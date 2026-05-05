@@ -1,7 +1,7 @@
 # WORKFLOW_STATE.MD — Диспетчер задач ИИ-агента Midas
 
 > **Тип:** MUTABLE — кратковременная память агента. Обновляется на каждом шаге работы.
-> **Обновлён:** 2026-05-06 00:02 (UTC+3)
+> **Обновлён:** 2026-05-06 00:07 (UTC+3)
 
 ---
 
@@ -98,77 +98,64 @@ midas-monorepo/
 
 ---
 
-## 6. ЗАВЕРШЁННАЯ ФАЗА — PHASE 1.6-B: HUMAN-IN-THE-LOOP DRAFT CONFIRMATION
+## 6. ЗАВЕРШЁННАЯ ФАЗА — PHASE 1.8-B: RUNTIME CONSISTENCY & SECURITY HARDENING
 
-> ✅ **COMPLETED / ACCEPTED by owner. Commit `d49625b` (code), `f205e09` (audit fix).**
+> ✅ **COMPLETED / ACCEPTED by owner. Implementation commit `7af1692`, acceptance commit `63175c7`. Tag `phase-1.8-B-accepted`.**
 
 **Результат:**
-
-### Задачи:
-- [x] `draft-confirmation.service.ts`: atomic `approveDraft()` и `rejectDraft()` `SELECT ... FOR UPDATE SKIP LOCKED`
-- [x] `confirmation.worker.ts`: callback-confirm queue, `answerCallbackQuery`, notifications dispatch
-- [x] `callback-confirm` queue в `queue-definitions.ts` (2 retries, 2s fixed backoff)
-- [x] `notifications.worker.ts`: реальные Telegram API `sendMessage` + inline keyboard
-- [x] `webhook.route.ts`: `callback_query` handler → enqueue к callback-confirm (ULID validation, SEC-03, SEC-06)
-- [x] `CallbackConfirmJobPayload` + `IdempotencyKeyBuilder.callbackConfirm()` в `@midas/shared`
-- [x] `callback-confirm-queue.ts` локальный producer в telegram-bot (без cross-app import)
-- [x] Smoke tests: 30/30 PASS — включая race condition test (parallel approve × 2 → exactly 1 Transaction)
-- [x] Phase 1.6-A regression: 73/73 PASS
-- [x] Typecheck/lint: 13/13 successful
-
-### Явно вынесено за скоп Phase 1.6-B:
-- ❌ AI parsing changes
-- ❌ /balance, /report, /category
-- ❌ CRON draft expiration (Сложный scheduler — Phase 1.7)
-- ❌ Crypto / blockchain
-- ❌ Google Sheets / Notion
-- ❌ Mini App
-- ❌ project_config.md changes
+- C-1: `draft.service.ts` — `resolveUserId()` fixed `telegram_user_id` → `telegram_id`
+- C-2: migration `1778008400000` — onboarding SECURITY DEFINER functions hardened with `search_path = public, pg_catalog`
+- M-1: `shared/index.ts` — `TRANSACTION_TYPE` updated to 5 canonical intent values
+- Tests: 171/171 PASS (16 Phase 1.8-B + 19 Phase 1.8-A + 20 Phase 1.7 + 30 Phase 1.6-B + 73 Phase 1.6-A + 13 typecheck+lint)
 
 ---
 
-## 7. MCP REQUIREMENTS (Phase 1.6-B)
+## 7. MCP REQUIREMENTS (следующий шаг — advisory only)
 
-| MCP-сервер | Phase 1.6-B | Доступ | Когда разрешён |
-|---|---|---|---|
-| Filesystem MCP | ✅ Требуется | read/write в `apps/`, `packages/` | Все фазы |
-| Postgres MCP | ✅ Требуется | read-only (schema) + read/write dev (migration) | Phase 1.2+ |
-| GitHub MCP | ⚪ По необходимости | read-only | Если remote repo нужен |
-| Browser / DevTools | ❌ Не нужен | — | Phase 4 (Mini App) |
-| Notion MCP | ❌ Запрещён | — | Phase 3 |
-| Google Sheets | ❌ Запрещён | — | Phase 3 |
-| Crypto / Blockchain | ❌ Запрещён | — | Phase 2 |
+| MCP-сервер | Доступ | Примечание |
+|---|---|---|
+| Filesystem MCP | ✅ read-only | Только чтение файлов для анализа. Никаких записей. |
+| Postgres MCP | ⚪ read-only (при необходимости) | Schema verification queries only |
+| GitHub MCP | ⚪ read-only (опционально) | Если нужно проверить remote |
+| Browser / DevTools | ❌ Запрещён | — |
+| Notion MCP | ❌ Запрещён | — |
+| Google Sheets | ❌ Запрещён | — |
+| Crypto / Blockchain | ❌ Запрещён | — |
 
 ---
 
-## 8. ФАЙЛЫ ДЛЯ ЧТЕНИЯ В НОВОМ ЧАТЕ (следующая фаза)
+## 8. ФАЙЛЫ ДЛЯ ЧТЕНИЯ В НОВОМ ЧАТЕ (следующий шаг — advisory)
 
 **Required (читать обязательно):**
 ```
 project_config.md
 workflow_state.md
-apps/background-workers/src/services/draft.service.ts                   # parsed_intent propagation
-apps/background-workers/src/services/draft-confirmation.service.ts       # intent_missing outcome
-apps/background-workers/src/workers/confirmation.worker.ts              # intent_missing messages
+docs/phase1_scope.md
+docs/mvp_acceptance_criteria.md
+docs/database_model_draft.md
+packages/database/migrations/1777973748530_mvp-schema-and-types.js      # full MVP schema
 packages/database/migrations/1778008338096_transaction-intent.js        # Phase 1.8-A schema
 apps/telegram-bot/src/routes/webhook.route.ts
+apps/telegram-bot/src/services/telegram-api.ts
 packages/shared/src/index.ts
 ```
 
 **Optional (читать при необходимости):**
 ```
-packages/ai-core/src/schemas.ts                                        # ParsedIntentType (5 values)
-packages/database/smoke-test-phase18a.mjs
-packages/database/migrations/1777973748530_mvp-schema-and-types.js
+packages/database/smoke-test-phase18b.mjs                               # Phase 1.8-B tests
+packages/database/smoke-test-phase18a.mjs                               # Phase 1.8-A tests
+apps/background-workers/src/services/draft-confirmation.service.ts      # approveDraft / intent flow
 ```
 
 **Do not load (не читать — тратит контекст):**
 ```
 docs/event_storming_part*.md
 docs/client-roadmap-architecture-overview.md
-docs/adr/ADR-000-*.md — ADR-002-*.md (meta/frontend)
-packages/database/smoke-test-phase16{a,b}.mjs  (regression suite only — do not modify)
-packages/database/smoke-test-phase17.mjs       (regression suite only — do not modify)
+docs/adr/*
+packages/ai-core/                           # unless advisory specifically concerns AI
+packages/database/smoke-test-phase16{a,b}.mjs
+packages/database/smoke-test-phase17.mjs
+Crypto / Notion / Sheets / Mini App files
 ```
 
 ---
@@ -177,13 +164,12 @@ packages/database/smoke-test-phase17.mjs       (regression suite only — do not
 
 > Read workflow_state.md and project_config.md first.
 > Before implementation, read workflow_state.md section 11 — Agent Operating Protocol and follow it strictly.
-> Verify git status, git log, and git tags yourself before any implementation.
-> Phase 1.8-B (Runtime Consistency & Security Hardening) is ACCEPTED. Commit 7af1692 on origin/main.
+> Phase 1.8-B (Runtime Consistency & Security Hardening) is COMPLETED / ACCEPTED. Commit `63175c7` on origin/main. Tag `phase-1.8-B-accepted`.
 > Prepare next phase advisory only — do not implement.
 > Do not implement /balance, /report, /category, /add_category.
 > Do not implement Persons/Fuzzy Matching, debt routing, transfer logic, exchange-rate conversion.
 > Do not modify project_config.md.
-> Do not proceed to next phase until I approve.
+> Do not proceed until owner APPROVED.
 
 ---
 
@@ -224,6 +210,7 @@ packages/database/smoke-test-phase17.mjs       (regression suite only — do not
 | 2026-05-05 23:39 | Phase 1.8-A ACCEPTED by owner after independent verification. Local and origin/main both at `51b6aee`. Implementation commit `425df61`. Migration `1778008338096_transaction-intent.js` tracked in git. Live DB verified: `parsed_intent` nullable, `transaction_intent` NOT NULL, no DEFAULT, CHECK constraints confirmed for exactly 5 values. 155/155 tests PASS (19 Phase 1.8-A + 20 Phase 1.7 + 30 Phase 1.6-B + 73 Phase 1.6-A + 13 typecheck+lint). No cleanup needed. |
 | 2026-05-05 23:50 | Phase 1.8-B Runtime Consistency & Security Hardening implementation complete. C-1 fix: `draft.service.ts` L41 `telegram_user_id`→`telegram_id` (critical runtime bug — would crash every AI parse job). C-2 fix: migration `1778008400000_harden-onboarding-search-path.js` — `SET search_path = 'public', 'pg_catalog'` added to `system_create_onboarding_workspace` and `system_find_or_create_user`. M-1 fix: `shared/index.ts` `TRANSACTION_TYPE` updated from 3 stale values to 5 canonical intent values. 16/16 Phase 1.8-B tests PASS. 19/19 Phase 1.8-A PASS. 20/20 Phase 1.7 PASS. 30/30 Phase 1.6-B PASS. 73/73 Phase 1.6-A PASS. 13/13 typecheck+lint PASS. Total: 171/171. Traceability ✅ Security ✅ Scope Guard ✅. Status: READY_FOR_OWNER_ACCEPTANCE. |
 | 2026-05-06 00:02 | Phase 1.8-B ACCEPTED by owner after PASS. C-1: resolveUserId fixed `telegram_user_id`→`telegram_id`. C-2: onboarding SECURITY DEFINER functions hardened with `search_path = public, pg_catalog`. M-1: `TRANSACTION_TYPE` updated to canonical 5 intent values. 171/171 tests PASS. origin/main at `7af1692`. Working tree clean. |
+| 2026-05-06 00:07 | workflow_state.md cleanup after Phase 1.8-B acceptance. Stale Sections 6–9 corrected: Section 6 updated to Phase 1.8-B results; Section 7 set to advisory-only MCP access; Section 8 refreshed with advisory file list; Section 9 updated with COMPLETED/ACCEPTED handoff. No code changes. |
 
 ---
 
