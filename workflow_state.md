@@ -1,7 +1,7 @@
 # WORKFLOW_STATE.MD — Диспетчер задач ИИ-агента Midas
 
 > **Тип:** MUTABLE — кратковременная память агента. Обновляется на каждом шаге работы.
-> **Обновлён:** 2026-05-05 20:30
+> **Обновлён:** 2026-05-05 20:35
 
 ---
 
@@ -10,11 +10,11 @@
 | Параметр | Значение |
 |---|---|
 | **PHASE** | `1 — MVP Implementation` |
-| **STEP** | `1.5 — User Onboarding & Workspace Resolution (IMPLEMENTATION COMPLETE)` |
-| **AGENT STATUS** | `WAITING_FOR_OWNER_APPROVAL_TO_ACCEPT_PHASE_1_5` |
-| **LAST COMPLETED** | `Phase 1.5 — User Onboarding & Workspace Resolution` |
-| **BLOCKER** | Владелец должен принять Phase 1.5 перед началом Phase 1.6 |
-| **NEXT ACTION** | Phase 1.5 Verification Gate — ожидаем APPROVED |
+| **STEP** | `1.5 — User Onboarding & Workspace Resolution (COMPLETED / ACCEPTED)` |
+| **AGENT STATUS** | `WAITING_FOR_OWNER_APPROVAL_TO_START_PHASE_1_6` |
+| **LAST COMPLETED** | `Phase 1.5 Verification Gate — PASS (39/39 smoke tests). Commit 9307800 pushed.` |
+| **BLOCKER** | Владелец должен одобрить начало Phase 1.6 |
+| **NEXT ACTION** | Ожидаем APPROVED для Phase 1.6 |
 
 ---
 
@@ -208,7 +208,8 @@ packages/ai-core/ (Phase 1.6+)
 | 2026-05-05 19:40 | workflow_state.md cleanup: stale Phase 1.2/1.4 references corrected in Sections 6–9. Sections now describe Phase 1.5 scope, MCP needs, required files, and handoff prompt. No code written. |
 | 2026-05-05 19:45 | Phase 1.5 scope narrowed by owner: User Onboarding & Workspace Resolution only. Removed from scope: callback_query, /add /balance /report /category, CRON, AI, full notifications. Sections 6, 8, 9 updated. |
 | 2026-05-05 20:00 | Phase 1.5 implementation complete. `findOrCreateUser` (atomic, ON CONFLICT race-safe), `resolveWorkspace` real DB, `/start` handler, Redis anti-spam, `sendMessage` wrapper. 13/13 typecheck+lint pass. Commit `8f88f22`. |
-| 2026-05-05 20:30 | Phase 1.5 Verification Gate FULL PASS (39/39 smoke tests). Critical fix: added `system_find_or_create_user` SECURITY DEFINER migration (double-checked locking via `pg_advisory_xact_lock`) to bypass RLS chicken-and-egg on workspace INSERT. All tests pass: onboarding, dedup, race condition, rate-limit, isolation. Commit `b60f7ac`. |
+| 2026-05-05 20:30 | Phase 1.5 Verification Gate PASS (39/39 smoke tests). Fix applied: RLS chicken-and-egg — `midas_app` cannot INSERT into `workspaces` without a pre-existing `workspace_memberships` row. Added migration `1777973900000`: `system_find_or_create_user` SECURITY DEFINER (executes as `midas_migrator`, exempt from RLS; `pg_advisory_xact_lock` for race safety). **Documentation note:** SECURITY DEFINER onboarding pattern was introduced in Phase 1.2 migration (`1777973795878_rls-and-policies.js`) as `system_create_onboarding_workspace` but is not covered by any existing ADR. ADR-009 covers Exchange Rate Snapshot only. A future ADR documenting the SECURITY DEFINER onboarding bootstrap pattern is recommended. Commits `b60f7ac`, `9307800` pushed. |
+| 2026-05-05 20:35 | Phase 1.5 ACCEPTED by owner. Status set to WAITING_FOR_OWNER_APPROVAL_TO_START_PHASE_1_6. |
 
 ---
 
