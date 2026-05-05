@@ -45,6 +45,7 @@ export const up = (pgm) => {
     RETURNS INTEGER
     LANGUAGE plpgsql
     SECURITY DEFINER
+    SET search_path = public, pg_catalog
     AS $$
     DECLARE
       v_expired_count INTEGER;
