@@ -1,7 +1,7 @@
 # WORKFLOW_STATE.MD — Диспетчер задач ИИ-агента Midas
 
 > **Тип:** MUTABLE — кратковременная память агента. Обновляется на каждом шаге работы.
-> **Обновлён:** 2026-05-05 21:22 (UTC+3)
+> **Обновлён:** 2026-05-05 21:28 (UTC+3)
 
 ---
 
@@ -12,7 +12,7 @@
 | **PHASE** | `1 — MVP Implementation` |
 | **STEP** | `1.7 — Draft Expiration & Lifecycle Cleanup COMPLETED / READY_FOR_OWNER_ACCEPTANCE` |
 | **AGENT STATUS** | `READY_FOR_OWNER_ACCEPTANCE` |
-| **LAST COMPLETED** | `Phase 1.7 Final Security Acceptance Check PASS WITH FIXES. Commits b9069ad, ac0be74.` |
+| **LAST COMPLETED** | `Phase 1.7 Hardening Cleanup PASS. All blockers resolved. Commits b9069ad → 07f9ff0.` |
 | **BLOCKER** | None |
 | **NEXT ACTION** | Await owner acceptance. Do not implement next phase until ACCEPTED. |
 
@@ -215,7 +215,7 @@ packages/ai-core/src/ (Phase 1.6-A — не трогать)
 | 2026-05-05 22:55 | Phase 1.6-B HitL Draft Confirmation implementation complete. `draft-confirmation.service.ts` (SELECT FOR UPDATE SKIP LOCKED), `confirmation.worker.ts`, `callback-confirm-queue.ts`, `webhook.route.ts` callback_query handler (ULID validation, SEC-03/06), real Telegram `sendMessage` with inline keyboard. 30/30 smoke tests PASS (incl. mandatory race condition test: parallel approve × 2 → exactly 1 Transaction). Phase 1.6-A regression: 73/73 PASS. 13/13 typecheck+lint clean. Commit `d49625b` pushed. **Status: READY_FOR_OWNER_ACCEPTANCE.** Note: CRON draft expiration (SEC-08) intentionally deferred to Phase 1.7. No SEC-08 claim in Phase 1.6-B. |
 | 2026-05-05 19:07 | Phase 1.6-B Final Acceptance Audit run (agent self-audit). All checks PASS: SEC-03 tenant isolation ✔, atomic approval ✔, race condition ✔, rejection no-op ✔, UNIQUE constraint ✔, no SEC-08 false claim ✔. workflow_state.md ACCEPTED wording corrected to READY_FOR_OWNER_ACCEPTANCE. Awaiting owner decision. |
 | 2026-05-05 21:14 | Phase 1.6-B ACCEPTED by owner after Final Acceptance Audit PASS WITH FIXES. Code unchanged. 30/30 Phase 1.6-B smoke tests PASS, 73/73 Phase 1.6-A regression PASS, 13/13 typecheck/lint PASS. Commit `f205e09` pushed. CRON expiration (SEC-08) intentionally deferred to Phase 1.7. |
-| 2026-05-05 21:22 | Phase 1.7 Final Security Acceptance Check — PASS WITH FIXES. Finding: `search_path` not fixed on `system_expire_pending_drafts()` (proconfig=NULL). Fix: corrective migration `1777973970000_harden-expire-search-path.js` applied. Verified: midas_app cannot CREATE in public (attack not exploitable). Post-fix: 20/20 Phase 1.7 PASS, 30/30 Phase 1.6-B PASS, 73/73 Phase 1.6-A PASS, 13/13 typecheck+lint PASS. Commit `ac0be74`. **Status: READY_FOR_OWNER_ACCEPTANCE.** |
+| 2026-05-05 21:28 | Phase 1.7 Hardening Cleanup — all blockers resolved. Owner transferred to `midas_migrator` via migration `1777973980000_fix-expire-function-owner.js`. All 3 SECURITY DEFINER functions now owned by `midas_migrator`. search_path fixed. PUBLIC cannot execute or CREATE in public schema. 20/20 smoke tests PASS. 13/13 typecheck+lint PASS. Pushed to origin/main. Commit `07f9ff0`. **Status: READY_FOR_OWNER_ACCEPTANCE.** |
 
 ---
 
