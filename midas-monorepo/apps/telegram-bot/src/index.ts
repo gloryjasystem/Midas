@@ -1,12 +1,9 @@
 /**
  * @midas/telegram-bot — Entry Point
  *
- * Phase 1.4: Telegram Bot Foundation
- *   - Fastify HTTP server for Telegram webhook ingestion
- *   - SEC-04: X-Telegram-Bot-Api-Secret-Token validation
- *   - SEC-05: Non-text message filtering
- *   - SEC-06: Idempotency keys for BullMQ job deduplication
- *   - SEC-12: raw_text never logged
+ * Phase 1.5: User Onboarding & Workspace Resolution
+ *   - Phase 1.4: Fastify HTTP server, SEC-04/05/06/12
+ *   - Phase 1.5: Real resolveWorkspace() via DB, /start onboarding, anti-spam guard
  *
  * Startup sequence:
  *   1. Build Fastify server (register plugins, routes)
@@ -17,11 +14,13 @@
  *   1. Close Fastify server (stop accepting new requests)
  *   2. Close BullMQ queue connections
  *   3. Close Redis connection
+ *   4. Close PostgreSQL pool
  */
 
 import { buildServer } from './server.js';
 import { closeQueues } from './queues/webhook-queue.js';
 import { closeRedis } from './queues/redis.js';
+import { closeDb } from '@midas/database';
 
 const PORT = parseInt(process.env.PORT ?? '3000', 10);
 const HOST = '0.0.0.0';
@@ -42,6 +41,9 @@ async function main(): Promise<void> {
 
     // 3. Close Redis
     await closeRedis();
+
+    // 4. Close PostgreSQL pool (Phase 1.5+)
+    await closeDb();
 
     server.log.info('[midas:bot] Graceful shutdown complete');
     process.exit(0);
@@ -78,7 +80,7 @@ async function main(): Promise<void> {
     host: HOST,
     webhookPath: '/webhook',
     healthPath: '/health',
-    phase: '1.4',
+    phase: '1.5',
   });
 }
 

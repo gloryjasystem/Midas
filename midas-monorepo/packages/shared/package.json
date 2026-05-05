@@ -10,5 +10,8 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint src/",
     "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "ulid": "^3.0.2"
   }
 }

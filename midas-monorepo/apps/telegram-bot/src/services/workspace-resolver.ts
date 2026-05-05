@@ -1,31 +1,30 @@
 /**
- * Workspace Resolver — Phase 1.4 stub.
+ * Workspace Resolver — Phase 1.5 (real implementation)
  *
  * Resolves the internal workspace_id for an incoming Telegram user.
  *
- * In Phase 1 MVP:
- *   - Each Telegram user has exactly ONE default workspace (ADR-003).
- *   - Workspace is created automatically on first /start (Frictionless Onboarding).
+ * Phase 1.5 replaces the Phase 1.4 stub with a real DB lookup via onboarding service.
  *
- * Current implementation (Phase 1.4 stub):
- *   - Returns a hardcoded placeholder workspace ID.
- *   - WILL BE replaced in Phase 1.5 with a real DB lookup using withTenantTransaction.
+ * SEC-03: workspace_id MUST come from a trusted backend source (DB lookup).
+ *         NEVER trust workspace_id from client input or Telegram message payload.
  *
- * SEC-03 constraint:
- *   - workspace_id MUST come from a trusted backend source (DB lookup by telegram_user_id).
- *   - NEVER trust workspace_id from client input or Telegram message payload.
+ * ADR-003: Each Telegram user has exactly ONE default workspace (owner role).
  *
- * Phase 1.5 implementation plan:
- *   SELECT wm.workspace_id
- *   FROM workspace_memberships wm
- *   JOIN users u ON u.id = wm.user_id
- *   WHERE u.telegram_user_id = $1
- *     AND wm.role = 'owner'
- *   LIMIT 1
+ * Flow:
+ *   1. Call findOrCreateUser(telegramUserId)
+ *   2. Returns { userId, workspaceId, isNewUser }
+ *   3. If isNewUser → send welcome message via Telegram Bot API
+ *   4. Return { workspaceId, isNewUser }
  *
- * If no workspace found → trigger onboarding (create workspace + user + membership).
- * This is the Frictionless Onboarding path (project_config.md §4.1).
+ * Note on /start vs regular messages:
+ *   resolveWorkspace() is called for ALL text messages, not just /start.
+ *   For regular messages from an already-registered user, it simply returns
+ *   their workspaceId without any side effects.
+ *   For first-time users sending any message, it transparently onboards them.
  */
+
+import { findOrCreateUser } from './onboarding.service.js';
+import { sendMessage } from './telegram-api.js';
 
 export interface WorkspaceResolverResult {
   workspaceId: string;
@@ -34,47 +33,31 @@ export interface WorkspaceResolverResult {
 }
 
 /**
- * Resolve the workspace ID for a Telegram user.
+ * Resolve the workspace ID for a Telegram user, creating one if necessary.
  *
- * @param telegramUserId - string representation of the Telegram user ID
+ * @param telegramUserId - string representation of the Telegram user ID (SEC-02)
+ * @param chatId - optional chat ID for sending welcome message on first onboarding
  * @returns resolved workspace context
  *
- * @throws Never in Phase 1.4 stub — always returns a placeholder.
- *         In Phase 1.5, throws if DB is unavailable.
+ * @throws If DB is unavailable or schema constraint violated (caller must handle)
  */
 export async function resolveWorkspace(
   telegramUserId: string,
+  chatId?: string,
 ): Promise<WorkspaceResolverResult> {
-  // ── Phase 1.4 STUB ────────────────────────────────────────────
-  // TODO Phase 1.5: Replace with real DB lookup via withTenantTransaction
-  //
-  // Example (Phase 1.5):
-  //   const result = await pool.query<{ workspace_id: string }>(
-  //     `SELECT wm.workspace_id
-  //      FROM workspace_memberships wm
-  //      JOIN users u ON u.id = wm.user_id
-  //      WHERE u.telegram_user_id = $1 AND wm.role = 'owner'
-  //      LIMIT 1`,
-  //     [telegramUserId]
-  //   );
-  //   if (result.rows.length === 0) {
-  //     return await createDefaultWorkspace(telegramUserId);
-  //   }
-  //   return { workspaceId: result.rows[0].workspace_id, isNewUser: false };
-  //
-  // ── END STUB ─────────────────────────────────────────────────
+  const result = await findOrCreateUser(telegramUserId);
 
-  // Suppress unused parameter warning during stub phase
-  void telegramUserId;
+  // Send welcome message for new users (Phase 1.5)
+  // Non-blocking: failure does NOT throw — webhook must remain 200-resilient
+  if (result.isNewUser && chatId) {
+    void sendMessage(
+      chatId,
+      '👋 <b>Добро пожаловать в Midas!</b>\n\nВаш персональный финансовый помощник готов к работе.\n\nПросто отправьте сообщение о расходе или доходе, например:\n<i>«Кофе 250р»</i> или <i>«Получил зарплату 80000»</i>',
+    );
+  }
 
-  // Await a no-op to satisfy require-await lint rule during stub phase.
-  // This will be replaced with a real DB query (pool.query) in Phase 1.5.
-  await Promise.resolve();
-
-  // Placeholder: use telegramUserId as workspace suffix for dev traceability
-  // This is NOT a valid workspace ULID — replace in Phase 1.5
   return {
-    workspaceId: `STUB_WORKSPACE_${telegramUserId}`,
-    isNewUser: false,
+    workspaceId: result.workspaceId,
+    isNewUser: result.isNewUser,
   };
 }
