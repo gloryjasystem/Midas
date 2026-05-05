@@ -1,0 +1,97 @@
+Мастер-план Midas v2.0: Архитектура, Пре-калькуляция и Vibe-Coding Плейбук
+Как сеньор-архитектор, проектирующий финансовые системы и ботов более 10 лет, я утверждаю: код — это самая дешевая часть разработки. Самая дорогая — это исправление логических ошибок, заложенных на этапе проектирования. Этот документ является «Единым источником истины» (Single Source of Truth) для мультиагентной разработки проекта Midas.
+Здесь продумано всё: от нулевого цикла до точных промптов для продвинутых моделей (Claude 3.7 Opus, Gemini 1.5 Pro), структуры файлов и архитектурных «мин».
+🛠 ЧАСТЬ 1: Управление ИИ и Двухфайловая Система Памяти
+ИИ-агенты теряют контекст. Чтобы этого избежать, разработка жестко опирается на два файла в корне проекта. Вы обязаны подгружать их в каждый новый чат IDE (Cursor/Windsurf).
+1. project_config.md (Конституция проекта)
+Этот файл статичен. ИИ не имеет права его менять без вашего прямого приказа.
+Стек: Node.js (FastAPI/Rust для микросервисов, если потребуется), React 18 (Vite), PostgreSQL, Tremor UI.
+Правило БД: Архитектура Shared Database, Shared Schema с использованием Row-Level Security (RLS).1 Изоляция по tenant_id. Запрет на использование BYPASSRLS. Использование ULID вместо UUIDv4 для предотвращения фрагментации индексов.2
+Интеграции: Все внешние запросы (Telegram API, блокчейны) должны быть идемпотентны.
+2. workflow_state.md (Диспетчер задач)
+Это кратковременная память агента.
+Структура: Текущая фаза (0-5) -> Задача -> План шагов -> Текущий статус.
+Правило ротации логов: Если лог превышает 5000 символов, агент обязан сжать историю в summary из 5 пунктов и очистить файл, чтобы сберечь токены и фокус.
+🏗 ЧАСТЬ 2: ЭТАП 0 — Пре-калькуляция и Проектирование
+Никакого кода. На этом этапе мы заставляем агента (Claude 3.7 Opus) спроектировать систему.
+Шаг 2.1: Шторминг Доменных Событий (Event Storming)
+Сложные системы строятся на событиях. Агент должен выписать все "Pivotal Events" (Ключевые события).
+Входящие: TelegramMessageReceived, TransactionParsed (Haiku), CryptoWebhookFired, BlockchainReorgDetected.
+Внутренние: BudgetThresholdExceeded, WorkspaceInitialized, TokenRefreshRaceCondition.
+Исходящие: NotionReportSynced, TelegramAlertSent.
+Шаг 2.2: Инициализация MCP (Model Context Protocol) Серверов
+Не копируйте документацию в промпты. Поднимите MCP-серверы локально, чтобы агент сам читал схемы и API:
+Postgres MCP: Позволяет ИИ читать актуальную схему БД и писать SQL-миграции "зряче".
+Notion MCP: Позволяет ИИ понимать структуру баз данных пользователя в Notion для корректной интеграции.
+GitHub / Local File System MCP: Для глубокого анализа кодовой базы.
+Шаг 2.3: Architecture Decision Records (ADR)
+Все архитектурные тупики ИИ обязан логировать в папку /docs/adr/. Формат: Контекст -> Рассмотренные варианты -> Решение (Почему Redlock, а не Mutex?) -> Последствия.3
+🤖 ЧАСТЬ 3: Иерархия Моделей и Секретные Промпты Архитектора
+Не стреляйте из пушки по воробьям. Каждой модели — своя задача.
+Claude 3.5 Haiku (В продакшене): Интегрируется в код бота для NLP-парсинга свободной речи («потратил 100$ на кофе») в строгий JSON.
+Claude 3.5 Sonnet (Кодогенерация): Пишет React-компоненты, API-роуты, базовый CRUD.
+Claude 3.7 Opus / Gemini 1.5 Pro (Решение архитектурных дедлоков): Подключаются только в вашей IDE для проектирования сложнейших узлов.
+🛡 Промпт 1: Трассировка Логики (Traceability Review)
+Использовать на Claude 3.7 Opus после написания любого сложного модуля (например, парсинга транзакции).
+Промпт для ИИ: «Выполни полную трассировку логики (Traceability Review). Проследи каждый миллиметр пути данных: от момента ввода текста пользователем в Telegram, через парсинг Claude Haiku, в контроллер Node.js, проверку идемпотентности, инъекцию tenant_id для RLS в PostgreSQL и до возврата ответа в UI. Убедись, что сигнатуры функций и типы данных (особенно числа с плавающей точкой для валют) совпадают на каждом слое стыковки. Найди 3 места, где этот поток может упасть без обработки ошибок». 4
+⚔️ Промпт 2: Враждебный Аудит (Adversarial Security Review)
+Использовать на Gemini 1.5 Pro или Opus перед коммитом в master.
+Промпт для ИИ: «Представь, что этот код написал стажер, а ты — старший аудитор по кибербезопасности. Твоя задача — сломать его. Ищи нарушения изоляции данных между воркспейсами (bypass RLS), уязвимости к SQL-инъекциям, состояние гонки (Race Condition) при обновлении токенов и утечки памяти в фоновых воркерах. Разбей найденные уязвимости на Critical, High, Medium, Low». 4
+📱 ЧАСТЬ 4: Проектирование Интерфейса (UX/UI) и Роутинг
+Бот Midas должен ощущаться как магия, а не как бухгалтерская программа.
+Frictionless Onboarding (Бесшовный старт): Пользователь нажимает /start -> Telegram передает initData -> Бэкенд валидирует крипто-подпись -> Система незаметно генерирует Default Workspace -> Пользователь сразу может писать свои траты. Никаких форм регистрации.
+Обработка ввода (Human-in-the-Loop): Пользователь пишет текст -> Haiku парсит его и отвечает Inline-клавиатурой: "Расход: 100$, Категория: Кофе. Верно? [Да][Изменить]". После [Да] данные улетают в БД.
+Архитектура TMA: Mini App открывается по кнопке. Используется startapp параметр для роутинга 5, так как Telegram режет обычные query-параметры.
+📂 ЧАСТЬ 5: Структура Проекта (Monorepo)
+Агент должен сгенерировать архитектуру монорепозитория (например, через Turborepo или Yarn Workspaces), чтобы разделить контексты:
+midas-monorepo/
+├── apps/
+│ ├── telegram-bot/ # Бэкенд бота (FastAPI или Node.js, Webhook, оркестрация)
+│ ├── mini-app/ # React SPA (Vite, Tremor UI)
+│ └── background-workers/ # Отдельный сервис для CRON, рассылок и PDF генерации
+├── packages/
+│ ├── database/ # Схемы PostgreSQL, миграции, RLS политики
+│ ├── ai-core/ # Интеграция с Claude Haiku, промпты для парсинга
+│ └── blockchain-adapters/ # Обработчики TRC20/ERC20, проверка идемпотентности
+├── docs/
+│ ├── project_config.md # Наша "Конституция"
+│ ├── workflow_state.md # Диспетчер задач ИИ
+│ └── adr/ # Архитектурные решения (ADR)
+💣 ЧАСТЬ 6: Этапы Разработки и Изоляция Архитектурных Мин
+Этап 1: Инфраструктура, БД и AI-ядро
+Задача: Docker, PostgreSQL RLS, Webhook бота, парсер Haiku.
+Мина: RLS Bypass. Сервисные ключи игнорируют RLS.2 Решение: ИИ обязан создать low-privilege роль для БД. Контекст воркспейса задается строго через SET LOCAL внутри транзакции.
+Мина: Искажение курсов. Решение: При парсинге мультивалютных оплат ИИ обязан жестко фиксировать в таблице 3 поля: original_amount, currency, и exchange_rate_at_timestamp.
+Мина: Клоны людей в Долгах. Решение: Внедрить алгоритмы нечеткого поиска (Fuzzy Matching) при привязке расходов на "Макса" и "Максима", чтобы не плодить дубли.
+Этап 2: Крипто-мониторинг и Блокчейн
+Задача: Webhooks для TRC20, BEP20, ERC20.
+Мина: Реорганизация цепи (Chain Reorgs). Блокчейны могут откатывать блоки.6 Решение: Внедрить "глубину подтверждения" (Confirmation Depth). Транзакции висят в статусе pending. Если приходит сигнал отмены блока (Orphaned Block) — делать автоматический ROLLBACK в базе.6
+Мина: Спам вебхуками. Провайдеры шлют один вебхук 5 раз. Решение: Жесткая идемпотентность по tx_hash + network_id с типом UNIQUE в базе.7
+Этап 3: Интеграции (Google Sheets & Notion)
+Задача: OAuth 2.0, двусторонняя синхронизация.
+Мина: Race Condition обновления токенов. Решение: Алгоритм Redlock (Redis).8 Прежде чем стучаться в Google за новым токеном, воркер захватывает блокировку. Остальные потоки ждут, иначе старый токен аннулируется, а юзера выбросит из аккаунта.
+Мина: Лимиты API. Решение: Внедрить паттерн Circuit Breaker. Если Notion отдает 429 ошибку — замыкаем цепь, складываем запросы в очередь (Dead Letter Queue) и ждем.
+Мина: Приватность Notion. Решение: Запретить выгрузку сырых транзакций и крипто-адресов. В Notion летит только агрегированная сводка.
+Этап 4: Frontend (Telegram Mini App)
+Задача: Дашборды, настройка категорий, Tremor UI.
+Мина: iOS Keyboard Bug. Решение: На iOS клавиатура ломает верстку TMA.5 ИИ обязан программно управлять фокусом и использовать метод hideKeyboard (Bot API 9.1).10
+Мина: Островки и Челки смартфонов. Решение: Строго использовать отступы safeAreaInset из Bot API 8.0.10
+Мина: Чувствительные данные (Private Keys/Tokens). Решение: Если потребуется хранить ключи клиента, использовать исключительно SecureStorage (Bot API 9.0) с доступом по биометрии (FaceID/TouchID).10
+Этап 5: Отчеты и Выход в Продакшен
+Задача: On-the-fly графики (Plotly), PDF генерация, CRON, Stress-тесты.
+Мина: Блокировка Event Loop. Решение: Генерация тяжелых PDF-отчетов обязана выполняться в изолированных Worker Threads (Node.js/Python), чтобы бот не "зависал" для других пользователей.
+Мина: Тихая деградация. Решение: Подключить Sentry. Провести нагрузочный тест, эмулирующий 10 000 параллельных транзакций, чтобы проверить работу алгоритма Redlock и RLS изоляции.
+Резюме Архитектора
+Передайте агенту project_config.md и workflow_state.md. Начните с Этапа 0 (Event Storming). Пусть ИИ декомпозирует архитектуру, опишет ADR и только после успешного ревью через Промпты №1 и №2 приступает к созданию инфраструктуры. Вы управляете рисками — ИИ пишет код.
+Nguồn trích dẫn
+Ensuring Tenant Scoping in Kong Konnect Using Row-Level Security, truy cập vào tháng 5 4, 2026, https://konghq.com/blog/engineering/ensuring-tenant-scoping-row-level-security
+Multi-tenant data isolation with PostgreSQL Row Level Security ..., truy cập vào tháng 5 4, 2026, https://aws.amazon.com/blogs/database/multi-tenant-data-isolation-with-postgresql-row-level-security/
+Maintain an architecture decision record (ADR) - Microsoft Azure Well-Architected Framework, truy cập vào tháng 5 4, 2026, https://learn.microsoft.com/en-us/azure/well-architected/architect-role/architecture-decision-record
+The Last Prompt You Need When Building Software with AI, truy cập vào tháng 5 4, 2026, https://chrislema.com/the-last-prompt-you-need-when-building-software-with-ai
+Telegram mini-app development and testing specifics: from ..., truy cập vào tháng 5 4, 2026, https://dev.to/dev_family/telegram-mini-app-development-and-testing-specifics-from-initialisation-to-launch-1ofh
+Understanding Blockchain Reorgs (and How to Manage Them) | by ..., truy cập vào tháng 5 4, 2026, https://medium.com/@vladyslav.semenchuk9/understanding-blockchain-reorgs-and-how-to-manage-them-e9f02c70ba38
+Real-Time Blockchain Webhooks - Quicknode, truy cập vào tháng 5 4, 2026, https://www.quicknode.com/webhooks
+Use Redis lock when refreshing session · Issue #1384 - GitHub, truy cập vào tháng 5 4, 2026, https://github.com/oauth2-proxy/oauth2-proxy/issues/1384
+Distributed Locks with Redis | Docs, truy cập vào tháng 5 4, 2026, https://redis.io/docs/latest/develop/clients/patterns/distributed-locks/
+Telegram Mini Apps, truy cập vào tháng 5 4, 2026, https://core.telegram.org/bots/webapps
+Web events - Telegram APIs, truy cập vào tháng 5 4, 2026, https://core.telegram.org/api/web-events
