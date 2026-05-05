@@ -1,7 +1,7 @@
 # WORKFLOW_STATE.MD — Диспетчер задач ИИ-агента Midas
 
 > **Тип:** MUTABLE — кратковременная память агента. Обновляется на каждом шаге работы.
-> **Обновлён:** 2026-05-05 19:07 (UTC+3)
+> **Обновлён:** 2026-05-05 19:14 (UTC+3)
 
 ---
 
@@ -10,11 +10,11 @@
 | Параметр | Значение |
 |---|---|
 | **PHASE** | `1 — MVP Implementation` |
-| **STEP** | `1.6-B — HitL Draft Confirmation READY_FOR_OWNER_ACCEPTANCE` |
-| **AGENT STATUS** | `AWAITING_OWNER_ACCEPTANCE` |
-| **LAST COMPLETED** | `Phase 1.6-B Verification Gate PASS. Commit d49625b. Awaiting owner acceptance.` |
-| **BLOCKER** | None — awaiting owner ACCEPTED |
-| **NEXT ACTION** | Owner: review Acceptance Audit and write ACCEPTED or FAIL to proceed |
+| **STEP** | `1.6-B — HitL Draft Confirmation COMPLETED / ACCEPTED` |
+| **AGENT STATUS** | `WAITING_FOR_OWNER_APPROVAL_TO_START_NEXT_PHASE` |
+| **LAST COMPLETED** | `Phase 1.6-B ACCEPTED by owner. Commit f205e09.` |
+| **BLOCKER** | None |
+| **NEXT ACTION** | Prepare next phase advisory only — do not implement |
 
 ---
 
@@ -32,7 +32,7 @@
 | 1.4 Telegram Bot Foundation | ✅ | `apps/telegram-bot/src/` — Fastify server, SEC-04/05/06/12, webhook route, workspace resolver stub |
 | 1.5 User Onboarding & Workspace Resolution | ✅ | `services/onboarding.service.ts`, `rate-limiter.ts`, `telegram-api.ts`, real `resolveWorkspace()`, `/start` handler |
 | 1.6-A AI Parse Pipeline | ✅ | `packages/ai-core/`, `draft.service.ts`, `ai-parse.worker.ts`, 73/73 smoke tests, commit `7b393d2` |
-| 1.6-B HitL Draft Confirmation | ⏳ READY_FOR_OWNER_ACCEPTANCE | `draft-confirmation.service.ts`, `confirmation.worker.ts`, `callback-confirm-queue.ts`, webhook callback_query handler, 30/30 smoke tests incl. race condition, commit `d49625b` |
+| 1.6-B HitL Draft Confirmation | ✅ ACCEPTED | `draft-confirmation.service.ts`, `confirmation.worker.ts`, `callback-confirm-queue.ts`, webhook callback_query handler, 30/30 smoke tests incl. race condition, commit `d49625b` |
 
 ---
 
@@ -97,7 +97,7 @@ midas-monorepo/
 
 ## 6. ЗАВЕРШЁННАЯ ФАЗА — PHASE 1.6-B: HUMAN-IN-THE-LOOP DRAFT CONFIRMATION
 
-> ⏳ **READY_FOR_OWNER_ACCEPTANCE. Commit `d49625b` pushed. Awaiting owner ACCEPTED.**
+> ✅ **COMPLETED / ACCEPTED by owner. Commit `d49625b` (code), `f205e09` (audit fix).**
 
 **Результат:**
 
@@ -213,6 +213,7 @@ packages/ai-core/src/ (Phase 1.6-A — не трогать)
 | 2026-05-05 21:30 | Phase 1.6-A Final Acceptance Check. Fix: NUMERIC(19,4) boundary — regex `\d*` → `\d{0,14}` caps integer part at 15 digits. 73/73 smoke tests pass. 13/13 typecheck+lint pass. Commit `7b393d2` pushed. Phase 1.6-A ACCEPTED. |
 | 2026-05-05 22:55 | Phase 1.6-B HitL Draft Confirmation implementation complete. `draft-confirmation.service.ts` (SELECT FOR UPDATE SKIP LOCKED), `confirmation.worker.ts`, `callback-confirm-queue.ts`, `webhook.route.ts` callback_query handler (ULID validation, SEC-03/06), real Telegram `sendMessage` with inline keyboard. 30/30 smoke tests PASS (incl. mandatory race condition test: parallel approve × 2 → exactly 1 Transaction). Phase 1.6-A regression: 73/73 PASS. 13/13 typecheck+lint clean. Commit `d49625b` pushed. **Status: READY_FOR_OWNER_ACCEPTANCE.** Note: CRON draft expiration (SEC-08) intentionally deferred to Phase 1.7. No SEC-08 claim in Phase 1.6-B. |
 | 2026-05-05 19:07 | Phase 1.6-B Final Acceptance Audit run (agent self-audit). All checks PASS: SEC-03 tenant isolation ✔, atomic approval ✔, race condition ✔, rejection no-op ✔, UNIQUE constraint ✔, no SEC-08 false claim ✔. workflow_state.md ACCEPTED wording corrected to READY_FOR_OWNER_ACCEPTANCE. Awaiting owner decision. |
+| 2026-05-05 19:14 | Phase 1.6-B ACCEPTED by owner after Final Acceptance Audit PASS WITH FIXES. Code unchanged. workflow_state.md self-acceptance wording fixed (READY_FOR_OWNER_ACCEPTANCE). 30/30 Phase 1.6-B smoke tests PASS, 73/73 Phase 1.6-A regression PASS, 13/13 typecheck/lint PASS. Commit `f205e09` pushed. CRON expiration (SEC-08) intentionally deferred to Phase 1.7. |
 
 ---
 
