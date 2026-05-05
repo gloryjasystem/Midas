@@ -1,7 +1,7 @@
 # WORKFLOW_STATE.MD — Диспетчер задач ИИ-агента Midas
 
 > **Тип:** MUTABLE — кратковременная память агента. Обновляется на каждом шаге работы.
-> **Обновлён:** 2026-05-05 19:35
+> **Обновлён:** 2026-05-05 19:40
 
 ---
 
@@ -92,62 +92,46 @@ midas-monorepo/
 
 ---
 
-## 6. NEXT STEP — PHASE 1.2: DATABASE FOUNDATION
+## 6. NEXT STEP — PHASE 1.5: USER ONBOARDING & BOT COMMANDS
 
-**Scope:** Работа только внутри `packages/database/` и docker-compose.
+> ⏳ **Pending owner approval. Do not implement until APPROVED.**
 
-### Задачи:
-- [ ] Создать структуру миграций
-- [ ] Создать начальную PostgreSQL-схему для MVP-сущностей
-- [ ] Реализовать DB roles и low-privilege application role
-- [ ] Реализовать RLS-политики
-- [ ] Реализовать `withTenantTransaction(workspaceId, fn)`
-- [ ] Реализовать tenant context injection (`SET LOCAL app.workspace_id`)
-- [ ] Реализовать Decimal / NUMERIC boundary rules (`pg.types.setTypeParser`)
-- [ ] Тесты: RLS isolation, tenant transaction wrapper, Decimal handling, atomic draft transitions
+**Scope:** Работа внутри `apps/telegram-bot/src/` и `packages/database/` (только чтение существующей схемы).
 
-### MVP-сущности (Phase 1.2):
-- `workspaces`
-- `users`
-- `workspace_memberships`
-- `account_sources`
-- `categories`
-- `persons`
-- `transaction_drafts`
-- `transactions`
-- `exchange_rate_snapshots`
-- `audit_logs`
-- `loans` (схема только, без бизнес-логики)
+### Планируемые задачи (advisory — не имплементировать):
+- [ ] `resolveWorkspace()` — реальный DB-запрос вместо stub (SEC-03): `workspace_memberships JOIN users WHERE telegram_user_id`
+- [ ] Frictionless Onboarding: `/start` → создание default Workspace + User + WorkspaceMembership для нового пользователя (ADR-003, §4.1)
+- [ ] `callback_query` handler — обработка кнопок подтверждения TransactionDraft (Human-in-the-Loop, SEC-07)
+- [ ] `/start`, `/add`, `/balance`, `/report`, `/category` — базовые команды бота
+- [ ] Отправка уведомлений через `notifications` queue (связать с Telegram Bot API)
+- [ ] SEC-08: CRON-job для expire `pending_user` черновиков по TTL
 
-### Запрещённый scope (Phase 1.2):
-- ❌ Telegram bot business logic
-- ❌ AI parser implementation
-- ❌ Inline keyboard flow
-- ❌ Reports
+### Запрещённый scope (Phase 1.5):
+- ❌ AI-парсинг (Claude) — Phase 1.6+
 - ❌ Crypto / blockchain
 - ❌ Google Sheets / Notion
-- ❌ Mini App dashboards
-- ❌ PDF reports
+- ❌ Mini App (React SPA)
+- ❌ PDF-отчёты
 - ❌ Изменение project_config.md
 
 ---
 
 ## 7. MCP REQUIREMENTS (для следующего чата)
 
-| MCP-сервер | Phase 1.2 | Когда разрешён |
-|---|---|---|
-| Filesystem MCP | ✅ Требуется | Все фазы |
-| Postgres MCP | ✅ Требуется | Phase 1.2+ (DB/schema work) |
-| GitHub MCP | ⚪ По необходимости | Если remote repo настроен |
-| Context7 MCP | ⚪ По необходимости | Если нужна документация библиотек |
-| Browser / DevTools | ❌ Не нужен | Phase 4 (Mini App) |
-| Notion MCP | ❌ Запрещён | Phase 3 |
-| Google Sheets | ❌ Запрещён | Phase 3 |
-| Crypto / Blockchain | ❌ Запрещён | Phase 2 |
+| MCP-сервер | Phase 1.5 | Доступ | Когда разрешён |
+|---|---|---|---|
+| Filesystem MCP | ✅ Требуется | read/write в `apps/telegram-bot/` | Все фазы |
+| Postgres MCP | ✅ Требуется | read-only (схема уже создана) | Phase 1.2+ |
+| GitHub MCP | ⚪ По необходимости | read-only | Если remote repo нужен |
+| Context7 MCP | ⚪ По необходимости | read-only | Если нужна документация |
+| Browser / DevTools | ❌ Не нужен | — | Phase 4 (Mini App) |
+| Notion MCP | ❌ Запрещён | — | Phase 3 |
+| Google Sheets | ❌ Запрещён | — | Phase 3 |
+| Crypto / Blockchain | ❌ Запрещён | — | Phase 2 |
 
 ---
 
-## 8. ФАЙЛЫ ДЛЯ ЧТЕНИЯ В НОВОМ ЧАТЕ (Phase 1.4)
+## 8. ФАЙЛЫ ДЛЯ ЧТЕНИЯ В НОВОМ ЧАТЕ (Phase 1.5)
 
 **Required (читать обязательно):**
 ```
@@ -155,14 +139,15 @@ project_config.md
 workflow_state.md
 docs/phase1_scope.md
 docs/database_model_draft.md
-docs/mvp_acceptance_criteria.md
 ```
 
 **Optional (читать при необходимости):**
 ```
 docs/queue_model.md
-docs/adr/ADR-014-task-queue-bullmq.md
-packages/shared/src/index.ts (job payloads)
+docs/adr/ADR-003-workspace-model.md
+docs/adr/ADR-013-draft-ttl-cleanup.md
+packages/shared/src/index.ts (job payloads & Telegram types)
+apps/telegram-bot/src/ (текущая реализация Phase 1.4)
 ```
 
 **Do not load (не читать — тратит контекст):**
@@ -172,7 +157,8 @@ docs/client-roadmap-architecture-overview.md
 docs/adr/ADR-000-*.md (meta)
 docs/adr/ADR-001-*.md (runtime — уже принято)
 docs/adr/ADR-002-*.md (frontend — future phase)
-Любые файлы из packages/database/, packages/ai-core/
+docs/adr/ADR-004-*.md (ULID — уже принято)
+packages/ai-core/ (AI интеграция — Phase 1.6+)
 ```
 
 ---
@@ -181,9 +167,10 @@ docs/adr/ADR-002-*.md (frontend — future phase)
 
 > Read workflow_state.md and project_config.md first.
 > Before implementation, read workflow_state.md section 11 — Agent Operating Protocol and follow it strictly.
-> Continue only with Phase 1.4 Telegram Bot Foundation.
+> Continue only with Phase 1.5 — User Onboarding & Bot Commands.
 > Do not modify project_config.md.
 > Do not implement future phases.
+> Do not proceed to Phase 1.6 until I approve.
 
 ---
 
@@ -209,6 +196,7 @@ docs/adr/ADR-002-*.md (frontend — future phase)
 | 2026-05-05 14:30 | Phase 1.3 BullMQ Task Queue Foundation completed & accepted. 13/13 typecheck+lint passed (0 errors). |
 | 2026-05-05 19:30 | Phase 1.4 Verification Gate FULL PASS (7/7 smoke tests). Bugs fixed: BullMQ jobId `:` → `\|` separator, `/health` excluded from SEC-04 guard. Commit `6e0cfa1` pushed. |
 | 2026-05-05 19:35 | Phase 1.4 ACCEPTED by owner. **Prod note:** Redis must use `noeviction` policy in production; `allkeys-lru` is acceptable only for local dev. |
+| 2026-05-05 19:40 | workflow_state.md cleanup: stale Phase 1.2/1.4 references corrected in Sections 6–9. Sections now describe Phase 1.5 scope, MCP needs, required files, and handoff prompt. No code written. |
 
 ---
 
