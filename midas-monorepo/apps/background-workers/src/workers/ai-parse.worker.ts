@@ -20,12 +20,12 @@
  */
 
 import { Worker, type Job } from 'bullmq';
-import { QUEUE_NAMES, type AiParseJobPayload } from '@midas/shared';
-import { ulid } from 'ulid';
+import { QUEUE_NAMES, type AiParseJobPayload, IdempotencyKeyBuilder } from '@midas/shared';
 import { parseTransaction } from '@midas/ai-core';
-import { pool } from '@midas/database';
 import { redisConnection } from '../queues/redis.js';
-import { createDraft } from '../services/draft.service.js';
+import { createDraft, resolveUserId } from '../services/draft.service.js';
+import { notificationsQueue } from '../queues/queue-definitions.js';
+import { ulid } from 'ulid';
 
 // ─────────────────────────────────────────────────────────────
 // Token budget (SEC-09, date-scoped)
@@ -40,31 +40,6 @@ const AI_BUDGET_MAX_DAILY_TOKENS = parseInt(
 /** Date-scoped Redis key — auto-rotates daily without a CRON (SEC-09) */
 function aiDailyBudgetKey(): string {
   return `ai_budget:${new Date().toISOString().slice(0, 10)}`; // YYYY-MM-DD
-}
-
-// ─────────────────────────────────────────────────────────────
-// Resolve internal userId from telegramUserId
-// Uses midas_app pool — SEC-03 context via system_find_or_create_user
-// The user MUST already exist (created during /start onboarding)
-// ─────────────────────────────────────────────────────────────
-
-async function resolveUserId(telegramUserId: string): Promise<string | null> {
-  const client = await pool.connect();
-  try {
-    const r = await client.query<{ user_id: string; workspace_id: string }>(
-      `SELECT user_id, workspace_id FROM system_find_or_create_user($1, $2, $3, $4, $5)`,
-      [
-        BigInt(telegramUserId),
-        ulid(), // candidate — ignored if user exists
-        ulid(),
-        ulid(),
-        `Workspace of ${telegramUserId}`, // ignored if user exists
-      ],
-    );
-    return r.rows[0]?.user_id ?? null;
-  } finally {
-    client.release();
-  }
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -102,15 +77,19 @@ async function processAiParse(job: Job<AiParseJobPayload>): Promise<void> {
   }
 
   // ── Step 2: Resolve internal userId ───────────────────────
-  const userId = await resolveUserId(telegramUserId);
-  if (!userId) {
-    // User not in DB — onboarding must have failed. Drop job.
+  // Throws if user not found (onboarding must have succeeded first)
+  let userId: string;
+  try {
+    userId = await resolveUserId(telegramUserId);
+  } catch (err: unknown) {
+    const errorClass = err instanceof Error ? err.constructor.name : 'UnknownError';
     console.error('[midas:ai-parse-worker] User not found for telegramUserId', {
       jobId: job.id,
       workspaceId,
+      errorClass,
       // telegramUserId excluded — maps to user PII
     });
-    throw new Error('User not found — onboarding may have failed');
+    throw err;
   }
 
   // ── Step 3: Parse with Claude Haiku (SEC-01) ─────────────
@@ -150,8 +129,62 @@ async function processAiParse(job: Job<AiParseJobPayload>): Promise<void> {
     draftId,
     status,
     botId,
-    // Phase 1.6-B: enqueue notification with inline keyboard here
   });
+
+  // ── Step 6: Send draft confirmation notification (Phase 1.6-B) ──
+  // Only send inline keyboard for drafts awaiting user confirmation.
+  if (status === 'pending_user') {
+    const { chatId } = job.data;
+    const alertId = ulid();
+
+    // Build inline keyboard for approve / reject
+    const inlineKeyboard = {
+      inline_keyboard: [
+        [
+          { text: '✅ Подтвердить', callback_data: `approve:${draftId}` },
+          { text: '❌ Отклонить', callback_data: `reject:${draftId}` },
+        ],
+      ],
+    };
+
+    // Draft preview — note: do NOT include raw_text or amount in log (SEC-12)
+    const previewMsg = `📝 Транзакция распознана. Подтвердите или отклоните:`;
+
+    await notificationsQueue.add(
+      QUEUE_NAMES.NOTIFICATIONS,
+      {
+        alertId,
+        workspaceId,
+        chatId,
+        message: previewMsg,
+        draftId,
+        inlineKeyboardJson: JSON.stringify(inlineKeyboard),
+      },
+      {
+        jobId: IdempotencyKeyBuilder.notification(workspaceId, alertId),
+      },
+    );
+
+    console.log('[midas:ai-parse-worker] Confirmation notification enqueued', {
+      jobId: job.id,
+      draftId,
+      workspaceId,
+    });
+  } else {
+    // needs_clarification — send simple message, no keyboard
+    const { chatId } = job.data;
+    const alertId = ulid();
+    await notificationsQueue.add(
+      QUEUE_NAMES.NOTIFICATIONS,
+      {
+        alertId,
+        workspaceId,
+        chatId,
+        message: '🤔 Не удалось распознать транзакцию. Попробуйте сформулировать иначе.',
+      },
+      { jobId: IdempotencyKeyBuilder.notification(workspaceId, alertId) },
+    );
+  }
 }
 
 // ─────────────────────────────────────────────────────────────

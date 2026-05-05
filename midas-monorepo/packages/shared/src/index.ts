@@ -20,6 +20,7 @@
 export const QUEUE_NAMES = {
   WEBHOOK_INGESTION: 'webhook-ingestion',
   AI_PARSE: 'ai-parse',
+  CALLBACK_CONFIRM: 'callback-confirm',
   NOTIFICATIONS: 'notifications',
 } as const;
 
@@ -96,6 +97,27 @@ export interface NotificationJobPayload {
   inlineKeyboardJson?: string;
 }
 
+/**
+ * Payload for the `callback-confirm` queue — Phase 1.6-B.
+ * Triggered when user taps approve/reject inline keyboard button.
+ * SEC-06 idempotency key: cb|user|{telegramUserId}|draft|{draftId}|action|{action}
+ * SEC-03: workspaceId injected by backend (webhook route) from trusted source.
+ */
+export interface CallbackConfirmJobPayload {
+  /** Telegram callback query ID — used to answer the callback (remove loading state) */
+  callbackQueryId: string;
+  /** Telegram user ID — string (SEC-02: no Number() on IDs) */
+  telegramUserId: string;
+  /** Internal draft ID (ULID) — from callback_data, validated against DB */
+  draftId: string;
+  /** Approval action — 'approve' or 'reject' */
+  action: 'approve' | 'reject';
+  /** Internal workspace ID — injected by backend from session, NOT from callback_data (SEC-03) */
+  workspaceId: string;
+  /** Telegram chat ID — for sending confirmation notification */
+  chatId: string;
+}
+
 // ─────────────────────────────────────────────────────────────
 // Log-safe job context — strips raw_text (SEC-12)
 // ─────────────────────────────────────────────────────────────
@@ -116,7 +138,7 @@ export interface LogSafeJobContext {
 export function buildLogSafeContext(
   jobId: string,
   queueName: QueueName,
-  payload: WebhookIngestionJobPayload | AiParseJobPayload | NotificationJobPayload,
+  payload: WebhookIngestionJobPayload | AiParseJobPayload | NotificationJobPayload | CallbackConfirmJobPayload,
 ): LogSafeJobContext {
   const ctx: LogSafeJobContext = {
     jobId,

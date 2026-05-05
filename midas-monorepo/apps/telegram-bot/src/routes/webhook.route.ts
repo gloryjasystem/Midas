@@ -44,11 +44,14 @@ import {
   QUEUE_NAMES,
   type TelegramUpdate,
   type WebhookIngestionJobPayload,
+  type CallbackConfirmJobPayload,
 } from '@midas/shared';
 import { webhookIngestionQueue } from '../queues/webhook-queue.js';
 import { resolveWorkspace } from '../services/workspace-resolver.js';
 import { checkOnboardingRateLimit } from '../services/rate-limiter.js';
 import { sendMessage } from '../services/telegram-api.js';
+
+import { callbackConfirmQueue } from '../queues/callback-confirm-queue.js';
 
 // ─────────────────────────────────────────────────────────────
 // Zod schema — validates raw incoming Telegram Update shape
@@ -120,13 +123,95 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
     const update = parseResult.data;
 
     // ── Step 2: Handle callback_query (inline keyboard) ──────
-    // Phase 1.6: acknowledge only. callback_query processing (HitL confirmation)
-    // is out of scope for Phase 1.5 per owner approval.
+    // Phase 1.6-B: approve/reject TransactionDraft confirmation.
+    // callback_data format: "approve:{draftId}" or "reject:{draftId}"
     if (update.callback_query) {
-      request.log.info({
-        msg: '[midas:bot:webhook] callback_query received — Phase 1.6 stub, acknowledged',
-        callbackId: update.callback_query.id,
+      const cq = update.callback_query;
+      const telegramUserId = String(cq.from.id);
+      const chatId = cq.message ? String(cq.message.chat.id) : String(cq.from.id);
+      const callbackData = cq.data ?? '';
+
+      // Parse callback_data — format: "action:draftId"
+      const colonIdx = callbackData.indexOf(':');
+      if (colonIdx === -1) {
+        // Unknown callback_data format — silently acknowledge
+        request.log.info({
+          msg: '[midas:bot:webhook] callback_query: unknown data format — acknowledged',
+          callbackId: cq.id,
+        });
+        await reply.status(200).send({ ok: true });
+        return;
+      }
+
+      const action = callbackData.slice(0, colonIdx);
+      const draftId = callbackData.slice(colonIdx + 1);
+
+      // Validate action — only 'approve' and 'reject' are permitted (SEC-01)
+      if (action !== 'approve' && action !== 'reject') {
+        request.log.warn({
+          msg: '[midas:bot:webhook] callback_query: invalid action — rejected',
+          callbackId: cq.id,
+          action,
+        });
+        await reply.status(200).send({ ok: true });
+        return;
+      }
+
+      // Validate draftId format (ULID: 26 chars, base32 alphabet)
+      if (!/^[0-9A-Z]{26}$/.test(draftId)) {
+        request.log.warn({
+          msg: '[midas:bot:webhook] callback_query: malformed draftId — rejected',
+          callbackId: cq.id,
+        });
+        await reply.status(200).send({ ok: true });
+        return;
+      }
+
+      // SEC-03: Resolve workspaceId from trusted source (DB), NOT from callback_data
+      let workspaceId: string;
+      try {
+        const resolved = await resolveWorkspace(telegramUserId, chatId);
+        workspaceId = resolved.workspaceId;
+      } catch (err: unknown) {
+        const errorClass = err instanceof Error ? err.constructor.name : 'UnknownError';
+        request.log.error({
+          msg: '[midas:bot:webhook] callback_query: workspace resolution failed',
+          callbackId: cq.id,
+          errorClass,
+        });
+        await reply.status(200).send({ ok: true });
+        return;
+      }
+
+      // Enqueue to callback-confirm queue (SEC-06: idempotency key)
+      const idempotencyKey = IdempotencyKeyBuilder.callbackConfirm(
+        telegramUserId,
+        draftId,
+        action,
+      );
+
+      const payload: CallbackConfirmJobPayload = {
+        callbackQueryId: cq.id,
+        telegramUserId,
+        draftId,
+        action,
+        workspaceId, // SEC-03: from trusted backend source
+        chatId,
+      };
+
+      await callbackConfirmQueue.add(QUEUE_NAMES.CALLBACK_CONFIRM, payload, {
+        jobId: idempotencyKey, // SEC-06: idempotent — duplicate taps are deduped
       });
+
+      request.log.info({
+        msg: '[midas:bot:webhook] callback_query enqueued',
+        callbackId: cq.id,
+        draftId,
+        action,
+        workspaceId,
+        idempotencyKey,
+      });
+
       await reply.status(200).send({ ok: true });
       return;
     }

@@ -23,6 +23,7 @@ import { attachDlqHandler } from './queues/dlq-handler.js';
 import { createWebhookIngestionWorker } from './workers/webhook-ingestion.worker.js';
 import { createAiParseWorker } from './workers/ai-parse.worker.js';
 import { createNotificationsWorker } from './workers/notifications.worker.js';
+import { createConfirmationWorker } from './workers/confirmation.worker.js';
 import { QUEUE_NAMES } from '@midas/shared';
 import type { QueueEvents } from 'bullmq';
 
@@ -35,11 +36,13 @@ console.log('[midas] background-workers starting...');
 const webhookWorker = createWebhookIngestionWorker();
 const aiParseWorker = createAiParseWorker();
 const notificationsWorker = createNotificationsWorker();
+const confirmationWorker = createConfirmationWorker();
 
 console.log('[midas] Workers started:');
 console.log(`  ✓ ${QUEUE_NAMES.WEBHOOK_INGESTION} (concurrency: 10)`);
 console.log(`  ✓ ${QUEUE_NAMES.AI_PARSE} (concurrency: 5, rate-limit: 50/60s)`);
 console.log(`  ✓ ${QUEUE_NAMES.NOTIFICATIONS} (concurrency: 10, rate-limit: 30/1s)`);
+console.log(`  ✓ ${QUEUE_NAMES.CALLBACK_CONFIRM} (concurrency: 5)`);
 
 // ─────────────────────────────────────────────────────────────
 // Attach DLQ handlers (QueueEvents — fires on permanent failures)
@@ -48,6 +51,7 @@ console.log(`  ✓ ${QUEUE_NAMES.NOTIFICATIONS} (concurrency: 10, rate-limit: 30
 const dlqHandlers: QueueEvents[] = [
   attachDlqHandler(QUEUE_NAMES.WEBHOOK_INGESTION),
   attachDlqHandler(QUEUE_NAMES.AI_PARSE),
+  attachDlqHandler(QUEUE_NAMES.CALLBACK_CONFIRM),
   attachDlqHandler(QUEUE_NAMES.NOTIFICATIONS),
 ];
 
@@ -66,6 +70,7 @@ async function gracefulShutdown(signal: string): Promise<void> {
     webhookWorker.close(),
     aiParseWorker.close(),
     notificationsWorker.close(),
+    confirmationWorker.close(),
   ]);
 
   console.log('[midas] All workers stopped');

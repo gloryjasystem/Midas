@@ -26,6 +26,7 @@ import type {
   WebhookIngestionJobPayload,
   AiParseJobPayload,
   NotificationJobPayload,
+  CallbackConfirmJobPayload,
 } from '@midas/shared';
 
 // ─────────────────────────────────────────────────────────────
@@ -89,6 +90,33 @@ export const aiParseQueue = new Queue<AiParseJobPayload>(QUEUE_NAMES.AI_PARSE, {
 });
 
 // ─────────────────────────────────────────────────────────────
+// callback-confirm Queue — Phase 1.6-B
+// Processes inline keyboard approve/reject actions.
+// Concurrency: 5 | No PII in payload — draftId + action only.
+// ─────────────────────────────────────────────────────────────
+
+const callbackConfirmDefaultJobOptions: DefaultJobOptions = {
+  attempts: 2,
+  backoff: {
+    type: 'fixed',
+    delay: 2_000, // 2s — DB operation is idempotent (SELECT FOR UPDATE SKIP LOCKED)
+  },
+  removeOnComplete: {
+    count: 1000,
+  },
+  removeOnFail: false, // No PII in payload — retain for DLQ review
+};
+
+export const callbackConfirmQueue = new Queue<CallbackConfirmJobPayload>(
+  QUEUE_NAMES.CALLBACK_CONFIRM,
+  {
+    connection: redisConnection,
+    prefix: BULL_PREFIX,
+    defaultJobOptions: callbackConfirmDefaultJobOptions,
+  },
+);
+
+// ─────────────────────────────────────────────────────────────
 // notifications Queue
 // Concurrency: 10 | Rate limit: 30 / 1s (Telegram Flood Limit)
 // ─────────────────────────────────────────────────────────────
@@ -119,6 +147,7 @@ export async function closeQueues(): Promise<void> {
   await Promise.all([
     webhookIngestionQueue.close(),
     aiParseQueue.close(),
+    callbackConfirmQueue.close(),
     notificationsQueue.close(),
   ]);
 }

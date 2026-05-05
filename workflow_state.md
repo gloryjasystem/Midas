@@ -10,11 +10,11 @@
 | Параметр | Значение |
 |---|---|
 | **PHASE** | `1 — MVP Implementation` |
-| **STEP** | `1.6-A — AI Parse Pipeline (COMPLETED / AWAITING OWNER ACCEPTANCE)` |
-| **AGENT STATUS** | `WAITING_FOR_OWNER_APPROVAL_TO_ACCEPT_PHASE_1_6A` |
-| **LAST COMPLETED** | `Phase 1.6-A Verification Gate — PASS WITH FIXES (69/69 smoke tests). Commit 35815db pushed.` |
-| **BLOCKER** | Владелец должен принять Phase 1.6-A и одобрить начало Phase 1.6-B |
-| **NEXT ACTION** | Ожидаем ACCEPTED для Phase 1.6-A, затем APPROVED для Phase 1.6-B |
+| **STEP** | `1.6-B — HitL Draft Confirmation (IN PROGRESS)` |
+| **AGENT STATUS** | `IMPLEMENTING_PHASE_1_6B` |
+| **LAST COMPLETED** | `Phase 1.6-A ACCEPTED by owner. Commit 7b393d2.` |
+| **BLOCKER** | None — APPROVED |
+| **NEXT ACTION** | Implement Phase 1.6-B: inline keyboard → callback_query → approve/reject → Transaction |
 
 ---
 
@@ -31,6 +31,7 @@
 | 1.3 BullMQ Task Queue Foundation | ✅ | `apps/background-workers/src/queues/`, `workers/`, `packages/shared/` job types |
 | 1.4 Telegram Bot Foundation | ✅ | `apps/telegram-bot/src/` — Fastify server, SEC-04/05/06/12, webhook route, workspace resolver stub |
 | 1.5 User Onboarding & Workspace Resolution | ✅ | `services/onboarding.service.ts`, `rate-limiter.ts`, `telegram-api.ts`, real `resolveWorkspace()`, `/start` handler |
+| 1.6-A AI Parse Pipeline | ✅ | `packages/ai-core/`, `draft.service.ts`, `ai-parse.worker.ts`, 75/75 smoke tests, commit `7b393d2` |
 
 ---
 
@@ -93,45 +94,41 @@ midas-monorepo/
 
 ---
 
-## 6. NEXT STEP — PHASE 1.5: USER ONBOARDING & WORKSPACE RESOLUTION
+## 6. NEXT STEP — PHASE 1.6-B: HUMAN-IN-THE-LOOP DRAFT CONFIRMATION
 
-> ⏳ **Pending owner approval. Do not implement until APPROVED.**
+> ✅ **APPROVED. Implementing now.**
 
-**Scope:** Работа внутри `apps/telegram-bot/src/services/` и `apps/telegram-bot/src/routes/` (чтение существующей схемы через `packages/database/`).
+**Scope:** HitL confirmation flow for `TransactionDraft`. No Phase 1.6-B scope creep.
 
-### Задачи (advisory — не имплементировать):
-- [ ] `resolveWorkspace()` — реальный DB-запрос вместо stub (SEC-03):
-  - `SELECT wm.workspace_id FROM workspace_memberships wm JOIN users u ON u.id = wm.user_id WHERE u.telegram_user_id = $1 AND wm.role = 'owner' LIMIT 1`
-- [ ] Frictionless Onboarding: `/start` handler → `withTenantTransaction` flow:
-  - Найти User по `telegram_user_id`
-  - Если не найден → создать User (ULID, ADR-004)
-  - Создать default Workspace (ULID, `default_currency` = 'USD', ADR-003)
-  - Создать WorkspaceMembership (role = 'owner')
-  - Всё в одной атомарной DB-транзакции (SEC-03)
-- [ ] Onboarding anti-spam guard: rate-limit `/start` по `telegram_user_id` через Redis (`rl:start:{userId}`, 1 req/60s)
-- [ ] Базовое ответное сообщение пользователю через Telegram Bot API (sendMessage): «Добро пожаловать» или «Вы уже зарегистрированы»
+### Задачи:
+- [x] Update workflow_state.md: Phase 1.6-A ACCEPTED, Phase 1.6-B scope
+- [ ] Implement `draft-confirmation.service.ts`: atomic `approveDraft()` and `rejectDraft()` using `SELECT ... FOR UPDATE SKIP LOCKED` + state machine transition
+- [ ] Implement `confirmation.worker.ts` (callback-confirm queue): handle approve/reject callback_query
+- [ ] Add `callback-confirm` queue to `queue-definitions.ts`
+- [ ] Implement `notifications.worker.ts`: send real Telegram API calls with inline keyboard
+- [ ] Update `webhook.route.ts`: callback_query → enqueue to callback-confirm queue
+- [ ] Add `CallbackConfirmJobPayload` to `@midas/shared`
+- [ ] Migration: add `user_id` column to `transaction_drafts` (needed for notification routing)
+- [ ] Smoke test: parallel callback_query approval → exactly 1 Transaction created
 
-### Явно вынесено за скоп фазы 1.5 (будущие фазы):
-- ❌ `callback_query` / TransactionDraft подтверждение (Human-in-the-Loop) — Phase 1.6
-- ❌ `/add`, `/balance`, `/report`, `/category` — Phase 1.6
-- ❌ CRON-job для expire draft TTL (SEC-08) — Phase 1.6
-- ❌ AI-парсинг (Claude Haiku) — Phase 1.6+
-- ❌ Полная бизнес-логика `notifications` — Phase 1.6
-- ❌ Crypto / blockchain — Phase 2
-- ❌ Google Sheets / Notion — Phase 3
-- ❌ Mini App (React SPA) — Phase 4
-- ❌ Изменение project_config.md
+### Явно вынесено за скоп Phase 1.6-B:
+- ❌ AI parsing changes
+- ❌ /balance, /report, /category
+- ❌ CRON draft expiration (complex scheduler — Phase 1.7)
+- ❌ Crypto / blockchain
+- ❌ Google Sheets / Notion
+- ❌ Mini App
+- ❌ project_config.md changes
 
 ---
 
-## 7. MCP REQUIREMENTS (для следующего чата)
+## 7. MCP REQUIREMENTS (Phase 1.6-B)
 
-| MCP-сервер | Phase 1.5 | Доступ | Когда разрешён |
+| MCP-сервер | Phase 1.6-B | Доступ | Когда разрешён |
 |---|---|---|---|
-| Filesystem MCP | ✅ Требуется | read/write в `apps/telegram-bot/` | Все фазы |
-| Postgres MCP | ✅ Требуется | read-only (схема уже создана) | Phase 1.2+ |
+| Filesystem MCP | ✅ Требуется | read/write в `apps/`, `packages/` | Все фазы |
+| Postgres MCP | ✅ Требуется | read-only (schema) + read/write dev (migration) | Phase 1.2+ |
 | GitHub MCP | ⚪ По необходимости | read-only | Если remote repo нужен |
-| Context7 MCP | ⚪ По необходимости | read-only | Если нужна документация |
 | Browser / DevTools | ❌ Не нужен | — | Phase 4 (Mini App) |
 | Notion MCP | ❌ Запрещён | — | Phase 3 |
 | Google Sheets | ❌ Запрещён | — | Phase 3 |
@@ -139,35 +136,31 @@ midas-monorepo/
 
 ---
 
-## 8. ФАЙЛЫ ДЛЯ ЧТЕНИЯ В НОВОМ ЧАТЕ (Phase 1.5)
+## 8. ФАЙЛЫ ДЛЯ ЧТЕНИЯ В НОВОМ ЧАТЕ (Phase 1.6-B)
 
 **Required (читать обязательно):**
 ```
 project_config.md
 workflow_state.md
-docs/phase1_scope.md
-docs/database_model_draft.md
+apps/background-workers/src/services/draft.service.ts
+apps/background-workers/src/queues/queue-definitions.ts
+apps/telegram-bot/src/routes/webhook.route.ts
+packages/shared/src/index.ts
 ```
 
 **Optional (читать при необходимости):**
 ```
-docs/adr/ADR-003-workspace-model.md
-packages/shared/src/index.ts (Telegram types, ULID)
-apps/telegram-bot/src/services/workspace-resolver.ts (текущий stub)
-apps/telegram-bot/src/routes/webhook.route.ts (понять /start flow)
-packages/database/src/ (схема для поиска таблиц)
+packages/database/migrations/1777973834059_draft-state-machine.js
+apps/background-workers/src/workers/ai-parse.worker.ts
+apps/telegram-bot/src/services/telegram-api.ts
 ```
 
 **Do not load (не читать — тратит контекст):**
 ```
 docs/event_storming_part*.md
 docs/client-roadmap-architecture-overview.md
-docs/queue_model.md (очереди — не затрагиваем в этой фазе)
-docs/adr/ADR-000-*.md (meta)
-docs/adr/ADR-001-*.md (runtime — уже принято)
-docs/adr/ADR-002-*.md (frontend — future phase)
-docs/adr/ADR-013-*.md (draft TTL — Phase 1.6)
-packages/ai-core/ (Phase 1.6+)
+docs/adr/ADR-000-*.md — ADR-002-*.md (meta/frontend)
+packages/ai-core/src/ (Phase 1.6-A — не трогать)
 ```
 
 ---
@@ -176,10 +169,11 @@ packages/ai-core/ (Phase 1.6+)
 
 > Read workflow_state.md and project_config.md first.
 > Before implementation, read workflow_state.md section 11 — Agent Operating Protocol and follow it strictly.
-> Continue only with Phase 1.5 — User Onboarding & Workspace Resolution.
-> Do not implement callback_query, bot commands, CRON, AI parsing, or notifications.
+> Continue only with Phase 1.6-B — Human-in-the-Loop Draft Confirmation.
+> Do not modify AI parsing (Phase 1.6-A). Do not implement /balance, /report, /category.
+> Do not implement CRON, crypto, Notion, Sheets, Mini App, PDF.
 > Do not modify project_config.md.
-> Do not proceed to Phase 1.6 until I approve.
+> Do not proceed to the next phase until I approve.
 
 ---
 
@@ -211,7 +205,7 @@ packages/ai-core/ (Phase 1.6+)
 | 2026-05-05 20:30 | Phase 1.5 Verification Gate PASS (39/39 smoke tests). Fix applied: RLS chicken-and-egg — `midas_app` cannot INSERT into `workspaces` without a pre-existing `workspace_memberships` row. Added migration `1777973900000`: `system_find_or_create_user` SECURITY DEFINER (executes as `midas_migrator`, exempt from RLS; `pg_advisory_xact_lock` for race safety). **Documentation note:** SECURITY DEFINER onboarding pattern was introduced in Phase 1.2 migration (`1777973795878_rls-and-policies.js`) as `system_create_onboarding_workspace` but is not covered by any existing ADR. ADR-009 covers Exchange Rate Snapshot only. A future ADR documenting the SECURITY DEFINER onboarding bootstrap pattern is recommended. Commits `b60f7ac`, `9307800` pushed. |
 | 2026-05-05 20:35 | Phase 1.5 ACCEPTED by owner. Status set to WAITING_FOR_OWNER_APPROVAL_TO_START_PHASE_1_6. |
 | 2026-05-05 21:00 | Phase 1.6-A AI Parse Pipeline implementation complete. `parseTransaction()` (Claude Haiku + Zod strict allowlist SEC-01), `createDraft()` (withTenantTransaction SEC-03), date-scoped AI budget guard SEC-09, SEC-12 `job.updateData('[REDACTED]')` + `removeOnFail: { age: 86400 }`. Commit `305e0f6`. |
-| 2026-05-05 21:15 | Phase 1.6-A Verification Gate PASS WITH FIXES. Fix: SEC-02 `parseFloat()` removed from `AmountString` validator — replaced with pure regex (rejects NaN, 0, -1, "123abc", "12.34.56"). Fix: console.log message text cleaned. 69/69 smoke tests pass. 13/13 typecheck+lint pass. Commit `35815db` pushed. |
+| 2026-05-05 21:30 | Phase 1.6-A Final Acceptance Check. Fix: NUMERIC(19,4) boundary — regex `\d*` → `\d{0,14}` caps integer part at 15 digits. Rejects `1000000000000000.0000`, `9999999999999999`. Accepts `999999999999999.9999`. 75/75 smoke tests pass. 13/13 typecheck+lint pass. Commit `7b393d2` pushed. |
 
 ---
 

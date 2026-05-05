@@ -237,10 +237,15 @@ assert(
   'ai-parse queue does NOT have removeOnFail: false (other queues may)',
   (() => {
     // Extract only the ai-parse queue section
-    const aiParseSection = queueDefsSource.slice(
-      queueDefsSource.indexOf('// ai-parse Queue'),
+    // ai-parse is between '// ai-parse Queue' and the next queue comment
+    const startIdx = queueDefsSource.indexOf('// ai-parse Queue');
+    const endMarkers = [
       queueDefsSource.indexOf('// notifications Queue'),
-    );
+      queueDefsSource.indexOf('// callback-confirm Queue'),
+      queueDefsSource.indexOf('// Callback-confirm Queue'),
+    ].filter((i) => i > startIdx && i !== -1);
+    const endIdx = endMarkers.length > 0 ? Math.min(...endMarkers) : queueDefsSource.length;
+    const aiParseSection = queueDefsSource.slice(startIdx, endIdx);
     return !aiParseSection.includes('removeOnFail: false');
   })(),
 );
@@ -348,22 +353,16 @@ assert(
 
 console.log('\n── Scope Guard: Phase 1.6-B features absent ─────────────────');
 
-assert(
-  'No inline keyboard in ai-parse worker',
-  !workerSource.includes('inline_keyboard') && !workerSource.includes('InlineKeyboard'),
-);
-assert(
-  'No callback_query handling in worker',
-  !workerSource.includes('callback_query'),
-);
+// Phase 1.6-B scope guards removed — Phase 1.6-B has been implemented.
+// inline_keyboard, callback_query, and draft approval are now present in ai-parse.worker.ts.
+// These guards were Phase 1.6-A-specific checks to prevent premature implementation.
 assert(
   'No CRON references in Phase 1.6-A files',
   !draftServiceSource.includes('cron') && !workerSource.includes('cron'),
 );
 assert(
-  'No Transaction creation (only Draft) in Phase 1.6-A',
-  !workerSource.toLowerCase().includes("'approved'") &&
-    !draftServiceSource.toLowerCase().includes("status = 'approved'"),
+  'draft.service (Phase 1.6-A) does not INSERT into transactions directly',
+  !draftServiceSource.toLowerCase().includes("insert into transactions"),
 );
 
 // ─────────────────────────────────────────────────────────────────────────────
