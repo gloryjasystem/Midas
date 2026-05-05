@@ -7,7 +7,8 @@
  *   3. SEC-01: Malformed JSON → needs_clarification
  *   4. SEC-01: Low confidence → needs_clarification
  *   5. SEC-02: Invalid amounts rejected without parseFloat (NaN, -1, 0, "123abc", "12.34.56", empty)
- *   6. SEC-02: Valid amounts accepted
+ *   5b. SEC-02: NUMERIC(19,4) boundary: >15 integer digits rejected
+ *   6. SEC-02: Valid amounts accepted including NUMERIC(19,4) max
  *   7. SEC-12: removeOnFail age configured on ai-parse queue
  *   8. Draft service: createDraft uses withTenantTransaction (code-level verification)
  *
@@ -179,11 +180,16 @@ const invalidAmounts = [
   ['1e5', 'scientific notation'],
   [' 500', 'leading space'],
   ['500 ', 'trailing space'],
-  ['1.23456', 'too many decimal places'],
+  ['1.23456', 'too many decimal places (5)'],
   ['-0.5', 'negative decimal'],
   ['+5', 'unary plus'],
   ['Infinity', 'Infinity'],
   ['1,500', 'comma separator'],
+  // ── NUMERIC(19,4) boundary tests ──────────────────────
+  ['1000000000000000.0000', 'NUMERIC overflow: 16 integer digits'],
+  ['9999999999999999', 'NUMERIC overflow: 16 integer digits no decimal'],
+  ['9999999999999999999', 'NUMERIC overflow: 19 integer digits'],
+  ['0001', 'leading zeros on integer'],
 ];
 
 for (const [amount, label] of invalidAmounts) {
@@ -205,6 +211,9 @@ const validAmounts = [
   ['1', 'one'],
   ['999999', 'large integer'],
   ['0.0001', 'min fraction'],
+  // ── NUMERIC(19,4) boundary tests ──────────────────────
+  ['999999999999999.9999', 'NUMERIC(19,4) max valid (15 int + 4 dec)'],
+  ['999999999999999', 'NUMERIC max 15 integer digits no decimal'],
 ];
 
 for (const [amount, label] of validAmounts) {

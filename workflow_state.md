@@ -10,11 +10,11 @@
 | Параметр | Значение |
 |---|---|
 | **PHASE** | `1 — MVP Implementation` |
-| **STEP** | `1.5 — User Onboarding & Workspace Resolution (COMPLETED / ACCEPTED)` |
-| **AGENT STATUS** | `WAITING_FOR_OWNER_APPROVAL_TO_START_PHASE_1_6` |
-| **LAST COMPLETED** | `Phase 1.5 Verification Gate — PASS (39/39 smoke tests). Commit 9307800 pushed.` |
-| **BLOCKER** | Владелец должен одобрить начало Phase 1.6 |
-| **NEXT ACTION** | Ожидаем APPROVED для Phase 1.6 |
+| **STEP** | `1.6-A — AI Parse Pipeline (COMPLETED / AWAITING OWNER ACCEPTANCE)` |
+| **AGENT STATUS** | `WAITING_FOR_OWNER_APPROVAL_TO_ACCEPT_PHASE_1_6A` |
+| **LAST COMPLETED** | `Phase 1.6-A Verification Gate — PASS WITH FIXES (69/69 smoke tests). Commit 35815db pushed.` |
+| **BLOCKER** | Владелец должен принять Phase 1.6-A и одобрить начало Phase 1.6-B |
+| **NEXT ACTION** | Ожидаем ACCEPTED для Phase 1.6-A, затем APPROVED для Phase 1.6-B |
 
 ---
 
@@ -210,6 +210,8 @@ packages/ai-core/ (Phase 1.6+)
 | 2026-05-05 20:00 | Phase 1.5 implementation complete. `findOrCreateUser` (atomic, ON CONFLICT race-safe), `resolveWorkspace` real DB, `/start` handler, Redis anti-spam, `sendMessage` wrapper. 13/13 typecheck+lint pass. Commit `8f88f22`. |
 | 2026-05-05 20:30 | Phase 1.5 Verification Gate PASS (39/39 smoke tests). Fix applied: RLS chicken-and-egg — `midas_app` cannot INSERT into `workspaces` without a pre-existing `workspace_memberships` row. Added migration `1777973900000`: `system_find_or_create_user` SECURITY DEFINER (executes as `midas_migrator`, exempt from RLS; `pg_advisory_xact_lock` for race safety). **Documentation note:** SECURITY DEFINER onboarding pattern was introduced in Phase 1.2 migration (`1777973795878_rls-and-policies.js`) as `system_create_onboarding_workspace` but is not covered by any existing ADR. ADR-009 covers Exchange Rate Snapshot only. A future ADR documenting the SECURITY DEFINER onboarding bootstrap pattern is recommended. Commits `b60f7ac`, `9307800` pushed. |
 | 2026-05-05 20:35 | Phase 1.5 ACCEPTED by owner. Status set to WAITING_FOR_OWNER_APPROVAL_TO_START_PHASE_1_6. |
+| 2026-05-05 21:00 | Phase 1.6-A AI Parse Pipeline implementation complete. `parseTransaction()` (Claude Haiku + Zod strict allowlist SEC-01), `createDraft()` (withTenantTransaction SEC-03), date-scoped AI budget guard SEC-09, SEC-12 `job.updateData('[REDACTED]')` + `removeOnFail: { age: 86400 }`. Commit `305e0f6`. |
+| 2026-05-05 21:15 | Phase 1.6-A Verification Gate PASS WITH FIXES. Fix: SEC-02 `parseFloat()` removed from `AmountString` validator — replaced with pure regex (rejects NaN, 0, -1, "123abc", "12.34.56"). Fix: console.log message text cleaned. 69/69 smoke tests pass. 13/13 typecheck+lint pass. Commit `35815db` pushed. |
 
 ---
 

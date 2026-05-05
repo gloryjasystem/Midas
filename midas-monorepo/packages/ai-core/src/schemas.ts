@@ -42,17 +42,23 @@ export type ParsedIntentType = z.infer<typeof ParsedIntentType>;
 const AmountString = z
   .string()
   .regex(
-    // Must be a positive decimal string with:
-    //   - integer part: at least one digit, no leading zeros for multi-digit (e.g. "07" → invalid)
-    //   - optional fractional part: 1–4 decimal digits
-    //   - amount > 0: integer part must be non-zero OR fractional part must be non-zero
+    // NUMERIC(19,4) boundary enforcement:
+    //   - integer part: max 15 digits (= NUMERIC precision 19 minus scale 4)
+    //   - fractional part: 0 or 1–4 digits after decimal
+    //   - positive only: lookahead rejects all-zero values
+    //   - no leading zeros on multi-digit integers ("0001" → rejected)
     //
-    // Accepted:  "500", "1500.50", "0.50", "25.0001"
-    // Rejected:  "0", "0.0000", "NaN", "-1", "123abc", "12.34.56", "", "1e5", " 5"
+    // Structure: ^(?!zero-only)(?:0 | [1-9] + up to 14 more digits)(?:. + 1-4 digits)?$
+    //
+    // Accepted:  "500", "1500.50", "0.50", "0.0001", "999999999999999.9999"
+    // Rejected:  "0", "0.0000", "NaN", "-1", "123abc", "12.34.56", "", "1e5",
+    //            " 5", "+5", "0001", "1000000000000000.0000", "9999999999999999"
     //
     // SEC-02: No parseFloat(), Number(), or float arithmetic used here.
-    /^(?!0+(?:\.0+)?$)(?:0|[1-9]\d*)(?:\.\d{1,4})?$/,
-    'Amount must be a positive decimal string (e.g. "500", "0.50") with at most 4 decimal places — no NaN, negatives, or zero',
+    // DB:     Compatible with PostgreSQL NUMERIC(19,4).
+    /^(?!0+(?:\.0+)?$)(?:0|[1-9]\d{0,14})(?:\.\d{1,4})?$/,
+    'Amount must be a positive decimal string compatible with NUMERIC(19,4): ' +
+      'max 15 integer digits, max 4 decimal places, no NaN/negative/zero/leading zeros',
   );
 
 // ─────────────────────────────────────────────────────────────
