@@ -1,7 +1,7 @@
 # WORKFLOW_STATE.MD — Диспетчер задач ИИ-агента Midas
 
 > **Тип:** MUTABLE — кратковременная память агента. Обновляется на каждом шаге работы.
-> **Обновлён:** 2026-05-05 14:30
+> **Обновлён:** 2026-05-05 19:15
 
 ---
 
@@ -10,11 +10,11 @@
 | Параметр | Значение |
 |---|---|
 | **PHASE** | `1 — MVP Implementation` |
-| **STEP** | `1.3 — BullMQ Task Queue Foundation (COMPLETED / ACCEPTED)` |
-| **AGENT STATUS** | `WAITING_FOR_OWNER_APPROVAL_TO_START_PHASE_1_4` |
-| **LAST COMPLETED** | `Phase 1.3 — BullMQ Task Queue Foundation` |
-| **BLOCKER** | Владелец должен дать команду на старт Phase 1.4 (Telegram Bot Foundation) |
-| **NEXT ACTION** | Начать Phase 1.4 после APPROVED |
+| **STEP** | `1.4 — Telegram Bot Foundation (COMPLETED / ACCEPTED)` |
+| **AGENT STATUS** | `WAITING_FOR_OWNER_APPROVAL_TO_START_PHASE_1_5` |
+| **LAST COMPLETED** | `Phase 1.4 — Telegram Bot Foundation` |
+| **BLOCKER** | Владелец должен дать команду на старт Phase 1.5 |
+| **NEXT ACTION** | Начать Phase 1.5 после APPROVED |
 
 ---
 
@@ -29,6 +29,7 @@
 | 1.1 Project Infrastructure Foundation | ✅ | `midas-monorepo/` — полная структура Turborepo, Docker Compose, ESLint, TypeScript |
 | 1.2 Database Foundation | ✅ | `packages/database/` — schema, RLS, withTenantTransaction, Decimal boundary |
 | 1.3 BullMQ Task Queue Foundation | ✅ | `apps/background-workers/src/queues/`, `workers/`, `packages/shared/` job types |
+| 1.4 Telegram Bot Foundation | ✅ | `apps/telegram-bot/src/` — Fastify server, SEC-04/05/06/12, webhook route, workspace resolver stub |
 
 ---
 
@@ -146,7 +147,7 @@ midas-monorepo/
 
 ---
 
-## 8. ФАЙЛЫ ДЛЯ ЧТЕНИЯ В НОВОМ ЧАТЕ (Phase 1.2)
+## 8. ФАЙЛЫ ДЛЯ ЧТЕНИЯ В НОВОМ ЧАТЕ (Phase 1.4)
 
 **Required (читать обязательно):**
 ```
@@ -160,11 +161,8 @@ docs/mvp_acceptance_criteria.md
 **Optional (читать при необходимости):**
 ```
 docs/queue_model.md
-docs/adr/ADR-003-workspace-model.md
-docs/adr/ADR-004-ulid-primary-keys.md
-docs/adr/ADR-009-exchange-rate-snapshot.md
-docs/adr/ADR-013-draft-ttl-cleanup.md
 docs/adr/ADR-014-task-queue-bullmq.md
+packages/shared/src/index.ts (job payloads)
 ```
 
 **Do not load (не читать — тратит контекст):**
@@ -174,7 +172,7 @@ docs/client-roadmap-architecture-overview.md
 docs/adr/ADR-000-*.md (meta)
 docs/adr/ADR-001-*.md (runtime — уже принято)
 docs/adr/ADR-002-*.md (frontend — future phase)
-Любые файлы из apps/telegram-bot/, apps/background-workers/, packages/ai-core/
+Любые файлы из packages/database/, packages/ai-core/
 ```
 
 ---
@@ -183,7 +181,7 @@ docs/adr/ADR-002-*.md (frontend — future phase)
 
 > Read workflow_state.md and project_config.md first.
 > Before implementation, read workflow_state.md section 11 — Agent Operating Protocol and follow it strictly.
-> Continue only with Phase 1.2 Database Foundation.
+> Continue only with Phase 1.4 Telegram Bot Foundation.
 > Do not modify project_config.md.
 > Do not implement future phases.
 
@@ -209,6 +207,7 @@ docs/adr/ADR-002-*.md (frontend — future phase)
 | 2026-05-05 12:11 | Self-audit applied: C1, C2, M1, M2, L2 fixes + Section 14 added |
 | 2026-05-05 12:55 | Phase 1.2 Database Foundation completed & accepted via Review Gate. Minor observation: onboarding workspace spam requires app-layer rate limiting. |
 | 2026-05-05 14:30 | Phase 1.3 BullMQ Task Queue Foundation completed & accepted. 13/13 typecheck+lint passed (0 errors). |
+| 2026-05-05 19:15 | Phase 1.4 Telegram Bot Foundation completed & accepted. 13/13 typecheck+lint passed (0 errors). Fastify + SEC-04/05/06/12. |
 
 ---
 

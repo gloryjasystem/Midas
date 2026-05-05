@@ -10,6 +10,7 @@
  * - Job payload interfaces for BullMQ queues (Phase 1.3)
  * - IdempotencyKeyBuilder per SEC-06
  * - Constants (currencies, status enums)
+ * - Telegram Update types (minimal subset, Phase 1.4)
  */
 
 // ─────────────────────────────────────────────────────────────
@@ -198,3 +199,60 @@ export const TRANSACTION_TYPE = {
 } as const;
 
 export type TransactionType = (typeof TRANSACTION_TYPE)[keyof typeof TRANSACTION_TYPE];
+
+// ─────────────────────────────────────────────────────────────
+// Telegram Bot API — minimal Update types (Phase 1.4)
+// SEC-05: Only text messages are processed. All other types are rejected.
+//
+// We define only the fields we actually access — no third-party type library
+// to keep the dependency footprint minimal and avoid version drift.
+// ─────────────────────────────────────────────────────────────
+
+/** Minimal Telegram User representation */
+export interface TelegramUser {
+  /** Telegram user ID (number in API, but we coerce to string immediately) */
+  id: number;
+  is_bot: boolean;
+  first_name: string;
+  username?: string;
+}
+
+/** Minimal Telegram Chat representation */
+export interface TelegramChat {
+  /** Telegram chat ID */
+  id: number;
+  type: 'private' | 'group' | 'supergroup' | 'channel';
+}
+
+/**
+ * Minimal Telegram Message — only fields required for Phase 1 text processing.
+ * SEC-05: `text` being absent signals a non-text message that must be rejected.
+ */
+export interface TelegramMessage {
+  message_id: number;
+  from?: TelegramUser;
+  chat: TelegramChat;
+  date: number; // Unix timestamp
+  text?: string; // Only present for text messages
+}
+
+/**
+ * Telegram Update object received via webhook.
+ * SEC-05: We only process `message` updates with a `text` field.
+ * `callback_query` is reserved for Phase 1.4 Human-in-the-Loop confirmations (stub only).
+ */
+export interface TelegramUpdate {
+  update_id: number;
+  /** Present for new messages */
+  message?: TelegramMessage;
+  /** Present for inline keyboard button presses — stub for Phase 1.4 */
+  callback_query?: TelegramCallbackQuery;
+}
+
+/** Minimal CallbackQuery for inline keyboard handling (Human-in-the-Loop, Phase 1.4) */
+export interface TelegramCallbackQuery {
+  id: string;
+  from: TelegramUser;
+  message?: TelegramMessage;
+  data?: string; // The button's callback_data value
+}
