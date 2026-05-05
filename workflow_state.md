@@ -1,7 +1,7 @@
 # WORKFLOW_STATE.MD — Диспетчер задач ИИ-агента Midas
 
 > **Тип:** MUTABLE — кратковременная память агента. Обновляется на каждом шаге работы.
-> **Обновлён:** 2026-05-05 19:45
+> **Обновлён:** 2026-05-05 20:00
 
 ---
 
@@ -10,11 +10,11 @@
 | Параметр | Значение |
 |---|---|
 | **PHASE** | `1 — MVP Implementation` |
-| **STEP** | `1.4 — Telegram Bot Foundation (COMPLETED / ACCEPTED)` |
-| **AGENT STATUS** | `WAITING_FOR_OWNER_APPROVAL_TO_START_PHASE_1_5` |
-| **LAST COMPLETED** | `Phase 1.4 — Telegram Bot Foundation` |
-| **BLOCKER** | Владелец должен дать команду на старт Phase 1.5 |
-| **NEXT ACTION** | Начать Phase 1.5 после APPROVED |
+| **STEP** | `1.5 — User Onboarding & Workspace Resolution (IMPLEMENTATION COMPLETE)` |
+| **AGENT STATUS** | `WAITING_FOR_OWNER_APPROVAL_TO_ACCEPT_PHASE_1_5` |
+| **LAST COMPLETED** | `Phase 1.5 — User Onboarding & Workspace Resolution` |
+| **BLOCKER** | Владелец должен принять Phase 1.5 перед началом Phase 1.6 |
+| **NEXT ACTION** | Phase 1.5 Verification Gate — ожидаем APPROVED |
 
 ---
 
@@ -30,6 +30,7 @@
 | 1.2 Database Foundation | ✅ | `packages/database/` — schema, RLS, withTenantTransaction, Decimal boundary |
 | 1.3 BullMQ Task Queue Foundation | ✅ | `apps/background-workers/src/queues/`, `workers/`, `packages/shared/` job types |
 | 1.4 Telegram Bot Foundation | ✅ | `apps/telegram-bot/src/` — Fastify server, SEC-04/05/06/12, webhook route, workspace resolver stub |
+| 1.5 User Onboarding & Workspace Resolution | ✅ | `services/onboarding.service.ts`, `rate-limiter.ts`, `telegram-api.ts`, real `resolveWorkspace()`, `/start` handler |
 
 ---
 
@@ -206,6 +207,7 @@ packages/ai-core/ (Phase 1.6+)
 | 2026-05-05 19:35 | Phase 1.4 ACCEPTED by owner. **Prod note:** Redis must use `noeviction` policy in production; `allkeys-lru` is acceptable only for local dev. |
 | 2026-05-05 19:40 | workflow_state.md cleanup: stale Phase 1.2/1.4 references corrected in Sections 6–9. Sections now describe Phase 1.5 scope, MCP needs, required files, and handoff prompt. No code written. |
 | 2026-05-05 19:45 | Phase 1.5 scope narrowed by owner: User Onboarding & Workspace Resolution only. Removed from scope: callback_query, /add /balance /report /category, CRON, AI, full notifications. Sections 6, 8, 9 updated. |
+| 2026-05-05 20:00 | Phase 1.5 implementation complete. `findOrCreateUser` (atomic, ON CONFLICT race-safe), `resolveWorkspace` real DB, `/start` handler, Redis anti-spam, `sendMessage` wrapper. 13/13 typecheck+lint pass. Commit `8f88f22`. |
 
 ---
 
