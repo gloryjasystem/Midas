@@ -1,7 +1,7 @@
 # WORKFLOW_STATE.MD — Диспетчер задач ИИ-агента Midas
 
 > **Тип:** MUTABLE — кратковременная память агента. Обновляется на каждом шаге работы.
-> **Обновлён:** 2026-05-05 19:14 (UTC+3)
+> **Обновлён:** 2026-05-05 21:05 (UTC+3)
 
 ---
 
@@ -10,11 +10,11 @@
 | Параметр | Значение |
 |---|---|
 | **PHASE** | `1 — MVP Implementation` |
-| **STEP** | `1.6-B — HitL Draft Confirmation COMPLETED / ACCEPTED` |
-| **AGENT STATUS** | `WAITING_FOR_OWNER_APPROVAL_TO_START_NEXT_PHASE` |
-| **LAST COMPLETED** | `Phase 1.6-B ACCEPTED by owner. Commit f205e09.` |
+| **STEP** | `1.7 — Draft Expiration & Lifecycle Cleanup IN PROGRESS` |
+| **AGENT STATUS** | `IMPLEMENTING_PHASE_1_7` |
+| **LAST COMPLETED** | `Phase 1.6-B ACCEPTED by owner. Commit 3025bec (latest).` |
 | **BLOCKER** | None |
-| **NEXT ACTION** | Prepare next phase advisory only — do not implement |
+| **NEXT ACTION** | Implement Phase 1.7: migration, service, worker, smoke tests |
 
 ---
 

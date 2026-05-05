@@ -140,6 +140,31 @@ export const notificationsQueue = new Queue<NotificationJobPayload>(QUEUE_NAMES.
 });
 
 // ─────────────────────────────────────────────────────────────
+// draft-expiration Queue — Phase 1.7
+// Repeatable CRON queue for expiring pending_user drafts.
+// Concurrency: 1 — single-instance CRON (expiration is atomic at DB layer)
+// No user payload — system maintenance job, no PII.
+// ─────────────────────────────────────────────────────────────
+
+const draftExpirationDefaultJobOptions: DefaultJobOptions = {
+  attempts: 3,
+  backoff: {
+    type: 'exponential',
+    delay: 5_000, // 5s → 10s → 20s — DB hiccups only
+  },
+  removeOnComplete: {
+    count: 100, // Keep last 100 completed runs for operational visibility
+  },
+  removeOnFail: false, // Retain failed CRON runs for investigation
+};
+
+export const draftExpirationQueue = new Queue(QUEUE_NAMES.DRAFT_EXPIRATION, {
+  connection: redisConnection,
+  prefix: BULL_PREFIX,
+  defaultJobOptions: draftExpirationDefaultJobOptions,
+});
+
+// ─────────────────────────────────────────────────────────────
 // Graceful shutdown — close all queue connections
 // ─────────────────────────────────────────────────────────────
 
@@ -149,5 +174,7 @@ export async function closeQueues(): Promise<void> {
     aiParseQueue.close(),
     callbackConfirmQueue.close(),
     notificationsQueue.close(),
+    draftExpirationQueue.close(),
   ]);
 }
+

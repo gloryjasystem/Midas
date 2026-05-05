@@ -22,6 +22,7 @@ export const QUEUE_NAMES = {
   AI_PARSE: 'ai-parse',
   CALLBACK_CONFIRM: 'callback-confirm',
   NOTIFICATIONS: 'notifications',
+  DRAFT_EXPIRATION: 'draft-expiration',
 } as const;
 
 export type QueueName = (typeof QUEUE_NAMES)[keyof typeof QUEUE_NAMES];
