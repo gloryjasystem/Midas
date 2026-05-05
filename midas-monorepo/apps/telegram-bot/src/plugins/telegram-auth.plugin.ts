@@ -59,6 +59,11 @@ const telegramAuthPlugin: FastifyPluginAsync = async (fastify) => {
   }
 
   fastify.addHook('preHandler', async (request: FastifyRequest, reply: FastifyReply) => {
+    // Exclude public routes from SEC-04 enforcement
+    if (request.url === '/health') {
+      return;
+    }
+
     // If no secret configured (dev mode), skip auth
     if (!expectedSecret) {
       return;

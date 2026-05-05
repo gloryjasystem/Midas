@@ -139,11 +139,14 @@ export function buildLogSafeContext(
 /**
  * Builds deterministic, collision-resistant idempotency keys for BullMQ jobs.
  *
+ * IMPORTANT — BullMQ v5 forbids ':' in custom jobId values (used internally
+ * by Redis for key namespacing). All separators use '|' (pipe) instead.
+ *
  * SEC-06 key formats:
- *  - Webhook ingestion: telegram:bot:{botId}:chat:{chatId}:msg:{messageId}
- *  - AI parse:          parse:bot:{botId}:msg:{messageId}
- *  - Callback confirm:  cb:user:{telegramUserId}:draft:{draftId}:action:{action}
- *  - Notification:      notify:{workspaceId}:{alertId}
+ *  - Webhook ingestion: tg|bot|{botId}|chat|{chatId}|msg|{messageId}
+ *  - AI parse:          parse|bot|{botId}|msg|{messageId}
+ *  - Callback confirm:  cb|user|{telegramUserId}|draft|{draftId}|action|{action}
+ *  - Notification:      notify|{workspaceId}|{alertId}
  */
 export const IdempotencyKeyBuilder = {
   /**
@@ -151,7 +154,7 @@ export const IdempotencyKeyBuilder = {
    * messageId is unique only within a chat; botId+chatId+messageId is globally unique.
    */
   webhookIngestion(botId: string, chatId: string, messageId: string): string {
-    return `telegram:bot:${botId}:chat:${chatId}:msg:${messageId}`;
+    return `tg|bot|${botId}|chat|${chatId}|msg|${messageId}`;
   },
 
   /**
@@ -159,7 +162,7 @@ export const IdempotencyKeyBuilder = {
    * Prevents double-parsing of the same message.
    */
   aiParse(botId: string, messageId: string): string {
-    return `parse:bot:${botId}:msg:${messageId}`;
+    return `parse|bot|${botId}|msg|${messageId}`;
   },
 
   /**
@@ -167,14 +170,14 @@ export const IdempotencyKeyBuilder = {
    * action = 'approved' | 'rejected'
    */
   callbackConfirm(telegramUserId: string, draftId: string, action: string): string {
-    return `cb:user:${telegramUserId}:draft:${draftId}:action:${action}`;
+    return `cb|user|${telegramUserId}|draft|${draftId}|action|${action}`;
   },
 
   /**
    * Key for notification jobs.
    */
   notification(workspaceId: string, alertId: string): string {
-    return `notify:${workspaceId}:${alertId}`;
+    return `notify|${workspaceId}|${alertId}`;
   },
 } as const;
 

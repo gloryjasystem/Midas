@@ -56,22 +56,23 @@ export async function buildServer(): Promise<FastifyInstance> {
     trustProxy: !isDev,
   });
 
+  // ── Health check (public, no auth — must be registered BEFORE auth plugin) ──
+  // Intentionally public: used by Docker healthcheck, load balancers, monitoring.
+  // Must not require X-Telegram-Bot-Api-Secret-Token.
+  fastify.get('/health', async (_request, reply) => {
+    await reply.status(200).send({ status: 'ok', service: '@midas/telegram-bot' });
+  });
+
   // ── Plugins ──────────────────────────────────────────────────
   // formbody: parse application/x-www-form-urlencoded (defensive, Telegram sends JSON)
   await fastify.register(formbody);
 
-  // SEC-04: Validate X-Telegram-Bot-Api-Secret-Token on ALL routes
+  // SEC-04: Validate X-Telegram-Bot-Api-Secret-Token on ALL routes registered AFTER this
   await fastify.register(telegramAuthPlugin);
 
-  // ── Routes ───────────────────────────────────────────────────
-  // Webhook route: POST /webhook
+  // ── Webhook Route ─────────────────────────────────────────────
+  // POST /webhook — registered AFTER auth plugin, therefore guarded
   await fastify.register(webhookRoute);
-
-  // Health-check: GET /health (used by Docker, load balancers)
-  // No auth guard — intentionally public
-  fastify.get('/health', async (_request, reply) => {
-    await reply.status(200).send({ status: 'ok', service: '@midas/telegram-bot' });
-  });
 
   return fastify;
 }
