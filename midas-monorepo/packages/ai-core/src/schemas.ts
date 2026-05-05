@@ -42,12 +42,17 @@ export type ParsedIntentType = z.infer<typeof ParsedIntentType>;
 const AmountString = z
   .string()
   .regex(
-    /^\d+(\.\d{1,4})?$/,
-    'Amount must be a positive decimal string with at most 4 decimal places',
-  )
-  .refine(
-    (val) => parseFloat(val) > 0,
-    'Amount must be greater than zero',
+    // Must be a positive decimal string with:
+    //   - integer part: at least one digit, no leading zeros for multi-digit (e.g. "07" → invalid)
+    //   - optional fractional part: 1–4 decimal digits
+    //   - amount > 0: integer part must be non-zero OR fractional part must be non-zero
+    //
+    // Accepted:  "500", "1500.50", "0.50", "25.0001"
+    // Rejected:  "0", "0.0000", "NaN", "-1", "123abc", "12.34.56", "", "1e5", " 5"
+    //
+    // SEC-02: No parseFloat(), Number(), or float arithmetic used here.
+    /^(?!0+(?:\.0+)?$)(?:0|[1-9]\d*)(?:\.\d{1,4})?$/,
+    'Amount must be a positive decimal string (e.g. "500", "0.50") with at most 4 decimal places — no NaN, negatives, or zero',
   );
 
 // ─────────────────────────────────────────────────────────────

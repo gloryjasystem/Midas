@@ -176,7 +176,7 @@ async function sanitizeFailedJobPayload(
       ...job.data,
       raw_text: '[REDACTED]', // SEC-12: no user text in failed job storage
     });
-    console.log('[midas:ai-parse-worker] Sanitized raw_text in failed job payload', {
+    console.log('[midas:ai-parse-worker] Sensitive field redacted in permanently failed job', {
       jobId: job.id,
       workspaceId: job.data.workspaceId,
     });
