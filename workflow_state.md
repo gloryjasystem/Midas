@@ -1,7 +1,7 @@
 # WORKFLOW_STATE.MD — Диспетчер задач ИИ-агента Midas
 
 > **Тип:** MUTABLE — кратковременная память агента. Обновляется на каждом шаге работы.
-> **Обновлён:** 2026-05-05 12:11
+> **Обновлён:** 2026-05-05 14:30
 
 ---
 
@@ -10,11 +10,11 @@
 | Параметр | Значение |
 |---|---|
 | **PHASE** | `1 — MVP Implementation` |
-| **STEP** | `1.2 — Database Foundation (COMPLETED / ACCEPTED)` |
-| **AGENT STATUS** | `WAITING_FOR_OWNER_APPROVAL_TO_START_PHASE_1_3` |
-| **LAST COMPLETED** | `Phase 1.2 — Database Foundation` |
-| **BLOCKER** | Владелец должен дать команду на старт Phase 1.3 (BullMQ Task Queue Foundation) |
-| **NEXT ACTION** | Начать Phase 1.3 после APPROVED |
+| **STEP** | `1.3 — BullMQ Task Queue Foundation (COMPLETED / ACCEPTED)` |
+| **AGENT STATUS** | `WAITING_FOR_OWNER_APPROVAL_TO_START_PHASE_1_4` |
+| **LAST COMPLETED** | `Phase 1.3 — BullMQ Task Queue Foundation` |
+| **BLOCKER** | Владелец должен дать команду на старт Phase 1.4 (Telegram Bot Foundation) |
+| **NEXT ACTION** | Начать Phase 1.4 после APPROVED |
 
 ---
 
@@ -27,6 +27,8 @@
 | 0.3 Implementation Readiness Gate | ✅ | `phase1_scope.md`, `database_model_draft.md`, `queue_model.md`, `mvp_acceptance_criteria.md` |
 | 0.3.1 Security & Traceability Patch | ✅ | SEC-01 — SEC-12 внесены в scope, DB model, queue model, acceptance criteria, ADR-009, ADR-013 |
 | 1.1 Project Infrastructure Foundation | ✅ | `midas-monorepo/` — полная структура Turborepo, Docker Compose, ESLint, TypeScript |
+| 1.2 Database Foundation | ✅ | `packages/database/` — schema, RLS, withTenantTransaction, Decimal boundary |
+| 1.3 BullMQ Task Queue Foundation | ✅ | `apps/background-workers/src/queues/`, `workers/`, `packages/shared/` job types |
 
 ---
 
@@ -206,6 +208,7 @@ docs/adr/ADR-002-*.md (frontend — future phase)
 | 2026-05-05 12:05 | Section 11 (Agent Operating Protocol, 13 sub-protocols) added to workflow_state.md |
 | 2026-05-05 12:11 | Self-audit applied: C1, C2, M1, M2, L2 fixes + Section 14 added |
 | 2026-05-05 12:55 | Phase 1.2 Database Foundation completed & accepted via Review Gate. Minor observation: onboarding workspace spam requires app-layer rate limiting. |
+| 2026-05-05 14:30 | Phase 1.3 BullMQ Task Queue Foundation completed & accepted. 13/13 typecheck+lint passed (0 errors). |
 
 ---
 

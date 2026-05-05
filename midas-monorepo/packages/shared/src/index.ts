@@ -7,9 +7,194 @@
  * - ULID generation
  * - Environment config loader
  * - Shared Zod schemas for AI output validation (SEC-01)
+ * - Job payload interfaces for BullMQ queues (Phase 1.3)
+ * - IdempotencyKeyBuilder per SEC-06
  * - Constants (currencies, status enums)
- *
- * Phase 1.1: Package skeleton only.
  */
 
-export {};
+// ─────────────────────────────────────────────────────────────
+// Queue Names — single source of truth
+// ─────────────────────────────────────────────────────────────
+
+export const QUEUE_NAMES = {
+  WEBHOOK_INGESTION: 'webhook-ingestion',
+  AI_PARSE: 'ai-parse',
+  NOTIFICATIONS: 'notifications',
+} as const;
+
+export type QueueName = (typeof QUEUE_NAMES)[keyof typeof QUEUE_NAMES];
+
+// ─────────────────────────────────────────────────────────────
+// Job Payload Interfaces
+// NOTE: raw_text must NEVER be logged (SEC-12). It is included
+// in the payload only so the worker can pass it to Claude, but
+// all logging utilities must strip this field before output.
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Payload for the `webhook-ingestion` queue.
+ * Represents a validated Telegram text message ready for processing.
+ * SEC-06 idempotency key: telegram:bot:{botId}:chat:{chatId}:msg:{messageId}
+ */
+export interface WebhookIngestionJobPayload {
+  /** Telegram bot ID */
+  botId: string;
+  /** Telegram chat ID (string to avoid number precision loss) */
+  chatId: string;
+  /** Telegram message ID (unique within chat) */
+  messageId: string;
+  /** Telegram user ID (string — SEC-02: no Number() on IDs) */
+  telegramUserId: string;
+  /** Internal workspace ID (ULID) — injected by backend, NOT from user input (SEC-03) */
+  workspaceId: string;
+  /** Raw text of the message — MUST NOT be logged (SEC-12) */
+  raw_text: string;
+  /** ISO timestamp of the original message */
+  receivedAt: string;
+}
+
+/**
+ * Payload for the `ai-parse` queue.
+ * Triggered after a webhook-ingestion job determines AI parsing is needed.
+ * SEC-06 idempotency key: parse:bot:{botId}:msg:{messageId}
+ */
+export interface AiParseJobPayload {
+  /** Telegram bot ID */
+  botId: string;
+  /** Telegram message ID */
+  messageId: string;
+  /** Telegram chat ID */
+  chatId: string;
+  /** Telegram user ID */
+  telegramUserId: string;
+  /** Internal workspace ID (ULID) — always from trusted backend context (SEC-03) */
+  workspaceId: string;
+  /** Raw text to parse — MUST NOT be logged (SEC-12) */
+  raw_text: string;
+  /** ISO timestamp of original message */
+  receivedAt: string;
+}
+
+/**
+ * Payload for the `notifications` queue.
+ * Triggers sending a Telegram message to a user.
+ * SEC-06 idempotency key: notify:{workspaceId}:{alertId}
+ */
+export interface NotificationJobPayload {
+  /** Unique alert/notification ID (ULID) — used for idempotency */
+  alertId: string;
+  /** Workspace the notification belongs to */
+  workspaceId: string;
+  /** Telegram chat ID to send to */
+  chatId: string;
+  /** Text content of the notification (safe to log — no raw financial text) */
+  message: string;
+  /** Optional: draft_id being confirmed/rejected */
+  draftId?: string;
+  /** Optional: inline keyboard JSON (serialized for type safety) */
+  inlineKeyboardJson?: string;
+}
+
+// ─────────────────────────────────────────────────────────────
+// Log-safe job context — strips raw_text (SEC-12)
+// ─────────────────────────────────────────────────────────────
+
+export interface LogSafeJobContext {
+  jobId: string;
+  queueName: QueueName;
+  workspaceId: string;
+  telegramUserId?: string;
+  draftId?: string;
+  errorClass?: string;
+}
+
+/**
+ * Build a log-safe context object from any job payload.
+ * NEVER include raw_text, tokens, or financial text in logs (SEC-12).
+ */
+export function buildLogSafeContext(
+  jobId: string,
+  queueName: QueueName,
+  payload: WebhookIngestionJobPayload | AiParseJobPayload | NotificationJobPayload,
+): LogSafeJobContext {
+  const ctx: LogSafeJobContext = {
+    jobId,
+    queueName,
+    workspaceId: payload.workspaceId,
+  };
+  if ('telegramUserId' in payload) {
+    ctx.telegramUserId = payload.telegramUserId;
+  }
+  if ('draftId' in payload && payload.draftId) {
+    ctx.draftId = payload.draftId;
+  }
+  return ctx;
+}
+
+// ─────────────────────────────────────────────────────────────
+// IdempotencyKeyBuilder — SEC-06
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Builds deterministic, collision-resistant idempotency keys for BullMQ jobs.
+ *
+ * SEC-06 key formats:
+ *  - Webhook ingestion: telegram:bot:{botId}:chat:{chatId}:msg:{messageId}
+ *  - AI parse:          parse:bot:{botId}:msg:{messageId}
+ *  - Callback confirm:  cb:user:{telegramUserId}:draft:{draftId}:action:{action}
+ *  - Notification:      notify:{workspaceId}:{alertId}
+ */
+export const IdempotencyKeyBuilder = {
+  /**
+   * Key for webhook-ingestion queue jobs.
+   * messageId is unique only within a chat; botId+chatId+messageId is globally unique.
+   */
+  webhookIngestion(botId: string, chatId: string, messageId: string): string {
+    return `telegram:bot:${botId}:chat:${chatId}:msg:${messageId}`;
+  },
+
+  /**
+   * Key for ai-parse queue jobs.
+   * Prevents double-parsing of the same message.
+   */
+  aiParse(botId: string, messageId: string): string {
+    return `parse:bot:${botId}:msg:${messageId}`;
+  },
+
+  /**
+   * Key for callback confirmation jobs.
+   * action = 'approved' | 'rejected'
+   */
+  callbackConfirm(telegramUserId: string, draftId: string, action: string): string {
+    return `cb:user:${telegramUserId}:draft:${draftId}:action:${action}`;
+  },
+
+  /**
+   * Key for notification jobs.
+   */
+  notification(workspaceId: string, alertId: string): string {
+    return `notify:${workspaceId}:${alertId}`;
+  },
+} as const;
+
+// ─────────────────────────────────────────────────────────────
+// Draft / Transaction Status Enums
+// ─────────────────────────────────────────────────────────────
+
+export const DRAFT_STATUS = {
+  PENDING_USER: 'pending_user',
+  APPROVED: 'approved',
+  REJECTED: 'rejected',
+  EXPIRED: 'expired',
+  NEEDS_CLARIFICATION: 'needs_clarification',
+} as const;
+
+export type DraftStatus = (typeof DRAFT_STATUS)[keyof typeof DRAFT_STATUS];
+
+export const TRANSACTION_TYPE = {
+  EXPENSE: 'expense',
+  INCOME: 'income',
+  DEBT: 'debt',
+} as const;
+
+export type TransactionType = (typeof TRANSACTION_TYPE)[keyof typeof TRANSACTION_TYPE];
