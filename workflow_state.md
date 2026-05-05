@@ -12,7 +12,7 @@
 | **PHASE** | `1 — MVP Implementation` |
 | **STEP** | `1.8-A — Transaction Intent Foundation` |
 | **AGENT STATUS** | `READY_FOR_OWNER_ACCEPTANCE` |
-| **LAST COMPLETED** | `Phase 1.8-A implementation complete. Commit pending (git checkpoint after acceptance).` |
+| **LAST COMPLETED** | `Phase 1.8-A implementation complete. Commit 425df61.` |
 | **BLOCKER** | None |
 | **NEXT ACTION** | Await owner acceptance of Phase 1.8-A. Do NOT proceed to Phase 1.8-B until ACCEPTED. |
 
