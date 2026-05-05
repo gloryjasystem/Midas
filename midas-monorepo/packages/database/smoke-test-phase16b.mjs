@@ -1,6 +1,9 @@
 /**
  * Smoke Tests — Phase 1.6-B: Human-in-the-Loop Draft Confirmation
  *
+ * Phase 1.8-A update: transaction INSERT statements now include transaction_intent = 'expense'
+ * to comply with the NOT NULL constraint added by migration 1778008338096_transaction-intent.js.
+ *
  * Tests:
  *   1. approveDraft() — happy path: draft transitions to 'approved', Transaction created
  *   2. rejectDraft()  — happy path: draft transitions to 'rejected', NO Transaction created
@@ -215,8 +218,8 @@ async function runTests() {
 
         try {
           await client.query(
-            `INSERT INTO transactions (id, workspace_id, original_amount, currency, exchange_rate, base_currency, base_amount, category_id, account_id, draft_id, transaction_time, rate_source, created_at)
-             VALUES ($1, $2, $3::NUMERIC, $4, 1::NUMERIC, $5, $3::NUMERIC, $6, $7, $8, NOW(), 'none', NOW())`,
+            `INSERT INTO transactions (id, workspace_id, original_amount, currency, exchange_rate, base_currency, base_amount, category_id, account_id, draft_id, transaction_time, transaction_intent, rate_source, created_at)
+             VALUES ($1, $2, $3::NUMERIC, $4, 1::NUMERIC, $5, $3::NUMERIC, $6, $7, $8, NOW(), 'expense', 'none', NOW())`,
             [transactionId, workspaceId, draft.parsed_amount ?? '0', draft.parsed_currency ?? 'USD', 'USD', categoryId, accountId, draftId]
           );
         } catch (insertErr) {
@@ -400,8 +403,8 @@ async function runTests() {
         accountId = r.rows[0]?.id ?? accountId;
       }
 
-      const insertSql = `INSERT INTO transactions (id, workspace_id, original_amount, currency, exchange_rate, base_currency, base_amount, category_id, account_id, draft_id, transaction_time, rate_source, created_at)
-        VALUES ($1, $2, '10.00'::NUMERIC, 'USD', 1::NUMERIC, 'USD', '10.00'::NUMERIC, $3, $4, $5, NOW(), 'none', NOW())`;
+      const insertSql = `INSERT INTO transactions (id, workspace_id, original_amount, currency, exchange_rate, base_currency, base_amount, category_id, account_id, draft_id, transaction_time, transaction_intent, rate_source, created_at)
+        VALUES ($1, $2, '10.00'::NUMERIC, 'USD', 1::NUMERIC, 'USD', '10.00'::NUMERIC, $3, $4, $5, NOW(), 'expense', 'none', NOW())`;
 
       await pool.query(insertSql, [ulid(), workspaceId, categoryId, accountId, draftId]);
 

@@ -1,8 +1,13 @@
 /**
- * Draft Service — Phase 1.6-A
+ * Draft Service — Phase 1.6-A / Phase 1.8-A
  *
  * Handles creation of TransactionDraft records.
  *
+ * Phase 1.8-A addition:
+ *   AiOutput.intent is now propagated to transaction_drafts.parsed_intent.
+ *   For needs_clarification drafts, parsed_intent = NULL (no valid intent from AI).
+ *
+ * SEC-01: intent comes only from Zod-validated AI output — never from user input.
  * SEC-03: ALL DB operations use withTenantTransaction(workspaceId, fn).
  * SEC-02: No float arithmetic. amounts stored as NUMERIC strings → DB handles precision.
  * SEC-12: raw_text stored in draft.raw_text column (DB storage is not logging).
@@ -12,7 +17,7 @@
  *
  * Draft statuses (from database_model_draft.md):
  *   pending_user → (Phase 1.6-B) approved | rejected
- *   pending_user → (CRON Phase 1.6-B) expired
+ *   pending_user → (CRON Phase 1.7) expired
  *   needs_clarification → terminal (user must resend)
  */
 
@@ -76,6 +81,9 @@ const DRAFT_TTL_HOURS = 24;
  * System fields (id, workspace_id, user_id, status, created_at, expires_at)
  * are ALL injected here — NEVER from AI output (SEC-01).
  *
+ * Phase 1.8-A: AiOutput.intent is propagated to parsed_intent.
+ * NULL parsed_intent is valid for needs_clarification drafts.
+ *
  * @param input - Draft creation input (workspaceId and userId from DB, not AI)
  * @returns CreatedDraft with generated draftId and final status
  */
@@ -95,6 +103,11 @@ export async function createDraft(input: CreateDraftInput): Promise<CreatedDraft
   // Extract AI data if parse was successful
   const aiData: AiOutput | null = parseResult.status === 'ok' ? parseResult.data : null;
 
+  // Phase 1.8-A: extract intent from validated AI output.
+  // NULL for needs_clarification — no reliable intent was produced.
+  // SEC-01: aiData.intent is Zod-validated — cannot contain system fields or injection.
+  const parsedIntent: string | null = aiData?.intent ?? null;
+
   await withTenantTransaction(workspaceId, userId, async (client) => {
     // SEC-03: withTenantTransaction sets SET LOCAL app.workspace_id = $workspaceId
     // All RLS policies will see the correct tenant context.
@@ -106,6 +119,7 @@ export async function createDraft(input: CreateDraftInput): Promise<CreatedDraft
         raw_text,
         parsed_amount,
         parsed_currency,
+        parsed_intent,
         category_id,
         person_id,
         account_id,
@@ -114,11 +128,11 @@ export async function createDraft(input: CreateDraftInput): Promise<CreatedDraft
         created_at,
         updated_at
       ) VALUES (
-        $1, $2, $3, $4, $5, $6,
-        NULL,  -- category_id: not resolved in Phase 1.6-A (fuzzy matching Phase 1.7)
+        $1, $2, $3, $4, $5, $6, $7,
+        NULL,  -- category_id: not resolved in Phase 1.6-A (fuzzy matching deferred)
         NULL,  -- person_id: not resolved in Phase 1.6-A
         NULL,  -- account_id: not set in Phase 1.6-A
-        $7, $8,
+        $8, $9,
         NOW(), NOW()
       )`,
       [
@@ -128,6 +142,7 @@ export async function createDraft(input: CreateDraftInput): Promise<CreatedDraft
         rawText,                                        // SEC-12: stored in DB, not logged
         aiData?.amount ?? null,                         // NUMERIC string or null
         aiData?.currency ?? null,                       // ISO 4217 or null
+        parsedIntent,                                   // Phase 1.8-A: intent from AI (or null)
         status,
         expiresAt.toISOString(),
       ],
@@ -139,6 +154,7 @@ export async function createDraft(input: CreateDraftInput): Promise<CreatedDraft
       workspaceId,
       userId,
       status,
+      parsedIntent, // safe to log: system classification, not user financial text
       expiresAt: expiresAt.toISOString(),
       // rawText deliberately excluded (SEC-12)
     });

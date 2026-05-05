@@ -1,7 +1,14 @@
 /**
- * Draft Confirmation Service — Phase 1.6-B
+ * Draft Confirmation Service — Phase 1.6-B / Phase 1.8-A
  *
  * Implements atomic approve/reject for TransactionDraft records.
+ *
+ * Phase 1.8-A addition:
+ *   - parsed_intent is now fetched from the draft during SELECT FOR UPDATE.
+ *   - transaction_intent is written to transactions during INSERT.
+ *   - If parsed_intent IS NULL when a draft is approved, the approval fails safely
+ *     with outcome 'intent_missing'. No Transaction is created. This prevents
+ *     silent data corruption — every Transaction must have a known intent.
  *
  * Race condition protection:
  *   - SELECT ... FOR UPDATE SKIP LOCKED prevents two concurrent workers from
@@ -29,7 +36,8 @@ export type ConfirmActionResult =
   | { outcome: 'rejected' }
   | { outcome: 'already_processed'; existingStatus: string }
   | { outcome: 'not_found' }
-  | { outcome: 'expired' };
+  | { outcome: 'expired' }
+  | { outcome: 'intent_missing' }; // Phase 1.8-A: draft has NULL parsed_intent — cannot create Transaction
 
 // ─────────────────────────────────────────────────────────────
 // approveDraft
@@ -42,10 +50,10 @@ export type ConfirmActionResult =
  *   1. SELECT ... FOR UPDATE SKIP LOCKED — lock the draft row.
  *      If another worker has it locked, SKIP LOCKED returns 0 rows → no-op.
  *   2. Validate: draft must exist, belong to workspace, be pending_user, and not expired.
- *   3. UPDATE transaction_drafts SET status = 'approved'.
+ *   3. Phase 1.8-A: validate parsed_intent is not NULL. If NULL → return intent_missing.
+ *   4. UPDATE transaction_drafts SET status = 'approved'.
  *      The DB trigger (enforce_draft_state_machine) also validates expiry.
- *   4. INSERT INTO transactions using parsed_amount (NUMERIC) — no float.
- *      Placeholders for exchange_rate/base_amount (1:1, same currency, Phase 1.6-B only).
+ *   5. INSERT INTO transactions with transaction_intent (Phase 1.8-A: explicit, no default).
  *
  * @param draftId - ULID of the draft to approve
  * @param workspaceId - Workspace ID (SEC-03: from backend session, not from callback_data)
@@ -67,9 +75,10 @@ export async function approveDraft(
       status: string;
       parsed_amount: string | null;
       parsed_currency: string | null;
+      parsed_intent: string | null;  // Phase 1.8-A: must be non-NULL for Transaction creation
       expires_at: string;
     }>(
-      `SELECT id, workspace_id, status, parsed_amount, parsed_currency, expires_at
+      `SELECT id, workspace_id, status, parsed_amount, parsed_currency, parsed_intent, expires_at
        FROM transaction_drafts
        WHERE id = $1 AND workspace_id = $2
        FOR UPDATE SKIP LOCKED`,
@@ -111,14 +120,28 @@ export async function approveDraft(
       return { outcome: 'expired' };
     }
 
-    // ── Step 5: Update draft status to approved ───────────────
+    // ── Step 5: Phase 1.8-A — Validate intent before committing ──────────────────
+    // parsed_intent must not be NULL. A Transaction without a known intent is
+    // semantically invalid and would corrupt future /report queries.
+    // Fail safely: do NOT update draft status, do NOT create Transaction.
+    // The user can resend the message to create a new draft with valid intent.
+    if (draft.parsed_intent === null) {
+      console.warn('[midas:draft-confirmation] Approval blocked: parsed_intent is NULL', {
+        draftId,
+        workspaceId,
+        // No raw_text logged (SEC-12)
+      });
+      return { outcome: 'intent_missing' };
+    }
+
+    // ── Step 6: Update draft status to approved ───────────────
     // DB trigger (enforce_draft_state_machine) will re-validate expiry and terminal state.
     await client.query(
       `UPDATE transaction_drafts SET status = 'approved', updated_at = NOW() WHERE id = $1`,
       [draftId],
     );
 
-    // ── Step 6: Create Transaction from draft ─────────────────
+    // ── Step 7: Create Transaction from draft ─────────────────
     // SEC-02: parsed_amount is a NUMERIC string from DB — passed directly to NUMERIC column.
     // No parseFloat(), no Number() — the DB handles precision.
     // Phase 1.6-B: exchange_rate = 1, base_amount = parsed_amount (same currency).
@@ -134,7 +157,7 @@ export async function approveDraft(
     const baseCurrency = wsResult.rows[0]?.default_currency ?? 'USD';
 
     // Determine category_id: use workspace first category or create a default one.
-    // Phase 1.6-B placeholder — Phase 1.7 will add proper fuzzy matching.
+    // Phase 1.6-B placeholder — fuzzy matching deferred to future phase.
     // categories.group is an ENUM: 'Бизнес' | 'Жизнь'
     const catResult = await client.query<{ id: string }>(
       `SELECT id FROM categories WHERE workspace_id = $1 LIMIT 1`,
@@ -196,6 +219,7 @@ export async function approveDraft(
         account_id,
         draft_id,
         transaction_time,
+        transaction_intent,
         rate_source,
         created_at
       ) VALUES (
@@ -209,18 +233,20 @@ export async function approveDraft(
         $7,                 -- account_id
         $8,                 -- draft_id (UNIQUE FK)
         NOW(),
+        $9,                 -- transaction_intent (Phase 1.8-A: explicit, no default)
         'none',             -- rate_source: Phase 1.6-B placeholder (ADR-009 Phase 2)
         NOW()
       )`,
       [
-        transactionId,   // $1 — ULID (ADR-004, SEC-01: not from AI)
-        workspaceId,     // $2 — SEC-03: from backend session
+        transactionId,              // $1 — ULID (ADR-004, SEC-01: not from AI)
+        workspaceId,                // $2 — SEC-03: from backend session
         draft.parsed_amount ?? '0', // $3 — NUMERIC string from DB (SEC-02)
-        currency,        // $4
-        baseCurrency,    // $5
-        categoryId,      // $6
-        accountId,       // $7
-        draftId,         // $8
+        currency,                   // $4
+        baseCurrency,               // $5
+        categoryId,                 // $6
+        accountId,                  // $7
+        draftId,                    // $8
+        draft.parsed_intent,        // $9 — Phase 1.8-A: non-NULL validated in Step 5
       ],
     );
 
@@ -228,6 +254,7 @@ export async function approveDraft(
       draftId,
       transactionId,
       workspaceId,
+      transactionIntent: draft.parsed_intent, // safe to log: classification value (SEC-12)
       // amount deliberately NOT logged (SEC-12)
     });
 

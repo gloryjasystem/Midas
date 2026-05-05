@@ -1,7 +1,7 @@
 # WORKFLOW_STATE.MD — Диспетчер задач ИИ-агента Midas
 
 > **Тип:** MUTABLE — кратковременная память агента. Обновляется на каждом шаге работы.
-> **Обновлён:** 2026-05-05 21:32 (UTC+3)
+> **Обновлён:** 2026-05-05 22:30 (UTC+3)
 
 ---
 
@@ -10,11 +10,11 @@
 | Параметр | Значение |
 |---|---|
 | **PHASE** | `1 — MVP Implementation` |
-| **STEP** | `1.7 — Draft Expiration & Lifecycle Cleanup COMPLETED / ACCEPTED` |
-| **AGENT STATUS** | `WAITING_FOR_OWNER_APPROVAL_TO_START_NEXT_PHASE` |
-| **LAST COMPLETED** | `Phase 1.7 ACCEPTED by owner. Commit 4e42971 (latest).` |
+| **STEP** | `1.8-A — Transaction Intent Foundation` |
+| **AGENT STATUS** | `READY_FOR_OWNER_ACCEPTANCE` |
+| **LAST COMPLETED** | `Phase 1.8-A implementation complete. Commit pending (git checkpoint after acceptance).` |
 | **BLOCKER** | None |
-| **NEXT ACTION** | Prepare next phase advisory only — do not implement |
+| **NEXT ACTION** | Await owner acceptance of Phase 1.8-A. Do NOT proceed to Phase 1.8-B until ACCEPTED. |
 
 ---
 
@@ -33,7 +33,8 @@
 | 1.5 User Onboarding & Workspace Resolution | ✅ | `services/onboarding.service.ts`, `rate-limiter.ts`, `telegram-api.ts`, real `resolveWorkspace()`, `/start` handler |
 | 1.6-A AI Parse Pipeline | ✅ | `packages/ai-core/`, `draft.service.ts`, `ai-parse.worker.ts`, 73/73 smoke tests, commit `7b393d2` |
 | 1.6-B HitL Draft Confirmation | ✅ ACCEPTED | `draft-confirmation.service.ts`, `confirmation.worker.ts`, `callback-confirm-queue.ts`, webhook callback_query handler, 30/30 smoke tests incl. race condition, commit `d49625b` |
-| 1.7 Draft Expiration & Lifecycle Cleanup | ✅ ACCEPTED | `migrations/1777973960000_draft-expiration.js` + `1777973970000_harden-expire-search-path.js` + `1777973980000_fix-expire-function-owner.js`, `draft-expiration.service.ts`, `draft-expiration.worker.ts`, `smoke-test-phase17.mjs` — 20/20 smoke tests PASS, commits `b9069ad`→`4e42971` |
+| 1.7 Draft Expiration & Lifecycle Cleanup | ✅ ACCEPTED | `migrations/1777973960000_draft-expiration.js` + `1777973970000_harden-expire-search-path.js` + `1777973980000_fix-expire-function-owner.js`, `draft-expiration.service.ts`, `draft-expiration.worker.ts`, `smoke-test-phase17.mjs` — 20/20 smoke tests PASS, commits `b9069ad`→`49e0cec` |
+| 1.8-A Transaction Intent Foundation | 🔄 READY FOR ACCEPTANCE | `migrations/1778008338096_transaction-intent.js`, `draft.service.ts` (parsed_intent propagation), `draft-confirmation.service.ts` (intent_missing outcome), `confirmation.worker.ts` (intent_missing messages), `smoke-test-phase18a.mjs` — 19/19 smoke tests PASS, 20/20 Phase 1.7 regression, 30/30 Phase 1.6-B regression, 73/73 Phase 1.6-A regression, 13/13 typecheck+lint PASS |
 
 ---
 
@@ -145,20 +146,19 @@ midas-monorepo/
 ```
 project_config.md
 workflow_state.md
-apps/background-workers/src/services/draft-confirmation.service.ts
-apps/background-workers/src/workers/confirmation.worker.ts
-apps/background-workers/src/workers/ai-parse.worker.ts
-apps/background-workers/src/queues/queue-definitions.ts
+apps/background-workers/src/services/draft.service.ts                   # parsed_intent propagation
+apps/background-workers/src/services/draft-confirmation.service.ts       # intent_missing outcome
+apps/background-workers/src/workers/confirmation.worker.ts              # intent_missing messages
+packages/database/migrations/1778008338096_transaction-intent.js        # Phase 1.8-A schema
 apps/telegram-bot/src/routes/webhook.route.ts
 packages/shared/src/index.ts
 ```
 
 **Optional (читать при необходимости):**
 ```
+packages/ai-core/src/schemas.ts                                        # ParsedIntentType (5 values)
+packages/database/smoke-test-phase18a.mjs
 packages/database/migrations/1777973748530_mvp-schema-and-types.js
-packages/database/migrations/1777973834059_draft-state-machine.js
-packages/database/smoke-test-phase16b.mjs
-apps/background-workers/src/workers/notifications.worker.ts
 ```
 
 **Do not load (не читать — тратит контекст):**
@@ -166,7 +166,8 @@ apps/background-workers/src/workers/notifications.worker.ts
 docs/event_storming_part*.md
 docs/client-roadmap-architecture-overview.md
 docs/adr/ADR-000-*.md — ADR-002-*.md (meta/frontend)
-packages/ai-core/src/ (Phase 1.6-A — не трогать)
+packages/database/smoke-test-phase16{a,b}.mjs  (regression suite only — do not modify)
+packages/database/smoke-test-phase17.mjs       (regression suite only — do not modify)
 ```
 
 ---
@@ -175,11 +176,12 @@ packages/ai-core/src/ (Phase 1.6-A — не трогать)
 
 > Read workflow_state.md and project_config.md first.
 > Before implementation, read workflow_state.md section 11 — Agent Operating Protocol and follow it strictly.
-> Phase 1.6-B is COMPLETED (commit `d49625b`). Await owner direction for next phase.
-> Do not modify AI parsing (Phase 1.6-A/B). Do not implement /balance, /report, /category.
-> Do not implement CRON, crypto, Notion, Sheets, Mini App, PDF.
+> Verify git status, git log, and git tags yourself before any implementation.
+> Phase 1.8-A (Transaction Intent Foundation) is READY_FOR_OWNER_ACCEPTANCE.
+> Do not implement /balance, /report, /category, /add_category.
+> Do not implement Persons/Fuzzy Matching, debt routing, transfer logic, exchange-rate conversion.
 > Do not modify project_config.md.
-> Do not proceed to the next phase until I approve.
+> Do not proceed to Phase 1.8-B until I approve.
 
 ---
 
@@ -215,7 +217,8 @@ packages/ai-core/src/ (Phase 1.6-A — не трогать)
 | 2026-05-05 22:55 | Phase 1.6-B HitL Draft Confirmation implementation complete. `draft-confirmation.service.ts` (SELECT FOR UPDATE SKIP LOCKED), `confirmation.worker.ts`, `callback-confirm-queue.ts`, `webhook.route.ts` callback_query handler (ULID validation, SEC-03/06), real Telegram `sendMessage` with inline keyboard. 30/30 smoke tests PASS (incl. mandatory race condition test: parallel approve × 2 → exactly 1 Transaction). Phase 1.6-A regression: 73/73 PASS. 13/13 typecheck+lint clean. Commit `d49625b` pushed. **Status: READY_FOR_OWNER_ACCEPTANCE.** Note: CRON draft expiration (SEC-08) intentionally deferred to Phase 1.7. No SEC-08 claim in Phase 1.6-B. |
 | 2026-05-05 19:07 | Phase 1.6-B Final Acceptance Audit run (agent self-audit). All checks PASS: SEC-03 tenant isolation ✔, atomic approval ✔, race condition ✔, rejection no-op ✔, UNIQUE constraint ✔, no SEC-08 false claim ✔. workflow_state.md ACCEPTED wording corrected to READY_FOR_OWNER_ACCEPTANCE. Awaiting owner decision. |
 | 2026-05-05 21:14 | Phase 1.6-B ACCEPTED by owner after Final Acceptance Audit PASS WITH FIXES. Code unchanged. 30/30 Phase 1.6-B smoke tests PASS, 73/73 Phase 1.6-A regression PASS, 13/13 typecheck/lint PASS. Commit `f205e09` pushed. CRON expiration (SEC-08) intentionally deferred to Phase 1.7. |
-| 2026-05-05 21:32 | Phase 1.7 ACCEPTED by owner. `system_expire_pending_drafts()` owner fixed to `midas_migrator`; `search_path = public, pg_catalog` fixed; EXECUTE revoked from PUBLIC; 20/20 smoke tests PASS; 13/13 typecheck+lint PASS; git pushed and clean. Commit `4e42971`. |
+| 2026-05-05 21:32 | Phase 1.7 ACCEPTED by owner. `system_expire_pending_drafts()` owner fixed to `midas_migrator`; `search_path = public, pg_catalog` fixed; EXECUTE revoked from PUBLIC; 20/20 smoke tests PASS; 13/13 typecheck+lint PASS; git pushed and clean. Commit `49e0cec`. |
+| 2026-05-05 22:30 | Phase 1.8-A Transaction Intent Foundation implementation complete. Migration `1778008338096_transaction-intent.js`: `parsed_intent` (nullable TEXT + CHECK) added to `transaction_drafts`; `transaction_intent` (NOT NULL TEXT + CHECK, backfilled 'expense', no DEFAULT) added to `transactions`. `draft.service.ts`: `AiOutput.intent` propagated to `parsed_intent`. `draft-confirmation.service.ts`: `parsed_intent` fetched in SELECT FOR UPDATE, new `intent_missing` outcome if NULL, `transaction_intent` written to transactions INSERT (explicit, no default). `confirmation.worker.ts`: `intent_missing` case handled with user message. 19/19 Phase 1.8-A tests PASS. 20/20 Phase 1.7 regression PASS. 30/30 Phase 1.6-B regression PASS. 73/73 Phase 1.6-A regression PASS. 13/13 typecheck+lint PASS. Traceability ✅ Security ✅ Scope Guard ✅. Status: READY_FOR_OWNER_ACCEPTANCE. |
 
 ---
 

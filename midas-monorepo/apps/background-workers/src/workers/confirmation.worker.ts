@@ -115,7 +115,9 @@ async function processConfirmation(job: Job<CallbackConfirmJobPayload>): Promise
           ? '⏰ Черновик истёк'
           : result.outcome === 'already_processed'
             ? '⚠️ Уже обработано'
-            : '⚠️ Черновик не найден';
+            : result.outcome === 'intent_missing'
+              ? '❓ Тип операции не распознан'
+              : '⚠️ Черновик не найден';
 
   // Fire-and-forget: don't fail the job if this times out
   void answerCallbackQuery(callbackQueryId, callbackText);
@@ -137,6 +139,11 @@ async function processConfirmation(job: Job<CallbackConfirmJobPayload>): Promise
       break;
     case 'not_found':
       notificationMessage = `⚠️ Черновик не найден. Возможно, он уже был удалён.`;
+      break;
+    case 'intent_missing':
+      // Phase 1.8-A: draft has NULL parsed_intent — AI could not determine transaction type.
+      // No Transaction was created. User should resend with clearer text.
+      notificationMessage = `❓ Не удалось определить тип операции (расход/доход/долг). Отправьте сообщение повторно с уточнением.`;
       break;
     default:
       notificationMessage = `ℹ️ Обработка завершена.`;
