@@ -10,11 +10,11 @@
 | Параметр | Значение |
 |---|---|
 | **PHASE** | `1 — MVP Implementation` |
-| **STEP** | `1.2 — Database Foundation (PENDING APPROVAL)` |
-| **AGENT STATUS** | `WAITING_FOR_OWNER_APPROVAL_TO_START_PHASE_1_2` |
-| **LAST COMPLETED** | `Phase 1.1 — Project Infrastructure Foundation` |
-| **BLOCKER** | Начать Phase 1.2 только после одобрения владельца в новом чате |
-| **NEXT ACTION** | Открыть новый чат для Phase 1.2 с handoff prompt из Section 9 |
+| **STEP** | `1.2 — Database Foundation (COMPLETED / ACCEPTED)` |
+| **AGENT STATUS** | `WAITING_FOR_OWNER_APPROVAL_TO_START_PHASE_1_3` |
+| **LAST COMPLETED** | `Phase 1.2 — Database Foundation` |
+| **BLOCKER** | Владелец должен дать команду на старт Phase 1.3 (BullMQ Task Queue Foundation) |
+| **NEXT ACTION** | Начать Phase 1.3 после APPROVED |
 
 ---
 
@@ -205,6 +205,7 @@ docs/adr/ADR-002-*.md (frontend — future phase)
 | 2026-05-05 10:22 | Docker readiness: port 5432 conflict resolved, `docker-compose.yml` volume path fixed for postgres:18 |
 | 2026-05-05 12:05 | Section 11 (Agent Operating Protocol, 13 sub-protocols) added to workflow_state.md |
 | 2026-05-05 12:11 | Self-audit applied: C1, C2, M1, M2, L2 fixes + Section 14 added |
+| 2026-05-05 12:55 | Phase 1.2 Database Foundation completed & accepted via Review Gate. Minor observation: onboarding workspace spam requires app-layer rate limiting. |
 
 ---
 

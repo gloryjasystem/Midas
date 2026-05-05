@@ -11,6 +11,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-midas_dev_password}
     volumes:
       - postgres_data:/var/lib/postgresql
+      - ./packages/database/init:/docker-entrypoint-initdb.d
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U midas_user -d midas"]
       interval: 5s

@@ -7,8 +7,7 @@
  * - withTenantTransaction(workspaceId, fn) for RLS isolation (SEC-03)
  * - Migration runner
  * - Repository interfaces
- *
- * Phase 1.1: Package skeleton only.
  */
 
-export {};
+export * from './db.js';
+export * from './transaction.js';

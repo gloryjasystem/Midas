@@ -6,9 +6,21 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
+    "migrate": "node-pg-migrate up",
+    "migrate:down": "node-pg-migrate down",
     "build": "tsc",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src/",
-    "clean": "rm -rf dist"
+    "clean": "rm -rf dist",
+    "test": "tsx --test src/tests/**/*.test.ts"
+  },
+  "dependencies": {
+    "decimal.js": "^10.6.0",
+    "pg": "^8.20.0"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.20.0",
+    "node-pg-migrate": "^8.0.4",
+    "tsx": "^4.21.0"
   }
 }
