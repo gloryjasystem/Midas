@@ -1,0 +1,116 @@
+/**
+ * @midas/ai-core — AI Output Zod Schema (SEC-01)
+ *
+ * Strict allowlist for Claude Haiku output validation.
+ *
+ * SEC-01 rules:
+ *   - Schema is STRICT: unknown fields cause parsing failure, not silent strip.
+ *   - AI output MUST NOT contain system fields: id, user_id, workspace_id,
+ *     tenant_id, status, created_at, updated_at, draft_id, transaction_id,
+ *     account_id, base_amount, exchange_rate, category_id, person_id.
+ *   - System fields are injected ONLY by the backend controller after validation.
+ *   - Malformed or ambiguous AI output → ParsedIntentStatus 'needs_clarification'
+ *     or 'rejected'. AI CANNOT create a Transaction directly (only Draft).
+ *
+ * Financial precision (SEC-02, ADR-009):
+ *   - All monetary amounts from AI are strings (AI outputs a human-readable number).
+ *   - The backend converts to Decimal AFTER Zod validation.
+ *   - AI must not output Infinity, NaN, or negative amounts for expenses.
+ */
+
+import { z } from 'zod';
+
+// ─────────────────────────────────────────────────────────────
+// Intent types
+// ─────────────────────────────────────────────────────────────
+
+export const ParsedIntentType = z.enum([
+  'expense',
+  'income',
+  'debt_given',   // Я дал в долг
+  'debt_received', // Мне дали в долг
+  'transfer',
+]);
+export type ParsedIntentType = z.infer<typeof ParsedIntentType>;
+
+// ─────────────────────────────────────────────────────────────
+// Amount string validation
+// Must be a valid positive decimal string — NOT a JS number.
+// AI outputs: "500", "1500.50", "25.00" etc.
+// ─────────────────────────────────────────────────────────────
+
+const AmountString = z
+  .string()
+  .regex(
+    /^\d+(\.\d{1,4})?$/,
+    'Amount must be a positive decimal string with at most 4 decimal places',
+  )
+  .refine(
+    (val) => parseFloat(val) > 0,
+    'Amount must be greater than zero',
+  );
+
+// ─────────────────────────────────────────────────────────────
+// AiOutput — the ONLY fields AI is allowed to produce
+// .strict() ensures any unknown field causes a ZodError (SEC-01)
+// ─────────────────────────────────────────────────────────────
+
+export const AiOutputSchema = z
+  .object({
+    /** Intent classification */
+    intent: ParsedIntentType,
+
+    /**
+     * Amount as string (SEC-02: not a JS number).
+     * AI outputs human-readable value, backend converts to Decimal.
+     */
+    amount: AmountString,
+
+    /**
+     * Currency code (ISO 4217 or ticker). Optional.
+     * If omitted → backend applies workspace.default_currency (SEC-10).
+     */
+    currency: z
+      .string()
+      .trim()
+      .min(1)
+      .max(10)
+      .regex(/^[A-Z]{3,6}$/, 'Currency must be 3–6 uppercase letters')
+      .optional(),
+
+    /**
+     * Category name hint from AI (free text, NOT a category_id — SEC-01).
+     * Backend maps to actual category by name lookup or leaves null.
+     * Max 100 chars to prevent prompt injection via category field.
+     */
+    category_hint: z.string().trim().min(1).max(100).optional(),
+
+    /**
+     * Person/counterparty name hint from AI (NOT a person_id — SEC-01).
+     * Backend resolves via fuzzy matching (Phase 1.6+) or leaves null.
+     */
+    person_hint: z.string().trim().min(1).max(100).optional(),
+
+    /**
+     * Note or description AI extracted from the message.
+     * Stored in draft.note. NOT used for any financial calculation.
+     * Max 500 chars.
+     */
+    note: z.string().trim().max(500).optional(),
+
+    /**
+     * AI confidence level. Used to decide needs_clarification threshold.
+     * 0.0 = unsure, 1.0 = certain.
+     */
+    confidence: z.number().min(0).max(1),
+  })
+  .strict(); // SEC-01: unknown fields = ZodError, not silent strip
+
+export type AiOutput = z.infer<typeof AiOutputSchema>;
+
+// ─────────────────────────────────────────────────────────────
+// Minimum confidence threshold for pending_user status
+// Below this → needs_clarification
+// ─────────────────────────────────────────────────────────────
+
+export const MIN_CONFIDENCE_THRESHOLD = 0.5;

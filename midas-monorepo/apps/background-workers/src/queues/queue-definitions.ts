@@ -74,7 +74,12 @@ const aiParseDefaultJobOptions: DefaultJobOptions = {
   removeOnComplete: {
     count: 500,
   },
-  removeOnFail: false,
+  // SEC-12: ai-parse jobs contain raw_text in payload.
+  // Failed jobs are auto-removed after 24h to prevent indefinite PII retention.
+  // Double protection: job.updateData() redacts raw_text immediately on final failure.
+  removeOnFail: {
+    age: 86_400, // 24 hours in seconds (ADR-013 draft TTL matches)
+  },
 };
 
 export const aiParseQueue = new Queue<AiParseJobPayload>(QUEUE_NAMES.AI_PARSE, {

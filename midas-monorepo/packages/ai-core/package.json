@@ -12,6 +12,8 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@midas/shared": "workspace:*"
+    "@anthropic-ai/sdk": "^0.93.0",
+    "@midas/shared": "workspace:*",
+    "zod": "^3.24.4"
   }
 }
