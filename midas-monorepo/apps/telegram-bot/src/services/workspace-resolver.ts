@@ -27,6 +27,8 @@ import { findOrCreateUser } from './onboarding.service.js';
 import { sendMessage } from './telegram-api.js';
 
 export interface WorkspaceResolverResult {
+  /** Internal user ULID */
+  userId: string;
   workspaceId: string;
   /** true if workspace was just created (first-time user) */
   isNewUser: boolean;
@@ -57,6 +59,7 @@ export async function resolveWorkspace(
   }
 
   return {
+    userId: result.userId,
     workspaceId: result.workspaceId,
     isNewUser: result.isNewUser,
   };

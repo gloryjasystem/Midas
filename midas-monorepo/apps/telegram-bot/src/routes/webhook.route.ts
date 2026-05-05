@@ -50,6 +50,7 @@ import { webhookIngestionQueue } from '../queues/webhook-queue.js';
 import { resolveWorkspace } from '../services/workspace-resolver.js';
 import { checkOnboardingRateLimit } from '../services/rate-limiter.js';
 import { sendMessage } from '../services/telegram-api.js';
+import { getMonthlyReport } from '../services/report.service.js';
 
 import { callbackConfirmQueue } from '../queues/callback-confirm-queue.js';
 
@@ -294,6 +295,34 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
           errorClass,
         });
         // Non-throwing: return 200 to Telegram
+      }
+
+      await reply.status(200).send({ ok: true });
+      return;
+    }
+
+    // ── Step 5c: /report command — monthly report (Phase 1.9) ─
+    // /report is handled as a command: resolve workspace → generate report → send text → return 200.
+    // It does NOT enqueue to AI parse queue.
+    if (message.text.trimStart().startsWith('/report')) {
+      try {
+        const resolved = await resolveWorkspace(telegramUserId, chatId);
+        const reportText = await getMonthlyReport(resolved.workspaceId, resolved.userId);
+        void sendMessage(chatId, reportText);
+
+        request.log.info({
+          msg: '[midas:bot:webhook] /report sent',
+          telegramUserId,
+          workspaceId: resolved.workspaceId,
+        });
+      } catch (err: unknown) {
+        const errorClass = err instanceof Error ? err.constructor.name : 'UnknownError';
+        request.log.error({
+          msg: '[midas:bot:webhook] /report failed',
+          telegramUserId,
+          errorClass,
+        });
+        void sendMessage(chatId, '⚠️ Не удалось сформировать отчёт. Попробуйте позже.');
       }
 
       await reply.status(200).send({ ok: true });
