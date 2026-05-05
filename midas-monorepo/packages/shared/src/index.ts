@@ -221,7 +221,9 @@ export type DraftStatus = (typeof DRAFT_STATUS)[keyof typeof DRAFT_STATUS];
 export const TRANSACTION_TYPE = {
   EXPENSE: 'expense',
   INCOME: 'income',
-  DEBT: 'debt',
+  DEBT_GIVEN: 'debt_given',
+  DEBT_RECEIVED: 'debt_received',
+  TRANSFER: 'transfer',
 } as const;
 
 export type TransactionType = (typeof TRANSACTION_TYPE)[keyof typeof TRANSACTION_TYPE];

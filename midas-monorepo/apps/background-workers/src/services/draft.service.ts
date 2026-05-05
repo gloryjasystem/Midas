@@ -38,7 +38,7 @@ import type { ParseResult } from '@midas/ai-core';
  */
 export async function resolveUserId(telegramUserId: string): Promise<string> {
   const result = await pool.query<{ id: string }>(
-    `SELECT id FROM users WHERE telegram_user_id = $1`,
+    `SELECT id FROM users WHERE telegram_id = $1`,
     [telegramUserId],
   );
   if (result.rows.length === 0) {
