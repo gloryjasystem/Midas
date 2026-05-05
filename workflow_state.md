@@ -1,7 +1,7 @@
 # WORKFLOW_STATE.MD — Диспетчер задач ИИ-агента Midas
 
 > **Тип:** MUTABLE — кратковременная память агента. Обновляется на каждом шаге работы.
-> **Обновлён:** 2026-05-05 21:05 (UTC+3)
+> **Обновлён:** 2026-05-05 21:12 (UTC+3)
 
 ---
 
@@ -10,11 +10,11 @@
 | Параметр | Значение |
 |---|---|
 | **PHASE** | `1 — MVP Implementation` |
-| **STEP** | `1.7 — Draft Expiration & Lifecycle Cleanup IN PROGRESS` |
-| **AGENT STATUS** | `IMPLEMENTING_PHASE_1_7` |
-| **LAST COMPLETED** | `Phase 1.6-B ACCEPTED by owner. Commit 3025bec (latest).` |
+| **STEP** | `1.7 — Draft Expiration & Lifecycle Cleanup COMPLETED / READY_FOR_OWNER_ACCEPTANCE` |
+| **AGENT STATUS** | `READY_FOR_OWNER_ACCEPTANCE` |
+| **LAST COMPLETED** | `Phase 1.7 implementation complete. Commit b9069ad.` |
 | **BLOCKER** | None |
-| **NEXT ACTION** | Implement Phase 1.7: migration, service, worker, smoke tests |
+| **NEXT ACTION** | Await owner acceptance. Do not implement next phase until ACCEPTED. |
 
 ---
 
@@ -33,6 +33,7 @@
 | 1.5 User Onboarding & Workspace Resolution | ✅ | `services/onboarding.service.ts`, `rate-limiter.ts`, `telegram-api.ts`, real `resolveWorkspace()`, `/start` handler |
 | 1.6-A AI Parse Pipeline | ✅ | `packages/ai-core/`, `draft.service.ts`, `ai-parse.worker.ts`, 73/73 smoke tests, commit `7b393d2` |
 | 1.6-B HitL Draft Confirmation | ✅ ACCEPTED | `draft-confirmation.service.ts`, `confirmation.worker.ts`, `callback-confirm-queue.ts`, webhook callback_query handler, 30/30 smoke tests incl. race condition, commit `d49625b` |
+| 1.7 Draft Expiration & Lifecycle Cleanup | ⏳ READY_FOR_OWNER_ACCEPTANCE | `migrations/1777973960000_draft-expiration.js`, `draft-expiration.service.ts`, `draft-expiration.worker.ts`, `smoke-test-phase17.mjs` — 20/20 smoke tests PASS, commit `b9069ad` |
 
 ---
 
@@ -213,7 +214,8 @@ packages/ai-core/src/ (Phase 1.6-A — не трогать)
 | 2026-05-05 21:30 | Phase 1.6-A Final Acceptance Check. Fix: NUMERIC(19,4) boundary — regex `\d*` → `\d{0,14}` caps integer part at 15 digits. 73/73 smoke tests pass. 13/13 typecheck+lint pass. Commit `7b393d2` pushed. Phase 1.6-A ACCEPTED. |
 | 2026-05-05 22:55 | Phase 1.6-B HitL Draft Confirmation implementation complete. `draft-confirmation.service.ts` (SELECT FOR UPDATE SKIP LOCKED), `confirmation.worker.ts`, `callback-confirm-queue.ts`, `webhook.route.ts` callback_query handler (ULID validation, SEC-03/06), real Telegram `sendMessage` with inline keyboard. 30/30 smoke tests PASS (incl. mandatory race condition test: parallel approve × 2 → exactly 1 Transaction). Phase 1.6-A regression: 73/73 PASS. 13/13 typecheck+lint clean. Commit `d49625b` pushed. **Status: READY_FOR_OWNER_ACCEPTANCE.** Note: CRON draft expiration (SEC-08) intentionally deferred to Phase 1.7. No SEC-08 claim in Phase 1.6-B. |
 | 2026-05-05 19:07 | Phase 1.6-B Final Acceptance Audit run (agent self-audit). All checks PASS: SEC-03 tenant isolation ✔, atomic approval ✔, race condition ✔, rejection no-op ✔, UNIQUE constraint ✔, no SEC-08 false claim ✔. workflow_state.md ACCEPTED wording corrected to READY_FOR_OWNER_ACCEPTANCE. Awaiting owner decision. |
-| 2026-05-05 19:14 | Phase 1.6-B ACCEPTED by owner after Final Acceptance Audit PASS WITH FIXES. Code unchanged. workflow_state.md self-acceptance wording fixed (READY_FOR_OWNER_ACCEPTANCE). 30/30 Phase 1.6-B smoke tests PASS, 73/73 Phase 1.6-A regression PASS, 13/13 typecheck/lint PASS. Commit `f205e09` pushed. CRON expiration (SEC-08) intentionally deferred to Phase 1.7. |
+| 2026-05-05 21:14 | Phase 1.6-B ACCEPTED by owner after Final Acceptance Audit PASS WITH FIXES. Code unchanged. 30/30 Phase 1.6-B smoke tests PASS, 73/73 Phase 1.6-A regression PASS, 13/13 typecheck/lint PASS. Commit `f205e09` pushed. CRON expiration (SEC-08) intentionally deferred to Phase 1.7. |
+| 2026-05-05 21:12 | Phase 1.7 Draft Expiration & Lifecycle Cleanup implementation complete. `system_expire_pending_drafts()` SECURITY DEFINER (Option A), BullMQ CRON worker (*/5 * * * *, concurrency 1, idempotent). 20/20 smoke tests PASS (incl. race, idempotency, trigger tests). 30/30 Phase 1.6-B regression PASS, 73/73 Phase 1.6-A regression PASS, 16/16 typecheck+lint PASS. SEC-08 fully closed. Commit `b9069ad`. **Status: READY_FOR_OWNER_ACCEPTANCE.** |
 
 ---
 
