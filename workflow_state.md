@@ -1,7 +1,7 @@
 # WORKFLOW_STATE.MD — Диспетчер задач ИИ-агента Midas
 
 > **Тип:** MUTABLE — кратковременная память агента. Обновляется на каждом шаге работы.
-> **Обновлён:** 2026-05-05 20:00
+> **Обновлён:** 2026-05-05 20:30
 
 ---
 
@@ -208,6 +208,7 @@ packages/ai-core/ (Phase 1.6+)
 | 2026-05-05 19:40 | workflow_state.md cleanup: stale Phase 1.2/1.4 references corrected in Sections 6–9. Sections now describe Phase 1.5 scope, MCP needs, required files, and handoff prompt. No code written. |
 | 2026-05-05 19:45 | Phase 1.5 scope narrowed by owner: User Onboarding & Workspace Resolution only. Removed from scope: callback_query, /add /balance /report /category, CRON, AI, full notifications. Sections 6, 8, 9 updated. |
 | 2026-05-05 20:00 | Phase 1.5 implementation complete. `findOrCreateUser` (atomic, ON CONFLICT race-safe), `resolveWorkspace` real DB, `/start` handler, Redis anti-spam, `sendMessage` wrapper. 13/13 typecheck+lint pass. Commit `8f88f22`. |
+| 2026-05-05 20:30 | Phase 1.5 Verification Gate FULL PASS (39/39 smoke tests). Critical fix: added `system_find_or_create_user` SECURITY DEFINER migration (double-checked locking via `pg_advisory_xact_lock`) to bypass RLS chicken-and-egg on workspace INSERT. All tests pass: onboarding, dedup, race condition, rate-limit, isolation. Commit `b60f7ac`. |
 
 ---
 
