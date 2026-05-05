@@ -1,7 +1,7 @@
 # WORKFLOW_STATE.MD — Диспетчер задач ИИ-агента Midas
 
 > **Тип:** MUTABLE — кратковременная память агента. Обновляется на каждом шаге работы.
-> **Обновлён:** 2026-05-05 19:40
+> **Обновлён:** 2026-05-05 19:45
 
 ---
 
@@ -92,26 +92,33 @@ midas-monorepo/
 
 ---
 
-## 6. NEXT STEP — PHASE 1.5: USER ONBOARDING & BOT COMMANDS
+## 6. NEXT STEP — PHASE 1.5: USER ONBOARDING & WORKSPACE RESOLUTION
 
 > ⏳ **Pending owner approval. Do not implement until APPROVED.**
 
-**Scope:** Работа внутри `apps/telegram-bot/src/` и `packages/database/` (только чтение существующей схемы).
+**Scope:** Работа внутри `apps/telegram-bot/src/services/` и `apps/telegram-bot/src/routes/` (чтение существующей схемы через `packages/database/`).
 
-### Планируемые задачи (advisory — не имплементировать):
-- [ ] `resolveWorkspace()` — реальный DB-запрос вместо stub (SEC-03): `workspace_memberships JOIN users WHERE telegram_user_id`
-- [ ] Frictionless Onboarding: `/start` → создание default Workspace + User + WorkspaceMembership для нового пользователя (ADR-003, §4.1)
-- [ ] `callback_query` handler — обработка кнопок подтверждения TransactionDraft (Human-in-the-Loop, SEC-07)
-- [ ] `/start`, `/add`, `/balance`, `/report`, `/category` — базовые команды бота
-- [ ] Отправка уведомлений через `notifications` queue (связать с Telegram Bot API)
-- [ ] SEC-08: CRON-job для expire `pending_user` черновиков по TTL
+### Задачи (advisory — не имплементировать):
+- [ ] `resolveWorkspace()` — реальный DB-запрос вместо stub (SEC-03):
+  - `SELECT wm.workspace_id FROM workspace_memberships wm JOIN users u ON u.id = wm.user_id WHERE u.telegram_user_id = $1 AND wm.role = 'owner' LIMIT 1`
+- [ ] Frictionless Onboarding: `/start` handler → `withTenantTransaction` flow:
+  - Найти User по `telegram_user_id`
+  - Если не найден → создать User (ULID, ADR-004)
+  - Создать default Workspace (ULID, `default_currency` = 'USD', ADR-003)
+  - Создать WorkspaceMembership (role = 'owner')
+  - Всё в одной атомарной DB-транзакции (SEC-03)
+- [ ] Onboarding anti-spam guard: rate-limit `/start` по `telegram_user_id` через Redis (`rl:start:{userId}`, 1 req/60s)
+- [ ] Базовое ответное сообщение пользователю через Telegram Bot API (sendMessage): «Добро пожаловать» или «Вы уже зарегистрированы»
 
-### Запрещённый scope (Phase 1.5):
-- ❌ AI-парсинг (Claude) — Phase 1.6+
-- ❌ Crypto / blockchain
-- ❌ Google Sheets / Notion
-- ❌ Mini App (React SPA)
-- ❌ PDF-отчёты
+### Явно вынесено за скоп фазы 1.5 (будущие фазы):
+- ❌ `callback_query` / TransactionDraft подтверждение (Human-in-the-Loop) — Phase 1.6
+- ❌ `/add`, `/balance`, `/report`, `/category` — Phase 1.6
+- ❌ CRON-job для expire draft TTL (SEC-08) — Phase 1.6
+- ❌ AI-парсинг (Claude Haiku) — Phase 1.6+
+- ❌ Полная бизнес-логика `notifications` — Phase 1.6
+- ❌ Crypto / blockchain — Phase 2
+- ❌ Google Sheets / Notion — Phase 3
+- ❌ Mini App (React SPA) — Phase 4
 - ❌ Изменение project_config.md
 
 ---
@@ -143,22 +150,23 @@ docs/database_model_draft.md
 
 **Optional (читать при необходимости):**
 ```
-docs/queue_model.md
 docs/adr/ADR-003-workspace-model.md
-docs/adr/ADR-013-draft-ttl-cleanup.md
-packages/shared/src/index.ts (job payloads & Telegram types)
-apps/telegram-bot/src/ (текущая реализация Phase 1.4)
+packages/shared/src/index.ts (Telegram types, ULID)
+apps/telegram-bot/src/services/workspace-resolver.ts (текущий stub)
+apps/telegram-bot/src/routes/webhook.route.ts (понять /start flow)
+packages/database/src/ (схема для поиска таблиц)
 ```
 
 **Do not load (не читать — тратит контекст):**
 ```
 docs/event_storming_part*.md
 docs/client-roadmap-architecture-overview.md
+docs/queue_model.md (очереди — не затрагиваем в этой фазе)
 docs/adr/ADR-000-*.md (meta)
 docs/adr/ADR-001-*.md (runtime — уже принято)
 docs/adr/ADR-002-*.md (frontend — future phase)
-docs/adr/ADR-004-*.md (ULID — уже принято)
-packages/ai-core/ (AI интеграция — Phase 1.6+)
+docs/adr/ADR-013-*.md (draft TTL — Phase 1.6)
+packages/ai-core/ (Phase 1.6+)
 ```
 
 ---
@@ -167,9 +175,9 @@ packages/ai-core/ (AI интеграция — Phase 1.6+)
 
 > Read workflow_state.md and project_config.md first.
 > Before implementation, read workflow_state.md section 11 — Agent Operating Protocol and follow it strictly.
-> Continue only with Phase 1.5 — User Onboarding & Bot Commands.
+> Continue only with Phase 1.5 — User Onboarding & Workspace Resolution.
+> Do not implement callback_query, bot commands, CRON, AI parsing, or notifications.
 > Do not modify project_config.md.
-> Do not implement future phases.
 > Do not proceed to Phase 1.6 until I approve.
 
 ---
@@ -197,6 +205,7 @@ packages/ai-core/ (AI интеграция — Phase 1.6+)
 | 2026-05-05 19:30 | Phase 1.4 Verification Gate FULL PASS (7/7 smoke tests). Bugs fixed: BullMQ jobId `:` → `\|` separator, `/health` excluded from SEC-04 guard. Commit `6e0cfa1` pushed. |
 | 2026-05-05 19:35 | Phase 1.4 ACCEPTED by owner. **Prod note:** Redis must use `noeviction` policy in production; `allkeys-lru` is acceptable only for local dev. |
 | 2026-05-05 19:40 | workflow_state.md cleanup: stale Phase 1.2/1.4 references corrected in Sections 6–9. Sections now describe Phase 1.5 scope, MCP needs, required files, and handoff prompt. No code written. |
+| 2026-05-05 19:45 | Phase 1.5 scope narrowed by owner: User Onboarding & Workspace Resolution only. Removed from scope: callback_query, /add /balance /report /category, CRON, AI, full notifications. Sections 6, 8, 9 updated. |
 
 ---
 
