@@ -1,7 +1,7 @@
 # WORKFLOW_STATE.MD — Диспетчер задач ИИ-агента Midas
 
 > **Тип:** MUTABLE — кратковременная память агента. Обновляется на каждом шаге работы.
-> **Обновлён:** 2026-05-07 02:00 (UTC+3)
+> **Обновлён:** 2026-05-07 02:25 (UTC+3)
 
 ---
 
@@ -10,11 +10,11 @@
 | Параметр | Значение |
 |---|---|
 | **PHASE** | `1 — MVP Implementation` |
-| **STEP** | `1.19 — account_sources.currency CHECK Constraint — READY_FOR_OWNER_ACCEPTANCE` |
-| **AGENT STATUS** | `READY_FOR_OWNER_ACCEPTANCE` |
-| **LAST COMPLETED** | `Phase 1.19 implementation complete. 24/24 Phase 1.19 + 644/644 regression (Ph1.6-A–Ph1.18) + 13/13 typecheck+lint = 668/668 PASS. Traceability ✅ Adversarial Security ✅ Scope Guard ✅. Constraint account_sources_currency_check CHECK (currency ~ '^[A-Z]{3,5}$') added. Pre-flight: 0 invalid rows. No TypeScript/route/dep changes.` |
-| **BLOCKER** | None — awaiting owner acceptance |
-| **NEXT ACTION** | Owner acceptance decision — do not start Phase 1.20 |
+| **STEP** | `1.19 — account_sources.currency CHECK Constraint — COMPLETED / ACCEPTED` |
+| **AGENT STATUS** | `WAITING_FOR_OWNER_APPROVAL_TO_START_NEXT_PHASE` |
+| **LAST COMPLETED** | `Phase 1.19 ACCEPTED. 24/24 Phase 1.19 + 644/644 regression (Ph1.6-A–Ph1.18) + 13/13 typecheck+lint = 668/668 PASS. Traceability ✅ Adversarial Security ✅ Scope Guard ✅. Constraint account_sources_currency_check CHECK (currency ~ '^[A-Z]{3,5}$') added. Implementation commit 9d288bd. Tag phase-1.19-accepted pushed.` |
+| **BLOCKER** | None — awaiting owner approval to start next phase |
+| **NEXT ACTION** | Prepare next phase advisory only — do not implement |
 
 ---
 
@@ -46,6 +46,7 @@
 | 1.16 account_sources UNIQUE Constraint Migration | ✅ ACCEPTED | `packages/database/migrations/1778200000000_account-sources-unique-name.js` (NEW), `packages/database/smoke-test-phase116.mjs` (NEW) — UNIQUE(workspace_id, name) added; pre-flight 0 duplicates; 24/24 Phase 1.16 + 583/583 total PASS. Traceability ✅ Adversarial Security ✅ Scope Guard ✅. Implementation commit `3ad45e3`. Tag `phase-1.16-accepted` pushed. |
 | 1.17 /add_account Strict-Format Command | ✅ ACCEPTED | `account.service.ts` (MODIFY), `webhook.route.ts` (MODIFY), `smoke-test-phase117.mjs` (NEW) — 27/27 Phase 1.17 + 610/610 total PASS. Traceability ✅ Adversarial Security ✅ Scope Guard ✅. Implementation commit `8c370e3`. Tag `phase-1.17-accepted` pushed. |
 | 1.18 /report Currency Label (base_currency grouping) | ✅ ACCEPTED | `report.service.ts` (MODIFY), `smoke-test-phase118.mjs` (NEW), `smoke-test-phase19.mjs` (MODIFY — runReportQuery SQL helper sync) — 34/34 Phase 1.18 + 644/644 total PASS. Traceability ✅ Adversarial Security ✅ Scope Guard ✅. Implementation commit `700a244`. Tag `phase-1.18-accepted` pushed. |
+| 1.19 account_sources.currency CHECK Constraint | ✅ ACCEPTED | `packages/database/migrations/1778300000000_account-sources-currency-check.js` (NEW), `packages/database/smoke-test-phase119.mjs` (NEW) — CHECK (currency ~ '^[A-Z]{3,5}$'); pre-flight 0 invalid rows; 24/24 Phase 1.19 + 668/668 total PASS. Traceability ✅ Adversarial Security ✅ Scope Guard ✅. Implementation commit `9d288bd`. Tag `phase-1.19-accepted` pushed. |
 
 ---
 
@@ -266,6 +267,7 @@ Crypto / Notion / Sheets / Mini App files
 | 2026-05-06 23:24 | Phase 1.17 accepted after final verification; /add_account strict-format command implemented; 610/610 tests passed; Traceability Review PASS; Adversarial Security Review PASS; Scope Guard Review PASS; implementation commit 8c370e3. Tag phase-1.17-accepted pushed. Status: WAITING_FOR_OWNER_APPROVAL_TO_START_NEXT_PHASE. |
 | 2026-05-07 00:08 | Phase 1.18 accepted after final verification; /report now shows base_currency labels and groups by transaction_intent + base_currency; smoke-test-phase19 runReportQuery() helper synced to production SQL; smoke-test-phase118.mjs (34 tests) added; 644/644 tests passed (34 Ph1.18 + 47 Ph1.9 + 563 Ph1.6-A–Ph1.17 + 13 typecheck+lint); Traceability Review PASS; Adversarial Security Review PASS; Scope Guard Review PASS; implementation commit 700a244. Tag phase-1.18-accepted pushed. Status: WAITING_FOR_OWNER_APPROVAL_TO_START_NEXT_PHASE. |
 | 2026-05-07 02:00 | Phase 1.19 account_sources.currency CHECK Constraint implementation complete. Owner APPROVED. Migration `1778300000000_account-sources-currency-check.js` (NEW): pre-flight check (0 invalid rows found in 553 existing rows) + `ALTER TABLE account_sources ADD CONSTRAINT account_sources_currency_check CHECK (currency ~ '^[A-Z]{3,5}$')`. `smoke-test-phase119.mjs` (NEW): 24/24 PASS — constraint existence, type, definition, valid codes (RUB/USD/EUR/GBP/BTC/ETH/USDT), invalid rejection (empty/lowercase/digits/spaces/6-char/2-char), no backfill, scope guard. No TypeScript/route/dep/AI/queue changes. 24/24 Phase 1.19 + 644/644 regression + 13/13 typecheck+lint = 668/668 PASS. Traceability ✅ Adversarial Security ✅ Scope Guard ✅. Status: READY_FOR_OWNER_ACCEPTANCE. |
+| 2026-05-07 02:25 | Phase 1.19 accepted after final verification; account_sources.currency CHECK constraint added with regex ^[A-Z]{3,5}$; 668/668 tests passed; Traceability Review PASS; Adversarial Security Review PASS; Scope Guard Review PASS; implementation commit 9d288bd. Tag phase-1.19-accepted pushed. Status: WAITING_FOR_OWNER_APPROVAL_TO_START_NEXT_PHASE. |
 
 ---
 
