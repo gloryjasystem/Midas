@@ -1,7 +1,7 @@
 # WORKFLOW_STATE.MD — Диспетчер задач ИИ-агента Midas
 
 > **Тип:** MUTABLE — кратковременная память агента. Обновляется на каждом шаге работы.
-> **Обновлён:** 2026-05-06 13:50 (UTC+3)
+> **Обновлён:** 2026-05-06 17:20 (UTC+3)
 
 ---
 
@@ -10,11 +10,11 @@
 | Параметр | Значение |
 |---|---|
 | **PHASE** | `1 — MVP Implementation` |
-| **STEP** | `1.11 — /category Read-Only List Command — ACCEPTED` |
-| **AGENT STATUS** | `WAITING_FOR_OWNER_APPROVAL_TO_START_NEXT_PHASE` |
-| **LAST COMPLETED** | `Phase 1.11 ACCEPTED. Final verification: 78/78 Phase 1.11 + 30/30 Phase 1.10 + 47/47 Phase 1.9 + 16/16 Phase 1.8-B + 19/19 Phase 1.8-A + 20/20 Phase 1.7 + 30/30 Phase 1.6-B + 73/73 Phase 1.6-A + 13/13 typecheck+lint = 326/326 PASS. Traceability ✅ Adversarial Security ✅ Scope Guard ✅. Implementation commit 2e77362; acceptance commit bc0d5a4; tag phase-1.11-accepted pushed.` |
-| **BLOCKER** | Owner approval required to start Phase 1.12 |
-| **NEXT ACTION** | Prepare next phase advisory only — do not implement |
+| **STEP** | `1.12 — Onboarding Default Data Seeding — IN_PROGRESS` |
+| **AGENT STATUS** | `READY_FOR_OWNER_ACCEPTANCE` |
+| **LAST COMPLETED** | `Phase 1.12 implementation complete. 37/37 Phase 1.12 + 78/78 Phase 1.11 + 30/30 Phase 1.10 + 47/47 Phase 1.9 + 16/16 Phase 1.8-B + 19/19 Phase 1.8-A + 20/20 Phase 1.7 + 30/30 Phase 1.6-B + 73/73 Phase 1.6-A + 13/13 typecheck+lint = 344/344 PASS. Traceability ✅ Adversarial Security ✅ Scope Guard ✅.` |
+| **BLOCKER** | Awaiting owner acceptance of Phase 1.12 |
+| **NEXT ACTION** | Owner reviews and either accepts or requests fixes |
 
 ---
 
@@ -101,34 +101,37 @@ midas-monorepo/
 
 ---
 
-## 6. ТЕКУЩАЯ ФАЗА — PHASE 1.11: /category READ-ONLY LIST COMMAND
+## 6. ТЕКУЩАЯ ФАЗА — PHASE 1.12: ONBOARDING DEFAULT DATA SEEDING
 
-> 🔄 **READY_FOR_OWNER_ACCEPTANCE. Implementation complete. Awaiting owner decision.**
+> 🔄 **READY_FOR_OWNER_ACCEPTANCE. Implementation complete. Awaiting owner acceptance.**
 
 **Результат:**
-- `apps/telegram-bot/src/services/category.service.ts` — новый файл.
-  `getCategoryList(workspaceId, userId)` → Russian text.
-  `withTenantTransaction` + явный `WHERE workspace_id = $1` (defense-in-depth).
-  Группировка: `Бизнес` перед `Жизнь`, русская плюрализация счётчика.
-  Пустой воркспейс: безопасное сообщение с тезером /add_category.
-- `webhook.route.ts` — минимальные изменения:
-  `/category` добавлен в `KNOWN_COMMANDS` (4 команды).
-  Блок-обработчик `/category` добавлен после `/report`, до гарду.
-  `HELP_TEXT` дополнен строкой `/category`.
-- `smoke-test-phase111.mjs` — 78 тестов PASS.
-- Аудит DB: RLS `tenant_isolation_categories` (`cmd: ALL`) ✅; `account_sources` не сидится при онбординге (задолженность, не фиксить в Phase 1.11).
-- Нет command-registry.ts, нет миграций, нет новых зависимостей, нет изменений AI.
-- Tests: 326/326 PASS (78 Phase 1.11 + 30 Phase 1.10 + 47 Phase 1.9 + 16 Phase 1.8-B + 19 Phase 1.8-A + 20 Phase 1.7 + 30 Phase 1.6-B + 73 Phase 1.6-A + 13 typecheck+lint)
+- `packages/database/migrations/1778100000000_onboarding-default-seed.js` — новая миграция.
+  Расширяет `system_find_or_create_user` до 7 параметров (добавлены `p_candidate_account_id`, `p_candidate_category_id`).
+  Для новых пользователей: INSERT account_sources (name='Default', type='manual', currency='RUB') + INSERT categories (name='Разное', group='Жизнь').
+  Существующие пользователи: ранний выход из функции без сидинга.
+  ON CONFLICT DO NOTHING — protection-in-depth.
+- `packages/database/migrations/1778100010000_fix-onboarding-seed-conflict.js` — fix-миграция.
+  Исправляет PL/pgSQL ambiguity error (code 42702): `ON CONFLICT (workspace_id, name)` заменено на `ON CONFLICT ON CONSTRAINT categories_workspace_id_name_key DO NOTHING`.
+- `apps/telegram-bot/src/services/onboarding.service.ts` — обновлён.
+  Генерирует 2 дополнительных candidate ULID (candidateAccountId, candidateCategoryId).
+  Передаёт 7 параметров в `system_find_or_create_user($1..$7)`.
+- `packages/database/smoke-test-phase112.mjs` — 37 тестов PASS.
+- Currency decision documented: `workspaces.default_currency DEFAULT 'RUB'` (schema migration 1777973748530) + onboarding INSERT hardcodes 'RUB' (migration 1777973900000). Currency = 'RUB' confirmed. No exchange-rate logic introduced.
+- Lazy fallback в `draft-confirmation.service.ts` НЕ изменён — defense-in-depth сохранён.
+- Нет route changes, нет новых slash commands, нет queue/worker changes, нет AI changes, нет новых зависимостей.
+- DB audit: 157 существующих воркспейсов, 71 без account_sources, 55 без categories. Backfill не выполняется — lazy fallback покрывает их.
+- Tests: 344/344 PASS (37 Phase 1.12 + 78 Phase 1.11 + 30 Phase 1.10 + 47 Phase 1.9 + 16 Phase 1.8-B + 19 Phase 1.8-A + 20 Phase 1.7 + 30 Phase 1.6-B + 73 Phase 1.6-A + 13 typecheck+lint)
 - Traceability ✅ Adversarial Security ✅ Scope Guard ✅
 
 ---
 
-## 7. MCP REQUIREMENTS (Phase 1.11 — implementation)
+## 7. MCP REQUIREMENTS (Phase 1.12 — implementation)
 
 | MCP-сервер | Доступ | Примечание |
 |---|---|---|
-| Filesystem MCP | ✅ read/write (project dir only) | Создание category.service.ts, smoke-test-phase111.mjs; правка webhook.route.ts |
-| Postgres MCP | ✅ read-only (local dev DB) | Аудит RLS политик `categories`; проверка `account_sources` сидинга |
+| Filesystem MCP | ✅ read/write (project dir only) | Создание миграций, smoke-test-phase112.mjs; правка onboarding.service.ts |
+| Postgres MCP | ✅ read-only (local dev DB) | Аудит схемы workspaces (default_currency); подсчёт существующих воркспейсов без сидинга |
 | GitHub MCP | ⚪ read-only (опционально) | Проверка remote sync если нужно |
 | Browser / DevTools | ❌ Запрещён | — |
 | Notion MCP | ❌ Запрещён | — |
@@ -137,22 +140,24 @@ midas-monorepo/
 
 ---
 
-## 8. ФАЙЛЫ ДЛЯ ЧТЕНИЯ В НОВОМ ЧАТЕ (Phase 1.11)
+## 8. ФАЙЛЫ ДЛЯ ЧТЕНИЯ В НОВОМ ЧАТЕ (Phase 1.12)
 
 **Required (читать обязательно):**
 ```
 project_config.md
 workflow_state.md
-apps/telegram-bot/src/routes/webhook.route.ts          # Phase 1.10 routing — extend KNOWN_COMMANDS, add /category handler
-apps/telegram-bot/src/services/report.service.ts       # Reference pattern for new category.service.ts
-apps/telegram-bot/src/services/category.service.ts    # Phase 1.11 — new file (create this)
-packages/database/smoke-test-phase111.mjs              # Phase 1.11 tests (create this)
+packages/database/migrations/1777973900000_onboarding-find-or-create.js   # Исходная SECDEF функция (5 params)
+packages/database/migrations/1778100000000_onboarding-default-seed.js     # Phase 1.12 миграция (7 params)
+packages/database/migrations/1778100010000_fix-onboarding-seed-conflict.js # Phase 1.12 fix (ON CONFLICT fix)
+apps/telegram-bot/src/services/onboarding.service.ts                      # Обновлён — 7 params
+apps/background-workers/src/services/draft-confirmation.service.ts        # Lazy fallback — НЕ трогать
+packages/database/smoke-test-phase112.mjs                                  # Phase 1.12 тесты
 ```
 
 **Optional (читать при необходимости):**
 ```
-packages/database/src/transaction.ts                   # withTenantTransaction signature
-packages/database/smoke-test-phase110.mjs              # Phase 1.10 regression reference
+packages/database/migrations/1777973748530_mvp-schema-and-types.js        # Схема workspaces, account_sources, categories
+packages/database/smoke-test-phase111.mjs                                  # Phase 1.11 regression reference
 ```
 
 **Do not load (не читать — тратит контекст):**
@@ -173,10 +178,10 @@ Crypto / Notion / Sheets / Mini App files
 
 > Read workflow_state.md and project_config.md first.
 > Before implementation, read workflow_state.md section 11 — Agent Operating Protocol and follow it strictly.
-> Phase 1.10 (Slash-Command Guard + Inline /help) is ACCEPTED. Commit `b321463`. Tag `phase-1.10-accepted` pushed.
 > Phase 1.11 (/category Read-Only List Command) is ACCEPTED. Commit `2e77362`. Tag `phase-1.11-accepted` pushed.
-> Do not re-implement Phase 1.11 or below. Do not implement Phase 1.12 without owner APPROVED.
-> Prepare next phase advisory only — do not implement.
+> Phase 1.12 (Onboarding Default Data Seeding) is READY_FOR_OWNER_ACCEPTANCE. Do NOT mark as ACCEPTED until owner explicitly accepts.
+> Do not implement Phase 1.13 without owner APPROVED.
+> Do not re-implement Phase 1.12 or below.
 
 ---
 
@@ -225,6 +230,7 @@ Crypto / Notion / Sheets / Mini App files
 | 2026-05-06 11:55 | Phase 1.10 ACCEPTED by owner after final acceptance verification. Full test run: 30/30 Phase 1.10 + 47/47 Phase 1.9 + 16/16 Phase 1.8-B + 19/19 Phase 1.8-A + 20/20 Phase 1.7 + 30/30 Phase 1.6-B + 73/73 Phase 1.6-A + 13/13 typecheck+lint = 248/248 PASS. Git clean pre/post tests. origin/main in sync. project_config.md unchanged (v1.2, last touched cc91a47). Commit b321463: 3 files only (webhook.route.ts, smoke-test-phase110.mjs, workflow_state.md). No command-registry.ts, no /balance, no migrations, no new deps. Section 14 self-audit: all ✅. Tag phase-1.10-accepted pushed. Status: WAITING_FOR_OWNER_APPROVAL_TO_START_NEXT_PHASE. |
 | 2026-05-06 12:18 | Phase 1.11 /category Read-Only List Command implementation complete. `category.service.ts`: `getCategoryList()` read-only, `withTenantTransaction`, explicit `WHERE workspace_id = $1`, grouped by `category_group` (`Бизнес` before `Жизнь`), Russian pluralization, empty-state message. `webhook.route.ts`: `/category` added to KNOWN_COMMANDS (4 commands), HELP_TEXT updated, handler block added after `/report`. DB audit: RLS `tenant_isolation_categories` (`cmd: ALL`) ✅; `account_sources` not seeded on onboarding (debt item, no fix in Phase 1.11). 78/78 Phase 1.11 + 30/30 Phase 1.10 + 47/47 Phase 1.9 + 16/16 Phase 1.8-B + 19/19 Phase 1.8-A + 20/20 Phase 1.7 + 30/30 Phase 1.6-B + 73/73 Phase 1.6-A + 13/13 typecheck+lint = 326/326 PASS. Traceability ✅ Adversarial Security ✅ Scope Guard ✅. Status: READY_FOR_OWNER_ACCEPTANCE. |
 | 2026-05-06 13:50 | Phase 1.11 ACCEPTED by owner after final verification. /category read-only command implemented; no write path, no migrations, no new deps, no AI changes. Final independent verification: 78/78 Phase 1.11 + 30/30 Phase 1.10 + 47/47 Phase 1.9 + 16/16 Phase 1.8-B + 19/19 Phase 1.8-A + 20/20 Phase 1.7 + 30/30 Phase 1.6-B + 73/73 Phase 1.6-A + 13/13 typecheck+lint = 326/326 PASS. Traceability ✅ Adversarial Security ✅ Scope Guard ✅. Implementation commit 2e77362. Tag phase-1.11-accepted pushed. Status: WAITING_FOR_OWNER_APPROVAL_TO_START_NEXT_PHASE. |
+| 2026-05-06 17:20 | Phase 1.12 Onboarding Default Data Seeding implementation complete. Currency finding: `workspaces.default_currency DEFAULT 'RUB'` confirmed — no hardcoding beyond existing onboarding pattern. Migrations: `1778100000000_onboarding-default-seed.js` (7-param SECDEF function) + `1778100010000_fix-onboarding-seed-conflict.js` (PL/pgSQL ON CONFLICT ambiguity fix using named constraint). `onboarding.service.ts` extended to pass candidateAccountId + candidateCategoryId ($6/$7). Lazy fallback in `draft-confirmation.service.ts` preserved untouched (defense-in-depth). No route changes, no new slash commands, no queue/worker changes, no AI changes, no new deps. DB audit: 157 workspaces, 71 missing account_sources, 55 missing categories — no backfill (lazy fallback covers them). 37/37 Phase 1.12 + 78/78 Phase 1.11 + 30/30 Phase 1.10 + 47/47 Phase 1.9 + 16/16 Phase 1.8-B + 19/19 Phase 1.8-A + 20/20 Phase 1.7 + 30/30 Phase 1.6-B + 73/73 Phase 1.6-A + 13/13 typecheck+lint = 344/344 PASS. Traceability ✅ Adversarial Security ✅ Scope Guard ✅. Status: READY_FOR_OWNER_ACCEPTANCE. |
 
 ---
 
