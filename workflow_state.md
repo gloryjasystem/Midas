@@ -1,7 +1,7 @@
 # WORKFLOW_STATE.MD — Диспетчер задач ИИ-агента Midas
 
 > **Тип:** MUTABLE — кратковременная память агента. Обновляется на каждом шаге работы.
-> **Обновлён:** 2026-05-06 11:45 (UTC+3)
+> **Обновлён:** 2026-05-06 11:55 (UTC+3)
 
 ---
 
@@ -10,11 +10,11 @@
 | Параметр | Значение |
 |---|---|
 | **PHASE** | `1 — MVP Implementation` |
-| **STEP** | `1.10 — Slash-Command Guard + Inline /help — READY_FOR_OWNER_ACCEPTANCE` |
-| **AGENT STATUS** | `READY_FOR_OWNER_ACCEPTANCE` |
-| **LAST COMPLETED** | `Phase 1.10 implementation complete. 30/30 Phase 1.10 + 47/47 Phase 1.9 + 16/16 Phase 1.8-B + 19/19 Phase 1.8-A + 20/20 Phase 1.7 + 30/30 Phase 1.6-B + 73/73 Phase 1.6-A + 13/13 typecheck+lint = 248/248 PASS. Traceability ✅ Security ✅ Scope Guard ✅.` |
-| **BLOCKER** | Owner explicit acceptance required before Phase 1.10 is marked ACCEPTED |
-| **NEXT ACTION** | Owner acceptance of Phase 1.10 — do not proceed to Phase 1.11 |
+| **STEP** | `1.10 — Slash-Command Guard + Inline /help ACCEPTED` |
+| **AGENT STATUS** | `WAITING_FOR_OWNER_APPROVAL_TO_START_NEXT_PHASE` |
+| **LAST COMPLETED** | `Phase 1.10 ACCEPTED. Final verification: 30/30 Phase 1.10 + 47/47 Phase 1.9 + 16/16 Phase 1.8-B + 19/19 Phase 1.8-A + 20/20 Phase 1.7 + 30/30 Phase 1.6-B + 73/73 Phase 1.6-A + 13/13 typecheck+lint = 248/248 PASS. Implementation commit b321463; tag phase-1.10-accepted pushed.` |
+| **BLOCKER** | Owner approval required to start Phase 1.11 |
+| **NEXT ACTION** | Prepare next phase advisory only — do not implement |
 
 ---
 
@@ -101,7 +101,7 @@ midas-monorepo/
 
 ## 6. ТЕКУЩАЯ ФАЗА — PHASE 1.10: SLASH-COMMAND GUARD + INLINE /help
 
-> 🔶 **IN_PROGRESS / READY_FOR_OWNER_ACCEPTANCE. Not ACCEPTED until owner explicitly accepts.**
+> ✅ **ACCEPTED. Implementation commit `b321463`. Tag `phase-1.10-accepted` pushed.**
 
 **Результат:**
 - `parseCommandToken(text)` — новая helper-функция в `webhook.route.ts`.
@@ -168,8 +168,9 @@ Crypto / Notion / Sheets / Mini App files
 > Read workflow_state.md and project_config.md first.
 > Before implementation, read workflow_state.md section 11 — Agent Operating Protocol and follow it strictly.
 > Phase 1.9 (Basic Text /report Command) is ACCEPTED. Tag `phase-1.9-accepted` pushed.
-> Phase 1.10 (Slash-Command Guard + Inline /help) is READY_FOR_OWNER_ACCEPTANCE. Do not mark as ACCEPTED until owner explicitly accepts.
-> Do not implement Phase 1.11 or any future phase without owner APPROVED.
+> Phase 1.10 (Slash-Command Guard + Inline /help) is ACCEPTED. Commit `b321463`. Tag `phase-1.10-accepted` pushed.
+> Do not re-implement Phase 1.10. Do not implement Phase 1.11 without owner APPROVED.
+> Prepare next phase advisory only — do not implement.
 
 ---
 
@@ -215,6 +216,7 @@ Crypto / Notion / Sheets / Mini App files
 | 2026-05-06 09:08 | workflow_state.md sync after Phase 1.9 implementation. Sections 1, 2, 6–9 corrected: Section 1 set to WAITING_FOR_OWNER_ACCEPTANCE_OF_PHASE_1_9; Section 2 Phase 1.9 row expanded with full artifact paths; Section 6 updated to Phase 1.9 results; Section 7 set to acceptance-audit-only MCP access; Section 8 refreshed with Phase 1.9 audit file list; Section 9 updated with acceptance handoff. No code changes. |
 | 2026-05-06 10:00 | Phase 1.9 ACCEPTED by owner after final verification. Full test run: 47/47 Phase 1.9 + 16/16 Phase 1.8-B + 19/19 Phase 1.8-A + 20/20 Phase 1.7 + 30/30 Phase 1.6-B + 73/73 Phase 1.6-A + 13/13 typecheck+lint = 218/218 PASS. Git clean pre/post tests. origin/main in sync. project_config.md unchanged (v1.2). Section 14 self-audit: all ✅. Committed workflow_state.md, pushed tag phase-1.9-accepted. Status: WAITING_FOR_OWNER_APPROVAL_TO_START_NEXT_PHASE. |
 | 2026-05-06 11:45 | Phase 1.10 Slash-Command Guard + Inline /help implementation complete. `parseCommandToken()` (exact first-token, @BotName strip), `KNOWN_COMMANDS` set, `/help` handler (Russian, lists /start /report /help), unknown-slash guard (5e). No command-registry, no new deps, no migrations, no AI changes. 30/30 Phase 1.10 + 47/47 Phase 1.9 + 16/16 Phase 1.8-B + 19/19 Phase 1.8-A + 20/20 Phase 1.7 + 30/30 Phase 1.6-B + 73/73 Phase 1.6-A + 13/13 typecheck+lint = 248/248 PASS. Traceability ✅ Adversarial Security ✅ Scope Guard ✅. Status: READY_FOR_OWNER_ACCEPTANCE. |
+| 2026-05-06 11:55 | Phase 1.10 ACCEPTED by owner after final acceptance verification. Full test run: 30/30 Phase 1.10 + 47/47 Phase 1.9 + 16/16 Phase 1.8-B + 19/19 Phase 1.8-A + 20/20 Phase 1.7 + 30/30 Phase 1.6-B + 73/73 Phase 1.6-A + 13/13 typecheck+lint = 248/248 PASS. Git clean pre/post tests. origin/main in sync. project_config.md unchanged (v1.2, last touched cc91a47). Commit b321463: 3 files only (webhook.route.ts, smoke-test-phase110.mjs, workflow_state.md). No command-registry.ts, no /balance, no migrations, no new deps. Section 14 self-audit: all ✅. Tag phase-1.10-accepted pushed. Status: WAITING_FOR_OWNER_APPROVAL_TO_START_NEXT_PHASE. |
 
 ---
 
