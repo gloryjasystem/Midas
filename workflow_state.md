@@ -1,7 +1,7 @@
 # WORKFLOW_STATE.MD — Диспетчер задач ИИ-агента Midas
 
 > **Тип:** MUTABLE — кратковременная память агента. Обновляется на каждом шаге работы.
-> **Обновлён:** 2026-05-06 00:27 (UTC+3)
+> **Обновлён:** 2026-05-06 09:08 (UTC+3)
 
 ---
 
@@ -10,11 +10,11 @@
 | Параметр | Значение |
 |---|---|
 | **PHASE** | `1 — MVP Implementation` |
-| **STEP** | `1.9 — Basic Text /report Command` |
-| **AGENT STATUS** | `READY_FOR_OWNER_ACCEPTANCE` |
-| **LAST COMPLETED** | `Phase 1.9 implementation complete. /report command added.` |
-| **BLOCKER** | None |
-| **NEXT ACTION** | Await owner acceptance of Phase 1.9. Do NOT start next phase until ACCEPTED. |
+| **STEP** | `1.9 — Basic Text /report Command READY_FOR_OWNER_ACCEPTANCE` |
+| **AGENT STATUS** | `WAITING_FOR_OWNER_ACCEPTANCE_OF_PHASE_1_9` |
+| **LAST COMPLETED** | `Phase 1.9 implementation complete. Commit e060edb on origin/main. 218/218 tests passed.` |
+| **BLOCKER** | Owner must accept Phase 1.9 before next phase |
+| **NEXT ACTION** | Await owner acceptance. Do not proceed to next phase. |
 
 ---
 
@@ -36,7 +36,7 @@
 | 1.7 Draft Expiration & Lifecycle Cleanup | ✅ ACCEPTED | `migrations/1777973960000_draft-expiration.js` + `1777973970000_harden-expire-search-path.js` + `1777973980000_fix-expire-function-owner.js`, `draft-expiration.service.ts`, `draft-expiration.worker.ts`, `smoke-test-phase17.mjs` — 20/20 smoke tests PASS, commits `b9069ad`→`49e0cec` |
 | 1.8-A Transaction Intent Foundation | ✅ ACCEPTED | `migrations/1778008338096_transaction-intent.js`, `draft.service.ts` (parsed_intent propagation), `draft-confirmation.service.ts` (intent_missing outcome), `confirmation.worker.ts` (intent_missing messages), `smoke-test-phase18a.mjs` — 19/19 smoke tests PASS, 155/155 total regression PASS, commits `425df61`→`51b6aee` |
 | 1.8-B Runtime Consistency & Security Hardening | ✅ ACCEPTED | C-1: `draft.service.ts` `telegram_user_id`→`telegram_id` fix. C-2: `migrations/1778008400000_harden-onboarding-search-path.js` — `search_path` fixed for 2 SECDEF functions. M-1: `shared/index.ts` `TRANSACTION_TYPE` updated to 5 canonical values. `smoke-test-phase18b.mjs` — 16/16 PASS, 171/171 total regression PASS, commit `7af1692` |
-| 1.9 Basic Text /report Command | 🔄 READY FOR ACCEPTANCE | `report.service.ts` (monthly report query), `webhook.route.ts` (/report command handler), `workspace-resolver.ts` (userId added to return), `smoke-test-phase19.mjs` — 47/47 PASS, 218/218 total regression PASS |
+| 1.9 Basic Text /report Command | 🔄 READY FOR ACCEPTANCE | `apps/telegram-bot/src/services/report.service.ts`, `apps/telegram-bot/src/routes/webhook.route.ts`, `apps/telegram-bot/src/services/workspace-resolver.ts`, `packages/database/smoke-test-phase19.mjs` — /report command, current UTC month, grouped by transaction_intent, Russian text output — 47/47 Phase 1.9 tests, 218/218 total regression PASS, commit `e060edb` |
 
 ---
 
@@ -99,24 +99,30 @@ midas-monorepo/
 
 ---
 
-## 6. ЗАВЕРШЁННАЯ ФАЗА — PHASE 1.8-B: RUNTIME CONSISTENCY & SECURITY HARDENING
+## 6. ТЕКУЩАЯ ФАЗА — PHASE 1.9: BASIC TEXT /report COMMAND
 
-> ✅ **COMPLETED / ACCEPTED by owner. Implementation commit `7af1692`, acceptance commit `63175c7`. Tag `phase-1.8-B-accepted`.**
+> 🔄 **READY_FOR_OWNER_ACCEPTANCE. Commit `e060edb` on origin/main.**
 
 **Результат:**
-- C-1: `draft.service.ts` — `resolveUserId()` fixed `telegram_user_id` → `telegram_id`
-- C-2: migration `1778008400000` — onboarding SECURITY DEFINER functions hardened with `search_path = public, pg_catalog`
-- M-1: `shared/index.ts` — `TRANSACTION_TYPE` updated to 5 canonical intent values
-- Tests: 171/171 PASS (16 Phase 1.8-B + 19 Phase 1.8-A + 20 Phase 1.7 + 30 Phase 1.6-B + 73 Phase 1.6-A + 13 typecheck+lint)
+- `/report` command implemented in `webhook.route.ts` (intercepted before AI parse flow)
+- Current UTC month only, no custom date ranges
+- Raw positive sums grouped by `transaction_intent` (expense, income, debt_given, debt_received, transfer)
+- No `/balance`, no `/category`, no `/add_category`
+- No exchange-rate conversion, no debt routing, no transfer logic
+- `withTenantTransaction(workspaceId, userId, fn)` used for SEC-03 tenant isolation
+- Defense-in-depth: explicit `WHERE workspace_id = $1` alongside RLS
+- Decimal-safe formatting: no `Number()` / `parseFloat()` in financial paths (SEC-02)
+- Tests: 218/218 PASS (47 Phase 1.9 + 16 Phase 1.8-B + 19 Phase 1.8-A + 20 Phase 1.7 + 30 Phase 1.6-B + 73 Phase 1.6-A + 13 typecheck+lint)
+- Commit `e060edb`
 
 ---
 
-## 7. MCP REQUIREMENTS (следующий шаг — advisory only)
+## 7. MCP REQUIREMENTS (следующий шаг — acceptance audit only)
 
 | MCP-сервер | Доступ | Примечание |
 |---|---|---|
-| Filesystem MCP | ✅ read-only | Только чтение файлов для анализа. Никаких записей. |
-| Postgres MCP | ⚪ read-only (при необходимости) | Schema verification queries only |
+| Filesystem MCP | ✅ read-only | Только чтение файлов для аудита. Никаких записей. |
+| Postgres MCP | ⚪ read-only (при необходимости) | Schema / query verification only |
 | GitHub MCP | ⚪ read-only (опционально) | Если нужно проверить remote |
 | Browser / DevTools | ❌ Запрещён | — |
 | Notion MCP | ❌ Запрещён | — |
@@ -125,19 +131,16 @@ midas-monorepo/
 
 ---
 
-## 8. ФАЙЛЫ ДЛЯ ЧТЕНИЯ В НОВОМ ЧАТЕ (следующий шаг — advisory)
+## 8. ФАЙЛЫ ДЛЯ ЧТЕНИЯ В НОВОМ ЧАТЕ (следующий шаг — acceptance audit)
 
 **Required (читать обязательно):**
 ```
 project_config.md
 workflow_state.md
-docs/phase1_scope.md
-docs/mvp_acceptance_criteria.md
-docs/database_model_draft.md
-packages/database/migrations/1777973748530_mvp-schema-and-types.js      # full MVP schema
-packages/database/migrations/1778008338096_transaction-intent.js        # Phase 1.8-A schema
-apps/telegram-bot/src/routes/webhook.route.ts
-apps/telegram-bot/src/services/telegram-api.ts
+apps/telegram-bot/src/services/report.service.ts                       # Phase 1.9 report logic
+apps/telegram-bot/src/routes/webhook.route.ts                          # /report command handler
+apps/telegram-bot/src/services/workspace-resolver.ts                   # userId in return
+packages/database/smoke-test-phase19.mjs                               # Phase 1.9 tests
 packages/shared/src/index.ts
 ```
 
@@ -145,7 +148,7 @@ packages/shared/src/index.ts
 ```
 packages/database/smoke-test-phase18b.mjs                               # Phase 1.8-B tests
 packages/database/smoke-test-phase18a.mjs                               # Phase 1.8-A tests
-apps/background-workers/src/services/draft-confirmation.service.ts      # approveDraft / intent flow
+packages/database/migrations/1778008338096_transaction-intent.js        # Phase 1.8-A schema
 ```
 
 **Do not load (не читать — тратит контекст):**
@@ -153,7 +156,7 @@ apps/background-workers/src/services/draft-confirmation.service.ts      # approv
 docs/event_storming_part*.md
 docs/client-roadmap-architecture-overview.md
 docs/adr/*
-packages/ai-core/                           # unless advisory specifically concerns AI
+packages/ai-core/                           # unless audit specifically concerns AI
 packages/database/smoke-test-phase16{a,b}.mjs
 packages/database/smoke-test-phase17.mjs
 Crypto / Notion / Sheets / Mini App files
@@ -165,11 +168,12 @@ Crypto / Notion / Sheets / Mini App files
 
 > Read workflow_state.md and project_config.md first.
 > Before implementation, read workflow_state.md section 11 — Agent Operating Protocol and follow it strictly.
-> Phase 1.9 (Basic Text /report Command) is READY_FOR_OWNER_ACCEPTANCE.
-> Do not implement /balance, /category, /add_category.
+> Phase 1.9 (Basic Text /report Command) is READY_FOR_OWNER_ACCEPTANCE. Commit `e060edb` on origin/main.
+> Do not mark Phase 1.9 as accepted until owner explicitly accepts.
+> Do not implement next phase. Do not implement /balance, /category, /add_category.
 > Do not implement Persons/Fuzzy Matching, debt routing, transfer logic, exchange-rate conversion.
 > Do not modify project_config.md.
-> Do not proceed to next phase until owner APPROVED.
+> Verify /report only — no /balance, /category, /add_category.
 
 ---
 
@@ -212,6 +216,7 @@ Crypto / Notion / Sheets / Mini App files
 | 2026-05-06 00:02 | Phase 1.8-B ACCEPTED by owner after PASS. C-1: resolveUserId fixed `telegram_user_id`→`telegram_id`. C-2: onboarding SECURITY DEFINER functions hardened with `search_path = public, pg_catalog`. M-1: `TRANSACTION_TYPE` updated to canonical 5 intent values. 171/171 tests PASS. origin/main at `7af1692`. Working tree clean. |
 | 2026-05-06 00:07 | workflow_state.md cleanup after Phase 1.8-B acceptance. Stale Sections 6–9 corrected: Section 6 updated to Phase 1.8-B results; Section 7 set to advisory-only MCP access; Section 8 refreshed with advisory file list; Section 9 updated with COMPLETED/ACCEPTED handoff. No code changes. |
 | 2026-05-06 00:27 | Phase 1.9 Basic Text /report Command implementation complete. `report.service.ts`: monthly report grouped by `transaction_intent`, `SUM(base_amount)` via NUMERIC, UTC month boundaries, Russian text output. `webhook.route.ts`: `/report` command intercepted before AI parse, resolves workspace+userId, calls report service. `workspace-resolver.ts`: `userId` added to `WorkspaceResolverResult`. Defense-in-depth: explicit `WHERE workspace_id = $1` alongside RLS. 47/47 Phase 1.9 tests PASS. 16/16 Phase 1.8-B PASS. 19/19 Phase 1.8-A PASS. 20/20 Phase 1.7 PASS. 30/30 Phase 1.6-B PASS. 73/73 Phase 1.6-A PASS. 13/13 typecheck+lint PASS. Total: 218/218. Traceability ✅ Security ✅ Scope Guard ✅. Status: READY_FOR_OWNER_ACCEPTANCE. |
+| 2026-05-06 09:08 | workflow_state.md sync after Phase 1.9 implementation. Sections 1, 2, 6–9 corrected: Section 1 set to WAITING_FOR_OWNER_ACCEPTANCE_OF_PHASE_1_9; Section 2 Phase 1.9 row expanded with full artifact paths; Section 6 updated to Phase 1.9 results; Section 7 set to acceptance-audit-only MCP access; Section 8 refreshed with Phase 1.9 audit file list; Section 9 updated with acceptance handoff. No code changes. |
 
 ---
 
