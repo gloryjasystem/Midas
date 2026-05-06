@@ -1,7 +1,7 @@
 # WORKFLOW_STATE.MD — Диспетчер задач ИИ-агента Midas
 
 > **Тип:** MUTABLE — кратковременная память агента. Обновляется на каждом шаге работы.
-> **Обновлён:** 2026-05-06 19:35 (UTC+3)
+> **Обновлён:** 2026-05-06 19:46 (UTC+3)
 
 ---
 
@@ -10,11 +10,11 @@
 | Параметр | Значение |
 |---|---|
 | **PHASE** | `1 — MVP Implementation` |
-| **STEP** | `1.14 — /accounts Read-Only List Command — READY_FOR_OWNER_ACCEPTANCE` |
-| **AGENT STATUS** | `READY_FOR_OWNER_ACCEPTANCE` |
-| **LAST COMPLETED** | `Phase 1.14 implementation complete. 70/70 Phase 1.14 + 437/437 total regression PASS. Traceability ✅ Adversarial Security ✅ Scope Guard ✅. 13/13 typecheck+lint PASS. No migrations. No new deps. Awaiting owner acceptance.` |
-| **BLOCKER** | None — awaiting owner acceptance |
-| **NEXT ACTION** | Owner reviews and writes ACCEPTED or requests fixes |
+| **STEP** | `1.14 — /accounts Read-Only List Command — ACCEPTED` |
+| **AGENT STATUS** | `WAITING_FOR_OWNER_APPROVAL_TO_START_NEXT_PHASE` |
+| **LAST COMPLETED** | `Phase 1.14 ACCEPTED by owner. 507/507 tests PASS. Traceability ✅ Adversarial Security ✅ Scope Guard ✅. Implementation commit 362b05b. Tag phase-1.14-accepted pushed.` |
+| **BLOCKER** | None — awaiting owner approval to start next phase |
+| **NEXT ACTION** | Prepare next phase advisory only — do not implement |
 
 ---
 
@@ -41,6 +41,7 @@
 | 1.11 /category Read-Only List Command | ✅ ACCEPTED | `apps/telegram-bot/src/services/category.service.ts` (new), `webhook.route.ts` (KNOWN_COMMANDS, HELP_TEXT, /category handler), `smoke-test-phase111.mjs` — 78/78 Phase 1.11 + 326/326 total regression PASS. Traceability ✅ Adversarial Security ✅ Scope Guard ✅. Implementation commit `2e77362`, tag `phase-1.11-accepted` pushed. |
 | 1.12 Onboarding Default Data Seeding | ✅ ACCEPTED | `migrations/1778100000000_onboarding-default-seed.js` + `1778100010000_fix-onboarding-seed-conflict.js` (7-param SECDEF function), `onboarding.service.ts` (candidateAccountId + candidateCategoryId), `smoke-test-phase112.mjs` — 37/37 Phase 1.12 + 363/363 total regression PASS. Traceability ✅ Adversarial Security ✅ Scope Guard ✅. Implementation commit `7b87eac`, tag `phase-1.12-accepted` pushed. |
 | 1.13 /add_category Strict-Format Command | ✅ ACCEPTED | `category.service.ts` (`parseAddCategoryArgs`, `resolveGroup`, `addCategory`, `AddCategoryResult`), `webhook.route.ts` (KNOWN_COMMANDS 4→5, HELP_TEXT, handler `5e-add`), `smoke-test-phase113.mjs` — 74/74 Phase 1.13 + 437/437 total regression PASS. Traceability ✅ Adversarial Security ✅ Scope Guard ✅. Implementation commit `eac55a9`, tag `phase-1.13-accepted` pushed. |
+| 1.14 /accounts Read-Only List Command | ✅ ACCEPTED | `apps/telegram-bot/src/services/account.service.ts` (new), `webhook.route.ts` (KNOWN_COMMANDS 5→6, HELP_TEXT, handler `5d-acc`), `smoke-test-phase114.mjs` — 70/70 Phase 1.14 + 507/507 total regression PASS. Traceability ✅ Adversarial Security ✅ Scope Guard ✅. Implementation commit `362b05b`, tag `phase-1.14-accepted` pushed. Note: HTML escaping for account/category names must be added before user-controlled write paths (/add_account). |
 
 ---
 
@@ -117,17 +118,18 @@ midas-monorepo/
 
 ---
 
-## 6b. ТЕКУЩАЯ ФАЗА — PHASE 1.14: /accounts READ-ONLY LIST COMMAND
+## 6b. ЗАВЕРШЁННАЯ ФАЗА — PHASE 1.14: /accounts READ-ONLY LIST COMMAND
 
-> 🔄 **READY_FOR_OWNER_ACCEPTANCE. 70/70 Phase 1.14 + 507/507 total regression PASS. Traceability ✅ Adversarial Security ✅ Scope Guard ✅.**
+> ✅ **ACCEPTED. 70/70 Phase 1.14 + 507/507 total regression PASS. Tag phase-1.14-accepted pushed.**
 
 **Результат:**
 - `account.service.ts` (NEW): `getAccountList()` (withTenantTransaction, explicit WHERE workspace_id = $1, flat list ORDER BY type name, Russian type labels, empty-state message, Russian pluralization).
 - `webhook.route.ts`: KNOWN_COMMANDS 5→6, HELP_TEXT updated (строка /accounts), обработчик `5d-acc`.
 - `smoke-test-phase114.mjs`: 70 тестов PASS (DB + логика; midas_app RLS USING верифицирован; тенант изоляция; пустой стейт; маппинг меток; scope guard).
 - Нет миграций, нет новых зависимостей, нет AI/queue changes.
-- 70/70 Phase 1.14 + 74/74 Phase 1.13 + 37/37 Phase 1.12 + 78/78 Phase 1.11 + 30/30 Phase 1.10 + 47/47 Phase 1.9 + 16/16 Phase 1.8-B + 19/19 Phase 1.8-A + 20/20 Phase 1.7 + 30/30 Phase 1.6-B + 73/73 Phase 1.6-A + 13/13 typecheck+lint = 507/507 PASS.
-- Traceability ✅ Adversarial Security ✅ Scope Guard ✅
+- Implementation commit `362b05b`. Tag `phase-1.14-accepted` pushed.
+- 507/507 PASS. Traceability ✅ Adversarial Security ✅ Scope Guard ✅
+- **Техдолг для Phase 1.15:** HTML escaping для `account.name` и `currency` в режиме `parse_mode: 'HTML'` обязательно до реализации write-path (/add_account). Тоже распространяется на `category.name` (Phase 1.11/1.13).
 
 **Scope:**
 - `apps/telegram-bot/src/services/account.service.ts` (NEW): `getAccountList()` — `withTenantTransaction`, explicit `WHERE workspace_id = $1`, flat list sorted by type+name, Russian type labels (manual=Ручной ввод, crypto_read_only=Крипто, bank_sync=Банк), empty-state message.
@@ -144,13 +146,13 @@ midas-monorepo/
 
 ---
 
-## 7. MCP REQUIREMENTS (Phase 1.14 — IN_PROGRESS)
+## 7. MCP REQUIREMENTS (Phase 1.14 — ACCEPTED / Advisory only)
 
 | MCP-сервер | Доступ | Примечание |
 |---|---|---|
-| Filesystem MCP | ✅ read/write (project dir only) | Создание account.service.ts, изменение webhook.route.ts, новый smoke-test |
-| Postgres MCP | ✅ local dev read/write | Запуск smoke-тестов, верификация RLS |
-| GitHub MCP | ⚪ read-only (опционально) | Проверка remote sync после acceptance |
+| Filesystem MCP | ✅ read-only | Чтение workflow_state.md, project_config.md для advisory |
+| Postgres MCP | ❌ не нужен | Advisory-only — без DB-изменений |
+| GitHub MCP | ⚪ read-only (опционально) | Проверка remote sync при необходимости |
 | Browser / DevTools | ❌ Запрещён | — |
 | Notion MCP | ❌ Запрещён | — |
 | Google Sheets | ❌ Запрещён | — |
@@ -158,7 +160,7 @@ midas-monorepo/
 
 ---
 
-## 8. ФАЙЛЫ ДЛЯ ЧТЕНИЯ В НОВОМ ЧАТЕ (Phase 1.14 — Implementation)
+## 8. ФАЙЛЫ ДЛЯ ЧТЕНИЯ В НОВОМ ЧАТЕ (Advisory — следующая фаза)
 
 **Required (читать обязательно):**
 ```
@@ -166,13 +168,12 @@ project_config.md
 workflow_state.md
 ```
 
-**Optional (читать при необходимости):**
+**Optional (читать при необходимости — для advisory следующей фазы):**
 ```
 apps/telegram-bot/src/routes/webhook.route.ts           # Текущее состояние роутера
-apps/telegram-bot/src/services/category.service.ts      # Reference pattern для account.service.ts
-apps/telegram-bot/src/services/account.service.ts       # Новый файл (после создания)
-packages/database/smoke-test-phase113.mjs               # Reference pattern для smoke tests
-packages/database/smoke-test-phase114.mjs               # Phase 1.14 тесты (после создания)
+apps/telegram-bot/src/services/account.service.ts       # Текущее состояние account сервиса
+apps/telegram-bot/src/services/category.service.ts      # Текущее состояние category сервиса
+packages/database/smoke-test-phase114.mjs               # Phase 1.14 тесты — reference паттерн
 ```
 
 **Do not load (не читать — тратит контекст):**
@@ -195,11 +196,11 @@ Crypto / Notion / Sheets / Mini App files
 
 > Read workflow_state.md and project_config.md first.
 > Before implementation, read workflow_state.md section 11 — Agent Operating Protocol and follow it strictly.
-> Phase 1.14 (/accounts Read-Only List Command) is IN_PROGRESS. Owner APPROVED.
-> AGENT STATUS: IMPLEMENTING_PHASE_1_14.
-> Read Section 6b for full Phase 1.14 scope.
-> Do not implement /add_account, /balance, or any migration.
-> Do not mark ACCEPTED until owner explicitly approves.
+> Phase 1.14 (/accounts Read-Only List Command) is ACCEPTED. Implementation commit `362b05b`. Tag `phase-1.14-accepted` pushed.
+> AGENT STATUS: WAITING_FOR_OWNER_APPROVAL_TO_START_NEXT_PHASE.
+> Do not implement Phase 1.15 or any future phase without explicit owner APPROVED.
+> Next action: prepare phase advisory only — present options, risks, scope. Wait for approval before any code.
+> Advisory note: HTML escaping for account/category names must be considered before implementing user-controlled write paths (/add_account).
 
 ---
 
@@ -251,7 +252,9 @@ Crypto / Notion / Sheets / Mini App files
 | 2026-05-06 17:20 | Phase 1.12 Onboarding Default Data Seeding implementation complete. Currency finding: `workspaces.default_currency DEFAULT 'RUB'` confirmed — no hardcoding beyond existing onboarding pattern. Migrations: `1778100000000_onboarding-default-seed.js` (7-param SECDEF function) + `1778100010000_fix-onboarding-seed-conflict.js` (PL/pgSQL ON CONFLICT ambiguity fix using named constraint). `onboarding.service.ts` extended to pass candidateAccountId + candidateCategoryId ($6/$7). Lazy fallback in `draft-confirmation.service.ts` preserved untouched (defense-in-depth). No route changes, no new slash commands, no queue/worker changes, no AI changes, no new deps. DB audit: 157 workspaces, 71 missing account_sources, 55 missing categories — no backfill (lazy fallback covers them). 37/37 Phase 1.12 + 78/78 Phase 1.11 + 30/30 Phase 1.10 + 47/47 Phase 1.9 + 16/16 Phase 1.8-B + 19/19 Phase 1.8-A + 20/20 Phase 1.7 + 30/30 Phase 1.6-B + 73/73 Phase 1.6-A + 13/13 typecheck+lint = 363/363 PASS. Traceability ✅ Adversarial Security ✅ Scope Guard ✅. Status: READY_FOR_OWNER_ACCEPTANCE. |
 | 2026-05-06 17:45 | workflow_state.md test-count fix: 344/344 → 363/363 (Phase 1.8-A 19 tests omitted from arithmetic sum). Commit 1b9a32a. No code changes. |
 | 2026-05-06 18:40 | Phase 1.13 /add_category Strict-Format Command implementation complete. `category.service.ts`: `parseAddCategoryArgs()` (group case-insensitive normalization via ALLOWED_GROUPS, name trim+length validation), `resolveGroup()`, `addCategory()` (withTenantTransaction, INSERT ON CONFLICT ON CONSTRAINT categories_workspace_id_name_key DO NOTHING, ULID id, returns 'created'\|'duplicate'), `AddCategoryResult` type. `webhook.route.ts`: KNOWN_COMMANDS 4→5, HELP_TEXT updated with /add_category line + groups + example, handler `5e-add` (parseAddCategoryArgs → resolveWorkspace → addCategory → Russian reply; duplicate: «Категория с таким именем уже существует.»). No migrations, no new deps, no AI changes. Empty-state /category message updated. midas_app RLS WITH CHECK verified via separate appPool in Test 8. 74/74 Phase 1.13 + 37/37 Phase 1.12 + 78/78 Phase 1.11 + 30/30 Phase 1.10 + 47/47 Phase 1.9 + 16/16 Phase 1.8-B + 19/19 Phase 1.8-A + 20/20 Phase 1.7 + 30/30 Phase 1.6-B + 73/73 Phase 1.6-A + 13/13 typecheck+lint = 437/437 PASS. Traceability ✅ Adversarial Security ✅ Scope Guard ✅. Implementation commit `eac55a9`. Status: READY_FOR_OWNER_ACCEPTANCE. |
-| 2026-05-06 19:03 | Phase 1.13 ACCEPTED by owner after final verification. /add_category strict-format command implemented; 437/437 tests PASS; Traceability Review PASS; Adversarial Security Review PASS; Scope Guard Review PASS; implementation commit `eac55a9`; workflow_state sync commit `09dba48`. Tag `phase-1.13-accepted` pushed. Status: WAITING_FOR_OWNER_APPROVAL_TO_START_NEXT_PHASE. |
+| 2026-05-06 19:22 | Phase 1.14 /accounts Read-Only List Command implementation started. Owner APPROVED. |
+| 2026-05-06 19:35 | Phase 1.14 implementation complete. `account.service.ts` (NEW): `getAccountList()` (withTenantTransaction, explicit WHERE workspace_id = $1, flat list ORDER BY type name, Russian labels, pluralization, empty-state). `webhook.route.ts`: KNOWN_COMMANDS 5→6, HELP_TEXT updated, handler `5d-acc`. `smoke-test-phase114.mjs`: 70 tests PASS. No migrations, no new deps, no AI/queue changes. 70/70 Phase 1.14 + 437/437 regression + 13/13 typecheck+lint = 507/507 PASS. Traceability ✅ Adversarial Security ✅ Scope Guard ✅. Implementation commit `362b05b`. |
+| 2026-05-06 19:46 | Phase 1.14 ACCEPTED by owner after final verification. /accounts read-only command implemented; 507/507 tests PASS; Traceability Review PASS; Adversarial Security Review PASS; Scope Guard Review PASS; implementation commit `362b05b`. HTML escaping for account/category names must be considered before implementing user-controlled write paths such as /add_account. Tag `phase-1.14-accepted` pushed. Status: WAITING_FOR_OWNER_APPROVAL_TO_START_NEXT_PHASE. |
 
 ---
 
