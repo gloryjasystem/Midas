@@ -17,6 +17,7 @@
  */
 
 import { withTenantTransaction } from '@midas/database';
+import { escapeHtml } from '../utils/html-escape.js';
 
 // ─────────────────────────────────────────────────────────────
 // Types
@@ -100,8 +101,11 @@ export async function getAccountList(
 
   // ── Build flat list sorted by type, name (ORDER BY in SQL) ──
   const lines = rows.map((row) => {
-    const label = resolveTypeLabel(row.type);
-    return `• ${row.name} — ${label} (${row.currency})`;
+    // escapeHtml applied to all DB-sourced values (SEC-03 defense-in-depth,
+    // phase 1.15 hardening). Type label is static code but escaped for
+    // consistent policy — harmless for the current known label set.
+    const label = escapeHtml(resolveTypeLabel(row.type));
+    return `• ${escapeHtml(row.name)} — ${label} (${escapeHtml(row.currency)})`;
   });
 
   const totalCount = rows.length;

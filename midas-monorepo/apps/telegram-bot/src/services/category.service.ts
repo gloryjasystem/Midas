@@ -20,6 +20,7 @@
 
 import { withTenantTransaction } from '@midas/database';
 import { monotonicFactory } from 'ulid';
+import { escapeHtml } from '../utils/html-escape.js';
 
 // ─────────────────────────────────────────────────────────────
 // Types
@@ -137,8 +138,10 @@ export async function getCategoryList(
 
   for (const group of sortedGroups) {
     const names = groupMap.get(group) ?? [];
-    const nameLines = names.map((n) => `• ${n}`).join('\n');
-    sections.push(`<b>${group}:</b>\n${nameLines}`);
+    // escapeHtml applied to category names (user-controlled) and group labels
+    // (enum-controlled but escaped for consistent defense-in-depth policy).
+    const nameLines = names.map((n) => `• ${escapeHtml(n)}`).join('\n');
+    sections.push(`<b>${escapeHtml(group)}:</b>\n${nameLines}`);
   }
 
   const totalCount = rows.length;
@@ -274,9 +277,11 @@ export function parseAddCategoryArgs(
   // Validate group (case-insensitive)
   const canonicalGroup = resolveGroup(groupToken);
   if (canonicalGroup === null) {
+    // escapeHtml: groupToken is user input reflected in a sendMessage with parse_mode:'HTML'.
+    // This closes the injection vector (e.g. /add_category <b>evil</b> Name).
     return {
       error:
-        `Неизвестная группа: «${groupToken}».\n` +
+        `Неизвестная группа: «${escapeHtml(groupToken)}».\n` +
         'Допустимые группы: Бизнес, Жизнь.',
     };
   }

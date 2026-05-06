@@ -63,6 +63,7 @@ import {
   parseAddCategoryArgs,
 } from '../services/category.service.js';
 import { getAccountList } from '../services/account.service.js';
+import { escapeHtml } from '../utils/html-escape.js';
 
 import { callbackConfirmQueue } from '../queues/callback-confirm-queue.js';
 
@@ -491,9 +492,11 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
           if (result === 'duplicate') {
             void sendMessage(chatId, 'Категория с таким именем уже существует.');
           } else {
+            // escapeHtml: parsed.canonicalGroup and parsed.name are user-influenced values
+            // rendered in parse_mode:'HTML' context (Phase 1.15 hardening).
             void sendMessage(
               chatId,
-              `✅ Категория добавлена: <b>${parsed.canonicalGroup}</b> / ${parsed.name}`,
+              `✅ Категория добавлена: <b>${escapeHtml(parsed.canonicalGroup)}</b> / ${escapeHtml(parsed.name)}`,
             );
           }
 
