@@ -1,7 +1,7 @@
-# WORKFLOW_STATE.MD — Диспетчер задач ИИ-агента Midas
+﻿# WORKFLOW_STATE.MD — Диспетчер задач ИИ-агента Midas
 
 > **Тип:** MUTABLE — кратковременная память агента. Обновляется на каждом шаге работы.
-> **Обновлён:** 2026-05-07 02:25 (UTC+3)
+> **Обновлён:** 2026-05-07 02:40 (UTC+3)
 
 ---
 
@@ -109,9 +109,9 @@ midas-monorepo/
 
 ---
 
-## 6. ТЕКУЩАЯ ФАЗА — PHASE 1.19: account_sources.currency CHECK Constraint
+## 6. ПОСЛЕДНЯЯ ЗАВЕРШЁННАЯ ФАЗА — PHASE 1.19: account_sources.currency CHECK Constraint
 
-> ✅ **READY_FOR_OWNER_ACCEPTANCE. Baseline: 644/644 PASS. New tests: 24/24 PASS. Total: 668/668.**
+> ✅ **COMPLETED / ACCEPTED. 24/24 Phase 1.19 + 644/644 previous accepted baseline = 668/668 PASS.**
 
 **Objective:**
 Add a DB-level CHECK constraint on `account_sources.currency` to enforce that only well-formed currency codes (ISO 4217 fiat + crypto codes) can be stored. This closes a latent DB integrity gap — the column was `TEXT NOT NULL` with no pattern guard.
@@ -154,12 +154,12 @@ Add a DB-level CHECK constraint on `account_sources.currency` to enforce that on
 
 ---
 
-## 7. MCP REQUIREMENTS (Phase 1.19 — READY_FOR_OWNER_ACCEPTANCE)
+## 7. MCP REQUIREMENTS (advisory для Phase 1.20)
 
 | MCP-сервер | Доступ | Примечание |
 |---|---|---|
-| Filesystem MCP | ✅ read-only | Аудит файлов фазы при необходимости |
-| Postgres MCP | ✅ read-only | Верификация constraint в pg_constraint |
+| Filesystem MCP | ✅ read-only | Анализ существующего кода для advisory |
+| Postgres MCP | ✅ read-only | Инспекция схемы, RLS, constraints |
 | GitHub MCP | ⚪ read-only (опционально) | Проверка remote sync |
 | Browser / DevTools | ❌ Запрещён | — |
 | Notion MCP | ❌ Запрещён | — |
@@ -168,19 +168,21 @@ Add a DB-level CHECK constraint on `account_sources.currency` to enforce that on
 
 ---
 
-## 8. ФАЙЛЫ ДЛЯ ЧТЕНИЯ В НОВОМ ЧАТЕ (Phase 1.19 — acceptance audit)
+## 8. ФАЙЛЫ ДЛЯ ЧТЕНИЯ В НОВОМ ЧАТЕ (advisory Phase 1.20)
 
 **Required (читать обязательно):**
 ```
 project_config.md
 workflow_state.md
-packages/database/migrations/1778300000000_account-sources-currency-check.js   # NEW migration
-packages/database/smoke-test-phase119.mjs                                        # NEW smoke tests
+apps/telegram-bot/src/routes/webhook.route.ts          # KNOWN_COMMANDS, /balance area
+apps/telegram-bot/src/services/account.service.ts     # balance logic candidate
+apps/telegram-bot/src/services/report.service.ts      # reference: runReportQuery pattern
 ```
 
-**Optional (читать при необходимости):**
+**Опционально (читать при необходимости):**
 ```
-packages/database/migrations/1778200000000_account-sources-unique-name.js   # structural reference (Phase 1.16)
+packages/database/smoke-test-phase117.mjs             # addAccount pattern reference
+packages/database/migrations/1778300000000_*          # Phase 1.19 migration (last applied)
 ```
 
 **Do not load (не читать — тратит контекст):**
@@ -190,7 +192,6 @@ docs/client-roadmap-architecture-overview.md
 docs/adr/*
 packages/ai-core/
 apps/background-workers/
-apps/telegram-bot/src/services/*
 Crypto / Notion / Sheets / Mini App files
 ```
 
@@ -200,9 +201,9 @@ Crypto / Notion / Sheets / Mini App files
 
 > Read workflow_state.md and project_config.md first.
 > Before any action, read workflow_state.md Section 11 — Agent Operating Protocol and follow it strictly.
-> Phase 1.19 (account_sources.currency CHECK Constraint) is READY_FOR_OWNER_ACCEPTANCE.
-> Do NOT implement Phase 1.20. Do NOT create tag phase-1.19-accepted until owner explicitly accepts.
-> Verify git status, git log --oneline -10, and origin/main are clean.
+> Phase 1.19 (account_sources.currency CHECK Constraint) is COMPLETED / ACCEPTED. Tag phase-1.19-accepted pushed.
+> Do NOT implement Phase 1.20. Prepare next phase advisory only — do not write any code.
+> Verify git status, git log --oneline -10, tag phase-1.19-accepted, and origin/main are clean.
 > Do not modify project_config.md.
 
 ---
