@@ -1,7 +1,7 @@
 # WORKFLOW_STATE.MD — Диспетчер задач ИИ-агента Midas
 
 > **Тип:** MUTABLE — кратковременная память агента. Обновляется на каждом шаге работы.
-> **Обновлён:** 2026-05-06 09:45 (UTC+3)
+> **Обновлён:** 2026-05-06 10:00 (UTC+3)
 
 ---
 
@@ -10,11 +10,11 @@
 | Параметр | Значение |
 |---|---|
 | **PHASE** | `1 — MVP Implementation` |
-| **STEP** | `1.9 — Basic Text /report Command READY_FOR_OWNER_ACCEPTANCE` |
-| **AGENT STATUS** | `WAITING_FOR_OWNER_ACCEPTANCE_OF_PHASE_1_9` |
-| **LAST COMPLETED** | `Phase 1.9 implementation complete. Implementation commit e060edb; workflow_state sync commit dffb53e; origin/main in sync. 218/218 tests passed.` |
-| **BLOCKER** | Owner must accept Phase 1.9 before next phase |
-| **NEXT ACTION** | Await owner acceptance. Do not proceed to next phase. |
+| **STEP** | `1.9 — Basic Text /report Command ACCEPTED` |
+| **AGENT STATUS** | `WAITING_FOR_OWNER_APPROVAL_TO_START_NEXT_PHASE` |
+| **LAST COMPLETED** | `Phase 1.9 ACCEPTED. Final verification: 47/47 Phase 1.9 + 16/16 Phase 1.8-B + 19/19 Phase 1.8-A + 20/20 Phase 1.7 + 30/30 Phase 1.6-B + 73/73 Phase 1.6-A + 13/13 typecheck+lint = 218/218 PASS. Implementation commit e060edb; workflow sync dffb53e, 1ec649e; tag phase-1.9-accepted pushed.` |
+| **BLOCKER** | Owner approval required to start Phase 1.10 |
+| **NEXT ACTION** | Prepare next phase advisory only — do not implement |
 
 ---
 
@@ -36,7 +36,7 @@
 | 1.7 Draft Expiration & Lifecycle Cleanup | ✅ ACCEPTED | `migrations/1777973960000_draft-expiration.js` + `1777973970000_harden-expire-search-path.js` + `1777973980000_fix-expire-function-owner.js`, `draft-expiration.service.ts`, `draft-expiration.worker.ts`, `smoke-test-phase17.mjs` — 20/20 smoke tests PASS, commits `b9069ad`→`49e0cec` |
 | 1.8-A Transaction Intent Foundation | ✅ ACCEPTED | `migrations/1778008338096_transaction-intent.js`, `draft.service.ts` (parsed_intent propagation), `draft-confirmation.service.ts` (intent_missing outcome), `confirmation.worker.ts` (intent_missing messages), `smoke-test-phase18a.mjs` — 19/19 smoke tests PASS, 155/155 total regression PASS, commits `425df61`→`51b6aee` |
 | 1.8-B Runtime Consistency & Security Hardening | ✅ ACCEPTED | C-1: `draft.service.ts` `telegram_user_id`→`telegram_id` fix. C-2: `migrations/1778008400000_harden-onboarding-search-path.js` — `search_path` fixed for 2 SECDEF functions. M-1: `shared/index.ts` `TRANSACTION_TYPE` updated to 5 canonical values. `smoke-test-phase18b.mjs` — 16/16 PASS, 171/171 total regression PASS, commit `7af1692` |
-| 1.9 Basic Text /report Command | 🔄 READY FOR ACCEPTANCE | `apps/telegram-bot/src/services/report.service.ts`, `apps/telegram-bot/src/routes/webhook.route.ts`, `apps/telegram-bot/src/services/workspace-resolver.ts`, `packages/database/smoke-test-phase19.mjs` — /report command, current UTC month, grouped by transaction_intent, Russian text output — 47/47 Phase 1.9 tests, 218/218 total regression PASS, implementation commit `e060edb`; workflow sync `dffb53e`. |
+| 1.9 Basic Text /report Command | ✅ ACCEPTED | `apps/telegram-bot/src/services/report.service.ts`, `apps/telegram-bot/src/routes/webhook.route.ts`, `apps/telegram-bot/src/services/workspace-resolver.ts`, `packages/database/smoke-test-phase19.mjs` — /report command, current UTC month, grouped by transaction_intent, Russian text output — 47/47 Phase 1.9 tests, 218/218 total regression PASS, implementation commit `e060edb`; workflow sync `dffb53e`, `1ec649e`; tag `phase-1.9-accepted`. |
 
 ---
 
@@ -101,7 +101,7 @@ midas-monorepo/
 
 ## 6. ТЕКУЩАЯ ФАЗА — PHASE 1.9: BASIC TEXT /report COMMAND
 
-> 🔄 **READY_FOR_OWNER_ACCEPTANCE. Commit `e060edb` on origin/main.**
+> ✅ **ACCEPTED. Implementation commit `e060edb`. Workflow sync commits `dffb53e`, `1ec649e`. Tag `phase-1.9-accepted` pushed.**
 
 **Результат:**
 - `/report` command implemented in `webhook.route.ts` (intercepted before AI parse flow)
@@ -168,12 +168,9 @@ Crypto / Notion / Sheets / Mini App files
 
 > Read workflow_state.md and project_config.md first.
 > Before implementation, read workflow_state.md section 11 — Agent Operating Protocol and follow it strictly.
-> Phase 1.9 (Basic Text /report Command) is READY_FOR_OWNER_ACCEPTANCE. Commit `e060edb` on origin/main.
-> Do not mark Phase 1.9 as accepted until owner explicitly accepts.
-> Do not implement next phase. Do not implement /balance, /category, /add_category.
-> Do not implement Persons/Fuzzy Matching, debt routing, transfer logic, exchange-rate conversion.
-> Do not modify project_config.md.
-> Verify /report only — no /balance, /category, /add_category.
+> Phase 1.9 (Basic Text /report Command) is ACCEPTED. Commit `e060edb` on origin/main. Tag `phase-1.9-accepted` pushed.
+> Do not re-implement Phase 1.9. Do not implement next phase without owner APPROVED.
+> Prepare next phase advisory only — do not implement.
 
 ---
 
@@ -217,6 +214,7 @@ Crypto / Notion / Sheets / Mini App files
 | 2026-05-06 00:07 | workflow_state.md cleanup after Phase 1.8-B acceptance. Stale Sections 6–9 corrected: Section 6 updated to Phase 1.8-B results; Section 7 set to advisory-only MCP access; Section 8 refreshed with advisory file list; Section 9 updated with COMPLETED/ACCEPTED handoff. No code changes. |
 | 2026-05-06 00:27 | Phase 1.9 Basic Text /report Command implementation complete. `report.service.ts`: monthly report grouped by `transaction_intent`, `SUM(base_amount)` via NUMERIC, UTC month boundaries, Russian text output. `webhook.route.ts`: `/report` command intercepted before AI parse, resolves workspace+userId, calls report service. `workspace-resolver.ts`: `userId` added to `WorkspaceResolverResult`. Defense-in-depth: explicit `WHERE workspace_id = $1` alongside RLS. 47/47 Phase 1.9 tests PASS. 16/16 Phase 1.8-B PASS. 19/19 Phase 1.8-A PASS. 20/20 Phase 1.7 PASS. 30/30 Phase 1.6-B PASS. 73/73 Phase 1.6-A PASS. 13/13 typecheck+lint PASS. Total: 218/218. Traceability ✅ Security ✅ Scope Guard ✅. Status: READY_FOR_OWNER_ACCEPTANCE. |
 | 2026-05-06 09:08 | workflow_state.md sync after Phase 1.9 implementation. Sections 1, 2, 6–9 corrected: Section 1 set to WAITING_FOR_OWNER_ACCEPTANCE_OF_PHASE_1_9; Section 2 Phase 1.9 row expanded with full artifact paths; Section 6 updated to Phase 1.9 results; Section 7 set to acceptance-audit-only MCP access; Section 8 refreshed with Phase 1.9 audit file list; Section 9 updated with acceptance handoff. No code changes. |
+| 2026-05-06 10:00 | Phase 1.9 ACCEPTED by owner after final verification. Full test run: 47/47 Phase 1.9 + 16/16 Phase 1.8-B + 19/19 Phase 1.8-A + 20/20 Phase 1.7 + 30/30 Phase 1.6-B + 73/73 Phase 1.6-A + 13/13 typecheck+lint = 218/218 PASS. Git clean pre/post tests. origin/main in sync. project_config.md unchanged (v1.2). Section 14 self-audit: all ✅. Committed workflow_state.md, pushed tag phase-1.9-accepted. Status: WAITING_FOR_OWNER_APPROVAL_TO_START_NEXT_PHASE. |
 
 ---
 
