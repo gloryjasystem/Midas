@@ -1,7 +1,7 @@
 # WORKFLOW_STATE.MD — Диспетчер задач ИИ-агента Midas
 
 > **Тип:** MUTABLE — кратковременная память агента. Обновляется на каждом шаге работы.
-> **Обновлён:** 2026-05-06 10:00 (UTC+3)
+> **Обновлён:** 2026-05-06 11:45 (UTC+3)
 
 ---
 
@@ -10,11 +10,11 @@
 | Параметр | Значение |
 |---|---|
 | **PHASE** | `1 — MVP Implementation` |
-| **STEP** | `1.9 — Basic Text /report Command ACCEPTED` |
-| **AGENT STATUS** | `WAITING_FOR_OWNER_APPROVAL_TO_START_NEXT_PHASE` |
-| **LAST COMPLETED** | `Phase 1.9 ACCEPTED. Final verification: 47/47 Phase 1.9 + 16/16 Phase 1.8-B + 19/19 Phase 1.8-A + 20/20 Phase 1.7 + 30/30 Phase 1.6-B + 73/73 Phase 1.6-A + 13/13 typecheck+lint = 218/218 PASS. Implementation commit e060edb; workflow sync dffb53e, 1ec649e; tag phase-1.9-accepted pushed.` |
-| **BLOCKER** | Owner approval required to start Phase 1.10 |
-| **NEXT ACTION** | Prepare next phase advisory only — do not implement |
+| **STEP** | `1.10 — Slash-Command Guard + Inline /help — READY_FOR_OWNER_ACCEPTANCE` |
+| **AGENT STATUS** | `READY_FOR_OWNER_ACCEPTANCE` |
+| **LAST COMPLETED** | `Phase 1.10 implementation complete. 30/30 Phase 1.10 + 47/47 Phase 1.9 + 16/16 Phase 1.8-B + 19/19 Phase 1.8-A + 20/20 Phase 1.7 + 30/30 Phase 1.6-B + 73/73 Phase 1.6-A + 13/13 typecheck+lint = 248/248 PASS. Traceability ✅ Security ✅ Scope Guard ✅.` |
+| **BLOCKER** | Owner explicit acceptance required before Phase 1.10 is marked ACCEPTED |
+| **NEXT ACTION** | Owner acceptance of Phase 1.10 — do not proceed to Phase 1.11 |
 
 ---
 
@@ -99,30 +99,32 @@ midas-monorepo/
 
 ---
 
-## 6. ТЕКУЩАЯ ФАЗА — PHASE 1.9: BASIC TEXT /report COMMAND
+## 6. ТЕКУЩАЯ ФАЗА — PHASE 1.10: SLASH-COMMAND GUARD + INLINE /help
 
-> ✅ **ACCEPTED. Implementation commit `e060edb`. Workflow sync commits `dffb53e`, `1ec649e`. Tag `phase-1.9-accepted` pushed.**
+> 🔶 **IN_PROGRESS / READY_FOR_OWNER_ACCEPTANCE. Not ACCEPTED until owner explicitly accepts.**
 
 **Результат:**
-- `/report` command implemented in `webhook.route.ts` (intercepted before AI parse flow)
-- Current UTC month only, no custom date ranges
-- Raw positive sums grouped by `transaction_intent` (expense, income, debt_given, debt_received, transfer)
-- No `/balance`, no `/category`, no `/add_category`
-- No exchange-rate conversion, no debt routing, no transfer logic
-- `withTenantTransaction(workspaceId, userId, fn)` used for SEC-03 tenant isolation
-- Defense-in-depth: explicit `WHERE workspace_id = $1` alongside RLS
-- Decimal-safe formatting: no `Number()` / `parseFloat()` in financial paths (SEC-02)
-- Tests: 218/218 PASS (47 Phase 1.9 + 16 Phase 1.8-B + 19 Phase 1.8-A + 20 Phase 1.7 + 30 Phase 1.6-B + 73 Phase 1.6-A + 13 typecheck+lint)
-- Commit `e060edb`
+- `parseCommandToken(text)` — новая helper-функция в `webhook.route.ts`.
+  Парсит первый токен сообщения; `@BotName` суффикс стрипается; `/reportabc` ≠ `/report` (точный токен).
+- `KNOWN_COMMANDS = new Set(['/start', '/report', '/help'])` — множество реализованных команд.
+- `/help` (5d) — отвечает русским текстом со списком 3 команд, не лезет в AI parse.
+- Slash-command guard (5e) — любая команда с `/`, не входящая в `KNOWN_COMMANDS`, возвращает:
+  `"Команда не распознана или пока находится в разработке."` — без AI parse, без enqueue.
+- Свободный текст (без `/`) — падает в AI parse ровно как и прежде (без изменений).
+- `/start` и `/report` — переработаны в блок `if (commandToken !== null)` (поведение не изменилось).
+- Нет command-registry.ts, нет рефакторинга роутинга, нет новых зависимостей.
+- Нет `/balance`, `/category`, `/add_category`, нет миграций, нет изменений AI.
+- Tests: 248/248 PASS (30 Phase 1.10 + 47 Phase 1.9 + 16 Phase 1.8-B + 19 Phase 1.8-A + 20 Phase 1.7 + 30 Phase 1.6-B + 73 Phase 1.6-A + 13 typecheck+lint)
+- Traceability ✅ Adversarial Security ✅ Scope Guard ✅
 
 ---
 
-## 7. MCP REQUIREMENTS (следующий шаг — acceptance audit only)
+## 7. MCP REQUIREMENTS (Phase 1.10 — acceptance audit)
 
 | MCP-сервер | Доступ | Примечание |
 |---|---|---|
-| Filesystem MCP | ✅ read-only | Только чтение файлов для аудита. Никаких записей. |
-| Postgres MCP | ⚪ read-only (при необходимости) | Schema / query verification only |
+| Filesystem MCP | ✅ read-only | Чтение файлов для аудита. Никаких записей. |
+| Postgres MCP | ⚪ не нужен | Phase 1.10 не добавляет SQL / миграций |
 | GitHub MCP | ⚪ read-only (опционально) | Если нужно проверить remote |
 | Browser / DevTools | ❌ Запрещён | — |
 | Notion MCP | ❌ Запрещён | — |
@@ -131,24 +133,20 @@ midas-monorepo/
 
 ---
 
-## 8. ФАЙЛЫ ДЛЯ ЧТЕНИЯ В НОВОМ ЧАТЕ (следующий шаг — acceptance audit)
+## 8. ФАЙЛЫ ДЛЯ ЧТЕНИЯ В НОВОМ ЧАТЕ (Phase 1.10 acceptance audit)
 
 **Required (читать обязательно):**
 ```
 project_config.md
 workflow_state.md
-apps/telegram-bot/src/services/report.service.ts                       # Phase 1.9 report logic
-apps/telegram-bot/src/routes/webhook.route.ts                          # /report command handler
-apps/telegram-bot/src/services/workspace-resolver.ts                   # userId in return
-packages/database/smoke-test-phase19.mjs                               # Phase 1.9 tests
-packages/shared/src/index.ts
+apps/telegram-bot/src/routes/webhook.route.ts          # Phase 1.10: parseCommandToken, KNOWN_COMMANDS, /help, guard
+packages/database/smoke-test-phase110.mjs              # Phase 1.10 tests (30 tests, no DB)
 ```
 
 **Optional (читать при необходимости):**
 ```
-packages/database/smoke-test-phase18b.mjs                               # Phase 1.8-B tests
-packages/database/smoke-test-phase18a.mjs                               # Phase 1.8-A tests
-packages/database/migrations/1778008338096_transaction-intent.js        # Phase 1.8-A schema
+apps/telegram-bot/src/services/report.service.ts       # Phase 1.9 report logic (referenced in route)
+packages/database/smoke-test-phase19.mjs               # Phase 1.9 regression
 ```
 
 **Do not load (не читать — тратит контекст):**
@@ -156,9 +154,10 @@ packages/database/migrations/1778008338096_transaction-intent.js        # Phase 
 docs/event_storming_part*.md
 docs/client-roadmap-architecture-overview.md
 docs/adr/*
-packages/ai-core/                           # unless audit specifically concerns AI
+packages/ai-core/
 packages/database/smoke-test-phase16{a,b}.mjs
 packages/database/smoke-test-phase17.mjs
+packages/database/smoke-test-phase18{a,b}.mjs
 Crypto / Notion / Sheets / Mini App files
 ```
 
@@ -168,9 +167,9 @@ Crypto / Notion / Sheets / Mini App files
 
 > Read workflow_state.md and project_config.md first.
 > Before implementation, read workflow_state.md section 11 — Agent Operating Protocol and follow it strictly.
-> Phase 1.9 (Basic Text /report Command) is ACCEPTED. Commit `e060edb` on origin/main. Tag `phase-1.9-accepted` pushed.
-> Do not re-implement Phase 1.9. Do not implement next phase without owner APPROVED.
-> Prepare next phase advisory only — do not implement.
+> Phase 1.9 (Basic Text /report Command) is ACCEPTED. Tag `phase-1.9-accepted` pushed.
+> Phase 1.10 (Slash-Command Guard + Inline /help) is READY_FOR_OWNER_ACCEPTANCE. Do not mark as ACCEPTED until owner explicitly accepts.
+> Do not implement Phase 1.11 or any future phase without owner APPROVED.
 
 ---
 
@@ -215,6 +214,7 @@ Crypto / Notion / Sheets / Mini App files
 | 2026-05-06 00:27 | Phase 1.9 Basic Text /report Command implementation complete. `report.service.ts`: monthly report grouped by `transaction_intent`, `SUM(base_amount)` via NUMERIC, UTC month boundaries, Russian text output. `webhook.route.ts`: `/report` command intercepted before AI parse, resolves workspace+userId, calls report service. `workspace-resolver.ts`: `userId` added to `WorkspaceResolverResult`. Defense-in-depth: explicit `WHERE workspace_id = $1` alongside RLS. 47/47 Phase 1.9 tests PASS. 16/16 Phase 1.8-B PASS. 19/19 Phase 1.8-A PASS. 20/20 Phase 1.7 PASS. 30/30 Phase 1.6-B PASS. 73/73 Phase 1.6-A PASS. 13/13 typecheck+lint PASS. Total: 218/218. Traceability ✅ Security ✅ Scope Guard ✅. Status: READY_FOR_OWNER_ACCEPTANCE. |
 | 2026-05-06 09:08 | workflow_state.md sync after Phase 1.9 implementation. Sections 1, 2, 6–9 corrected: Section 1 set to WAITING_FOR_OWNER_ACCEPTANCE_OF_PHASE_1_9; Section 2 Phase 1.9 row expanded with full artifact paths; Section 6 updated to Phase 1.9 results; Section 7 set to acceptance-audit-only MCP access; Section 8 refreshed with Phase 1.9 audit file list; Section 9 updated with acceptance handoff. No code changes. |
 | 2026-05-06 10:00 | Phase 1.9 ACCEPTED by owner after final verification. Full test run: 47/47 Phase 1.9 + 16/16 Phase 1.8-B + 19/19 Phase 1.8-A + 20/20 Phase 1.7 + 30/30 Phase 1.6-B + 73/73 Phase 1.6-A + 13/13 typecheck+lint = 218/218 PASS. Git clean pre/post tests. origin/main in sync. project_config.md unchanged (v1.2). Section 14 self-audit: all ✅. Committed workflow_state.md, pushed tag phase-1.9-accepted. Status: WAITING_FOR_OWNER_APPROVAL_TO_START_NEXT_PHASE. |
+| 2026-05-06 11:45 | Phase 1.10 Slash-Command Guard + Inline /help implementation complete. `parseCommandToken()` (exact first-token, @BotName strip), `KNOWN_COMMANDS` set, `/help` handler (Russian, lists /start /report /help), unknown-slash guard (5e). No command-registry, no new deps, no migrations, no AI changes. 30/30 Phase 1.10 + 47/47 Phase 1.9 + 16/16 Phase 1.8-B + 19/19 Phase 1.8-A + 20/20 Phase 1.7 + 30/30 Phase 1.6-B + 73/73 Phase 1.6-A + 13/13 typecheck+lint = 248/248 PASS. Traceability ✅ Adversarial Security ✅ Scope Guard ✅. Status: READY_FOR_OWNER_ACCEPTANCE. |
 
 ---
 

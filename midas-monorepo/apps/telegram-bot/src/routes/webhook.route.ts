@@ -26,6 +26,12 @@
  *   SEC-12: Logging privacy
  *     → `raw_text` is NEVER logged. Only job metadata is logged.
  *
+ * Slash-command routing (Phase 1.10):
+ *   Known commands: /start, /report, /help
+ *   Unknown slash commands (e.g. /balance, /category) are rejected with a safe
+ *   Russian message and do NOT reach the AI parse queue.
+ *   Normal free-text (no leading "/") continues to AI parse exactly as before.
+ *
  * Flow:
  *   1. Receive TelegramUpdate JSON
  *   2. Zod-validate basic shape
@@ -93,6 +99,58 @@ const telegramUpdateSchema = z.object({
   message: telegramMessageSchema.optional(),
   callback_query: telegramCallbackQuerySchema.optional(),
 });
+
+// ─────────────────────────────────────────────────────────────
+// Command routing helpers (Phase 1.10)
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Parse the first token of a Telegram message text as a slash command.
+ *
+ * Returns the command string (e.g. "/start", "/report") or null if the
+ * text does not start with "/".
+ *
+ * Rules:
+ *   - Leading whitespace is stripped (trimStart).
+ *   - The first whitespace-delimited token is taken.
+ *   - A @BotName suffix is stripped (e.g. /help@MyBot → /help).
+ *   - /reportabc is returned as-is ("/reportabc") — NOT treated as /report.
+ *
+ * Limitation: Telegram bot-mention stripping is best-effort.
+ * If a bot name contains unusual characters the result may be unexpected,
+ * but all commands are then cross-checked against KNOWN_COMMANDS so unknown
+ * results are safely blocked.
+ */
+function parseCommandToken(text: string): string | null {
+  const trimmed = text.trimStart();
+  if (!trimmed.startsWith('/')) return null;
+  const token = trimmed.split(/\s+/)[0] ?? '';
+  // Strip @BotName suffix if present
+  const atIdx = token.indexOf('@');
+  return atIdx === -1 ? token : token.slice(0, atIdx);
+}
+
+/**
+ * Set of implemented slash commands (Phase 1.10).
+ * Any command NOT in this set is blocked before AI parse.
+ * Extend only when a new command is implemented in a future phase.
+ */
+const KNOWN_COMMANDS = new Set(['/start', '/report', '/help']);
+
+/**
+ * Russian-language help text listing all currently available commands.
+ * Phase 1.10: /start, /report, /help only.
+ */
+const HELP_TEXT =
+  'ℹ️ <b>Доступные команды Midas:</b>\n\n' +
+  '/start — Регистрация и приветствие\n' +
+  '/report — Отчёт о доходах и расходах за текущий месяц\n' +
+  '/help — Показать это сообщение\n\n' +
+  'Для записи транзакции просто напишите мне сообщение, например:\n' +
+  '<i>«Потратил 500 рублей на кофе»</i>';
+
+/** Message returned for any unrecognised slash command. */
+const UNKNOWN_COMMAND_TEXT = 'Команда не распознана или пока находится в разработке.';
 
 // ─────────────────────────────────────────────────────────────
 // Route plugin
@@ -254,79 +312,115 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
     // Unix timestamp → ISO string
     const receivedAt = new Date(message.date * 1000).toISOString();
 
-    // ── Step 5b: /start command — onboarding flow (Phase 1.5) ─
-    // /start is handled separately: onboard + welcome + return 200 (no enqueue).
-    // Rate-limited to prevent spam (1 call per 60s per user via Redis SET NX EX).
-    if (message.text.trimStart().startsWith('/start')) {
-      const allowed = await checkOnboardingRateLimit(telegramUserId);
+    // ── Step 5b–5e: Slash-command routing (Phase 1.10) ────────
+    //
+    // Dispatch model:
+    //   - Parse first token. If not a slash command → fall through to AI parse.
+    //   - /start  → onboarding flow (Phase 1.5)
+    //   - /report → monthly report (Phase 1.9)
+    //   - /help   → inline help text (Phase 1.10)
+    //   - any other slash command → blocked (Phase 1.10 guard)
+    //
+    // parseCommandToken returns null for free text → AI parse path is unchanged.
 
-      if (!allowed) {
-        // Rate-limited: silent 200. Do NOT send another message (would spam the user).
+    const commandToken = parseCommandToken(message.text);
+
+    if (commandToken !== null) {
+      // ── 5b: /start ───────────────────────────────────────────
+      if (commandToken === '/start') {
+        const allowed = await checkOnboardingRateLimit(telegramUserId);
+
+        if (!allowed) {
+          // Rate-limited: silent 200. Do NOT send another message (would spam the user).
+          request.log.info({
+            msg: '[midas:bot:webhook] /start rate-limited',
+            telegramUserId,
+          });
+          await reply.status(200).send({ ok: true });
+          return;
+        }
+
+        // Run onboarding: find or create User + Workspace + Membership
+        try {
+          const resolved = await resolveWorkspace(telegramUserId, chatId);
+          request.log.info({
+            msg: '[midas:bot:webhook] /start onboarding complete',
+            telegramUserId,
+            workspaceId: resolved.workspaceId,
+            isNewUser: resolved.isNewUser,
+          });
+
+          // If existing user, send a re-greeting (resolveWorkspace only sends for isNewUser)
+          if (!resolved.isNewUser) {
+            void sendMessage(
+              chatId,
+              '✅ Вы уже зарегистрированы. Просто отправьте сообщение о расходе или доходе.',
+            );
+          }
+        } catch (err: unknown) {
+          const errorClass = err instanceof Error ? err.constructor.name : 'UnknownError';
+          request.log.error({
+            msg: '[midas:bot:webhook] /start onboarding failed',
+            telegramUserId,
+            errorClass,
+          });
+          // Non-throwing: return 200 to Telegram
+        }
+
+        await reply.status(200).send({ ok: true });
+        return;
+      }
+
+      // ── 5c: /report ──────────────────────────────────────────
+      if (commandToken === '/report') {
+        try {
+          const resolved = await resolveWorkspace(telegramUserId, chatId);
+          const reportText = await getMonthlyReport(resolved.workspaceId, resolved.userId);
+          void sendMessage(chatId, reportText);
+
+          request.log.info({
+            msg: '[midas:bot:webhook] /report sent',
+            telegramUserId,
+            workspaceId: resolved.workspaceId,
+          });
+        } catch (err: unknown) {
+          const errorClass = err instanceof Error ? err.constructor.name : 'UnknownError';
+          request.log.error({
+            msg: '[midas:bot:webhook] /report failed',
+            telegramUserId,
+            errorClass,
+          });
+          void sendMessage(chatId, '⚠️ Не удалось сформировать отчёт. Попробуйте позже.');
+        }
+
+        await reply.status(200).send({ ok: true });
+        return;
+      }
+
+      // ── 5d: /help (Phase 1.10) ───────────────────────────────
+      if (commandToken === '/help') {
+        void sendMessage(chatId, HELP_TEXT);
         request.log.info({
-          msg: '[midas:bot:webhook] /start rate-limited',
+          msg: '[midas:bot:webhook] /help sent',
           telegramUserId,
         });
         await reply.status(200).send({ ok: true });
         return;
       }
 
-      // Run onboarding: find or create User + Workspace + Membership
-      try {
-        const resolved = await resolveWorkspace(telegramUserId, chatId);
+      // ── 5e: Unknown slash-command guard (Phase 1.10) ─────────
+      // Any text starting with "/" that is NOT in KNOWN_COMMANDS is blocked here.
+      // It does NOT reach the AI parse queue.
+      if (!KNOWN_COMMANDS.has(commandToken)) {
+        void sendMessage(chatId, UNKNOWN_COMMAND_TEXT);
         request.log.info({
-          msg: '[midas:bot:webhook] /start onboarding complete',
+          msg: '[midas:bot:webhook] unknown slash command blocked',
           telegramUserId,
-          workspaceId: resolved.workspaceId,
-          isNewUser: resolved.isNewUser,
+          commandToken,
         });
-
-        // If existing user, send a re-greeting (resolveWorkspace only sends for isNewUser)
-        if (!resolved.isNewUser) {
-          void sendMessage(
-            chatId,
-            '✅ Вы уже зарегистрированы. Просто отправьте сообщение о расходе или доходе.',
-          );
-        }
-      } catch (err: unknown) {
-        const errorClass = err instanceof Error ? err.constructor.name : 'UnknownError';
-        request.log.error({
-          msg: '[midas:bot:webhook] /start onboarding failed',
-          telegramUserId,
-          errorClass,
-        });
-        // Non-throwing: return 200 to Telegram
+        await reply.status(200).send({ ok: true });
+        return;
       }
-
-      await reply.status(200).send({ ok: true });
-      return;
-    }
-
-    // ── Step 5c: /report command — monthly report (Phase 1.9) ─
-    // /report is handled as a command: resolve workspace → generate report → send text → return 200.
-    // It does NOT enqueue to AI parse queue.
-    if (message.text.trimStart().startsWith('/report')) {
-      try {
-        const resolved = await resolveWorkspace(telegramUserId, chatId);
-        const reportText = await getMonthlyReport(resolved.workspaceId, resolved.userId);
-        void sendMessage(chatId, reportText);
-
-        request.log.info({
-          msg: '[midas:bot:webhook] /report sent',
-          telegramUserId,
-          workspaceId: resolved.workspaceId,
-        });
-      } catch (err: unknown) {
-        const errorClass = err instanceof Error ? err.constructor.name : 'UnknownError';
-        request.log.error({
-          msg: '[midas:bot:webhook] /report failed',
-          telegramUserId,
-          errorClass,
-        });
-        void sendMessage(chatId, '⚠️ Не удалось сформировать отчёт. Попробуйте позже.');
-      }
-
-      await reply.status(200).send({ ok: true });
-      return;
     }
 
     // ── Step 6: SEC-03 — Resolve workspace from trusted source
