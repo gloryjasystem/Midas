@@ -62,6 +62,7 @@ import {
   addCategory,
   parseAddCategoryArgs,
 } from '../services/category.service.js';
+import { getAccountList } from '../services/account.service.js';
 
 import { callbackConfirmQueue } from '../queues/callback-confirm-queue.js';
 
@@ -140,7 +141,7 @@ function parseCommandToken(text: string): string | null {
  * Any command NOT in this set is blocked before AI parse.
  * Extend only when a new command is implemented in a future phase.
  */
-const KNOWN_COMMANDS = new Set(['/start', '/report', '/help', '/category', '/add_category']);
+const KNOWN_COMMANDS = new Set(['/start', '/report', '/help', '/category', '/add_category', '/accounts']);
 
 /**
  * Russian-language help text listing all currently available commands.
@@ -154,6 +155,7 @@ const HELP_TEXT =
   '/report — Отчёт о доходах и расходах за текущий месяц\n' +
   '/category — Список категорий вашего кошелька\n' +
   '/add_category <группа> <название> — Добавить категорию\n' +
+  '/accounts — Список ваших счетов\n' +
   '/help — Показать это сообщение\n\n' +
   'Группы для /add_category: Бизнес, Жизнь\n' +
   'Пример: /add_category Жизнь Кофе\n\n' +
@@ -428,6 +430,32 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
             errorClass,
           });
           void sendMessage(chatId, '⚠️ Не удалось получить список категорий. Попробуйте позже.');
+        }
+
+        await reply.status(200).send({ ok: true });
+        return;
+      }
+
+      // ── 5d-acc: /accounts (Phase 1.14) ───────────────────────
+      if (commandToken === '/accounts') {
+        try {
+          const resolved = await resolveWorkspace(telegramUserId, chatId);
+          const accountText = await getAccountList(resolved.workspaceId, resolved.userId);
+          void sendMessage(chatId, accountText);
+
+          request.log.info({
+            msg: '[midas:bot:webhook] /accounts sent',
+            telegramUserId,
+            workspaceId: resolved.workspaceId,
+          });
+        } catch (err: unknown) {
+          const errorClass = err instanceof Error ? err.constructor.name : 'UnknownError';
+          request.log.error({
+            msg: '[midas:bot:webhook] /accounts failed',
+            telegramUserId,
+            errorClass,
+          });
+          void sendMessage(chatId, '⚠️ Не удалось получить список счетов. Попробуйте позже.');
         }
 
         await reply.status(200).send({ ok: true });

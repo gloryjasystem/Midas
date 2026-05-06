@@ -1,7 +1,7 @@
 # WORKFLOW_STATE.MD — Диспетчер задач ИИ-агента Midas
 
 > **Тип:** MUTABLE — кратковременная память агента. Обновляется на каждом шаге работы.
-> **Обновлён:** 2026-05-06 19:03 (UTC+3)
+> **Обновлён:** 2026-05-06 19:35 (UTC+3)
 
 ---
 
@@ -10,11 +10,11 @@
 | Параметр | Значение |
 |---|---|
 | **PHASE** | `1 — MVP Implementation` |
-| **STEP** | `1.13 — /add_category Strict-Format Command — ACCEPTED` |
-| **AGENT STATUS** | `WAITING_FOR_OWNER_APPROVAL_TO_START_NEXT_PHASE` |
-| **LAST COMPLETED** | `Phase 1.13 ACCEPTED by owner. 437/437 tests PASS. Traceability ✅ Adversarial Security ✅ Scope Guard ✅. Implementation commit eac55a9; workflow_state sync commit 09dba48. Tag phase-1.13-accepted pushed.` |
-| **BLOCKER** | None — awaiting owner approval to start next phase |
-| **NEXT ACTION** | Prepare next phase advisory only — do not implement |
+| **STEP** | `1.14 — /accounts Read-Only List Command — READY_FOR_OWNER_ACCEPTANCE` |
+| **AGENT STATUS** | `READY_FOR_OWNER_ACCEPTANCE` |
+| **LAST COMPLETED** | `Phase 1.14 implementation complete. 70/70 Phase 1.14 + 437/437 total regression PASS. Traceability ✅ Adversarial Security ✅ Scope Guard ✅. 13/13 typecheck+lint PASS. No migrations. No new deps. Awaiting owner acceptance.` |
+| **BLOCKER** | None — awaiting owner acceptance |
+| **NEXT ACTION** | Owner reviews and writes ACCEPTED or requests fixes |
 
 ---
 
@@ -117,13 +117,40 @@ midas-monorepo/
 
 ---
 
-## 7. MCP REQUIREMENTS (Phase 1.13 — ACCEPTED / Advisory only)
+## 6b. ТЕКУЩАЯ ФАЗА — PHASE 1.14: /accounts READ-ONLY LIST COMMAND
+
+> 🔄 **READY_FOR_OWNER_ACCEPTANCE. 70/70 Phase 1.14 + 507/507 total regression PASS. Traceability ✅ Adversarial Security ✅ Scope Guard ✅.**
+
+**Результат:**
+- `account.service.ts` (NEW): `getAccountList()` (withTenantTransaction, explicit WHERE workspace_id = $1, flat list ORDER BY type name, Russian type labels, empty-state message, Russian pluralization).
+- `webhook.route.ts`: KNOWN_COMMANDS 5→6, HELP_TEXT updated (строка /accounts), обработчик `5d-acc`.
+- `smoke-test-phase114.mjs`: 70 тестов PASS (DB + логика; midas_app RLS USING верифицирован; тенант изоляция; пустой стейт; маппинг меток; scope guard).
+- Нет миграций, нет новых зависимостей, нет AI/queue changes.
+- 70/70 Phase 1.14 + 74/74 Phase 1.13 + 37/37 Phase 1.12 + 78/78 Phase 1.11 + 30/30 Phase 1.10 + 47/47 Phase 1.9 + 16/16 Phase 1.8-B + 19/19 Phase 1.8-A + 20/20 Phase 1.7 + 30/30 Phase 1.6-B + 73/73 Phase 1.6-A + 13/13 typecheck+lint = 507/507 PASS.
+- Traceability ✅ Adversarial Security ✅ Scope Guard ✅
+
+**Scope:**
+- `apps/telegram-bot/src/services/account.service.ts` (NEW): `getAccountList()` — `withTenantTransaction`, explicit `WHERE workspace_id = $1`, flat list sorted by type+name, Russian type labels (manual=Ручной ввод, crypto_read_only=Крипто, bank_sync=Банк), empty-state message.
+- `apps/telegram-bot/src/routes/webhook.route.ts` (MODIFY): `/accounts` added to `KNOWN_COMMANDS` (5→6), HELP_TEXT updated, handler block added.
+- `packages/database/smoke-test-phase114.mjs` (NEW): Phase 1.14 smoke tests.
+
+**Запрещено в этой фазе:**
+- `/add_account` (Phase 1.15)
+- Миграции
+- UNIQUE constraint на account_sources
+- `/balance`
+- AI / queue / worker изменения
+- Новые зависимости
+
+---
+
+## 7. MCP REQUIREMENTS (Phase 1.14 — IN_PROGRESS)
 
 | MCP-сервер | Доступ | Примечание |
 |---|---|---|
-| Filesystem MCP | ✅ read-only | Чтение workflow_state.md, project_config.md для advisory |
-| Postgres MCP | ❌ не нужен | Advisory-only — без DB-изменений |
-| GitHub MCP | ⚪ read-only (опционально) | Проверка remote sync при необходимости |
+| Filesystem MCP | ✅ read/write (project dir only) | Создание account.service.ts, изменение webhook.route.ts, новый smoke-test |
+| Postgres MCP | ✅ local dev read/write | Запуск smoke-тестов, верификация RLS |
+| GitHub MCP | ⚪ read-only (опционально) | Проверка remote sync после acceptance |
 | Browser / DevTools | ❌ Запрещён | — |
 | Notion MCP | ❌ Запрещён | — |
 | Google Sheets | ❌ Запрещён | — |
@@ -131,7 +158,7 @@ midas-monorepo/
 
 ---
 
-## 8. ФАЙЛЫ ДЛЯ ЧТЕНИЯ В НОВОМ ЧАТЕ (Advisory — следующая фаза)
+## 8. ФАЙЛЫ ДЛЯ ЧТЕНИЯ В НОВОМ ЧАТЕ (Phase 1.14 — Implementation)
 
 **Required (читать обязательно):**
 ```
@@ -139,11 +166,13 @@ project_config.md
 workflow_state.md
 ```
 
-**Optional (читать при необходимости — для advisory следующей фазы):**
+**Optional (читать при необходимости):**
 ```
-apps/telegram-bot/src/routes/webhook.route.ts        # Текущее состояние роутера
-apps/telegram-bot/src/services/category.service.ts   # Текущее состояние сервиса категорий
-packages/database/smoke-test-phase113.mjs            # Phase 1.13 тесты — reference паттерн
+apps/telegram-bot/src/routes/webhook.route.ts           # Текущее состояние роутера
+apps/telegram-bot/src/services/category.service.ts      # Reference pattern для account.service.ts
+apps/telegram-bot/src/services/account.service.ts       # Новый файл (после создания)
+packages/database/smoke-test-phase113.mjs               # Reference pattern для smoke tests
+packages/database/smoke-test-phase114.mjs               # Phase 1.14 тесты (после создания)
 ```
 
 **Do not load (не читать — тратит контекст):**
@@ -166,10 +195,11 @@ Crypto / Notion / Sheets / Mini App files
 
 > Read workflow_state.md and project_config.md first.
 > Before implementation, read workflow_state.md section 11 — Agent Operating Protocol and follow it strictly.
-> Phase 1.13 (/add_category Strict-Format Command) is ACCEPTED. Implementation commit `eac55a9`. Tag `phase-1.13-accepted` pushed.
-> AGENT STATUS: WAITING_FOR_OWNER_APPROVAL_TO_START_NEXT_PHASE.
-> Do not implement Phase 1.14 or any future phase without explicit owner APPROVED.
-> Next action: prepare phase advisory only — present options, risks, scope. Wait for approval before any code.
+> Phase 1.14 (/accounts Read-Only List Command) is IN_PROGRESS. Owner APPROVED.
+> AGENT STATUS: IMPLEMENTING_PHASE_1_14.
+> Read Section 6b for full Phase 1.14 scope.
+> Do not implement /add_account, /balance, or any migration.
+> Do not mark ACCEPTED until owner explicitly approves.
 
 ---
 
