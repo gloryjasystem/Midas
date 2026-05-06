@@ -1,7 +1,7 @@
 # WORKFLOW_STATE.MD — Диспетчер задач ИИ-агента Midas
 
 > **Тип:** MUTABLE — кратковременная память агента. Обновляется на каждом шаге работы.
-> **Обновлён:** 2026-05-06 22:50 (UTC+3)
+> **Обновлён:** 2026-05-06 22:46 (UTC+3)
 
 ---
 
@@ -10,11 +10,11 @@
 | Параметр | Значение |
 |---|---|
 | **PHASE** | `1 — MVP Implementation` |
-| **STEP** | `1.16 — account_sources UNIQUE Constraint Migration — READY_FOR_OWNER_ACCEPTANCE` |
-| **AGENT STATUS** | `READY_FOR_OWNER_ACCEPTANCE` |
-| **LAST COMPLETED** | `Phase 1.16 implementation complete. 24/24 Phase 1.16 + 559/559 regression + 13/13 typecheck+lint = 583/583 PASS. Traceability ✅ Adversarial Security ✅ Scope Guard ✅. Migration pre-flight: 0 duplicates. Constraint account_sources_workspace_id_name_key confirmed in pg_constraint.` |
-| **BLOCKER** | None — awaiting owner acceptance |
-| **NEXT ACTION** | Owner review and acceptance of Phase 1.16 |
+| **STEP** | `1.16 — account_sources UNIQUE Constraint Migration — COMPLETED / ACCEPTED` |
+| **AGENT STATUS** | `WAITING_FOR_OWNER_APPROVAL_TO_START_NEXT_PHASE` |
+| **LAST COMPLETED** | `Phase 1.16 ACCEPTED. 24/24 Phase 1.16 + 559/559 regression + 13/13 typecheck+lint = 583/583 PASS. Traceability ✅ Adversarial Security ✅ Scope Guard ✅. Implementation commit 3ad45e3. Tag phase-1.16-accepted pushed.` |
+| **BLOCKER** | None — awaiting owner approval to start Phase 1.17 |
+| **NEXT ACTION** | Prepare next phase advisory only — do not implement |
 
 ---
 
@@ -43,7 +43,7 @@
 | 1.13 /add_category Strict-Format Command | ✅ ACCEPTED | `category.service.ts` (`parseAddCategoryArgs`, `resolveGroup`, `addCategory`, `AddCategoryResult`), `webhook.route.ts` (KNOWN_COMMANDS 4→5, HELP_TEXT, handler `5e-add`), `smoke-test-phase113.mjs` — 74/74 Phase 1.13 + 437/437 total regression PASS. Traceability ✅ Adversarial Security ✅ Scope Guard ✅. Implementation commit `eac55a9`, tag `phase-1.13-accepted` pushed. |
 | 1.14 /accounts Read-Only List Command | ✅ ACCEPTED | `apps/telegram-bot/src/services/account.service.ts` (new), `webhook.route.ts` (KNOWN_COMMANDS 5→6, HELP_TEXT, handler `5d-acc`), `smoke-test-phase114.mjs` — 70/70 Phase 1.14 + 507/507 total regression PASS. Traceability ✅ Adversarial Security ✅ Scope Guard ✅. Implementation commit `362b05b`, tag `phase-1.14-accepted` pushed. Note: HTML escaping for account/category names must be added before user-controlled write paths (/add_account). |
 | 1.15 HTML Escaping Hardening | ✅ ACCEPTED | `apps/telegram-bot/src/utils/html-escape.ts` (NEW), `account.service.ts` (MODIFY), `category.service.ts` (MODIFY), `webhook.route.ts` (MODIFY), `smoke-test-phase115.mjs` (NEW) — 52/52 Phase 1.15 + 559/559 total PASS. Traceability ✅ Adversarial Security ✅ Scope Guard ✅. Traceability fix: `groupToken` escaped in error message. Implementation commit `4f63a91`; workflow_state sync commit `88ebae3`; test-count fix commit `45b1eec`. Tag `phase-1.15-accepted` pushed. |
-| 1.16 account_sources UNIQUE Constraint Migration | 🔄 READY_FOR_ACCEPTANCE | `packages/database/migrations/1778200000000_account-sources-unique-name.js` (NEW), `packages/database/smoke-test-phase116.mjs` (NEW) — UNIQUE(workspace_id, name) added; pre-flight 0 duplicates; 24/24 Phase 1.16 + 583/583 total PASS. Traceability ✅ Adversarial Security ✅ Scope Guard ✅. Awaiting owner acceptance. |
+| 1.16 account_sources UNIQUE Constraint Migration | ✅ ACCEPTED | `packages/database/migrations/1778200000000_account-sources-unique-name.js` (NEW), `packages/database/smoke-test-phase116.mjs` (NEW) — UNIQUE(workspace_id, name) added; pre-flight 0 duplicates; 24/24 Phase 1.16 + 583/583 total PASS. Traceability ✅ Adversarial Security ✅ Scope Guard ✅. Implementation commit `3ad45e3`. Tag `phase-1.16-accepted` pushed. |
 
 ---
 
@@ -108,7 +108,7 @@ midas-monorepo/
 
 ## 6. ТЕКУЩАЯ ФАЗА — PHASE 1.16: account_sources UNIQUE CONSTRAINT MIGRATION
 
-> ✅ **READY_FOR_OWNER_ACCEPTANCE. 24/24 Phase 1.16 + 583/583 total PASS. Implementation complete.**
+> ✅ **COMPLETED / ACCEPTED. 24/24 Phase 1.16 + 583/583 total PASS. Phase 1.16 accepted by owner. Awaiting approval to start Phase 1.17.**
 
 **Objective:**
 Add `UNIQUE(workspace_id, name)` constraint to `account_sources` table via a single migration.
@@ -187,9 +187,8 @@ Crypto / Notion / Sheets / Mini App files
 
 > Read workflow_state.md and project_config.md first.
 > Before implementation, read workflow_state.md section 11 — Agent Operating Protocol and follow it strictly.
-> Phase 1.16 (account_sources UNIQUE Constraint Migration) is IN_PROGRESS. Owner APPROVED.
-> Read required files from Section 8 before implementing.
-> AGENT STATUS: IN_PROGRESS — Phase 1.16.
+> Phase 1.16 (account_sources UNIQUE Constraint Migration) is COMPLETED / ACCEPTED.
+> AGENT STATUS: WAITING_FOR_OWNER_APPROVAL_TO_START_NEXT_PHASE.
 > Do not implement Phase 1.17 or any future phase without explicit owner APPROVED.
 > Do not implement /add_account, /balance, or new dependencies.
 
@@ -250,6 +249,7 @@ Crypto / Notion / Sheets / Mini App files
 | 2026-05-06 21:56 | workflow_state.md test-count fix: 557/557 → 559/559 (final audit confirmed actual total; prior count incorrectly treated 507 as pure smoke-test baseline, double-counting 13 typecheck+lint tasks). Correct breakdown: 52 (Ph1.15) + 494 (Ph1.6-A through Ph1.14 smoke) + 13 (typecheck+lint) = 559. No code changes. |
 | 2026-05-06 22:04 | Phase 1.15 accepted after final verification and workflow_state test-count fix; HTML escaping hardening implemented; 559/559 tests passed; Traceability Review PASS WITH FIXES; Adversarial Security Review PASS; Scope Guard Review PASS; implementation commit 4f63a91; workflow_state sync commit 88ebae3; test-count fix commit 45b1eec. Tag phase-1.15-accepted pushed. Status: WAITING_FOR_OWNER_APPROVAL_TO_START_NEXT_PHASE. |
 | 2026-05-06 22:50 | Phase 1.16 account_sources UNIQUE Constraint Migration implementation complete. Owner APPROVED. Migration `1778200000000_account-sources-unique-name.js`: `up()` pre-flight duplicate check (0 found → safe) + `ALTER TABLE account_sources ADD CONSTRAINT account_sources_workspace_id_name_key UNIQUE(workspace_id, name)`. `down()` uses DROP CONSTRAINT IF EXISTS. `smoke-test-phase116.mjs`: 24/24 PASS. No TypeScript/route/service/worker/AI changes. 24/24 Phase 1.16 + 559/559 regression + 13/13 typecheck+lint = 583/583 PASS. Traceability ✅ Adversarial Security ✅ Scope Guard ✅. Status: READY_FOR_OWNER_ACCEPTANCE. |
+| 2026-05-06 22:46 | Phase 1.16 accepted after final verification; account_sources UNIQUE(workspace_id, name) constraint implemented; 583/583 tests passed; Traceability Review PASS; Adversarial Security Review PASS; Scope Guard Review PASS; implementation commit 3ad45e3. Tag phase-1.16-accepted pushed. Status: WAITING_FOR_OWNER_APPROVAL_TO_START_NEXT_PHASE. |
 
 ---
 
