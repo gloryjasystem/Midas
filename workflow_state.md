@@ -10,11 +10,11 @@
 | Параметр | Значение |
 |---|---|
 | **PHASE** | `1 — MVP Implementation` |
-| **STEP** | `1.14 — /accounts Read-Only List Command — ACCEPTED` |
-| **AGENT STATUS** | `WAITING_FOR_OWNER_APPROVAL_TO_START_NEXT_PHASE` |
-| **LAST COMPLETED** | `Phase 1.14 ACCEPTED by owner. 507/507 tests PASS. Traceability ✅ Adversarial Security ✅ Scope Guard ✅. Implementation commit 362b05b. Tag phase-1.14-accepted pushed.` |
-| **BLOCKER** | None — awaiting owner approval to start next phase |
-| **NEXT ACTION** | Prepare next phase advisory only — do not implement |
+| **STEP** | `1.15 — HTML Escaping Hardening — READY_FOR_OWNER_ACCEPTANCE` |
+| **AGENT STATUS** | `READY_FOR_OWNER_ACCEPTANCE` |
+| **LAST COMPLETED** | `Phase 1.15 implementation complete. 52/52 Phase 1.15 + 507/507 regression + 13/13 typecheck+lint = 557/557 PASS. Traceability ✅ Adversarial Security ✅ Scope Guard ✅. Traceability fix: escapeHtml applied to groupToken in unknown-group error message.` |
+| **BLOCKER** | None — awaiting owner acceptance |
+| **NEXT ACTION** | Owner review and acceptance of Phase 1.15 |
 
 ---
 
@@ -42,6 +42,7 @@
 | 1.12 Onboarding Default Data Seeding | ✅ ACCEPTED | `migrations/1778100000000_onboarding-default-seed.js` + `1778100010000_fix-onboarding-seed-conflict.js` (7-param SECDEF function), `onboarding.service.ts` (candidateAccountId + candidateCategoryId), `smoke-test-phase112.mjs` — 37/37 Phase 1.12 + 363/363 total regression PASS. Traceability ✅ Adversarial Security ✅ Scope Guard ✅. Implementation commit `7b87eac`, tag `phase-1.12-accepted` pushed. |
 | 1.13 /add_category Strict-Format Command | ✅ ACCEPTED | `category.service.ts` (`parseAddCategoryArgs`, `resolveGroup`, `addCategory`, `AddCategoryResult`), `webhook.route.ts` (KNOWN_COMMANDS 4→5, HELP_TEXT, handler `5e-add`), `smoke-test-phase113.mjs` — 74/74 Phase 1.13 + 437/437 total regression PASS. Traceability ✅ Adversarial Security ✅ Scope Guard ✅. Implementation commit `eac55a9`, tag `phase-1.13-accepted` pushed. |
 | 1.14 /accounts Read-Only List Command | ✅ ACCEPTED | `apps/telegram-bot/src/services/account.service.ts` (new), `webhook.route.ts` (KNOWN_COMMANDS 5→6, HELP_TEXT, handler `5d-acc`), `smoke-test-phase114.mjs` — 70/70 Phase 1.14 + 507/507 total regression PASS. Traceability ✅ Adversarial Security ✅ Scope Guard ✅. Implementation commit `362b05b`, tag `phase-1.14-accepted` pushed. Note: HTML escaping for account/category names must be added before user-controlled write paths (/add_account). |
+| 1.15 HTML Escaping Hardening | 🔄 READY_FOR_ACCEPTANCE | `apps/telegram-bot/src/utils/html-escape.ts` (NEW), `account.service.ts` (MODIFY), `category.service.ts` (MODIFY), `webhook.route.ts` (MODIFY), `smoke-test-phase115.mjs` (NEW) — 52/52 Phase 1.15 + 557/557 total PASS. Traceability ✅ Adversarial Security ✅ Scope Guard ✅. Traceability fix: `groupToken` escaped in error message. Awaiting owner acceptance. |
 
 ---
 
@@ -104,55 +105,50 @@ midas-monorepo/
 
 ---
 
-## 6. ПОСЛЕДНЯЯ ЗАВЕРШЁННАЯ ФАЗА — PHASE 1.13: /add_category STRICT-FORMAT COMMAND
+## 6. ТЕКУЩАЯ ФАЗА — PHASE 1.15: HTML ESCAPING HARDENING
 
-> ✅ **ACCEPTED. 74/74 Phase 1.13 + 437/437 total regression PASS. Tag phase-1.13-accepted pushed.**
-
-**Результат:**
-- `category.service.ts`: `parseAddCategoryArgs()`, `resolveGroup()`, `addCategory()` (withTenantTransaction, ON CONFLICT DO NOTHING, ULID id, returns 'created'|'duplicate'), `AddCategoryResult` type.
-- `webhook.route.ts`: KNOWN_COMMANDS 4→5, HELP_TEXT с /add_category, обработчик `5e-add`.
-- `smoke-test-phase113.mjs`: 74 теста PASS (DB + логика; midas_app RLS WITH CHECK верифицирован).
-- Нет миграций, нет новых зависимостей, нет AI/queue changes.
-- Implementation commit `eac55a9`. workflow_state sync commit `09dba48`. Tag `phase-1.13-accepted` pushed.
-- 437/437 PASS. Traceability ✅ Adversarial Security ✅ Scope Guard ✅
-
----
-
-## 6b. ЗАВЕРШЁННАЯ ФАЗА — PHASE 1.14: /accounts READ-ONLY LIST COMMAND
-
-> ✅ **ACCEPTED. 70/70 Phase 1.14 + 507/507 total regression PASS. Tag phase-1.14-accepted pushed.**
+> ✅ **READY_FOR_OWNER_ACCEPTANCE. 52/52 Phase 1.15 + 557/557 total PASS. Implementation complete.**
 
 **Результат:**
-- `account.service.ts` (NEW): `getAccountList()` (withTenantTransaction, explicit WHERE workspace_id = $1, flat list ORDER BY type name, Russian type labels, empty-state message, Russian pluralization).
-- `webhook.route.ts`: KNOWN_COMMANDS 5→6, HELP_TEXT updated (строка /accounts), обработчик `5d-acc`.
-- `smoke-test-phase114.mjs`: 70 тестов PASS (DB + логика; midas_app RLS USING верифицирован; тенант изоляция; пустой стейт; маппинг меток; scope guard).
+- `apps/telegram-bot/src/utils/html-escape.ts` (NEW): `escapeHtml()` — escapes `&`→`&amp;`, `<`→`&lt;`, `>`→`&gt;`, `"`→`&quot;`, `'`→`&#x27;`.
+- `apps/telegram-bot/src/services/account.service.ts` (MODIFY): `escapeHtml` applied to `row.name`, `resolveTypeLabel(row.type)`, `row.currency` at render point.
+- `apps/telegram-bot/src/services/category.service.ts` (MODIFY): `escapeHtml` applied to category names in list, group labels in section headers, and `groupToken` in unknown-group error message (Traceability fix).
+- `apps/telegram-bot/src/routes/webhook.route.ts` (MODIFY): `escapeHtml` applied to `parsed.canonicalGroup` and `parsed.name` in `/add_category` success message.
+- `packages/database/smoke-test-phase115.mjs` (NEW): 52 Phase 1.15 tests PASS.
+- Traceability fix: `groupToken` (user input) reflected in error message now escaped before `sendMessage` with `parse_mode:'HTML'`.
 - Нет миграций, нет новых зависимостей, нет AI/queue changes.
-- Implementation commit `362b05b`. Tag `phase-1.14-accepted` pushed.
-- 507/507 PASS. Traceability ✅ Adversarial Security ✅ Scope Guard ✅
-- **Техдолг для Phase 1.15:** HTML escaping для `account.name` и `currency` в режиме `parse_mode: 'HTML'` обязательно до реализации write-path (/add_account). Тоже распространяется на `category.name` (Phase 1.11/1.13).
+- 52/52 Phase 1.15 + 507/507 regression + 13/13 typecheck+lint = 557/557 PASS. Traceability ✅ Adversarial Security ✅ Scope Guard ✅
 
 **Scope:**
-- `apps/telegram-bot/src/services/account.service.ts` (NEW): `getAccountList()` — `withTenantTransaction`, explicit `WHERE workspace_id = $1`, flat list sorted by type+name, Russian type labels (manual=Ручной ввод, crypto_read_only=Крипто, bank_sync=Банк), empty-state message.
-- `apps/telegram-bot/src/routes/webhook.route.ts` (MODIFY): `/accounts` added to `KNOWN_COMMANDS` (5→6), HELP_TEXT updated, handler block added.
-- `packages/database/smoke-test-phase114.mjs` (NEW): Phase 1.14 smoke tests.
+- `apps/telegram-bot/src/utils/html-escape.ts` (NEW): `escapeHtml()` — escapes `&`, `<`, `>`, `"`, `'`.
+- `apps/telegram-bot/src/services/account.service.ts` (MODIFY): apply `escapeHtml` to `row.name`, `row.currency`, resolved type label.
+- `apps/telegram-bot/src/services/category.service.ts` (MODIFY): apply `escapeHtml` to `row.name`, `row.group` in list output; `groupToken` in unknown-group error message.
+- `apps/telegram-bot/src/routes/webhook.route.ts` (MODIFY): apply `escapeHtml` to `parsed.name` and `parsed.canonicalGroup` in `/add_category` success message.
+- `packages/database/smoke-test-phase115.mjs` (NEW): Phase 1.15 smoke tests.
 
 **Запрещено в этой фазе:**
-- `/add_account` (Phase 1.15)
+- `/add_account`
+- `/balance`
 - Миграции
 - UNIQUE constraint на account_sources
-- `/balance`
 - AI / queue / worker изменения
-- Новые зависимости
+- Новые npm зависимости
+- Изменения маршрутов кроме escaping в `/add_category` success message
+- Phase 1.16
+
+**Предыдущая завершённая фаза (Phase 1.14):**
+- `account.service.ts` (NEW), `webhook.route.ts` (MODIFY), `smoke-test-phase114.mjs` (NEW).
+- Implementation commit `362b05b`. Tag `phase-1.14-accepted` pushed. 507/507 PASS.
 
 ---
 
-## 7. MCP REQUIREMENTS (Phase 1.14 — ACCEPTED / Advisory only)
+## 7. MCP REQUIREMENTS (Phase 1.15 — IN_PROGRESS)
 
 | MCP-сервер | Доступ | Примечание |
 |---|---|---|
-| Filesystem MCP | ✅ read-only | Чтение workflow_state.md, project_config.md для advisory |
-| Postgres MCP | ❌ не нужен | Advisory-only — без DB-изменений |
-| GitHub MCP | ⚪ read-only (опционально) | Проверка remote sync при необходимости |
+| Filesystem MCP | ✅ read/write (project dir) | Создание утилиты, правка сервисов, тесты |
+| Postgres MCP | ✅ read-only | Проверка схемы при необходимости |
+| GitHub MCP | ⚪ read-only (опционально) | Проверка remote sync |
 | Browser / DevTools | ❌ Запрещён | — |
 | Notion MCP | ❌ Запрещён | — |
 | Google Sheets | ❌ Запрещён | — |
@@ -160,19 +156,21 @@ midas-monorepo/
 
 ---
 
-## 8. ФАЙЛЫ ДЛЯ ЧТЕНИЯ В НОВОМ ЧАТЕ (Advisory — следующая фаза)
+## 8. ФАЙЛЫ ДЛЯ ЧТЕНИЯ В НОВОМ ЧАТЕ (Phase 1.15 — реализация)
 
 **Required (читать обязательно):**
 ```
 project_config.md
 workflow_state.md
+apps/telegram-bot/src/utils/html-escape.ts              # NEW утилита Phase 1.15
+apps/telegram-bot/src/services/account.service.ts       # MODIFIED в Phase 1.15
+apps/telegram-bot/src/services/category.service.ts      # MODIFIED в Phase 1.15
+apps/telegram-bot/src/routes/webhook.route.ts           # MODIFIED в Phase 1.15
 ```
 
-**Optional (читать при необходимости — для advisory следующей фазы):**
+**Optional (читать при необходимости):**
 ```
-apps/telegram-bot/src/routes/webhook.route.ts           # Текущее состояние роутера
-apps/telegram-bot/src/services/account.service.ts       # Текущее состояние account сервиса
-apps/telegram-bot/src/services/category.service.ts      # Текущее состояние category сервиса
+packages/database/smoke-test-phase115.mjs               # Phase 1.15 тесты
 packages/database/smoke-test-phase114.mjs               # Phase 1.14 тесты — reference паттерн
 ```
 
@@ -196,11 +194,11 @@ Crypto / Notion / Sheets / Mini App files
 
 > Read workflow_state.md and project_config.md first.
 > Before implementation, read workflow_state.md section 11 — Agent Operating Protocol and follow it strictly.
-> Phase 1.14 (/accounts Read-Only List Command) is ACCEPTED. Implementation commit `362b05b`. Tag `phase-1.14-accepted` pushed.
-> AGENT STATUS: WAITING_FOR_OWNER_APPROVAL_TO_START_NEXT_PHASE.
-> Do not implement Phase 1.15 or any future phase without explicit owner APPROVED.
-> Next action: prepare phase advisory only — present options, risks, scope. Wait for approval before any code.
-> Advisory note: HTML escaping for account/category names must be considered before implementing user-controlled write paths (/add_account).
+> Phase 1.15 (HTML Escaping Hardening) is IN_PROGRESS. Owner APPROVED.
+> Read required files from Section 8 before implementing.
+> AGENT STATUS: IN_PROGRESS — Phase 1.15.
+> Do not implement Phase 1.16 or any future phase without explicit owner APPROVED.
+> Do not implement /add_account, /balance, migrations, or new dependencies.
 
 ---
 
@@ -255,6 +253,7 @@ Crypto / Notion / Sheets / Mini App files
 | 2026-05-06 19:22 | Phase 1.14 /accounts Read-Only List Command implementation started. Owner APPROVED. |
 | 2026-05-06 19:35 | Phase 1.14 implementation complete. `account.service.ts` (NEW): `getAccountList()` (withTenantTransaction, explicit WHERE workspace_id = $1, flat list ORDER BY type name, Russian labels, pluralization, empty-state). `webhook.route.ts`: KNOWN_COMMANDS 5→6, HELP_TEXT updated, handler `5d-acc`. `smoke-test-phase114.mjs`: 70 tests PASS. No migrations, no new deps, no AI/queue changes. 70/70 Phase 1.14 + 437/437 regression + 13/13 typecheck+lint = 507/507 PASS. Traceability ✅ Adversarial Security ✅ Scope Guard ✅. Implementation commit `362b05b`. |
 | 2026-05-06 19:46 | Phase 1.14 ACCEPTED by owner after final verification. /accounts read-only command implemented; 507/507 tests PASS; Traceability Review PASS; Adversarial Security Review PASS; Scope Guard Review PASS; implementation commit `362b05b`. HTML escaping for account/category names must be considered before implementing user-controlled write paths such as /add_account. Tag `phase-1.14-accepted` pushed. Status: WAITING_FOR_OWNER_APPROVAL_TO_START_NEXT_PHASE. |
+| 2026-05-06 21:32 | Phase 1.15 HTML Escaping Hardening implementation complete. Owner APPROVED. `html-escape.ts` (NEW): `escapeHtml()` — 5 chars escaped (`&`, `<`, `>`, `"`, `'`). `account.service.ts`: `escapeHtml` on `row.name`, `resolveTypeLabel(row.type)`, `row.currency`. `category.service.ts`: `escapeHtml` on category names, group labels, and `groupToken` in unknown-group error message (Traceability fix). `webhook.route.ts`: `escapeHtml` on `parsed.canonicalGroup` and `parsed.name` in `/add_category` success message. `smoke-test-phase115.mjs`: 52/52 PASS. No migrations, no new deps, no AI/queue changes. 52/52 Phase 1.15 + 507/507 regression + 13/13 typecheck+lint = 557/557 PASS. Traceability ✅ Adversarial Security ✅ Scope Guard ✅. Status: READY_FOR_OWNER_ACCEPTANCE. |
 
 ---
 
