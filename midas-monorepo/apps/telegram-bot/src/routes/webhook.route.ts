@@ -26,9 +26,9 @@
  *   SEC-12: Logging privacy
  *     → `raw_text` is NEVER logged. Only job metadata is logged.
  *
- * Slash-command routing (Phase 1.10):
- *   Known commands: /start, /report, /help
- *   Unknown slash commands (e.g. /balance, /category) are rejected with a safe
+ * Slash-command routing (Phase 1.10 + Phase 1.13):
+ *   Known commands: /start, /report, /help, /category, /add_category
+ *   Unknown slash commands (e.g. /balance) are rejected with a safe
  *   Russian message and do NOT reach the AI parse queue.
  *   Normal free-text (no leading "/") continues to AI parse exactly as before.
  *
@@ -57,7 +57,11 @@ import { resolveWorkspace } from '../services/workspace-resolver.js';
 import { checkOnboardingRateLimit } from '../services/rate-limiter.js';
 import { sendMessage } from '../services/telegram-api.js';
 import { getMonthlyReport } from '../services/report.service.js';
-import { getCategoryList } from '../services/category.service.js';
+import {
+  getCategoryList,
+  addCategory,
+  parseAddCategoryArgs,
+} from '../services/category.service.js';
 
 import { callbackConfirmQueue } from '../queues/callback-confirm-queue.js';
 
@@ -136,18 +140,23 @@ function parseCommandToken(text: string): string | null {
  * Any command NOT in this set is blocked before AI parse.
  * Extend only when a new command is implemented in a future phase.
  */
-const KNOWN_COMMANDS = new Set(['/start', '/report', '/help', '/category']);
+const KNOWN_COMMANDS = new Set(['/start', '/report', '/help', '/category', '/add_category']);
 
 /**
  * Russian-language help text listing all currently available commands.
- * Phase 1.10: /start, /report, /help only.
+ * Phase 1.10: /start, /report, /help
+ * Phase 1.11: /category
+ * Phase 1.13: /add_category
  */
 const HELP_TEXT =
   'ℹ️ <b>Доступные команды Midas:</b>\n\n' +
   '/start — Регистрация и приветствие\n' +
   '/report — Отчёт о доходах и расходах за текущий месяц\n' +
   '/category — Список категорий вашего кошелька\n' +
+  '/add_category <группа> <название> — Добавить категорию\n' +
   '/help — Показать это сообщение\n\n' +
+  'Группы для /add_category: Бизнес, Жизнь\n' +
+  'Пример: /add_category Жизнь Кофе\n\n' +
   'Для записи транзакции просто напишите мне сообщение, например:\n' +
   '<i>«Потратил 500 рублей на кофе»</i>';
 
@@ -419,6 +428,62 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
             errorClass,
           });
           void sendMessage(chatId, '⚠️ Не удалось получить список категорий. Попробуйте позже.');
+        }
+
+        await reply.status(200).send({ ok: true });
+        return;
+      }
+
+      // ── 5e-add: /add_category (Phase 1.13) ───────────────────
+      if (commandToken === '/add_category') {
+        // Parse and validate args before any DB call
+        const parsed = parseAddCategoryArgs(message.text);
+
+        if ('error' in parsed) {
+          // Argument validation failed — send usage hint, do NOT enqueue
+          void sendMessage(chatId, parsed.error);
+          request.log.info({
+            msg: '[midas:bot:webhook] /add_category bad args',
+            telegramUserId,
+            // name/group NOT logged (SEC-12)
+          });
+          await reply.status(200).send({ ok: true });
+          return;
+        }
+
+        try {
+          const resolved = await resolveWorkspace(telegramUserId, chatId);
+          const result = await addCategory(
+            resolved.workspaceId,
+            resolved.userId,
+            parsed.canonicalGroup,
+            parsed.name,
+          );
+
+          if (result === 'duplicate') {
+            void sendMessage(chatId, 'Категория с таким именем уже существует.');
+          } else {
+            void sendMessage(
+              chatId,
+              `✅ Категория добавлена: <b>${parsed.canonicalGroup}</b> / ${parsed.name}`,
+            );
+          }
+
+          request.log.info({
+            msg: '[midas:bot:webhook] /add_category processed',
+            telegramUserId,
+            workspaceId: resolved.workspaceId,
+            result,
+            // name/group NOT logged (SEC-12)
+          });
+        } catch (err: unknown) {
+          const errorClass = err instanceof Error ? err.constructor.name : 'UnknownError';
+          request.log.error({
+            msg: '[midas:bot:webhook] /add_category failed',
+            telegramUserId,
+            errorClass,
+          });
+          void sendMessage(chatId, '⚠️ Не удалось добавить категорию. Попробуйте позже.');
         }
 
         await reply.status(200).send({ ok: true });
