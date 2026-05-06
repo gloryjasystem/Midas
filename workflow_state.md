@@ -1,7 +1,7 @@
 # WORKFLOW_STATE.MD — Диспетчер задач ИИ-агента Midas
 
 > **Тип:** MUTABLE — кратковременная память агента. Обновляется на каждом шаге работы.
-> **Обновлён:** 2026-05-06 22:04 (UTC+3)
+> **Обновлён:** 2026-05-06 22:50 (UTC+3)
 
 ---
 
@@ -10,11 +10,11 @@
 | Параметр | Значение |
 |---|---|
 | **PHASE** | `1 — MVP Implementation` |
-| **STEP** | `1.15 — HTML Escaping Hardening — COMPLETED / ACCEPTED` |
-| **AGENT STATUS** | `WAITING_FOR_OWNER_APPROVAL_TO_START_NEXT_PHASE` |
-| **LAST COMPLETED** | `Phase 1.15 ACCEPTED. 52/52 Phase 1.15 + 494/494 regression smoke tests + 13/13 typecheck+lint = 559/559 PASS. Traceability ✅ Adversarial Security ✅ Scope Guard ✅. Implementation commit 4f63a91; workflow_state sync commit 88ebae3; test-count fix commit 45b1eec. Tag phase-1.15-accepted pushed.` |
-| **BLOCKER** | None — awaiting owner approval to start Phase 1.16 |
-| **NEXT ACTION** | Prepare next phase advisory only — do not implement |
+| **STEP** | `1.16 — account_sources UNIQUE Constraint Migration — READY_FOR_OWNER_ACCEPTANCE` |
+| **AGENT STATUS** | `READY_FOR_OWNER_ACCEPTANCE` |
+| **LAST COMPLETED** | `Phase 1.16 implementation complete. 24/24 Phase 1.16 + 559/559 regression + 13/13 typecheck+lint = 583/583 PASS. Traceability ✅ Adversarial Security ✅ Scope Guard ✅. Migration pre-flight: 0 duplicates. Constraint account_sources_workspace_id_name_key confirmed in pg_constraint.` |
+| **BLOCKER** | None — awaiting owner acceptance |
+| **NEXT ACTION** | Owner review and acceptance of Phase 1.16 |
 
 ---
 
@@ -43,6 +43,7 @@
 | 1.13 /add_category Strict-Format Command | ✅ ACCEPTED | `category.service.ts` (`parseAddCategoryArgs`, `resolveGroup`, `addCategory`, `AddCategoryResult`), `webhook.route.ts` (KNOWN_COMMANDS 4→5, HELP_TEXT, handler `5e-add`), `smoke-test-phase113.mjs` — 74/74 Phase 1.13 + 437/437 total regression PASS. Traceability ✅ Adversarial Security ✅ Scope Guard ✅. Implementation commit `eac55a9`, tag `phase-1.13-accepted` pushed. |
 | 1.14 /accounts Read-Only List Command | ✅ ACCEPTED | `apps/telegram-bot/src/services/account.service.ts` (new), `webhook.route.ts` (KNOWN_COMMANDS 5→6, HELP_TEXT, handler `5d-acc`), `smoke-test-phase114.mjs` — 70/70 Phase 1.14 + 507/507 total regression PASS. Traceability ✅ Adversarial Security ✅ Scope Guard ✅. Implementation commit `362b05b`, tag `phase-1.14-accepted` pushed. Note: HTML escaping for account/category names must be added before user-controlled write paths (/add_account). |
 | 1.15 HTML Escaping Hardening | ✅ ACCEPTED | `apps/telegram-bot/src/utils/html-escape.ts` (NEW), `account.service.ts` (MODIFY), `category.service.ts` (MODIFY), `webhook.route.ts` (MODIFY), `smoke-test-phase115.mjs` (NEW) — 52/52 Phase 1.15 + 559/559 total PASS. Traceability ✅ Adversarial Security ✅ Scope Guard ✅. Traceability fix: `groupToken` escaped in error message. Implementation commit `4f63a91`; workflow_state sync commit `88ebae3`; test-count fix commit `45b1eec`. Tag `phase-1.15-accepted` pushed. |
+| 1.16 account_sources UNIQUE Constraint Migration | 🔄 READY_FOR_ACCEPTANCE | `packages/database/migrations/1778200000000_account-sources-unique-name.js` (NEW), `packages/database/smoke-test-phase116.mjs` (NEW) — UNIQUE(workspace_id, name) added; pre-flight 0 duplicates; 24/24 Phase 1.16 + 583/583 total PASS. Traceability ✅ Adversarial Security ✅ Scope Guard ✅. Awaiting owner acceptance. |
 
 ---
 
@@ -105,49 +106,43 @@ midas-monorepo/
 
 ---
 
-## 6. ТЕКУЩАЯ ФАЗА — PHASE 1.15: HTML ESCAPING HARDENING
+## 6. ТЕКУЩАЯ ФАЗА — PHASE 1.16: account_sources UNIQUE CONSTRAINT MIGRATION
 
-> ✅ **COMPLETED / ACCEPTED. 52/52 Phase 1.15 + 559/559 total PASS. Phase 1.15 accepted by owner. Awaiting approval to start Phase 1.16.**
+> ✅ **READY_FOR_OWNER_ACCEPTANCE. 24/24 Phase 1.16 + 583/583 total PASS. Implementation complete.**
 
-**Результат:**
-- `apps/telegram-bot/src/utils/html-escape.ts` (NEW): `escapeHtml()` — escapes `&`→`&amp;`, `<`→`&lt;`, `>`→`&gt;`, `"`→`&quot;`, `'`→`&#x27;`.
-- `apps/telegram-bot/src/services/account.service.ts` (MODIFY): `escapeHtml` applied to `row.name`, `resolveTypeLabel(row.type)`, `row.currency` at render point.
-- `apps/telegram-bot/src/services/category.service.ts` (MODIFY): `escapeHtml` applied to category names in list, group labels in section headers, and `groupToken` in unknown-group error message (Traceability fix).
-- `apps/telegram-bot/src/routes/webhook.route.ts` (MODIFY): `escapeHtml` applied to `parsed.canonicalGroup` and `parsed.name` in `/add_category` success message.
-- `packages/database/smoke-test-phase115.mjs` (NEW): 52 Phase 1.15 tests PASS.
-- Traceability fix: `groupToken` (user input) reflected in error message now escaped before `sendMessage` with `parse_mode:'HTML'`.
-- Нет миграций, нет новых зависимостей, нет AI/queue changes.
-- 52/52 Phase 1.15 + 494/494 regression smoke tests + 13/13 typecheck+lint = 559/559 PASS. Traceability ✅ Adversarial Security ✅ Scope Guard ✅
+**Objective:**
+Add `UNIQUE(workspace_id, name)` constraint to `account_sources` table via a single migration.
+This closes the last structural gap blocking a safe `/add_account` write path.
 
 **Scope:**
-- `apps/telegram-bot/src/utils/html-escape.ts` (NEW): `escapeHtml()` — escapes `&`, `<`, `>`, `"`, `'`.
-- `apps/telegram-bot/src/services/account.service.ts` (MODIFY): apply `escapeHtml` to `row.name`, `row.currency`, resolved type label.
-- `apps/telegram-bot/src/services/category.service.ts` (MODIFY): apply `escapeHtml` to `row.name`, `row.group` in list output; `groupToken` in unknown-group error message.
-- `apps/telegram-bot/src/routes/webhook.route.ts` (MODIFY): apply `escapeHtml` to `parsed.name` and `parsed.canonicalGroup` in `/add_category` success message.
-- `packages/database/smoke-test-phase115.mjs` (NEW): Phase 1.15 smoke tests.
+- `packages/database/migrations/<timestamp>_account-sources-unique-name.js` (NEW): `up()` adds `UNIQUE(workspace_id, name)`; `down()` drops it.
+- `packages/database/smoke-test-phase116.mjs` (NEW): Phase 1.16 smoke tests.
+- Constraint name: `account_sources_workspace_id_name_key`
+- No TypeScript changes. No route changes. No new commands. No new dependencies.
 
 **Запрещено в этой фазе:**
 - `/add_account`
 - `/balance`
-- Миграции
-- UNIQUE constraint на account_sources
-- AI / queue / worker изменения
-- Новые npm зависимости
-- Изменения маршрутов кроме escaping в `/add_category` success message
-- Phase 1.16
+- Debt/transfer routing
+- Exchange rate conversion
+- AI / queue / worker changes
+- New npm dependencies
+- Modifying existing routes / services
+- `project_config.md` changes
+- Phase 1.17
 
-**Предыдущая завершённая фаза (Phase 1.14):**
-- `account.service.ts` (NEW), `webhook.route.ts` (MODIFY), `smoke-test-phase114.mjs` (NEW).
-- Implementation commit `362b05b`. Tag `phase-1.14-accepted` pushed. 507/507 PASS.
+**Предыдущая завершённая фаза (Phase 1.15):**
+- `html-escape.ts` (NEW), `account.service.ts` (MODIFY), `category.service.ts` (MODIFY), `webhook.route.ts` (MODIFY), `smoke-test-phase115.mjs` (NEW).
+- Implementation commit `4f63a91`. Tag `phase-1.15-accepted` pushed. 559/559 PASS.
 
 ---
 
-## 7. MCP REQUIREMENTS (Phase 1.15 — IN_PROGRESS)
+## 7. MCP REQUIREMENTS (Phase 1.16 — IN_PROGRESS)
 
 | MCP-сервер | Доступ | Примечание |
 |---|---|---|
-| Filesystem MCP | ✅ read/write (project dir) | Создание утилиты, правка сервисов, тесты |
-| Postgres MCP | ✅ read-only | Проверка схемы при необходимости |
+| Filesystem MCP | ✅ read/write (project dir) | Миграция + smoke tests |
+| Postgres MCP | ✅ read-only | Проверка pg_constraint до/после миграции |
 | GitHub MCP | ⚪ read-only (опционально) | Проверка remote sync |
 | Browser / DevTools | ❌ Запрещён | — |
 | Notion MCP | ❌ Запрещён | — |
@@ -156,22 +151,21 @@ midas-monorepo/
 
 ---
 
-## 8. ФАЙЛЫ ДЛЯ ЧТЕНИЯ В НОВОМ ЧАТЕ (Phase 1.15 — реализация)
+## 8. ФАЙЛЫ ДЛЯ ЧТЕНИЯ В НОВОМ ЧАТЕ (Phase 1.16 — реализация)
 
 **Required (читать обязательно):**
 ```
 project_config.md
 workflow_state.md
-apps/telegram-bot/src/utils/html-escape.ts              # NEW утилита Phase 1.15
-apps/telegram-bot/src/services/account.service.ts       # MODIFIED в Phase 1.15
-apps/telegram-bot/src/services/category.service.ts      # MODIFIED в Phase 1.15
-apps/telegram-bot/src/routes/webhook.route.ts           # MODIFIED в Phase 1.15
+packages/database/migrations/1777973748530_mvp-schema-and-types.js   # constraint pattern ref
+packages/database/migrations/<timestamp>_account-sources-unique-name.js  # Phase 1.16 migration
+packages/database/smoke-test-phase116.mjs                               # Phase 1.16 tests
 ```
 
 **Optional (читать при необходимости):**
 ```
-packages/database/smoke-test-phase115.mjs               # Phase 1.15 тесты
-packages/database/smoke-test-phase114.mjs               # Phase 1.14 тесты — reference паттерн
+packages/database/smoke-test-phase115.mjs               # Phase 1.15 тесты — reference паттерн
+apps/telegram-bot/src/services/category.service.ts      # ON CONFLICT pattern reference
 ```
 
 **Do not load (не читать — тратит контекст):**
@@ -184,7 +178,6 @@ packages/database/smoke-test-phase16{a,b}.mjs
 packages/database/smoke-test-phase17.mjs
 packages/database/smoke-test-phase18{a,b}.mjs
 apps/background-workers/
-packages/database/migrations/
 Crypto / Notion / Sheets / Mini App files
 ```
 
@@ -194,10 +187,11 @@ Crypto / Notion / Sheets / Mini App files
 
 > Read workflow_state.md and project_config.md first.
 > Before implementation, read workflow_state.md section 11 — Agent Operating Protocol and follow it strictly.
-> Phase 1.15 (HTML Escaping Hardening) is COMPLETED / ACCEPTED.
-> AGENT STATUS: WAITING_FOR_OWNER_APPROVAL_TO_START_NEXT_PHASE.
-> Do not implement Phase 1.16 or any future phase without explicit owner APPROVED.
-> Do not implement /add_account, /balance, migrations, or new dependencies.
+> Phase 1.16 (account_sources UNIQUE Constraint Migration) is IN_PROGRESS. Owner APPROVED.
+> Read required files from Section 8 before implementing.
+> AGENT STATUS: IN_PROGRESS — Phase 1.16.
+> Do not implement Phase 1.17 or any future phase without explicit owner APPROVED.
+> Do not implement /add_account, /balance, or new dependencies.
 
 ---
 
@@ -255,6 +249,7 @@ Crypto / Notion / Sheets / Mini App files
 | 2026-05-06 21:32 | Phase 1.15 HTML Escaping Hardening implementation complete. Owner APPROVED. `html-escape.ts` (NEW): `escapeHtml()` — 5 chars escaped (`&`, `<`, `>`, `"`, `'`). `account.service.ts`: `escapeHtml` on `row.name`, `resolveTypeLabel(row.type)`, `row.currency`. `category.service.ts`: `escapeHtml` on category names, group labels, and `groupToken` in unknown-group error message (Traceability fix). `webhook.route.ts`: `escapeHtml` on `parsed.canonicalGroup` and `parsed.name` in `/add_category` success message. `smoke-test-phase115.mjs`: 52/52 PASS. No migrations, no new deps, no AI/queue changes. 52/52 Phase 1.15 + 494/494 regression smoke tests + 13/13 typecheck+lint = 559/559 PASS. Traceability ✅ Adversarial Security ✅ Scope Guard ✅. Status: READY_FOR_OWNER_ACCEPTANCE. |
 | 2026-05-06 21:56 | workflow_state.md test-count fix: 557/557 → 559/559 (final audit confirmed actual total; prior count incorrectly treated 507 as pure smoke-test baseline, double-counting 13 typecheck+lint tasks). Correct breakdown: 52 (Ph1.15) + 494 (Ph1.6-A through Ph1.14 smoke) + 13 (typecheck+lint) = 559. No code changes. |
 | 2026-05-06 22:04 | Phase 1.15 accepted after final verification and workflow_state test-count fix; HTML escaping hardening implemented; 559/559 tests passed; Traceability Review PASS WITH FIXES; Adversarial Security Review PASS; Scope Guard Review PASS; implementation commit 4f63a91; workflow_state sync commit 88ebae3; test-count fix commit 45b1eec. Tag phase-1.15-accepted pushed. Status: WAITING_FOR_OWNER_APPROVAL_TO_START_NEXT_PHASE. |
+| 2026-05-06 22:50 | Phase 1.16 account_sources UNIQUE Constraint Migration implementation complete. Owner APPROVED. Migration `1778200000000_account-sources-unique-name.js`: `up()` pre-flight duplicate check (0 found → safe) + `ALTER TABLE account_sources ADD CONSTRAINT account_sources_workspace_id_name_key UNIQUE(workspace_id, name)`. `down()` uses DROP CONSTRAINT IF EXISTS. `smoke-test-phase116.mjs`: 24/24 PASS. No TypeScript/route/service/worker/AI changes. 24/24 Phase 1.16 + 559/559 regression + 13/13 typecheck+lint = 583/583 PASS. Traceability ✅ Adversarial Security ✅ Scope Guard ✅. Status: READY_FOR_OWNER_ACCEPTANCE. |
 
 ---
 
