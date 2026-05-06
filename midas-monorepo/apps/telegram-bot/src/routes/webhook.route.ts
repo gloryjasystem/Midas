@@ -57,6 +57,7 @@ import { resolveWorkspace } from '../services/workspace-resolver.js';
 import { checkOnboardingRateLimit } from '../services/rate-limiter.js';
 import { sendMessage } from '../services/telegram-api.js';
 import { getMonthlyReport } from '../services/report.service.js';
+import { getCategoryList } from '../services/category.service.js';
 
 import { callbackConfirmQueue } from '../queues/callback-confirm-queue.js';
 
@@ -135,7 +136,7 @@ function parseCommandToken(text: string): string | null {
  * Any command NOT in this set is blocked before AI parse.
  * Extend only when a new command is implemented in a future phase.
  */
-const KNOWN_COMMANDS = new Set(['/start', '/report', '/help']);
+const KNOWN_COMMANDS = new Set(['/start', '/report', '/help', '/category']);
 
 /**
  * Russian-language help text listing all currently available commands.
@@ -145,6 +146,7 @@ const HELP_TEXT =
   'ℹ️ <b>Доступные команды Midas:</b>\n\n' +
   '/start — Регистрация и приветствие\n' +
   '/report — Отчёт о доходах и расходах за текущий месяц\n' +
+  '/category — Список категорий вашего кошелька\n' +
   '/help — Показать это сообщение\n\n' +
   'Для записи транзакции просто напишите мне сообщение, например:\n' +
   '<i>«Потратил 500 рублей на кофе»</i>';
@@ -391,6 +393,32 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
             errorClass,
           });
           void sendMessage(chatId, '⚠️ Не удалось сформировать отчёт. Попробуйте позже.');
+        }
+
+        await reply.status(200).send({ ok: true });
+        return;
+      }
+
+      // ── 5d-cat: /category (Phase 1.11) ───────────────────────
+      if (commandToken === '/category') {
+        try {
+          const resolved = await resolveWorkspace(telegramUserId, chatId);
+          const categoryText = await getCategoryList(resolved.workspaceId, resolved.userId);
+          void sendMessage(chatId, categoryText);
+
+          request.log.info({
+            msg: '[midas:bot:webhook] /category sent',
+            telegramUserId,
+            workspaceId: resolved.workspaceId,
+          });
+        } catch (err: unknown) {
+          const errorClass = err instanceof Error ? err.constructor.name : 'UnknownError';
+          request.log.error({
+            msg: '[midas:bot:webhook] /category failed',
+            telegramUserId,
+            errorClass,
+          });
+          void sendMessage(chatId, '⚠️ Не удалось получить список категорий. Попробуйте позже.');
         }
 
         await reply.status(200).send({ ok: true });

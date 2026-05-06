@@ -10,11 +10,11 @@
 | Параметр | Значение |
 |---|---|
 | **PHASE** | `1 — MVP Implementation` |
-| **STEP** | `1.10 — Slash-Command Guard + Inline /help ACCEPTED` |
-| **AGENT STATUS** | `WAITING_FOR_OWNER_APPROVAL_TO_START_NEXT_PHASE` |
-| **LAST COMPLETED** | `Phase 1.10 ACCEPTED. Final verification: 30/30 Phase 1.10 + 47/47 Phase 1.9 + 16/16 Phase 1.8-B + 19/19 Phase 1.8-A + 20/20 Phase 1.7 + 30/30 Phase 1.6-B + 73/73 Phase 1.6-A + 13/13 typecheck+lint = 248/248 PASS. Implementation commit b321463; tag phase-1.10-accepted pushed.` |
-| **BLOCKER** | Owner approval required to start Phase 1.11 |
-| **NEXT ACTION** | Prepare next phase advisory only — do not implement |
+| **STEP** | `1.11 — /category Read-Only List Command — READY_FOR_OWNER_ACCEPTANCE` |
+| **AGENT STATUS** | `READY_FOR_OWNER_ACCEPTANCE` |
+| **LAST COMPLETED** | `Phase 1.11 implementation complete. 78/78 Phase 1.11 + 30/30 Phase 1.10 + 47/47 Phase 1.9 + 16/16 Phase 1.8-B + 19/19 Phase 1.8-A + 20/20 Phase 1.7 + 30/30 Phase 1.6-B + 73/73 Phase 1.6-A + 13/13 typecheck+lint = 326/326 PASS. Traceability ✅ Adversarial Security ✅ Scope Guard ✅. Status: READY_FOR_OWNER_ACCEPTANCE.` |
+| **BLOCKER** | Owner acceptance required |
+| **NEXT ACTION** | Owner reviews and accepts Phase 1.11 |
 
 ---
 
@@ -37,6 +37,8 @@
 | 1.8-A Transaction Intent Foundation | ✅ ACCEPTED | `migrations/1778008338096_transaction-intent.js`, `draft.service.ts` (parsed_intent propagation), `draft-confirmation.service.ts` (intent_missing outcome), `confirmation.worker.ts` (intent_missing messages), `smoke-test-phase18a.mjs` — 19/19 smoke tests PASS, 155/155 total regression PASS, commits `425df61`→`51b6aee` |
 | 1.8-B Runtime Consistency & Security Hardening | ✅ ACCEPTED | C-1: `draft.service.ts` `telegram_user_id`→`telegram_id` fix. C-2: `migrations/1778008400000_harden-onboarding-search-path.js` — `search_path` fixed for 2 SECDEF functions. M-1: `shared/index.ts` `TRANSACTION_TYPE` updated to 5 canonical values. `smoke-test-phase18b.mjs` — 16/16 PASS, 171/171 total regression PASS, commit `7af1692` |
 | 1.9 Basic Text /report Command | ✅ ACCEPTED | `apps/telegram-bot/src/services/report.service.ts`, `apps/telegram-bot/src/routes/webhook.route.ts`, `apps/telegram-bot/src/services/workspace-resolver.ts`, `packages/database/smoke-test-phase19.mjs` — /report command, current UTC month, grouped by transaction_intent, Russian text output — 47/47 Phase 1.9 tests, 218/218 total regression PASS, implementation commit `e060edb`; workflow sync `dffb53e`, `1ec649e`; tag `phase-1.9-accepted`. |
+| 1.10 Slash-Command Guard + Inline /help | ✅ ACCEPTED | `webhook.route.ts` (parseCommandToken, KNOWN_COMMANDS, /help, guard), `smoke-test-phase110.mjs` — 30/30 smoke tests PASS, 248/248 total regression PASS, commit `b321463`, tag `phase-1.10-accepted`. |
+| 1.11 /category Read-Only List Command | 🔄 READY_FOR_OWNER_ACCEPTANCE | `apps/telegram-bot/src/services/category.service.ts` (new), `webhook.route.ts` (KNOWN_COMMANDS, HELP_TEXT, /category handler), `smoke-test-phase111.mjs` — 78/78 Phase 1.11 + 30/30 Phase 1.10 + 247 regression = 326/326 PASS. Traceability ✅ Adversarial Security ✅ Scope Guard ✅. DB audit: RLS `tenant_isolation_categories` policy ✅; `account_sources` not seeded on onboarding (debt item, do not fix in Phase 1.11). |
 
 ---
 
@@ -99,33 +101,35 @@ midas-monorepo/
 
 ---
 
-## 6. ТЕКУЩАЯ ФАЗА — PHASE 1.10: SLASH-COMMAND GUARD + INLINE /help
+## 6. ТЕКУЩАЯ ФАЗА — PHASE 1.11: /category READ-ONLY LIST COMMAND
 
-> ✅ **ACCEPTED. Implementation commit `b321463`. Tag `phase-1.10-accepted` pushed.**
+> 🔄 **READY_FOR_OWNER_ACCEPTANCE. Implementation complete. Awaiting owner decision.**
 
 **Результат:**
-- `parseCommandToken(text)` — новая helper-функция в `webhook.route.ts`.
-  Парсит первый токен сообщения; `@BotName` суффикс стрипается; `/reportabc` ≠ `/report` (точный токен).
-- `KNOWN_COMMANDS = new Set(['/start', '/report', '/help'])` — множество реализованных команд.
-- `/help` (5d) — отвечает русским текстом со списком 3 команд, не лезет в AI parse.
-- Slash-command guard (5e) — любая команда с `/`, не входящая в `KNOWN_COMMANDS`, возвращает:
-  `"Команда не распознана или пока находится в разработке."` — без AI parse, без enqueue.
-- Свободный текст (без `/`) — падает в AI parse ровно как и прежде (без изменений).
-- `/start` и `/report` — переработаны в блок `if (commandToken !== null)` (поведение не изменилось).
-- Нет command-registry.ts, нет рефакторинга роутинга, нет новых зависимостей.
-- Нет `/balance`, `/category`, `/add_category`, нет миграций, нет изменений AI.
-- Tests: 248/248 PASS (30 Phase 1.10 + 47 Phase 1.9 + 16 Phase 1.8-B + 19 Phase 1.8-A + 20 Phase 1.7 + 30 Phase 1.6-B + 73 Phase 1.6-A + 13 typecheck+lint)
+- `apps/telegram-bot/src/services/category.service.ts` — новый файл.
+  `getCategoryList(workspaceId, userId)` → Russian text.
+  `withTenantTransaction` + явный `WHERE workspace_id = $1` (defense-in-depth).
+  Группировка: `Бизнес` перед `Жизнь`, русская плюрализация счётчика.
+  Пустой воркспейс: безопасное сообщение с тезером /add_category.
+- `webhook.route.ts` — минимальные изменения:
+  `/category` добавлен в `KNOWN_COMMANDS` (4 команды).
+  Блок-обработчик `/category` добавлен после `/report`, до гарду.
+  `HELP_TEXT` дополнен строкой `/category`.
+- `smoke-test-phase111.mjs` — 78 тестов PASS.
+- Аудит DB: RLS `tenant_isolation_categories` (`cmd: ALL`) ✅; `account_sources` не сидится при онбординге (задолженность, не фиксить в Phase 1.11).
+- Нет command-registry.ts, нет миграций, нет новых зависимостей, нет изменений AI.
+- Tests: 326/326 PASS (78 Phase 1.11 + 30 Phase 1.10 + 47 Phase 1.9 + 16 Phase 1.8-B + 19 Phase 1.8-A + 20 Phase 1.7 + 30 Phase 1.6-B + 73 Phase 1.6-A + 13 typecheck+lint)
 - Traceability ✅ Adversarial Security ✅ Scope Guard ✅
 
 ---
 
-## 7. MCP REQUIREMENTS (Phase 1.10 — acceptance audit)
+## 7. MCP REQUIREMENTS (Phase 1.11 — implementation)
 
 | MCP-сервер | Доступ | Примечание |
 |---|---|---|
-| Filesystem MCP | ✅ read-only | Чтение файлов для аудита. Никаких записей. |
-| Postgres MCP | ⚪ не нужен | Phase 1.10 не добавляет SQL / миграций |
-| GitHub MCP | ⚪ read-only (опционально) | Если нужно проверить remote |
+| Filesystem MCP | ✅ read/write (project dir only) | Создание category.service.ts, smoke-test-phase111.mjs; правка webhook.route.ts |
+| Postgres MCP | ✅ read-only (local dev DB) | Аудит RLS политик `categories`; проверка `account_sources` сидинга |
+| GitHub MCP | ⚪ read-only (опционально) | Проверка remote sync если нужно |
 | Browser / DevTools | ❌ Запрещён | — |
 | Notion MCP | ❌ Запрещён | — |
 | Google Sheets | ❌ Запрещён | — |
@@ -133,20 +137,22 @@ midas-monorepo/
 
 ---
 
-## 8. ФАЙЛЫ ДЛЯ ЧТЕНИЯ В НОВОМ ЧАТЕ (Phase 1.10 acceptance audit)
+## 8. ФАЙЛЫ ДЛЯ ЧТЕНИЯ В НОВОМ ЧАТЕ (Phase 1.11)
 
 **Required (читать обязательно):**
 ```
 project_config.md
 workflow_state.md
-apps/telegram-bot/src/routes/webhook.route.ts          # Phase 1.10: parseCommandToken, KNOWN_COMMANDS, /help, guard
-packages/database/smoke-test-phase110.mjs              # Phase 1.10 tests (30 tests, no DB)
+apps/telegram-bot/src/routes/webhook.route.ts          # Phase 1.10 routing — extend KNOWN_COMMANDS, add /category handler
+apps/telegram-bot/src/services/report.service.ts       # Reference pattern for new category.service.ts
+apps/telegram-bot/src/services/category.service.ts    # Phase 1.11 — new file (create this)
+packages/database/smoke-test-phase111.mjs              # Phase 1.11 tests (create this)
 ```
 
 **Optional (читать при необходимости):**
 ```
-apps/telegram-bot/src/services/report.service.ts       # Phase 1.9 report logic (referenced in route)
-packages/database/smoke-test-phase19.mjs               # Phase 1.9 regression
+packages/database/src/transaction.ts                   # withTenantTransaction signature
+packages/database/smoke-test-phase110.mjs              # Phase 1.10 regression reference
 ```
 
 **Do not load (не читать — тратит контекст):**
@@ -167,10 +173,10 @@ Crypto / Notion / Sheets / Mini App files
 
 > Read workflow_state.md and project_config.md first.
 > Before implementation, read workflow_state.md section 11 — Agent Operating Protocol and follow it strictly.
-> Phase 1.9 (Basic Text /report Command) is ACCEPTED. Tag `phase-1.9-accepted` pushed.
 > Phase 1.10 (Slash-Command Guard + Inline /help) is ACCEPTED. Commit `b321463`. Tag `phase-1.10-accepted` pushed.
-> Do not re-implement Phase 1.10. Do not implement Phase 1.11 without owner APPROVED.
-> Prepare next phase advisory only — do not implement.
+> Phase 1.11 (/category Read-Only List) is READY_FOR_OWNER_ACCEPTANCE (or IN_PROGRESS — check Section 1).
+> Do not re-implement Phases 1.10 or below. Do not implement Phase 1.12 without owner APPROVED.
+> Read Section 6 for current phase scope and Section 2 for completed phase list.
 
 ---
 
@@ -217,6 +223,7 @@ Crypto / Notion / Sheets / Mini App files
 | 2026-05-06 10:00 | Phase 1.9 ACCEPTED by owner after final verification. Full test run: 47/47 Phase 1.9 + 16/16 Phase 1.8-B + 19/19 Phase 1.8-A + 20/20 Phase 1.7 + 30/30 Phase 1.6-B + 73/73 Phase 1.6-A + 13/13 typecheck+lint = 218/218 PASS. Git clean pre/post tests. origin/main in sync. project_config.md unchanged (v1.2). Section 14 self-audit: all ✅. Committed workflow_state.md, pushed tag phase-1.9-accepted. Status: WAITING_FOR_OWNER_APPROVAL_TO_START_NEXT_PHASE. |
 | 2026-05-06 11:45 | Phase 1.10 Slash-Command Guard + Inline /help implementation complete. `parseCommandToken()` (exact first-token, @BotName strip), `KNOWN_COMMANDS` set, `/help` handler (Russian, lists /start /report /help), unknown-slash guard (5e). No command-registry, no new deps, no migrations, no AI changes. 30/30 Phase 1.10 + 47/47 Phase 1.9 + 16/16 Phase 1.8-B + 19/19 Phase 1.8-A + 20/20 Phase 1.7 + 30/30 Phase 1.6-B + 73/73 Phase 1.6-A + 13/13 typecheck+lint = 248/248 PASS. Traceability ✅ Adversarial Security ✅ Scope Guard ✅. Status: READY_FOR_OWNER_ACCEPTANCE. |
 | 2026-05-06 11:55 | Phase 1.10 ACCEPTED by owner after final acceptance verification. Full test run: 30/30 Phase 1.10 + 47/47 Phase 1.9 + 16/16 Phase 1.8-B + 19/19 Phase 1.8-A + 20/20 Phase 1.7 + 30/30 Phase 1.6-B + 73/73 Phase 1.6-A + 13/13 typecheck+lint = 248/248 PASS. Git clean pre/post tests. origin/main in sync. project_config.md unchanged (v1.2, last touched cc91a47). Commit b321463: 3 files only (webhook.route.ts, smoke-test-phase110.mjs, workflow_state.md). No command-registry.ts, no /balance, no migrations, no new deps. Section 14 self-audit: all ✅. Tag phase-1.10-accepted pushed. Status: WAITING_FOR_OWNER_APPROVAL_TO_START_NEXT_PHASE. |
+| 2026-05-06 12:18 | Phase 1.11 /category Read-Only List Command implementation complete. `category.service.ts`: `getCategoryList()` read-only, `withTenantTransaction`, explicit `WHERE workspace_id = $1`, grouped by `category_group` (`Бизнес` before `Жизнь`), Russian pluralization, empty-state message. `webhook.route.ts`: `/category` added to KNOWN_COMMANDS (4 commands), HELP_TEXT updated, handler block added after `/report`. DB audit: RLS `tenant_isolation_categories` (`cmd: ALL`) ✅; `account_sources` not seeded on onboarding (debt item, no fix in Phase 1.11). 78/78 Phase 1.11 + 30/30 Phase 1.10 + 47/47 Phase 1.9 + 16/16 Phase 1.8-B + 19/19 Phase 1.8-A + 20/20 Phase 1.7 + 30/30 Phase 1.6-B + 73/73 Phase 1.6-A + 13/13 typecheck+lint = 326/326 PASS. Traceability ✅ Adversarial Security ✅ Scope Guard ✅. Status: READY_FOR_OWNER_ACCEPTANCE. |
 
 ---
 
