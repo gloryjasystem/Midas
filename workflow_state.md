@@ -1,7 +1,7 @@
 # WORKFLOW_STATE.MD — Диспетчер задач ИИ-агента Midas
 
 > **Тип:** MUTABLE — кратковременная память агента. Обновляется на каждом шаге работы.
-> **Обновлён:** 2026-05-06 22:46 (UTC+3)
+> **Обновлён:** 2026-05-06 23:15 (UTC+3)
 
 ---
 
@@ -10,11 +10,11 @@
 | Параметр | Значение |
 |---|---|
 | **PHASE** | `1 — MVP Implementation` |
-| **STEP** | `1.16 — account_sources UNIQUE Constraint Migration — COMPLETED / ACCEPTED` |
-| **AGENT STATUS** | `WAITING_FOR_OWNER_APPROVAL_TO_START_NEXT_PHASE` |
-| **LAST COMPLETED** | `Phase 1.16 ACCEPTED. 24/24 Phase 1.16 + 559/559 regression + 13/13 typecheck+lint = 583/583 PASS. Traceability ✅ Adversarial Security ✅ Scope Guard ✅. Implementation commit 3ad45e3. Tag phase-1.16-accepted pushed.` |
-| **BLOCKER** | None — awaiting owner approval to start Phase 1.17 |
-| **NEXT ACTION** | Prepare next phase advisory only — do not implement |
+| **STEP** | `1.17 — /add_account Strict-Format Command — READY_FOR_OWNER_ACCEPTANCE` |
+| **AGENT STATUS** | `READY_FOR_OWNER_ACCEPTANCE` |
+| **LAST COMPLETED** | `Phase 1.17 READY. 27/27 Phase 1.17 + 583/583 regression + 8/8 typecheck + 8/8 lint = 610/610 PASS. Traceability ✅ Adversarial Security ✅ Scope Guard ✅.` |
+| **BLOCKER** | None — awaiting owner acceptance of Phase 1.17 |
+| **NEXT ACTION** | Owner: review Phase 1.17, then ACCEPT to tag phase-1.17-accepted and move to Phase 1.18 advisory |
 
 ---
 
@@ -106,43 +106,56 @@ midas-monorepo/
 
 ---
 
-## 6. ТЕКУЩАЯ ФАЗА — PHASE 1.16: account_sources UNIQUE CONSTRAINT MIGRATION
+## 6. ТЕКУЩАЯ ФАЗА — PHASE 1.17: /add_account STRICT-FORMAT COMMAND
 
-> ✅ **COMPLETED / ACCEPTED. 24/24 Phase 1.16 + 583/583 total PASS. Phase 1.16 accepted by owner. Awaiting approval to start Phase 1.17.**
+> 🔄 **IN_PROGRESS. Owner APPROVED. Baseline: 583/583 PASS.**
 
 **Objective:**
-Add `UNIQUE(workspace_id, name)` constraint to `account_sources` table via a single migration.
-This closes the last structural gap blocking a safe `/add_account` write path.
+Implement `/add_account <name>` — a strict-format write command that inserts a new `account_sources` row for the current workspace.
+Completes the write/read symmetry for accounts (`/accounts` read + `/add_account` write).
+
+**Owner Decisions:**
+- Command format: `/add_account <name>` (no currency arg)
+- Account type: always `manual`
+- Currency: always `RUB` (workspace default)
+- No currency DB CHECK constraint in this phase
 
 **Scope:**
-- `packages/database/migrations/<timestamp>_account-sources-unique-name.js` (NEW): `up()` adds `UNIQUE(workspace_id, name)`; `down()` drops it.
-- `packages/database/smoke-test-phase116.mjs` (NEW): Phase 1.16 smoke tests.
-- Constraint name: `account_sources_workspace_id_name_key`
-- No TypeScript changes. No route changes. No new commands. No new dependencies.
+- `apps/telegram-bot/src/services/account.service.ts` (MODIFY): add `parseAddAccountArgs()`, `addAccount()`, `AddAccountResult` type
+- `apps/telegram-bot/src/routes/webhook.route.ts` (MODIFY): add `/add_account` to `KNOWN_COMMANDS`, `HELP_TEXT`, inline handler
+- `packages/database/smoke-test-phase117.mjs` (NEW): Phase 1.17 smoke tests
+- No migrations. No new dependencies. No AI/queue/worker changes.
+
+**Name validation rules:**
+- Trimmed, non-empty
+- Max 100 chars
+- Names with spaces allowed
+- Duplicate: `ON CONFLICT ON CONSTRAINT account_sources_workspace_id_name_key DO NOTHING` → Russian friendly message
 
 **Запрещено в этой фазе:**
-- `/add_account`
 - `/balance`
-- Debt/transfer routing
-- Exchange rate conversion
+- `/edit_account`, `/delete_account`
+- Account type selection
+- Currency argument
+- Currency CHECK migration
+- Modifying `/report`, `/accounts`, `/category`, `/add_category` (except routing/help)
 - AI / queue / worker changes
 - New npm dependencies
-- Modifying existing routes / services
 - `project_config.md` changes
-- Phase 1.17
+- Phase 1.18
 
-**Предыдущая завершённая фаза (Phase 1.15):**
-- `html-escape.ts` (NEW), `account.service.ts` (MODIFY), `category.service.ts` (MODIFY), `webhook.route.ts` (MODIFY), `smoke-test-phase115.mjs` (NEW).
-- Implementation commit `4f63a91`. Tag `phase-1.15-accepted` pushed. 559/559 PASS.
+**Предыдущая завершённая фаза (Phase 1.16):**
+- `migrations/1778200000000_account-sources-unique-name.js` (NEW), `smoke-test-phase116.mjs` (NEW).
+- Implementation commit `3ad45e3`. Tag `phase-1.16-accepted` pushed. 583/583 PASS.
 
 ---
 
-## 7. MCP REQUIREMENTS (Phase 1.16 — IN_PROGRESS)
+## 7. MCP REQUIREMENTS (Phase 1.17 — IN_PROGRESS)
 
 | MCP-сервер | Доступ | Примечание |
 |---|---|---|
-| Filesystem MCP | ✅ read/write (project dir) | Миграция + smoke tests |
-| Postgres MCP | ✅ read-only | Проверка pg_constraint до/после миграции |
+| Filesystem MCP | ✅ read/write (project dir) | Редактирование сервисов + smoke tests |
+| Postgres MCP | ✅ read-only | Проверка RLS, constraint, результатов smoke tests |
 | GitHub MCP | ⚪ read-only (опционально) | Проверка remote sync |
 | Browser / DevTools | ❌ Запрещён | — |
 | Notion MCP | ❌ Запрещён | — |
@@ -151,21 +164,22 @@ This closes the last structural gap blocking a safe `/add_account` write path.
 
 ---
 
-## 8. ФАЙЛЫ ДЛЯ ЧТЕНИЯ В НОВОМ ЧАТЕ (Phase 1.16 — реализация)
+## 8. ФАЙЛЫ ДЛЯ ЧТЕНИЯ В НОВОМ ЧАТЕ (Phase 1.17 — реализация)
 
 **Required (читать обязательно):**
 ```
 project_config.md
 workflow_state.md
-packages/database/migrations/1777973748530_mvp-schema-and-types.js   # constraint pattern ref
-packages/database/migrations/<timestamp>_account-sources-unique-name.js  # Phase 1.16 migration
-packages/database/smoke-test-phase116.mjs                               # Phase 1.16 tests
+apps/telegram-bot/src/services/account.service.ts       # MODIFY: add write path
+apps/telegram-bot/src/routes/webhook.route.ts           # MODIFY: add /add_account handler
+apps/telegram-bot/src/services/category.service.ts      # pattern reference (parseArgs, addCategory)
+packages/database/smoke-test-phase116.mjs               # test structure reference
 ```
 
 **Optional (читать при необходимости):**
 ```
-packages/database/smoke-test-phase115.mjs               # Phase 1.15 тесты — reference паттерн
-apps/telegram-bot/src/services/category.service.ts      # ON CONFLICT pattern reference
+apps/telegram-bot/src/utils/html-escape.ts              # confirm escapeHtml signature
+packages/database/migrations/1778200000000_account-sources-unique-name.js  # constraint name ref
 ```
 
 **Do not load (не читать — тратит контекст):**
@@ -174,9 +188,7 @@ docs/event_storming_part*.md
 docs/client-roadmap-architecture-overview.md
 docs/adr/*
 packages/ai-core/
-packages/database/smoke-test-phase16{a,b}.mjs
-packages/database/smoke-test-phase17.mjs
-packages/database/smoke-test-phase18{a,b}.mjs
+packages/database/smoke-test-phase1{6a,6b,7,8a,8b}.mjs
 apps/background-workers/
 Crypto / Notion / Sheets / Mini App files
 ```
@@ -187,10 +199,10 @@ Crypto / Notion / Sheets / Mini App files
 
 > Read workflow_state.md and project_config.md first.
 > Before implementation, read workflow_state.md section 11 — Agent Operating Protocol and follow it strictly.
-> Phase 1.16 (account_sources UNIQUE Constraint Migration) is COMPLETED / ACCEPTED.
-> AGENT STATUS: WAITING_FOR_OWNER_APPROVAL_TO_START_NEXT_PHASE.
-> Do not implement Phase 1.17 or any future phase without explicit owner APPROVED.
-> Do not implement /add_account, /balance, or new dependencies.
+> Phase 1.17 (/add_account Strict-Format Command) is READY_FOR_OWNER_ACCEPTANCE.
+> Do not implement Phase 1.18 or any future phase without explicit owner APPROVED.
+> Do not implement /balance, /edit_account, /delete_account, or new dependencies.
+> Do not modify project_config.md. Do not tag phase-1.17-accepted until owner explicitly accepts.
 
 ---
 
@@ -250,6 +262,7 @@ Crypto / Notion / Sheets / Mini App files
 | 2026-05-06 22:04 | Phase 1.15 accepted after final verification and workflow_state test-count fix; HTML escaping hardening implemented; 559/559 tests passed; Traceability Review PASS WITH FIXES; Adversarial Security Review PASS; Scope Guard Review PASS; implementation commit 4f63a91; workflow_state sync commit 88ebae3; test-count fix commit 45b1eec. Tag phase-1.15-accepted pushed. Status: WAITING_FOR_OWNER_APPROVAL_TO_START_NEXT_PHASE. |
 | 2026-05-06 22:50 | Phase 1.16 account_sources UNIQUE Constraint Migration implementation complete. Owner APPROVED. Migration `1778200000000_account-sources-unique-name.js`: `up()` pre-flight duplicate check (0 found → safe) + `ALTER TABLE account_sources ADD CONSTRAINT account_sources_workspace_id_name_key UNIQUE(workspace_id, name)`. `down()` uses DROP CONSTRAINT IF EXISTS. `smoke-test-phase116.mjs`: 24/24 PASS. No TypeScript/route/service/worker/AI changes. 24/24 Phase 1.16 + 559/559 regression + 13/13 typecheck+lint = 583/583 PASS. Traceability ✅ Adversarial Security ✅ Scope Guard ✅. Status: READY_FOR_OWNER_ACCEPTANCE. |
 | 2026-05-06 22:46 | Phase 1.16 accepted after final verification; account_sources UNIQUE(workspace_id, name) constraint implemented; 583/583 tests passed; Traceability Review PASS; Adversarial Security Review PASS; Scope Guard Review PASS; implementation commit 3ad45e3. Tag phase-1.16-accepted pushed. Status: WAITING_FOR_OWNER_APPROVAL_TO_START_NEXT_PHASE. |
+| 2026-05-06 23:05 | Phase 1.17 /add_account Strict-Format Command implementation complete. Owner APPROVED. `account.service.ts` (MODIFY): `parseAddAccountArgs()` (first-space split, trim, empty check, max 100 char guard), `addAccount()` (withTenantTransaction, INSERT INTO account_sources VALUES ... 'manual'::account_source_type, 'RUB' ON CONFLICT ON CONSTRAINT account_sources_workspace_id_name_key DO NOTHING RETURNING id, returns created/duplicate), `AddAccountResult` type, `monotonicFactory` ULID. `webhook.route.ts` (MODIFY): KNOWN_COMMANDS 6→7, HELP_TEXT updated (`/add_account <название> — Добавить счёт`), handler `5e-add-acc` (parseAddAccountArgs → resolveWorkspace → addAccount → duplicate Russian message / success `escapeHtml` reply). `smoke-test-phase117.mjs` (NEW): 27/27 PASS. No migrations, no new deps, no AI/queue changes. 27/27 Phase 1.17 + 583/583 regression + 8/8 typecheck + 8/8 lint = 610/610 PASS. Traceability ✅ Adversarial Security ✅ Scope Guard ✅. Status: READY_FOR_OWNER_ACCEPTANCE. |
 
 ---
 

@@ -1,7 +1,8 @@
 /**
- * Account Service — Phase 1.14
+ * Account Service — Phase 1.14 + Phase 1.17
  *
- * Read-only list of account_sources for a workspace.
+ * Phase 1.14: Read-only list of account_sources for a workspace.
+ * Phase 1.17: addAccount() — strict-format write path for /add_account command.
  *
  * Scope:
  *   - getAccountList(): read-only, flat list sorted by type, name.
@@ -9,6 +10,11 @@
  *       manual          → Ручной ввод
  *       crypto_read_only → Крипто
  *       bank_sync       → Банк
+ *   - addAccount(): insert a new account_sources row for the workspace.
+ *     - Name: trimmed, non-empty, max 100 chars, spaces allowed.
+ *     - Type: always 'manual' (Phase 1.17 scope).
+ *     - Currency: always 'RUB' (workspace default, Phase 1.17 scope).
+ *     - Duplicate: detected via ON CONFLICT → returns 'duplicate' result.
  *
  * SEC-02: No financial amounts involved. No float arithmetic.
  * SEC-03: All queries run inside withTenantTransaction for RLS isolation.
@@ -17,6 +23,7 @@
  */
 
 import { withTenantTransaction } from '@midas/database';
+import { monotonicFactory } from 'ulid';
 import { escapeHtml } from '../utils/html-escape.js';
 
 // ─────────────────────────────────────────────────────────────
@@ -130,4 +137,118 @@ function pluralizeAccounts(count: number): string {
   if (mod10 === 1) return 'счёт';
   if (mod10 >= 2 && mod10 <= 4) return 'счёта';
   return 'счетов';
+}
+
+// ─────────────────────────────────────────────────────────────
+// addAccount — Phase 1.17
+// ─────────────────────────────────────────────────────────────
+
+// Monotonic ULID factory — safe for single-process use.
+const generateUlid = monotonicFactory();
+
+/** Maximum allowed char length for an account name. */
+const MAX_ACCOUNT_NAME_LENGTH = 100;
+
+/**
+ * Result of an addAccount() call.
+ *   created   — new account_sources row successfully inserted.
+ *   duplicate — an account with the same name already exists in this workspace.
+ */
+export type AddAccountResult = 'created' | 'duplicate';
+
+/**
+ * Insert a new account_sources row for the given workspace.
+ *
+ * @param workspaceId - Internal workspace ULID (from trusted backend — SEC-03)
+ * @param userId      - Internal user ULID (required by withTenantTransaction)
+ * @param name        - Account name (trimmed, non-empty, max 100 chars) — must be pre-validated
+ * @returns AddAccountResult: 'created' | 'duplicate'
+ *
+ * SEC-03: INSERT runs inside withTenantTransaction — RLS policy tenant_isolation_account_sources
+ *         enforces workspace_id isolation at DB level via WITH CHECK.
+ *         Defense-in-depth: explicit workspace_id = $2 in the INSERT.
+ * SEC-02: No financial amounts. No float arithmetic.
+ * SEC-12: Name is NOT logged.
+ *
+ * Type is always 'manual' (Phase 1.17 scope — crypto/bank types are Phase 2+).
+ * Currency is always 'RUB' (workspace default; no user input accepted in this phase).
+ *
+ * Duplicate detection: ON CONFLICT ON CONSTRAINT account_sources_workspace_id_name_key DO NOTHING.
+ * If the row already exists, INSERT returns 0 rows → 'duplicate' result.
+ */
+export async function addAccount(
+  workspaceId: string,
+  userId: string,
+  name: string,
+): Promise<AddAccountResult> {
+  const accountId = generateUlid();
+
+  const rowsInserted = await withTenantTransaction<number>(
+    workspaceId,
+    userId,
+    async (client) => {
+      const result = await client.query<{ id: string }>(
+        // Defense-in-depth: explicit workspace_id = $2 alongside RLS WITH CHECK.
+        // ON CONFLICT ON CONSTRAINT: uses the named unique constraint (added Phase 1.16)
+        // to prevent duplicate account names within the same workspace.
+        `INSERT INTO account_sources (id, workspace_id, name, type, currency)
+         VALUES ($1, $2, $3, 'manual'::account_source_type, 'RUB')
+         ON CONFLICT ON CONSTRAINT account_sources_workspace_id_name_key DO NOTHING
+         RETURNING id`,
+        [accountId, workspaceId, name],
+      );
+      return result.rowCount ?? 0;
+    },
+  );
+
+  return rowsInserted === 0 ? 'duplicate' : 'created';
+}
+
+/**
+ * Parse and validate the arguments of the /add_account command.
+ *
+ * Input format:  /add_account <name>
+ * The full message text is passed; the command token is consumed.
+ * Account names may contain spaces (everything after the command token is the name).
+ *
+ * @param text - Full message text from Telegram (e.g. "/add_account My Wallet")
+ * @returns { name } on success, or an error string (Russian) on failure.
+ */
+export function parseAddAccountArgs(
+  text: string,
+): { name: string } | { error: string } {
+  // Strip the command token (/add_account or /add_account@BotName)
+  const trimmed = text.trim();
+  const firstSpaceIdx = trimmed.search(/\s/);
+
+  if (firstSpaceIdx === -1) {
+    // No arguments at all
+    return {
+      error:
+        'Использование: /add_account <название>\n' +
+        'Пример: /add_account Наличные',
+    };
+  }
+
+  // Everything after the command token (including spaces) is the account name.
+  const rawName = trimmed.slice(firstSpaceIdx).trim();
+
+  // Validate name — non-empty after trim
+  if (rawName.length === 0) {
+    return {
+      error:
+        'Название счёта не может быть пустым.\n' +
+        'Пример: /add_account Наличные',
+    };
+  }
+
+  // Validate name — max length
+  if (rawName.length > MAX_ACCOUNT_NAME_LENGTH) {
+    return {
+      error:
+        `Название счёта слишком длинное (максимум ${String(MAX_ACCOUNT_NAME_LENGTH)} символов).`,
+    };
+  }
+
+  return { name: rawName };
 }

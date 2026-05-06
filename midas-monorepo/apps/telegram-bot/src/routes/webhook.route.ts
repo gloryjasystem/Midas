@@ -62,7 +62,11 @@ import {
   addCategory,
   parseAddCategoryArgs,
 } from '../services/category.service.js';
-import { getAccountList } from '../services/account.service.js';
+import {
+  getAccountList,
+  addAccount,
+  parseAddAccountArgs,
+} from '../services/account.service.js';
 import { escapeHtml } from '../utils/html-escape.js';
 
 import { callbackConfirmQueue } from '../queues/callback-confirm-queue.js';
@@ -142,13 +146,15 @@ function parseCommandToken(text: string): string | null {
  * Any command NOT in this set is blocked before AI parse.
  * Extend only when a new command is implemented in a future phase.
  */
-const KNOWN_COMMANDS = new Set(['/start', '/report', '/help', '/category', '/add_category', '/accounts']);
+const KNOWN_COMMANDS = new Set(['/start', '/report', '/help', '/category', '/add_category', '/accounts', '/add_account']);
 
 /**
  * Russian-language help text listing all currently available commands.
  * Phase 1.10: /start, /report, /help
  * Phase 1.11: /category
  * Phase 1.13: /add_category
+ * Phase 1.14: /accounts
+ * Phase 1.17: /add_account
  */
 const HELP_TEXT =
   'ℹ️ <b>Доступные команды Midas:</b>\n\n' +
@@ -157,6 +163,7 @@ const HELP_TEXT =
   '/category — Список категорий вашего кошелька\n' +
   '/add_category <группа> <название> — Добавить категорию\n' +
   '/accounts — Список ваших счетов\n' +
+  '/add_account <название> — Добавить счёт\n' +
   '/help — Показать это сообщение\n\n' +
   'Группы для /add_category: Бизнес, Жизнь\n' +
   'Пример: /add_category Жизнь Кофе\n\n' +
@@ -457,6 +464,62 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
             errorClass,
           });
           void sendMessage(chatId, '⚠️ Не удалось получить список счетов. Попробуйте позже.');
+        }
+
+        await reply.status(200).send({ ok: true });
+        return;
+      }
+
+      // ── 5e-add-acc: /add_account (Phase 1.17) ────────────────
+      if (commandToken === '/add_account') {
+        // Parse and validate args before any DB call
+        const parsed = parseAddAccountArgs(message.text);
+
+        if ('error' in parsed) {
+          // Argument validation failed — send usage hint, do NOT enqueue
+          void sendMessage(chatId, parsed.error);
+          request.log.info({
+            msg: '[midas:bot:webhook] /add_account bad args',
+            telegramUserId,
+            // name NOT logged (SEC-12)
+          });
+          await reply.status(200).send({ ok: true });
+          return;
+        }
+
+        try {
+          const resolved = await resolveWorkspace(telegramUserId, chatId);
+          const result = await addAccount(
+            resolved.workspaceId,
+            resolved.userId,
+            parsed.name,
+          );
+
+          if (result === 'duplicate') {
+            void sendMessage(chatId, 'Счёт с таким названием уже существует.');
+          } else {
+            // escapeHtml: parsed.name is user input rendered in parse_mode:'HTML' context (Phase 1.15 pattern).
+            void sendMessage(
+              chatId,
+              `✅ Счёт добавлен: <b>${escapeHtml(parsed.name)}</b>`,
+            );
+          }
+
+          request.log.info({
+            msg: '[midas:bot:webhook] /add_account processed',
+            telegramUserId,
+            workspaceId: resolved.workspaceId,
+            result,
+            // name NOT logged (SEC-12)
+          });
+        } catch (err: unknown) {
+          const errorClass = err instanceof Error ? err.constructor.name : 'UnknownError';
+          request.log.error({
+            msg: '[midas:bot:webhook] /add_account failed',
+            telegramUserId,
+            errorClass,
+          });
+          void sendMessage(chatId, '⚠️ Не удалось добавить счёт. Попробуйте позже.');
         }
 
         await reply.status(200).send({ ok: true });
