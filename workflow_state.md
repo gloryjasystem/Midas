@@ -1,7 +1,7 @@
 # WORKFLOW_STATE.MD — Диспетчер задач ИИ-агента Midas
 
 > **Тип:** MUTABLE — кратковременная память агента. Обновляется на каждом шаге работы.
-> **Обновлён:** 2026-05-07 00:08 (UTC+3)
+> **Обновлён:** 2026-05-07 02:00 (UTC+3)
 
 ---
 
@@ -10,11 +10,11 @@
 | Параметр | Значение |
 |---|---|
 | **PHASE** | `1 — MVP Implementation` |
-| **STEP** | `1.18 — /report Currency Label (base_currency grouping) — COMPLETED / ACCEPTED` |
-| **AGENT STATUS** | `WAITING_FOR_OWNER_APPROVAL_TO_START_NEXT_PHASE` |
-| **LAST COMPLETED** | `Phase 1.18 ACCEPTED. 34/34 Phase 1.18 + 47/47 Phase 1.9 (updated helper) + 563/563 regression (Ph1.6-A–Ph1.17) + 13/13 typecheck+lint = 644/644 PASS. Traceability ✅ Adversarial Security ✅ Scope Guard ✅. Implementation commit 700a244. Tag phase-1.18-accepted pushed.` |
-| **BLOCKER** | None — awaiting owner approval to start next phase |
-| **NEXT ACTION** | Prepare next phase advisory only — do not implement |
+| **STEP** | `1.19 — account_sources.currency CHECK Constraint — READY_FOR_OWNER_ACCEPTANCE` |
+| **AGENT STATUS** | `READY_FOR_OWNER_ACCEPTANCE` |
+| **LAST COMPLETED** | `Phase 1.19 implementation complete. 24/24 Phase 1.19 + 644/644 regression (Ph1.6-A–Ph1.18) + 13/13 typecheck+lint = 668/668 PASS. Traceability ✅ Adversarial Security ✅ Scope Guard ✅. Constraint account_sources_currency_check CHECK (currency ~ '^[A-Z]{3,5}$') added. Pre-flight: 0 invalid rows. No TypeScript/route/dep changes.` |
+| **BLOCKER** | None — awaiting owner acceptance |
+| **NEXT ACTION** | Owner acceptance decision — do not start Phase 1.20 |
 
 ---
 
@@ -44,6 +44,8 @@
 | 1.14 /accounts Read-Only List Command | ✅ ACCEPTED | `apps/telegram-bot/src/services/account.service.ts` (new), `webhook.route.ts` (KNOWN_COMMANDS 5→6, HELP_TEXT, handler `5d-acc`), `smoke-test-phase114.mjs` — 70/70 Phase 1.14 + 507/507 total regression PASS. Traceability ✅ Adversarial Security ✅ Scope Guard ✅. Implementation commit `362b05b`, tag `phase-1.14-accepted` pushed. Note: HTML escaping for account/category names must be added before user-controlled write paths (/add_account). |
 | 1.15 HTML Escaping Hardening | ✅ ACCEPTED | `apps/telegram-bot/src/utils/html-escape.ts` (NEW), `account.service.ts` (MODIFY), `category.service.ts` (MODIFY), `webhook.route.ts` (MODIFY), `smoke-test-phase115.mjs` (NEW) — 52/52 Phase 1.15 + 559/559 total PASS. Traceability ✅ Adversarial Security ✅ Scope Guard ✅. Traceability fix: `groupToken` escaped in error message. Implementation commit `4f63a91`; workflow_state sync commit `88ebae3`; test-count fix commit `45b1eec`. Tag `phase-1.15-accepted` pushed. |
 | 1.16 account_sources UNIQUE Constraint Migration | ✅ ACCEPTED | `packages/database/migrations/1778200000000_account-sources-unique-name.js` (NEW), `packages/database/smoke-test-phase116.mjs` (NEW) — UNIQUE(workspace_id, name) added; pre-flight 0 duplicates; 24/24 Phase 1.16 + 583/583 total PASS. Traceability ✅ Adversarial Security ✅ Scope Guard ✅. Implementation commit `3ad45e3`. Tag `phase-1.16-accepted` pushed. |
+| 1.17 /add_account Strict-Format Command | ✅ ACCEPTED | `account.service.ts` (MODIFY), `webhook.route.ts` (MODIFY), `smoke-test-phase117.mjs` (NEW) — 27/27 Phase 1.17 + 610/610 total PASS. Traceability ✅ Adversarial Security ✅ Scope Guard ✅. Implementation commit `8c370e3`. Tag `phase-1.17-accepted` pushed. |
+| 1.18 /report Currency Label (base_currency grouping) | ✅ ACCEPTED | `report.service.ts` (MODIFY), `smoke-test-phase118.mjs` (NEW), `smoke-test-phase19.mjs` (MODIFY — runReportQuery SQL helper sync) — 34/34 Phase 1.18 + 644/644 total PASS. Traceability ✅ Adversarial Security ✅ Scope Guard ✅. Implementation commit `700a244`. Tag `phase-1.18-accepted` pushed. |
 
 ---
 
@@ -106,57 +108,57 @@ midas-monorepo/
 
 ---
 
-## 6. ТЕКУЩАЯ ФАЗА — PHASE 1.18: /report CURRENCY LABEL (base_currency grouping)
+## 6. ТЕКУЩАЯ ФАЗА — PHASE 1.19: account_sources.currency CHECK Constraint
 
-> 🔄 **IN_PROGRESS. Owner APPROVED. Baseline: 610/610 PASS.**
+> ✅ **READY_FOR_OWNER_ACCEPTANCE. Baseline: 644/644 PASS. New tests: 24/24 PASS. Total: 668/668.**
 
 **Objective:**
-Fix the `/report` command to show the currency of each amount line and correctly group amounts by `(transaction_intent, base_currency)` instead of `transaction_intent` alone.
-
-The current query silently mixes currencies if a workspace has transactions in multiple `base_currency` values (possible whenever AI parser outputs a non-RUB currency). Adding the currency label also closes a UX gap — users currently see bare numbers with no currency symbol.
+Add a DB-level CHECK constraint on `account_sources.currency` to enforce that only well-formed currency codes (ISO 4217 fiat + crypto codes) can be stored. This closes a latent DB integrity gap — the column was `TEXT NOT NULL` with no pattern guard.
 
 **Owner Decisions:**
-- Scope: `/report` currency label with `base_currency` GROUP BY — option B confirmed
-- Output line format: `💸 Расходы (USD): <b>42355.76</b> (289 шт.)`
-- Update `smoke-test-phase19.mjs` `runReportQuery()` helper to mirror production SQL (no assertion changes)
-- Exclude account grouping, /balance, currency CHECK migration, E2E harness
+- Regex pattern: `^[A-Z]{3,5}$` (permissive — covers all current codes without an explicit allowlist)
+- Pre-flight guard: aborts if any invalid rows found (0 found in live DB)
+- Scope: migration-only hardening + smoke tests
 
 **Scope:**
-- `apps/telegram-bot/src/services/report.service.ts` (MODIFY):
-  - Add `base_currency` to SELECT and GROUP BY
-  - Update `IntentSummaryRow` type to include `base_currency: string`
-  - Add `escapeHtml` import and apply to `base_currency` in output line
-  - Output format: `💸 Расходы (USD): <b>42355.76</b> (289 шт.)`
-- `packages/database/smoke-test-phase118.mjs` (NEW): Phase 1.18 smoke tests
-- `packages/database/smoke-test-phase19.mjs` (MODIFY):
-  - Update `runReportQuery()` SQL helper to add `base_currency` to SELECT and GROUP BY
-  - No assertion changes — all test fixtures use single-currency data, counts unchanged
-- No migrations. No new dependencies. No route changes. No AI/queue/worker changes.
+- `packages/database/migrations/1778300000000_account-sources-currency-check.js` (NEW):
+  - Pre-flight: `SELECT COUNT(*) WHERE currency !~ '^[A-Z]{3,5}$'` — RAISE EXCEPTION if > 0
+  - `ALTER TABLE account_sources ADD CONSTRAINT account_sources_currency_check CHECK (currency ~ '^[A-Z]{3,5}$')`
+  - `down()`: `DROP CONSTRAINT IF EXISTS account_sources_currency_check`
+- `packages/database/smoke-test-phase119.mjs` (NEW): 24 smoke tests
+- No TypeScript changes. No route changes. No new dependencies. No AI/queue/worker changes.
+
+**Результаты Phase 1.19:**
+- Migration applied: `account_sources_currency_check` constraint present in live DB ✅
+- Pre-flight: 0 invalid rows in 553 existing account_sources rows ✅
+- Smoke tests: 24/24 PASS ✅
+- Full regression: 644/644 PASS (Ph1.6-A through Ph1.18) ✅
+- Typecheck + lint: 13/13 PASS ✅
+- Traceability Review: ✅ PASS
+- Adversarial Security Review: ✅ PASS
+- Scope Guard Review: ✅ PASS
 
 **Запрещено в этой фазе:**
 - `/balance`
-- Account grouping in `/report`
-- `/edit_account`, `/delete_account`, `/edit_category`, `/delete_category`
-- `account_sources` currency CHECK migration (Phase 1.19)
-- New slash commands
-- `webhook.route.ts` changes (unless absolutely necessary)
+- `/add_currency` или любые новые команды
+- Изменения `/report`, `/accounts`, `/add_account`, `/category`, `/add_category`
 - AI / queue / worker changes
 - New npm dependencies
 - `project_config.md` changes
-- Phase 1.19
+- Phase 1.20
 
-**Предыдущая завершённая фаза (Phase 1.17):**
-- `account.service.ts` (MODIFY), `webhook.route.ts` (MODIFY), `smoke-test-phase117.mjs` (NEW).
-- Implementation commit `8c370e3`. Tag `phase-1.17-accepted` pushed. 610/610 PASS.
+**Предыдущая завершённая фаза (Phase 1.18):**
+- `report.service.ts` (MODIFY), `smoke-test-phase118.mjs` (NEW), `smoke-test-phase19.mjs` (MODIFY).
+- Implementation commit `700a244`. Tag `phase-1.18-accepted` pushed. 644/644 PASS.
 
 ---
 
-## 7. MCP REQUIREMENTS (Phase 1.18 — IN_PROGRESS)
+## 7. MCP REQUIREMENTS (Phase 1.19 — READY_FOR_OWNER_ACCEPTANCE)
 
 | MCP-сервер | Доступ | Примечание |
 |---|---|---|
-| Filesystem MCP | ✅ read/write (project dir) | Редактирование report.service.ts + smoke tests |
-| Postgres MCP | ✅ read-only | Проверка base_currency значений, результатов smoke tests |
+| Filesystem MCP | ✅ read-only | Аудит файлов фазы при необходимости |
+| Postgres MCP | ✅ read-only | Верификация constraint в pg_constraint |
 | GitHub MCP | ⚪ read-only (опционально) | Проверка remote sync |
 | Browser / DevTools | ❌ Запрещён | — |
 | Notion MCP | ❌ Запрещён | — |
@@ -165,21 +167,19 @@ The current query silently mixes currencies if a workspace has transactions in m
 
 ---
 
-## 8. ФАЙЛЫ ДЛЯ ЧТЕНИЯ В НОВОМ ЧАТЕ (Phase 1.18 — реализация)
+## 8. ФАЙЛЫ ДЛЯ ЧТЕНИЯ В НОВОМ ЧАТЕ (Phase 1.19 — acceptance audit)
 
 **Required (читать обязательно):**
 ```
 project_config.md
 workflow_state.md
-apps/telegram-bot/src/services/report.service.ts        # MODIFY: add base_currency to query + output
-apps/telegram-bot/src/utils/html-escape.ts              # escapeHtml signature
-packages/database/smoke-test-phase19.mjs                # MODIFY: runReportQuery() helper sync
-packages/database/smoke-test-phase117.mjs               # test structure reference for new file
+packages/database/migrations/1778300000000_account-sources-currency-check.js   # NEW migration
+packages/database/smoke-test-phase119.mjs                                        # NEW smoke tests
 ```
 
 **Optional (читать при необходимости):**
 ```
-apps/telegram-bot/src/routes/webhook.route.ts           # confirm /report handler (no changes needed)
+packages/database/migrations/1778200000000_account-sources-unique-name.js   # structural reference (Phase 1.16)
 ```
 
 **Do not load (не читать — тратит контекст):**
@@ -189,6 +189,7 @@ docs/client-roadmap-architecture-overview.md
 docs/adr/*
 packages/ai-core/
 apps/background-workers/
+apps/telegram-bot/src/services/*
 Crypto / Notion / Sheets / Mini App files
 ```
 
@@ -197,10 +198,10 @@ Crypto / Notion / Sheets / Mini App files
 ## 9. ПРОМПТ ДЛЯ СТАРТА НОВОГО ЧАТА
 
 > Read workflow_state.md and project_config.md first.
-> Before implementation, read workflow_state.md section 11 — Agent Operating Protocol and follow it strictly.
-> Phase 1.18 (/report Currency Label) is IN_PROGRESS. Owner APPROVED.
-> Scope: report.service.ts MODIFY (base_currency in SELECT/GROUP BY/output) + smoke-test-phase118.mjs NEW + smoke-test-phase19.mjs MODIFY (runReportQuery SQL helper sync only).
-> Do not implement /balance, account grouping, edit/delete commands, or new dependencies.
+> Before any action, read workflow_state.md Section 11 — Agent Operating Protocol and follow it strictly.
+> Phase 1.19 (account_sources.currency CHECK Constraint) is READY_FOR_OWNER_ACCEPTANCE.
+> Do NOT implement Phase 1.20. Do NOT create tag phase-1.19-accepted until owner explicitly accepts.
+> Verify git status, git log --oneline -10, and origin/main are clean.
 > Do not modify project_config.md.
 
 ---
@@ -264,6 +265,7 @@ Crypto / Notion / Sheets / Mini App files
 | 2026-05-06 23:05 | Phase 1.17 /add_account Strict-Format Command implementation complete. Owner APPROVED. `account.service.ts` (MODIFY): `parseAddAccountArgs()` (first-space split, trim, empty check, max 100 char guard), `addAccount()` (withTenantTransaction, INSERT INTO account_sources VALUES ... 'manual'::account_source_type, 'RUB' ON CONFLICT ON CONSTRAINT account_sources_workspace_id_name_key DO NOTHING RETURNING id, returns created/duplicate), `AddAccountResult` type, `monotonicFactory` ULID. `webhook.route.ts` (MODIFY): KNOWN_COMMANDS 6→7, HELP_TEXT updated (`/add_account <название> — Добавить счёт`), handler `5e-add-acc` (parseAddAccountArgs → resolveWorkspace → addAccount → duplicate Russian message / success `escapeHtml` reply). `smoke-test-phase117.mjs` (NEW): 27/27 PASS. No migrations, no new deps, no AI/queue changes. 27/27 Phase 1.17 + 583/583 regression + 8/8 typecheck + 8/8 lint = 610/610 PASS. Traceability ✅ Adversarial Security ✅ Scope Guard ✅. Status: READY_FOR_OWNER_ACCEPTANCE. |
 | 2026-05-06 23:24 | Phase 1.17 accepted after final verification; /add_account strict-format command implemented; 610/610 tests passed; Traceability Review PASS; Adversarial Security Review PASS; Scope Guard Review PASS; implementation commit 8c370e3. Tag phase-1.17-accepted pushed. Status: WAITING_FOR_OWNER_APPROVAL_TO_START_NEXT_PHASE. |
 | 2026-05-07 00:08 | Phase 1.18 accepted after final verification; /report now shows base_currency labels and groups by transaction_intent + base_currency; smoke-test-phase19 runReportQuery() helper synced to production SQL; smoke-test-phase118.mjs (34 tests) added; 644/644 tests passed (34 Ph1.18 + 47 Ph1.9 + 563 Ph1.6-A–Ph1.17 + 13 typecheck+lint); Traceability Review PASS; Adversarial Security Review PASS; Scope Guard Review PASS; implementation commit 700a244. Tag phase-1.18-accepted pushed. Status: WAITING_FOR_OWNER_APPROVAL_TO_START_NEXT_PHASE. |
+| 2026-05-07 02:00 | Phase 1.19 account_sources.currency CHECK Constraint implementation complete. Owner APPROVED. Migration `1778300000000_account-sources-currency-check.js` (NEW): pre-flight check (0 invalid rows found in 553 existing rows) + `ALTER TABLE account_sources ADD CONSTRAINT account_sources_currency_check CHECK (currency ~ '^[A-Z]{3,5}$')`. `smoke-test-phase119.mjs` (NEW): 24/24 PASS — constraint existence, type, definition, valid codes (RUB/USD/EUR/GBP/BTC/ETH/USDT), invalid rejection (empty/lowercase/digits/spaces/6-char/2-char), no backfill, scope guard. No TypeScript/route/dep/AI/queue changes. 24/24 Phase 1.19 + 644/644 regression + 13/13 typecheck+lint = 668/668 PASS. Traceability ✅ Adversarial Security ✅ Scope Guard ✅. Status: READY_FOR_OWNER_ACCEPTANCE. |
 
 ---
 
