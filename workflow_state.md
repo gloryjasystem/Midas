@@ -1,7 +1,7 @@
 # WORKFLOW_STATE.MD — Диспетчер задач ИИ-агента Midas
 
 > **Тип:** MUTABLE — кратковременная память агента. Обновляется на каждом шаге работы.
-> **Обновлён:** 2026-05-06 09:08 (UTC+3)
+> **Обновлён:** 2026-05-06 09:45 (UTC+3)
 
 ---
 
@@ -12,7 +12,7 @@
 | **PHASE** | `1 — MVP Implementation` |
 | **STEP** | `1.9 — Basic Text /report Command READY_FOR_OWNER_ACCEPTANCE` |
 | **AGENT STATUS** | `WAITING_FOR_OWNER_ACCEPTANCE_OF_PHASE_1_9` |
-| **LAST COMPLETED** | `Phase 1.9 implementation complete. Commit e060edb on origin/main. 218/218 tests passed.` |
+| **LAST COMPLETED** | `Phase 1.9 implementation complete. Implementation commit e060edb; workflow_state sync commit dffb53e; origin/main in sync. 218/218 tests passed.` |
 | **BLOCKER** | Owner must accept Phase 1.9 before next phase |
 | **NEXT ACTION** | Await owner acceptance. Do not proceed to next phase. |
 
@@ -36,7 +36,7 @@
 | 1.7 Draft Expiration & Lifecycle Cleanup | ✅ ACCEPTED | `migrations/1777973960000_draft-expiration.js` + `1777973970000_harden-expire-search-path.js` + `1777973980000_fix-expire-function-owner.js`, `draft-expiration.service.ts`, `draft-expiration.worker.ts`, `smoke-test-phase17.mjs` — 20/20 smoke tests PASS, commits `b9069ad`→`49e0cec` |
 | 1.8-A Transaction Intent Foundation | ✅ ACCEPTED | `migrations/1778008338096_transaction-intent.js`, `draft.service.ts` (parsed_intent propagation), `draft-confirmation.service.ts` (intent_missing outcome), `confirmation.worker.ts` (intent_missing messages), `smoke-test-phase18a.mjs` — 19/19 smoke tests PASS, 155/155 total regression PASS, commits `425df61`→`51b6aee` |
 | 1.8-B Runtime Consistency & Security Hardening | ✅ ACCEPTED | C-1: `draft.service.ts` `telegram_user_id`→`telegram_id` fix. C-2: `migrations/1778008400000_harden-onboarding-search-path.js` — `search_path` fixed for 2 SECDEF functions. M-1: `shared/index.ts` `TRANSACTION_TYPE` updated to 5 canonical values. `smoke-test-phase18b.mjs` — 16/16 PASS, 171/171 total regression PASS, commit `7af1692` |
-| 1.9 Basic Text /report Command | 🔄 READY FOR ACCEPTANCE | `apps/telegram-bot/src/services/report.service.ts`, `apps/telegram-bot/src/routes/webhook.route.ts`, `apps/telegram-bot/src/services/workspace-resolver.ts`, `packages/database/smoke-test-phase19.mjs` — /report command, current UTC month, grouped by transaction_intent, Russian text output — 47/47 Phase 1.9 tests, 218/218 total regression PASS, commit `e060edb` |
+| 1.9 Basic Text /report Command | 🔄 READY FOR ACCEPTANCE | `apps/telegram-bot/src/services/report.service.ts`, `apps/telegram-bot/src/routes/webhook.route.ts`, `apps/telegram-bot/src/services/workspace-resolver.ts`, `packages/database/smoke-test-phase19.mjs` — /report command, current UTC month, grouped by transaction_intent, Russian text output — 47/47 Phase 1.9 tests, 218/218 total regression PASS, implementation commit `e060edb`; workflow sync `dffb53e`. |
 
 ---
 
