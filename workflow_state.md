@@ -1,7 +1,7 @@
 # WORKFLOW_STATE.MD — Диспетчер задач ИИ-агента Midas
 
 > **Тип:** MUTABLE — кратковременная память агента. Обновляется на каждом шаге работы.
-> **Обновлён:** 2026-05-06 17:55 (UTC+3)
+> **Обновлён:** 2026-05-06 19:03 (UTC+3)
 
 ---
 
@@ -10,11 +10,11 @@
 | Параметр | Значение |
 |---|---|
 | **PHASE** | `1 — MVP Implementation` |
-| **STEP** | `1.13 — /add_category Strict-Format Command — READY_FOR_OWNER_ACCEPTANCE` |
-| **AGENT STATUS** | `READY_FOR_OWNER_ACCEPTANCE` |
-| **LAST COMPLETED** | `Phase 1.13 READY_FOR_OWNER_ACCEPTANCE. 74/74 Phase 1.13 + 437/437 total regression PASS. Traceability ✅ Adversarial Security ✅ Scope Guard ✅. Implementation commit eac55a9.` |
-| **BLOCKER** | Owner acceptance required |
-| **NEXT ACTION** | Owner reviews and accepts or requests changes |
+| **STEP** | `1.13 — /add_category Strict-Format Command — ACCEPTED` |
+| **AGENT STATUS** | `WAITING_FOR_OWNER_APPROVAL_TO_START_NEXT_PHASE` |
+| **LAST COMPLETED** | `Phase 1.13 ACCEPTED by owner. 437/437 tests PASS. Traceability ✅ Adversarial Security ✅ Scope Guard ✅. Implementation commit eac55a9; workflow_state sync commit 09dba48. Tag phase-1.13-accepted pushed.` |
+| **BLOCKER** | None — awaiting owner approval to start next phase |
+| **NEXT ACTION** | Prepare next phase advisory only — do not implement |
 
 ---
 
@@ -40,6 +40,7 @@
 | 1.10 Slash-Command Guard + Inline /help | ✅ ACCEPTED | `webhook.route.ts` (parseCommandToken, KNOWN_COMMANDS, /help, guard), `smoke-test-phase110.mjs` — 30/30 smoke tests PASS, 248/248 total regression PASS, commit `b321463`, tag `phase-1.10-accepted`. |
 | 1.11 /category Read-Only List Command | ✅ ACCEPTED | `apps/telegram-bot/src/services/category.service.ts` (new), `webhook.route.ts` (KNOWN_COMMANDS, HELP_TEXT, /category handler), `smoke-test-phase111.mjs` — 78/78 Phase 1.11 + 326/326 total regression PASS. Traceability ✅ Adversarial Security ✅ Scope Guard ✅. Implementation commit `2e77362`, tag `phase-1.11-accepted` pushed. |
 | 1.12 Onboarding Default Data Seeding | ✅ ACCEPTED | `migrations/1778100000000_onboarding-default-seed.js` + `1778100010000_fix-onboarding-seed-conflict.js` (7-param SECDEF function), `onboarding.service.ts` (candidateAccountId + candidateCategoryId), `smoke-test-phase112.mjs` — 37/37 Phase 1.12 + 363/363 total regression PASS. Traceability ✅ Adversarial Security ✅ Scope Guard ✅. Implementation commit `7b87eac`, tag `phase-1.12-accepted` pushed. |
+| 1.13 /add_category Strict-Format Command | ✅ ACCEPTED | `category.service.ts` (`parseAddCategoryArgs`, `resolveGroup`, `addCategory`, `AddCategoryResult`), `webhook.route.ts` (KNOWN_COMMANDS 4→5, HELP_TEXT, handler `5e-add`), `smoke-test-phase113.mjs` — 74/74 Phase 1.13 + 437/437 total regression PASS. Traceability ✅ Adversarial Security ✅ Scope Guard ✅. Implementation commit `eac55a9`, tag `phase-1.13-accepted` pushed. |
 
 ---
 
@@ -102,37 +103,27 @@ midas-monorepo/
 
 ---
 
-## 6. ТЕКУЩАЯ ФАЗА — PHASE 1.13: /add_category STRICT-FORMAT COMMAND
+## 6. ПОСЛЕДНЯЯ ЗАВЕРШЁННАЯ ФАЗА — PHASE 1.13: /add_category STRICT-FORMAT COMMAND
 
-> 🔄 **READY_FOR_OWNER_ACCEPTANCE. 74/74 Phase 1.13 + 437/437 total regression PASS.**
+> ✅ **ACCEPTED. 74/74 Phase 1.13 + 437/437 total regression PASS. Tag phase-1.13-accepted pushed.**
 
 **Результат:**
-- `apps/telegram-bot/src/services/category.service.ts` — расширен.
-  `addCategory(workspaceId, userId, canonicalGroup, name)`: INSERT через `withTenantTransaction`, `ON CONFLICT ON CONSTRAINT categories_workspace_id_name_key DO NOTHING`, ULID `id`, возвращает `'created' | 'duplicate'`.
-  `parseAddCategoryArgs(text)`: парсинг group-token (case-insensitive, нормализация к canonical enum), имя (trimmed, non-empty, ≤100 символов).
-  `resolveGroup(rawGroup)`: case-insensitive lookup в `ALLOWED_GROUPS`.
-  `AddCategoryResult` — экспортированный тип.
-  Пустой стейт `/category` обновлён: показывает `/add_category <группа> <название>`.
-- `apps/telegram-bot/src/routes/webhook.route.ts` — обновлён.
-  `KNOWN_COMMANDS`: 4 → 5 (добавлен `/add_category`).
-  `HELP_TEXT`: добавлены `/add_category <группа> <название>`, подсказка про группы и пример.
-  Обработчик `5e-add: /add_category`: валидация аргументов → resolveWorkspace → addCategory → Russian reply.
-  Дубликат: `Категория с таким именем уже существует.`
-  Имя/группа НЕ логируются (SEC-12). workspaceId — из resolveWorkspace (НЕ из сообщения, SEC-03).
-- `packages/database/smoke-test-phase113.mjs` — 74 теста PASS.
-- Нет новых миграций, нет queue/worker changes, нет AI changes, нет новых зависимостей.
-- Tests: 437/437 PASS (74 Phase 1.13 + 37 Phase 1.12 + 78 Phase 1.11 + 30 Phase 1.10 + 47 Phase 1.9 + 16 Phase 1.8-B + 19 Phase 1.8-A + 20 Phase 1.7 + 30 Phase 1.6-B + 73 Phase 1.6-A + 13 typecheck+lint)
-- Traceability ✅ Adversarial Security ✅ Scope Guard ✅
+- `category.service.ts`: `parseAddCategoryArgs()`, `resolveGroup()`, `addCategory()` (withTenantTransaction, ON CONFLICT DO NOTHING, ULID id, returns 'created'|'duplicate'), `AddCategoryResult` type.
+- `webhook.route.ts`: KNOWN_COMMANDS 4→5, HELP_TEXT с /add_category, обработчик `5e-add`.
+- `smoke-test-phase113.mjs`: 74 теста PASS (DB + логика; midas_app RLS WITH CHECK верифицирован).
+- Нет миграций, нет новых зависимостей, нет AI/queue changes.
+- Implementation commit `eac55a9`. workflow_state sync commit `09dba48`. Tag `phase-1.13-accepted` pushed.
+- 437/437 PASS. Traceability ✅ Adversarial Security ✅ Scope Guard ✅
 
 ---
 
-## 7. MCP REQUIREMENTS (Phase 1.13 — implementation)
+## 7. MCP REQUIREMENTS (Phase 1.13 — ACCEPTED / Advisory only)
 
 | MCP-сервер | Доступ | Примечание |
 |---|---|---|
-| Filesystem MCP | ✅ read/write (project dir only) | Правка category.service.ts, webhook.route.ts; создание smoke-test-phase113.mjs |
-| Postgres MCP | ✅ read-only (local dev DB) | Аудит schema categories, enum category_group, RLS policies, UNIQUE constraint |
-| GitHub MCP | ⚪ read-only (опционально) | Проверка remote sync если нужно |
+| Filesystem MCP | ✅ read-only | Чтение workflow_state.md, project_config.md для advisory |
+| Postgres MCP | ❌ не нужен | Advisory-only — без DB-изменений |
+| GitHub MCP | ⚪ read-only (опционально) | Проверка remote sync при необходимости |
 | Browser / DevTools | ❌ Запрещён | — |
 | Notion MCP | ❌ Запрещён | — |
 | Google Sheets | ❌ Запрещён | — |
@@ -140,21 +131,19 @@ midas-monorepo/
 
 ---
 
-## 8. ФАЙЛЫ ДЛЯ ЧТЕНИЯ В НОВОМ ЧАТЕ (Phase 1.13)
+## 8. ФАЙЛЫ ДЛЯ ЧТЕНИЯ В НОВОМ ЧАТЕ (Advisory — следующая фаза)
 
 **Required (читать обязательно):**
 ```
 project_config.md
 workflow_state.md
-apps/telegram-bot/src/routes/webhook.route.ts                             # Роутинг команд, KNOWN_COMMANDS, HELP_TEXT
-apps/telegram-bot/src/services/category.service.ts                        # Существующий read-only сервис — расширяем
-packages/database/smoke-test-phase113.mjs                                  # Phase 1.13 тесты (создаётся в этой фазе)
 ```
 
-**Optional (читать при необходимости):**
+**Optional (читать при необходимости — для advisory следующей фазы):**
 ```
-packages/database/smoke-test-phase111.mjs                                  # Phase 1.11 regression reference (паттерн тестов)
-packages/database/smoke-test-phase112.mjs                                  # Phase 1.12 regression reference
+apps/telegram-bot/src/routes/webhook.route.ts        # Текущее состояние роутера
+apps/telegram-bot/src/services/category.service.ts   # Текущее состояние сервиса категорий
+packages/database/smoke-test-phase113.mjs            # Phase 1.13 тесты — reference паттерн
 ```
 
 **Do not load (не читать — тратит контекст):**
@@ -177,10 +166,10 @@ Crypto / Notion / Sheets / Mini App files
 
 > Read workflow_state.md and project_config.md first.
 > Before implementation, read workflow_state.md section 11 — Agent Operating Protocol and follow it strictly.
-> Phase 1.12 (Onboarding Default Data Seeding) is ACCEPTED. Implementation commit `7b87eac`. Tag `phase-1.12-accepted` pushed.
-> Phase 1.13 (/add_category Strict-Format Command) is IN_PROGRESS. Owner APPROVED.
-> Required files: webhook.route.ts, category.service.ts, smoke-test-phase113.mjs.
-> Do not re-implement Phase 1.13 without reading current state. Do not start Phase 1.14 without owner APPROVED.
+> Phase 1.13 (/add_category Strict-Format Command) is ACCEPTED. Implementation commit `eac55a9`. Tag `phase-1.13-accepted` pushed.
+> AGENT STATUS: WAITING_FOR_OWNER_APPROVAL_TO_START_NEXT_PHASE.
+> Do not implement Phase 1.14 or any future phase without explicit owner APPROVED.
+> Next action: prepare phase advisory only — present options, risks, scope. Wait for approval before any code.
 
 ---
 
@@ -232,6 +221,7 @@ Crypto / Notion / Sheets / Mini App files
 | 2026-05-06 17:20 | Phase 1.12 Onboarding Default Data Seeding implementation complete. Currency finding: `workspaces.default_currency DEFAULT 'RUB'` confirmed — no hardcoding beyond existing onboarding pattern. Migrations: `1778100000000_onboarding-default-seed.js` (7-param SECDEF function) + `1778100010000_fix-onboarding-seed-conflict.js` (PL/pgSQL ON CONFLICT ambiguity fix using named constraint). `onboarding.service.ts` extended to pass candidateAccountId + candidateCategoryId ($6/$7). Lazy fallback in `draft-confirmation.service.ts` preserved untouched (defense-in-depth). No route changes, no new slash commands, no queue/worker changes, no AI changes, no new deps. DB audit: 157 workspaces, 71 missing account_sources, 55 missing categories — no backfill (lazy fallback covers them). 37/37 Phase 1.12 + 78/78 Phase 1.11 + 30/30 Phase 1.10 + 47/47 Phase 1.9 + 16/16 Phase 1.8-B + 19/19 Phase 1.8-A + 20/20 Phase 1.7 + 30/30 Phase 1.6-B + 73/73 Phase 1.6-A + 13/13 typecheck+lint = 363/363 PASS. Traceability ✅ Adversarial Security ✅ Scope Guard ✅. Status: READY_FOR_OWNER_ACCEPTANCE. |
 | 2026-05-06 17:45 | workflow_state.md test-count fix: 344/344 → 363/363 (Phase 1.8-A 19 tests omitted from arithmetic sum). Commit 1b9a32a. No code changes. |
 | 2026-05-06 18:40 | Phase 1.13 /add_category Strict-Format Command implementation complete. `category.service.ts`: `parseAddCategoryArgs()` (group case-insensitive normalization via ALLOWED_GROUPS, name trim+length validation), `resolveGroup()`, `addCategory()` (withTenantTransaction, INSERT ON CONFLICT ON CONSTRAINT categories_workspace_id_name_key DO NOTHING, ULID id, returns 'created'\|'duplicate'), `AddCategoryResult` type. `webhook.route.ts`: KNOWN_COMMANDS 4→5, HELP_TEXT updated with /add_category line + groups + example, handler `5e-add` (parseAddCategoryArgs → resolveWorkspace → addCategory → Russian reply; duplicate: «Категория с таким именем уже существует.»). No migrations, no new deps, no AI changes. Empty-state /category message updated. midas_app RLS WITH CHECK verified via separate appPool in Test 8. 74/74 Phase 1.13 + 37/37 Phase 1.12 + 78/78 Phase 1.11 + 30/30 Phase 1.10 + 47/47 Phase 1.9 + 16/16 Phase 1.8-B + 19/19 Phase 1.8-A + 20/20 Phase 1.7 + 30/30 Phase 1.6-B + 73/73 Phase 1.6-A + 13/13 typecheck+lint = 437/437 PASS. Traceability ✅ Adversarial Security ✅ Scope Guard ✅. Implementation commit `eac55a9`. Status: READY_FOR_OWNER_ACCEPTANCE. |
+| 2026-05-06 19:03 | Phase 1.13 ACCEPTED by owner after final verification. /add_category strict-format command implemented; 437/437 tests PASS; Traceability Review PASS; Adversarial Security Review PASS; Scope Guard Review PASS; implementation commit `eac55a9`; workflow_state sync commit `09dba48`. Tag `phase-1.13-accepted` pushed. Status: WAITING_FOR_OWNER_APPROVAL_TO_START_NEXT_PHASE. |
 
 ---
 
