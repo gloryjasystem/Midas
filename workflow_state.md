@@ -1,7 +1,7 @@
 # WORKFLOW_STATE.MD — Диспетчер задач ИИ-агента Midas
 
 > **Тип:** MUTABLE — кратковременная память агента. Обновляется на каждом шаге работы.
-> **Обновлён:** 2026-05-06 23:25 (UTC+3)
+> **Обновлён:** 2026-05-07 00:00 (UTC+3)
 
 ---
 
@@ -10,11 +10,11 @@
 | Параметр | Значение |
 |---|---|
 | **PHASE** | `1 — MVP Implementation` |
-| **STEP** | `1.17 — /add_account Strict-Format Command — COMPLETED / ACCEPTED` |
-| **AGENT STATUS** | `WAITING_FOR_OWNER_APPROVAL_TO_START_NEXT_PHASE` |
-| **LAST COMPLETED** | `Phase 1.17 ACCEPTED. 27/27 Phase 1.17 + 583/583 regression + 8/8 typecheck + 8/8 lint = 610/610 PASS. Traceability ✅ Adversarial Security ✅ Scope Guard ✅. Implementation commit 8c370e3. Tag phase-1.17-accepted pushed.` |
-| **BLOCKER** | None — awaiting owner approval to start next phase |
-| **NEXT ACTION** | Prepare next phase advisory only — do not implement |
+| **STEP** | `1.18 — /report Currency Label (base_currency grouping) — READY_FOR_OWNER_ACCEPTANCE` |
+| **AGENT STATUS** | `READY_FOR_OWNER_ACCEPTANCE` |
+| **LAST COMPLETED** | `Phase 1.18 READY. 34/34 Phase 1.18 + 47/47 Phase 1.9 (updated helper) + 576/576 regression (Ph1.10–Ph1.17) + 13/13 typecheck+lint = 644/644 PASS. Traceability ✅ Adversarial Security ✅ Scope Guard ✅.` |
+| **BLOCKER** | None — awaiting owner acceptance |
+| **NEXT ACTION** | Owner to review and issue ACCEPTED command |
 
 ---
 
@@ -106,56 +106,57 @@ midas-monorepo/
 
 ---
 
-## 6. ТЕКУЩАЯ ФАЗА — PHASE 1.17: /add_account STRICT-FORMAT COMMAND
+## 6. ТЕКУЩАЯ ФАЗА — PHASE 1.18: /report CURRENCY LABEL (base_currency grouping)
 
-> 🔄 **IN_PROGRESS. Owner APPROVED. Baseline: 583/583 PASS.**
+> 🔄 **IN_PROGRESS. Owner APPROVED. Baseline: 610/610 PASS.**
 
 **Objective:**
-Implement `/add_account <name>` — a strict-format write command that inserts a new `account_sources` row for the current workspace.
-Completes the write/read symmetry for accounts (`/accounts` read + `/add_account` write).
+Fix the `/report` command to show the currency of each amount line and correctly group amounts by `(transaction_intent, base_currency)` instead of `transaction_intent` alone.
+
+The current query silently mixes currencies if a workspace has transactions in multiple `base_currency` values (possible whenever AI parser outputs a non-RUB currency). Adding the currency label also closes a UX gap — users currently see bare numbers with no currency symbol.
 
 **Owner Decisions:**
-- Command format: `/add_account <name>` (no currency arg)
-- Account type: always `manual`
-- Currency: always `RUB` (workspace default)
-- No currency DB CHECK constraint in this phase
+- Scope: `/report` currency label with `base_currency` GROUP BY — option B confirmed
+- Output line format: `💸 Расходы (USD): <b>42355.76</b> (289 шт.)`
+- Update `smoke-test-phase19.mjs` `runReportQuery()` helper to mirror production SQL (no assertion changes)
+- Exclude account grouping, /balance, currency CHECK migration, E2E harness
 
 **Scope:**
-- `apps/telegram-bot/src/services/account.service.ts` (MODIFY): add `parseAddAccountArgs()`, `addAccount()`, `AddAccountResult` type
-- `apps/telegram-bot/src/routes/webhook.route.ts` (MODIFY): add `/add_account` to `KNOWN_COMMANDS`, `HELP_TEXT`, inline handler
-- `packages/database/smoke-test-phase117.mjs` (NEW): Phase 1.17 smoke tests
-- No migrations. No new dependencies. No AI/queue/worker changes.
-
-**Name validation rules:**
-- Trimmed, non-empty
-- Max 100 chars
-- Names with spaces allowed
-- Duplicate: `ON CONFLICT ON CONSTRAINT account_sources_workspace_id_name_key DO NOTHING` → Russian friendly message
+- `apps/telegram-bot/src/services/report.service.ts` (MODIFY):
+  - Add `base_currency` to SELECT and GROUP BY
+  - Update `IntentSummaryRow` type to include `base_currency: string`
+  - Add `escapeHtml` import and apply to `base_currency` in output line
+  - Output format: `💸 Расходы (USD): <b>42355.76</b> (289 шт.)`
+- `packages/database/smoke-test-phase118.mjs` (NEW): Phase 1.18 smoke tests
+- `packages/database/smoke-test-phase19.mjs` (MODIFY):
+  - Update `runReportQuery()` SQL helper to add `base_currency` to SELECT and GROUP BY
+  - No assertion changes — all test fixtures use single-currency data, counts unchanged
+- No migrations. No new dependencies. No route changes. No AI/queue/worker changes.
 
 **Запрещено в этой фазе:**
 - `/balance`
-- `/edit_account`, `/delete_account`
-- Account type selection
-- Currency argument
-- Currency CHECK migration
-- Modifying `/report`, `/accounts`, `/category`, `/add_category` (except routing/help)
+- Account grouping in `/report`
+- `/edit_account`, `/delete_account`, `/edit_category`, `/delete_category`
+- `account_sources` currency CHECK migration (Phase 1.19)
+- New slash commands
+- `webhook.route.ts` changes (unless absolutely necessary)
 - AI / queue / worker changes
 - New npm dependencies
 - `project_config.md` changes
-- Phase 1.18
+- Phase 1.19
 
-**Предыдущая завершённая фаза (Phase 1.16):**
-- `migrations/1778200000000_account-sources-unique-name.js` (NEW), `smoke-test-phase116.mjs` (NEW).
-- Implementation commit `3ad45e3`. Tag `phase-1.16-accepted` pushed. 583/583 PASS.
+**Предыдущая завершённая фаза (Phase 1.17):**
+- `account.service.ts` (MODIFY), `webhook.route.ts` (MODIFY), `smoke-test-phase117.mjs` (NEW).
+- Implementation commit `8c370e3`. Tag `phase-1.17-accepted` pushed. 610/610 PASS.
 
 ---
 
-## 7. MCP REQUIREMENTS (Phase 1.17 — IN_PROGRESS)
+## 7. MCP REQUIREMENTS (Phase 1.18 — IN_PROGRESS)
 
 | MCP-сервер | Доступ | Примечание |
 |---|---|---|
-| Filesystem MCP | ✅ read/write (project dir) | Редактирование сервисов + smoke tests |
-| Postgres MCP | ✅ read-only | Проверка RLS, constraint, результатов smoke tests |
+| Filesystem MCP | ✅ read/write (project dir) | Редактирование report.service.ts + smoke tests |
+| Postgres MCP | ✅ read-only | Проверка base_currency значений, результатов smoke tests |
 | GitHub MCP | ⚪ read-only (опционально) | Проверка remote sync |
 | Browser / DevTools | ❌ Запрещён | — |
 | Notion MCP | ❌ Запрещён | — |
@@ -164,22 +165,21 @@ Completes the write/read symmetry for accounts (`/accounts` read + `/add_account
 
 ---
 
-## 8. ФАЙЛЫ ДЛЯ ЧТЕНИЯ В НОВОМ ЧАТЕ (Phase 1.17 — реализация)
+## 8. ФАЙЛЫ ДЛЯ ЧТЕНИЯ В НОВОМ ЧАТЕ (Phase 1.18 — реализация)
 
 **Required (читать обязательно):**
 ```
 project_config.md
 workflow_state.md
-apps/telegram-bot/src/services/account.service.ts       # MODIFY: add write path
-apps/telegram-bot/src/routes/webhook.route.ts           # MODIFY: add /add_account handler
-apps/telegram-bot/src/services/category.service.ts      # pattern reference (parseArgs, addCategory)
-packages/database/smoke-test-phase116.mjs               # test structure reference
+apps/telegram-bot/src/services/report.service.ts        # MODIFY: add base_currency to query + output
+apps/telegram-bot/src/utils/html-escape.ts              # escapeHtml signature
+packages/database/smoke-test-phase19.mjs                # MODIFY: runReportQuery() helper sync
+packages/database/smoke-test-phase117.mjs               # test structure reference for new file
 ```
 
 **Optional (читать при необходимости):**
 ```
-apps/telegram-bot/src/utils/html-escape.ts              # confirm escapeHtml signature
-packages/database/migrations/1778200000000_account-sources-unique-name.js  # constraint name ref
+apps/telegram-bot/src/routes/webhook.route.ts           # confirm /report handler (no changes needed)
 ```
 
 **Do not load (не читать — тратит контекст):**
@@ -188,7 +188,6 @@ docs/event_storming_part*.md
 docs/client-roadmap-architecture-overview.md
 docs/adr/*
 packages/ai-core/
-packages/database/smoke-test-phase1{6a,6b,7,8a,8b}.mjs
 apps/background-workers/
 Crypto / Notion / Sheets / Mini App files
 ```
@@ -199,10 +198,10 @@ Crypto / Notion / Sheets / Mini App files
 
 > Read workflow_state.md and project_config.md first.
 > Before implementation, read workflow_state.md section 11 — Agent Operating Protocol and follow it strictly.
-> Phase 1.17 (/add_account Strict-Format Command) is COMPLETED / ACCEPTED. Tag phase-1.17-accepted pushed.
-> Do not implement Phase 1.18 or any future phase without explicit owner APPROVED.
-> Do not implement /balance, /edit_account, /delete_account, or new dependencies.
-> Do not modify project_config.md. Prepare next phase advisory only — do not implement.
+> Phase 1.18 (/report Currency Label) is IN_PROGRESS. Owner APPROVED.
+> Scope: report.service.ts MODIFY (base_currency in SELECT/GROUP BY/output) + smoke-test-phase118.mjs NEW + smoke-test-phase19.mjs MODIFY (runReportQuery SQL helper sync only).
+> Do not implement /balance, account grouping, edit/delete commands, or new dependencies.
+> Do not modify project_config.md.
 
 ---
 

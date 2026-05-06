@@ -1,5 +1,5 @@
 /**
- * Report Service — Phase 1.9
+ * Report Service — Phase 1.9 + Phase 1.18
  *
  * Generates a text-based monthly transaction report for a workspace.
  *
@@ -9,6 +9,15 @@
  *   - Sums base_amount using NUMERIC aggregation (SEC-02: no float arithmetic)
  *   - Returns plain Russian text for Telegram sendMessage
  *
+ * Phase 1.18 change:
+ *   - Added base_currency to SELECT, GROUP BY, and ORDER BY.
+ *   - Each (transaction_intent, base_currency) pair is a separate output line.
+ *   - Currency label shown in parentheses: 💸 Расходы (USD): <b>42355.76</b> (289 шт.)
+ *   - escapeHtml applied to base_currency (Phase 1.15 policy — DB-sourced text value).
+ *   - Rationale: GROUP BY transaction_intent alone silently mixes amounts from different
+ *     currencies into one sum, which is semantically incorrect. This fix is required for
+ *     correctness whenever multi-currency transactions exist in a workspace.
+ *
  * SEC-02: All financial amounts are Decimal objects (from pg.types.setTypeParser).
  *         Formatting uses .toFixed() for string output. No Number(), parseFloat(), or float math.
  * SEC-03: All queries run inside withTenantTransaction for RLS isolation.
@@ -16,6 +25,7 @@
  */
 
 import { withTenantTransaction } from '@midas/database';
+import { escapeHtml } from '../utils/html-escape.js';
 
 // ─────────────────────────────────────────────────────────────
 // Types
@@ -23,6 +33,7 @@ import { withTenantTransaction } from '@midas/database';
 
 interface IntentSummaryRow {
   transaction_intent: string;
+  base_currency: string;  // Phase 1.18: included in GROUP BY for correctness
   total: { toFixed: (dp: number) => string };  // Decimal from pg NUMERIC parser
   count: number;
 }
@@ -83,16 +94,20 @@ export async function getMonthlyReport(
     userId,
     async (client) => {
       const result = await client.query<IntentSummaryRow>(
+        // Phase 1.18: GROUP BY transaction_intent, base_currency for correctness.
+        // Grouping by intent alone silently mixes amounts from different currencies.
+        // Defense-in-depth: explicit WHERE workspace_id = $1 alongside RLS (SEC-03).
         `SELECT
            transaction_intent,
+           base_currency,
            SUM(base_amount) AS total,
            COUNT(*)::INT AS count
          FROM transactions
          WHERE workspace_id = $1
            AND transaction_time >= $2
            AND transaction_time < $3
-         GROUP BY transaction_intent
-         ORDER BY transaction_intent`,
+         GROUP BY transaction_intent, base_currency
+         ORDER BY transaction_intent, base_currency`,
         [workspaceId, start, end],
       );
       return result.rows;
@@ -106,12 +121,16 @@ export async function getMonthlyReport(
 
   // ── Build text report ──────────────────────────────────────
   // SEC-02: total is a Decimal object. Use .toFixed() — never Number() or parseFloat().
+  // Phase 1.18: escapeHtml applied to base_currency (DB-sourced text — Phase 1.15 policy).
   const lines = rows.map((row) => {
     const intentLabel = INTENT_LABELS[row.transaction_intent] ?? row.transaction_intent;
     // SEC-02: Decimal.toFixed(2) for display, string output only
     const totalStr = row.total.toFixed(2);
     const countStr = String(row.count);
-    return `${intentLabel}: <b>${totalStr}</b> (${countStr} шт.)`;
+    // escapeHtml on base_currency: DB text value, not user-controlled, but consistent
+    // with Phase 1.15 policy of escaping all DB-sourced strings in HTML-mode messages.
+    const currencyLabel = escapeHtml(row.base_currency);
+    return `${intentLabel} (${currencyLabel}): <b>${totalStr}</b> (${countStr} шт.)`;
   });
 
   return `📊 <b>Отчёт за ${label}</b>\n\n${lines.join('\n')}`;

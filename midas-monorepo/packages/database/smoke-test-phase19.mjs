@@ -104,6 +104,7 @@ async function insertTransaction(pool, { wsId, accountId, categoryId, intent, am
 
 /**
  * Run the exact same SQL that report.service.ts uses.
+ * Phase 1.18 update: added base_currency to SELECT, GROUP BY, ORDER BY to mirror production.
  */
 async function runReportQuery(pool, wsId, userId, start, end) {
   // Set tenant context exactly like withTenantTransaction does
@@ -114,16 +115,19 @@ async function runReportQuery(pool, wsId, userId, start, end) {
     await client.query("SELECT set_config('app.user_id', $1, true)", [userId]);
 
     const result = await client.query(
+      // Phase 1.18: GROUP BY transaction_intent, base_currency (mirrors production SQL).
+      // All Phase 1.9 fixtures use a single currency (USD), so existing assertions are unchanged.
       `SELECT
          transaction_intent,
+         base_currency,
          SUM(base_amount) AS total,
          COUNT(*)::INT AS count
        FROM transactions
        WHERE workspace_id = $1
          AND transaction_time >= $2
          AND transaction_time < $3
-       GROUP BY transaction_intent
-       ORDER BY transaction_intent`,
+       GROUP BY transaction_intent, base_currency
+       ORDER BY transaction_intent, base_currency`,
       [wsId, start, end],
     );
 
