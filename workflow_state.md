@@ -10,11 +10,11 @@
 | Параметр | Значение |
 |---|---|
 | **PHASE** | `1 — MVP Implementation` |
-| **STEP** | `1.24 — Default Currency RUB → USDT — COMPLETED / ACCEPTED` |
-| **AGENT STATUS** | `WAITING_FOR_OWNER_APPROVAL_TO_START_NEXT_PHASE` |
-| **LAST COMPLETED** | `Phase 1.24 ACCEPTED. Default currency changed RUB → USDT for new users. 750/750 tests PASS. Tag phase-1.24-accepted pushed.` |
-| **BLOCKER** | None — awaiting owner approval to start next phase |
-| **NEXT ACTION** | Prepare next phase advisory only — do not implement |
+| **STEP** | `1.25 — /settings text mode — READY_FOR_OWNER_ACCEPTANCE` |
+| **AGENT STATUS** | `READY_FOR_OWNER_ACCEPTANCE` |
+| **LAST COMPLETED** | `Phase 1.25 DONE. /settings view/currency/timezone. Timezone migration. Draft fallback fix. 32/32 + 737/737 + 13/13 = 782/782 PASS.` |
+| **BLOCKER** | None — awaiting owner acceptance decision |
+| **NEXT ACTION** | Owner acceptance only — do not create tag or start Phase 1.26 without approval |
 
 ---
 
@@ -93,7 +93,7 @@ midas-monorepo/
 ├── packages/
 ## 6. ТЕКУЩАЯ ФАЗА — PHASE 1.24: Default Currency RUB → USDT
 
-> ✅ **COMPLETED / ACCEPTED. 750/750 tests PASS. Traceability ✅ Adversarial Security ✅ Scope Guard ✅. Tag phase-1.24-accepted pushed.**
+> ✅ **COMPLETED / ACCEPTED (Phase 1.24). See Section 10 history.**
 
 **Objective:**
 Change default currency for ALL new workspaces from 'RUB' to 'USDT'.

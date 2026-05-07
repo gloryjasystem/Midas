@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Telegram Webhook Route — POST /webhook
  *
  * Entry point for all incoming Telegram updates.
@@ -74,6 +74,15 @@ import {
   addAccount,
   parseAddAccountArgs,
 } from '../services/account.service.js';
+import {
+  getSettings,
+  updateCurrency,
+  updateTimezone,
+  parseSettingsArgs,
+  formatSettingsView,
+  formatCurrencyUpdated,
+  formatTimezoneUpdated,
+} from '../services/settings.service.js';
 import { escapeHtml } from '../utils/html-escape.js';
 
 import { callbackConfirmQueue } from '../queues/callback-confirm-queue.js';
@@ -153,7 +162,7 @@ function parseCommandToken(text: string): string | null {
  * Any command NOT in this set is blocked before AI parse.
  * Extend only when a new command is implemented in a future phase.
  */
-const KNOWN_COMMANDS = new Set(['/start', '/report', '/help', '/category', '/add_category', '/accounts', '/add_account', '/balance', '/set_balance']);
+const KNOWN_COMMANDS = new Set(['/start', '/report', '/help', '/category', '/add_category', '/accounts', '/add_account', '/balance', '/set_balance', '/settings']);
 
 /**
  * Russian-language help text listing all currently available commands.
@@ -171,6 +180,7 @@ const HELP_TEXT =
   '/report — Отчёт о доходах и расходах за текущий месяц\n' +
   '/balance — Баланс по всем счетам (за всё время)\n' +
   '/set_balance <название> <сумма> — Синхронизировать баланс счёта\n' +
+  '/settings — Настройки (валюта, часовой пояс)\n' +
   '/category — Список категорий вашего кошелька\n' +
   '/add_category <группа> <название> — Добавить категорию\n' +
   '/accounts — Список ваших счетов\n' +
@@ -665,6 +675,84 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
             errorClass,
           });
           void sendMessage(chatId, '⚠️ Не удалось добавить категорию. Попробуйте позже.');
+        }
+
+        await reply.status(200).send({ ok: true });
+        return;
+      }
+
+      // ── 5f-settings: /settings (Phase 1.25) ─────────────────
+      if (commandToken === '/settings') {
+        const parsed = parseSettingsArgs(message.text);
+
+        if ('error' in parsed) {
+          void sendMessage(chatId, parsed.error);
+          request.log.info({
+            msg: '[midas:bot:webhook] /settings bad args',
+            telegramUserId,
+            // subcommand NOT logged (SEC-12 consistency)
+          });
+          await reply.status(200).send({ ok: true });
+          return;
+        }
+
+        try {
+          const resolved = await resolveWorkspace(telegramUserId, chatId);
+
+          if (parsed.action === 'view') {
+            const settings = await getSettings(resolved.workspaceId, resolved.userId);
+            if (!settings) {
+              void sendMessage(chatId, '⚠️ Не удалось получить настройки. Попробуйте позже.');
+            } else {
+              void sendMessage(chatId, formatSettingsView(settings));
+            }
+            request.log.info({
+              msg: '[midas:bot:webhook] /settings view',
+              telegramUserId,
+              workspaceId: resolved.workspaceId,
+            });
+          } else if (parsed.action === 'currency') {
+            // Fetch old value for display in confirmation
+            const before = await getSettings(resolved.workspaceId, resolved.userId);
+            const oldCode = before?.default_currency ?? '?';
+
+            const result = await updateCurrency(resolved.workspaceId, resolved.userId, parsed.code);
+            if (result === 'not_found') {
+              void sendMessage(chatId, '⚠️ Не удалось обновить валюту. Попробуйте позже.');
+            } else {
+              void sendMessage(chatId, formatCurrencyUpdated(parsed.code, oldCode));
+            }
+            request.log.info({
+              msg: '[midas:bot:webhook] /settings currency updated',
+              telegramUserId,
+              workspaceId: resolved.workspaceId,
+              // code NOT logged (SEC-12 consistency)
+            });
+          } else {
+            const before = await getSettings(resolved.workspaceId, resolved.userId);
+            const oldZone = before?.timezone ?? 'UTC';
+
+            const result = await updateTimezone(resolved.workspaceId, resolved.userId, parsed.zone);
+            if (result === 'not_found') {
+              void sendMessage(chatId, '⚠️ Не удалось обновить часовой пояс. Попробуйте позже.');
+            } else {
+              void sendMessage(chatId, formatTimezoneUpdated(parsed.zone, oldZone));
+            }
+            request.log.info({
+              msg: '[midas:bot:webhook] /settings timezone updated',
+              telegramUserId,
+              workspaceId: resolved.workspaceId,
+              // zone NOT logged (SEC-12 consistency)
+            });
+          }
+        } catch (err: unknown) {
+          const errorClass = err instanceof Error ? err.constructor.name : 'UnknownError';
+          request.log.error({
+            msg: '[midas:bot:webhook] /settings failed',
+            telegramUserId,
+            errorClass,
+          });
+          void sendMessage(chatId, '⚠️ Ошибка настроек. Попробуйте позже.');
         }
 
         await reply.status(200).send({ ok: true });
