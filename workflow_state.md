@@ -1,7 +1,7 @@
 # WORKFLOW_STATE.MD — Диспетчер задач ИИ-агента Midas
 
 > **Тип:** MUTABLE — кратковременная память агента. Обновляется на каждом шаге работы.
-> **Обновлён:** 2026-05-07 14:00 (UTC+3)
+> **Обновлён:** 2026-05-07 14:51 (UTC+3)
 
 ---
 
@@ -10,11 +10,11 @@
 | Параметр | Значение |
 |---|---|
 | **PHASE** | `1 — MVP Implementation` |
-| **STEP** | `1.23 — /set_balance — READY_FOR_OWNER_ACCEPTANCE` |
-| **AGENT STATUS** | `READY_FOR_OWNER_ACCEPTANCE` |
-| **LAST COMPLETED** | `Phase 1.23 DONE. setBalance.service.ts (NEW), webhook.route.ts (MODIFY), smoke-test-phase123.mjs (NEW). 13/13 typecheck+lint PASS. 34/34 smoke tests PASS. Commit 65a8e56 pushed.` |
-| **BLOCKER** | None — awaiting owner acceptance decision |
-| **NEXT ACTION** | Owner acceptance only — do not create tag or start Phase 1.24 without approval |
+| **STEP** | `1.23 — /set_balance — COMPLETED / ACCEPTED` |
+| **AGENT STATUS** | `WAITING_FOR_OWNER_APPROVAL_TO_START_NEXT_PHASE` |
+| **LAST COMPLETED** | `Phase 1.23 ACCEPTED. /set_balance implemented. 730/730 tests PASS. Traceability ✅ Adversarial Security ✅ Scope Guard ✅. Tag phase-1.23-accepted pushed.` |
+| **BLOCKER** | None — awaiting owner approval to start next phase |
+| **NEXT ACTION** | Prepare next phase advisory only — do not implement |
 
 ---
 
@@ -93,7 +93,7 @@ midas-monorepo/
 ├── packages/
 ## 6. ТЕКУЩАЯ ФАЗА — PHASE 1.23: /set_balance (Balance Synchronization)
 
-> 🔄 **IN_PROGRESS — Owner APPROVED. Implementation started.**
+> ✅ **COMPLETED / ACCEPTED. 730/730 tests PASS. Traceability ✅ Adversarial Security ✅ Scope Guard ✅. Tag phase-1.23-accepted pushed.**
 
 **Objective:**
 Implement `/set_balance <account> <amount>` — synchronizes the real balance of an account by recalculating `account_sources.initial_balance` so that `/balance` shows the target value. No new transactions created.
@@ -211,14 +211,12 @@ Crypto / Notion / Sheets / Mini App files
 
 ## 9. ПРОМПТ ДЛЯ СТАРТА НОВОГО ЧАТА
 
-> Read workflow_state.md, project_config.md, docs/product-roadmap.md, docs/balance-semantics.md first.
+> Read workflow_state.md and project_config.md first.
 > Before any action, read workflow_state.md Section 11 — Agent Operating Protocol and follow it strictly.
-> Phase 1.23 (/set_balance) is IN_PROGRESS (owner APPROVED).
-> Do NOT create phase-1.23-accepted tag until owner explicitly accepts.
+> Phase 1.23 (/set_balance) is COMPLETED / ACCEPTED. Tag phase-1.23-accepted pushed.
 > Do NOT start Phase 1.24 without owner approval.
 > Verify git status, git log --oneline -5, origin/main are clean.
 > Do not modify project_config.md.
-> Compact mode: read only files listed in Section 8.
 
 ---
 
@@ -290,6 +288,7 @@ Crypto / Notion / Sheets / Mini App files
 | 2026-05-07 10:30 | Phase 1.22 Stale Comment Cleanup implementation complete. Owner APPROVED. `webhook.route.ts` (MODIFY, comment-only): slash-command routing header updated — Phase 1.21 added to phase refs, all 8 known commands listed, stale “(e.g. /balance)” example removed. 0 logic changes. 13/13 typecheck+lint PASS. 696/696 regression baseline unchanged. Traceability ✅ Adversarial Security ✅ Scope Guard ✅. Status: READY_FOR_OWNER_ACCEPTANCE. |
 | 2026-05-07 10:35 | Phase 1.22 accepted after final verification; stale /balance comment in webhook.route.ts fixed; comment-only change; 13/13 typecheck+lint PASS; Traceability Review PASS; Adversarial Security Review PASS; Scope Guard Review PASS; implementation commit d2ea3fd. Tag phase-1.22-accepted pushed. Status: WAITING_FOR_OWNER_APPROVAL_TO_START_NEXT_PHASE. |
 | 2026-05-07 14:00 | Phase 1.23 /set_balance implementation complete. Owner APPROVED. `setBalance.service.ts` (NEW): `parseSetBalanceArgs()` (last-token-as-amount, AMOUNT_REGEX 15-digit cap, SEC-02), `setAccountBalance()` (LOWER() exact match, formula `new_initial_balance = target − SUM(txns)` in PostgreSQL NUMERIC, withTenantTransaction SEC-03, defensive undefined guard replacing `!` non-null assertion), `formatSetBalanceResult()` (escapeHtml for all user strings). `webhook.route.ts` (MODIFY): import 3 functions from setBalance.service.js, KNOWN_COMMANDS 8→9, HELP_TEXT updated with /set_balance line, handler `5c-setbal` added (parseSetBalanceArgs → resolveWorkspace → setAccountBalance → formatSetBalanceResult). `smoke-test-phase123.mjs` (NEW): 34/34 PASS — Groups A (10 parse tests), B (12 DB formula tests including negative/idempotent/resync/precision), C (8 security/scope tests), D (4 regression). 13/13 typecheck+lint PASS. No migrations, no new tables, no transactions created, no /report changes. Commit 65a8e56 pushed. Status: READY_FOR_OWNER_ACCEPTANCE. |
+| 2026-05-07 14:51 | Phase 1.23 accepted after final verification; /set_balance implemented; synchronizes account balance by recalculating account_sources.initial_balance; no transactions created; no categories used; /report unaffected; 730/730 tests passed; Traceability Review PASS; Adversarial Security Review PASS; Scope Guard Review PASS; implementation commit 65a8e56; workflow_state sync commit 6b1df77. Tag phase-1.23-accepted pushed. Status: WAITING_FOR_OWNER_APPROVAL_TO_START_NEXT_PHASE. |
 
 ---
 
