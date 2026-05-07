@@ -10,11 +10,11 @@
 | Параметр | Значение |
 |---|---|
 | **PHASE** | `1 — MVP Implementation` |
-| **STEP** | `1.32 — Smart Text Input / Clarification Engine — IMPLEMENTED / READY_FOR_OWNER_ACCEPTANCE` |
-| **AGENT STATUS** | `READY_FOR_OWNER_ACCEPTANCE` |
-| **LAST COMPLETED** | `Phase 1.32 IMPLEMENTED. Smart clarification engine: clarification_field column (migration 1778900000000); AI schema amount/intent optional; PARTIAL_CONFIDENCE_THRESHOLD=0.3; 'partial' ParseResult; patchDraftAmount/Intent/Category; clar: callback namespace (≤52 bytes max); midas:clar: Redis text intercept; 57/57 Phase 1.32 smoke + 0/0 lint/typecheck errors PASS. Implementation commit e00f37e.` |
-| **BLOCKER** | None — awaiting owner acceptance signal. |
-| **NEXT ACTION** | Owner: review implementation and issue `ACCEPTED` or request changes. |
+| **STEP** | `1.32 — Smart Text Input / Clarification Engine — COMPLETED / ACCEPTED` |
+| **AGENT STATUS** | `WAITING_FOR_OWNER_APPROVAL_TO_START_NEXT_PHASE` |
+| **LAST COMPLETED** | `Phase 1.32 ACCEPTED. Clarification Engine implemented; draft-clarification-state migration added with safe down(); needs_clarification→pending_user verified; AI amount/intent optional with strict schema preserved; <0.3 nonsense and 0.3–0.5 targeted clarification thresholds; one-question priority amount→intent→category; Redis midas:clar: TTL 300s for amount text flow; clar: callbacks max 62 bytes; DB patching secured with FOR UPDATE SKIP LOCKED and workspace_id guards; no inline category creation; no command-flow repair; no new deps; 57/57 Phase 1.32 smoke PASS; accessible regressions PASS; typecheck/lint PASS; Traceability ✅ Adversarial Security ✅ Scope Guard ✅; impl commit e00f37e; workflow commit e1c0170.` |
+| **BLOCKER** | None — Phase 1.32 accepted. Awaiting owner approval for next phase. |
+| **NEXT ACTION** | Prepare next phase advisory only — do not implement Phase 1.33. |
 
 ---
 
@@ -59,7 +59,7 @@
 | 1.29 Transaction Soft Delete | ✅ ACCEPTED | `migrations/1778700000000_transactions-soft-delete.js` (NEW). deleted_at TIMESTAMPTZ DEFAULT NULL; soft delete via UPDATE; excluded from /edit, /balance (LEFT JOIN ON), /report, /set_balance; 941/941 gates PASS. Traceability ✅ Adversarial Security ✅ Scope Guard ✅. impl commit 7082540. Tag `phase-1.29-accepted` pushed. |
 | 1.30 Smart Account Onboarding | ✅ ACCEPTED | `account-onboard-keyboard.service.ts` (NEW), `account.service.ts` (hasAccounts, addAccountWithCurrency), `webhook.route.ts` (MODIFY — ac: callbacks, /start onboarding, /accounts empty-state, text intercept). Redis TTL midas:ac: 300s. 64/64 Phase 1.30 smoke + 318/318 accessible gates PASS. impl commit 4593867. Tag `phase-1.30-accepted` pushed. |
 | 1.31 Inline Account Creation | ✅ ACCEPTED | `migrations/1778800000000_drafts-account-hint.js`, `account-fuzzy.service.ts`, `account-inline-keyboard.service.ts`, `account-resolver.service.ts` (bg-workers), `account.service.ts` (MODIFY), `draft.service.ts` (MODIFY), `ai-parse.worker.ts` (MODIFY), `webhook.route.ts` (MODIFY), `draft-confirmation.service.ts` (MODIFY), `schemas.ts`+`prompts.ts` (MODIFY). Option A: resolve before keyboard. ia: namespace ≤62 bytes. 27/27 smoke + 13/13 typecheck/lint PASS. Implementation commit 7c065f7. |
-| 1.32 Smart Text Input / Clarification Engine | 🔄 READY_FOR_OWNER_ACCEPTANCE | `migrations/1778900000000_draft-clarification-state.js` (NEW), `schemas.ts` (amount/intent optional, PARTIAL_CONFIDENCE_THRESHOLD=0.3, MissingField), `claude-client.ts` ('partial' ParseResult, computeMissingFields), `prompts.ts` (partial examples), `draft.service.ts` (patchDraftAmount/Intent/Category), `ai-parse.worker.ts` (targeted clarification messages), `clarification.service.ts` (NEW, telegram-bot), `webhook.route.ts` (clar: callbacks, midas:clar: intercept), `smoke-test-phase132.mjs` (57/57 PASS). 0 lint/typecheck errors. Implementation commit e00f37e. |
+| 1.32 Smart Text Input / Clarification Engine | ✅ ACCEPTED | `migrations/1778900000000_draft-clarification-state.js` (NEW), `schemas.ts` (amount/intent optional, PARTIAL_CONFIDENCE_THRESHOLD=0.3, MissingField), `claude-client.ts` ('partial' ParseResult, computeMissingFields), `prompts.ts` (partial examples), `draft.service.ts` (patchDraftAmount/Intent/Category), `ai-parse.worker.ts` (targeted clarification messages), `clarification.service.ts` (NEW, telegram-bot), `webhook.route.ts` (clar: callbacks, midas:clar: intercept), `smoke-test-phase132.mjs` (57/57 PASS). 0 lint/typecheck errors. Traceability ✅ Adversarial Security ✅ Scope Guard ✅. Implementation commit e00f37e. Tag `phase-1.32-accepted` pushed. |
 
 ---
 
