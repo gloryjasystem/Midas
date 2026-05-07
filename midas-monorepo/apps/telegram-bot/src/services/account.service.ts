@@ -1,11 +1,14 @@
-﻿/**
- * Account Service — Phase 1.14 + Phase 1.17 + Phase 1.24
- * 
+/**
+ * Account Service — Phase 1.14 + Phase 1.17 + Phase 1.24 + Phase 1.30
+ *
  * Phase 1.14: Read-only list of account_sources for a workspace.
  * Phase 1.17: addAccount() — strict-format write path for /add_account command.
  * Phase 1.24: addAccount() now reads workspace.default_currency dynamically
  *             instead of hardcoding 'RUB'. Ensures new accounts always match
  *             the workspace's configured default currency (USDT for new workspaces).
+ * Phase 1.30: hasAccounts() — lightweight count query for empty-state detection.
+ *             addAccountWithCurrency() — like addAccount() but accepts explicit
+ *             currency for the guided onboarding flow (overrides workspace default).
  *
  * Scope:
  *   - getAccountList(): read-only, flat list sorted by type, name.
@@ -18,6 +21,9 @@
  *     - Type: always 'manual' (Phase 1.17 scope).
  *     - Currency: read from workspace.default_currency (Phase 1.24).
  *     - Duplicate: detected via ON CONFLICT → returns 'duplicate' result.
+ *   - hasAccounts(): returns true if workspace has ≥ 1 account. Zero DB reads
+ *     beyond the COUNT query (no unnecessary row fetching).
+ *   - addAccountWithCurrency(): like addAccount() but accepts explicit currency.
  *
  * SEC-02: No financial amounts involved. No float arithmetic.
  * SEC-03: All queries run inside withTenantTransaction for RLS isolation.
@@ -265,4 +271,82 @@ export function parseAddAccountArgs(
   }
 
   return { name: rawName };
+}
+
+// ─────────────────────────────────────────────────────────────
+// hasAccounts — Phase 1.30
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Return true if the workspace has at least one account_sources row.
+ *
+ * Used by the /accounts empty-state handler to decide whether to show the
+ * flat list or the guided onboarding keyboard.
+ *
+ * Does NOT call getAccountList() to avoid loading all rows unnecessarily.
+ *
+ * SEC-03: Runs inside withTenantTransaction + explicit workspace_id (defense-in-depth).
+ */
+export async function hasAccounts(
+  workspaceId: string,
+  userId: string,
+): Promise<boolean> {
+  const count = await withTenantTransaction<number>(
+    workspaceId,
+    userId,
+    async (client) => {
+      const result = await client.query<{ cnt: string }>(
+        `SELECT COUNT(*)::text AS cnt FROM account_sources WHERE workspace_id = $1`,
+        [workspaceId],
+      );
+      return parseInt(result.rows[0]?.cnt ?? '0', 10);
+    },
+  );
+  return count > 0;
+}
+
+// ─────────────────────────────────────────────────────────────
+// addAccountWithCurrency — Phase 1.30
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Insert a new account_sources row with an explicitly supplied currency.
+ *
+ * Used by the guided onboarding flow (Phase 1.30) where the user selects
+ * a specific currency rather than inheriting workspace.default_currency.
+ *
+ * @param workspaceId - Internal workspace ULID (from trusted backend — SEC-03)
+ * @param userId      - Internal user ULID (required by withTenantTransaction)
+ * @param name        - Account name (pre-validated, non-empty, max 100 chars)
+ * @param currency    - Explicit currency code (pre-validated, non-empty, max 10 chars)
+ * @returns AddAccountResult: 'created' | 'duplicate'
+ *
+ * SEC-03: INSERT runs inside withTenantTransaction — RLS enforced.
+ * SEC-02: No financial amounts. No float arithmetic.
+ * SEC-12: Name and currency NOT logged.
+ */
+export async function addAccountWithCurrency(
+  workspaceId: string,
+  userId: string,
+  name: string,
+  currency: string,
+): Promise<AddAccountResult> {
+  const accountId = generateUlid();
+
+  const rowsInserted = await withTenantTransaction<number>(
+    workspaceId,
+    userId,
+    async (client) => {
+      const result = await client.query<{ id: string }>(
+        `INSERT INTO account_sources (id, workspace_id, name, type, currency)
+         VALUES ($1, $2, $3, 'manual'::account_source_type, $4)
+         ON CONFLICT ON CONSTRAINT account_sources_workspace_id_name_key DO NOTHING
+         RETURNING id`,
+        [accountId, workspaceId, name, currency],
+      );
+      return result.rowCount ?? 0;
+    },
+  );
+
+  return rowsInserted === 0 ? 'duplicate' : 'created';
 }

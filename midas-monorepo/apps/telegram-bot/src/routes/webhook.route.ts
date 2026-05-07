@@ -72,6 +72,8 @@ import {
 import {
   getAccountList,
   addAccount,
+  hasAccounts,             // Phase 1.30
+  addAccountWithCurrency,  // Phase 1.30
   parseAddAccountArgs,
 } from '../services/account.service.js';
 import {
@@ -127,6 +129,21 @@ import {
   buildIntentPickerKeyboard,
   buildDeleteConfirmKeyboard,   // Phase 1.29
 } from '../services/edit-keyboard.service.js';
+import {
+  parseAccountCallback,             // Phase 1.30
+  buildAccountTypeKeyboard,          // Phase 1.30
+  buildStartOnboardKeyboard,         // Phase 1.30
+  buildExchangePickerKeyboard,       // Phase 1.30
+  buildOnboardCurrencyKeyboard,      // Phase 1.30
+  buildAfterCreateKeyboard,          // Phase 1.30
+  ACCOUNTS_EMPTY_TEXT,               // Phase 1.30
+  START_ONBOARD_TEXT,                // Phase 1.30
+  EXCHANGE_PICKER_TEXT,              // Phase 1.30
+  CURRENCY_PICKER_TEXT,              // Phase 1.30
+  nameInputPrompt,                   // Phase 1.30
+  CURRENCY_INPUT_PROMPT,             // Phase 1.30
+  type AccountOnboardState,          // Phase 1.30
+} from '../services/account-onboard-keyboard.service.js';
 
 import { callbackConfirmQueue } from '../queues/callback-confirm-queue.js';
 
@@ -258,6 +275,13 @@ function editStateKey(telegramUserId: string, chatId: string): string {
   return `midas:edit:${telegramUserId}:${chatId}`;
 }
 
+// Phase 1.30: Redis key for account onboarding multi-step state
+// Value format: JSON.stringify(AccountOnboardState)
+const ONBOARD_STATE_TTL_SEC = 300; // 5 minutes
+function onboardStateKey(telegramUserId: string, chatId: string): string {
+  return `midas:ac:${telegramUserId}:${chatId}`;
+}
+
 const webhookRoute: FastifyPluginAsync = async (fastify) => {
   // Await a no-op: Fastify route plugins must be async; the actual async work
   // happens inside the route handler. Promise.resolve() satisfies require-await.
@@ -289,6 +313,142 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
       const telegramUserId = String(cq.from.id);
       const chatId = cq.message ? String(cq.message.chat.id) : String(cq.from.id);
       const callbackData = cq.data ?? '';
+
+        // ── Phase 1.30: account onboarding callbacks (prefix "ac:") ────
+        if (callbackData.startsWith('ac:')) {
+          const acCmd = parseAccountCallback(callbackData);
+          if (!acCmd) {
+            request.log.warn({
+              msg: '[midas:bot:webhook] ac: callback: unrecognised data — acknowledged',
+              callbackId: cq.id,
+            });
+            await answerCallbackQuery(cq.id);
+            await reply.status(200).send({ ok: true });
+            return;
+          }
+
+          let acResolved: { workspaceId: string; userId: string };
+          try {
+            acResolved = await resolveWorkspace(telegramUserId, chatId);
+          } catch {
+            await answerCallbackQuery(cq.id);
+            await reply.status(200).send({ ok: true });
+            return;
+          }
+
+          const acKey = onboardStateKey(telegramUserId, chatId);
+          const acMsgId = cq.message ? String(cq.message.message_id) : null;
+
+          try {
+            if (acCmd.cmd === 'skip') {
+              // User skipped onboarding — clear state, confirm
+              await redisConnection.del(acKey);
+              if (acMsgId) void editMessageText(chatId, acMsgId, '✅ Хорошо! Добавишь счёт позже через /add_account или /accounts.', { inline_keyboard: [] });
+
+            } else if (acCmd.cmd === 'done') {
+              // User finished — clear state, show account list
+              await redisConnection.del(acKey);
+              const accountText = await getAccountList(acResolved.workspaceId, acResolved.userId);
+              if (acMsgId) void editMessageText(chatId, acMsgId, accountText, { inline_keyboard: [] });
+
+            } else if (acCmd.cmd === 'more') {
+              // User wants to add another account — restart type picker
+              await redisConnection.del(acKey);
+              if (acMsgId) void editMessageText(chatId, acMsgId, ACCOUNTS_EMPTY_TEXT, buildAccountTypeKeyboard());
+
+            } else if (acCmd.cmd === 'type') {
+              // User selected account type
+              if (acCmd.accountType === 'exchange') {
+                // Exchange: show exchange preset picker first
+                const state: AccountOnboardState = { step: 'name_input', accountType: 'exchange' };
+                await redisConnection.set(acKey, JSON.stringify(state), 'EX', ONBOARD_STATE_TTL_SEC);
+                if (acMsgId) void editMessageText(chatId, acMsgId, EXCHANGE_PICKER_TEXT, buildExchangePickerKeyboard());
+              } else if (acCmd.accountType === 'cash') {
+                // Cash: name is auto-determined after currency pick
+                const state: AccountOnboardState = { step: 'cur_pick', accountType: 'cash' };
+                await redisConnection.set(acKey, JSON.stringify(state), 'EX', ONBOARD_STATE_TTL_SEC);
+                if (acMsgId) void editMessageText(chatId, acMsgId, CURRENCY_PICKER_TEXT, buildOnboardCurrencyKeyboard());
+              } else {
+                // card / wallet / custom: need free-text name first
+                const state: AccountOnboardState = { step: 'name_input', accountType: acCmd.accountType };
+                await redisConnection.set(acKey, JSON.stringify(state), 'EX', ONBOARD_STATE_TTL_SEC);
+                if (acMsgId) void editMessageText(chatId, acMsgId, nameInputPrompt(acCmd.accountType), { inline_keyboard: [] });
+              }
+
+            } else if (acCmd.cmd === 'exchange_preset') {
+              // User picked an exchange preset — move to currency pick with name set
+              const state: AccountOnboardState = { step: 'cur_pick', accountType: 'exchange', name: acCmd.name };
+              await redisConnection.set(acKey, JSON.stringify(state), 'EX', ONBOARD_STATE_TTL_SEC);
+              if (acMsgId) void editMessageText(chatId, acMsgId, CURRENCY_PICKER_TEXT, buildOnboardCurrencyKeyboard());
+
+            } else if (acCmd.cmd === 'exchange_custom') {
+              // User wants to type a custom exchange name
+              const state: AccountOnboardState = { step: 'name_input', accountType: 'exchange' };
+              await redisConnection.set(acKey, JSON.stringify(state), 'EX', ONBOARD_STATE_TTL_SEC);
+              if (acMsgId) void editMessageText(chatId, acMsgId, '✏️ Введи название биржи:', { inline_keyboard: [] });
+
+            } else if (acCmd.cmd === 'currency') {
+              // User picked a currency — load state, create account
+              const rawState = await redisConnection.get(acKey);
+              if (!rawState) {
+                // State expired — restart
+                if (acMsgId) void editMessageText(chatId, acMsgId, ACCOUNTS_EMPTY_TEXT, buildAccountTypeKeyboard());
+              } else {
+                let state: AccountOnboardState;
+                try { state = JSON.parse(rawState) as AccountOnboardState; }
+                catch { state = { step: 'type_pick' }; }
+
+                let accountName: string;
+                if (state.accountType === 'cash') {
+                  accountName = `Наличные ${acCmd.code}`;
+                } else {
+                  accountName = state.name ?? 'Счёт';
+                }
+
+                const res = await addAccountWithCurrency(
+                  acResolved.workspaceId, acResolved.userId, accountName, acCmd.code,
+                );
+
+                await redisConnection.del(acKey);
+
+                if (res === 'duplicate') {
+                  if (acMsgId) void editMessageText(
+                    chatId, acMsgId,
+                    `⚠️ Счёт <b>${escapeHtml(accountName)}</b> уже существует.`,
+                    buildAfterCreateKeyboard(),
+                  );
+                } else {
+                  if (acMsgId) void editMessageText(
+                    chatId, acMsgId,
+                    `✅ Счёт <b>${escapeHtml(accountName)}</b> (${escapeHtml(acCmd.code)}) создан!`,
+                    buildAfterCreateKeyboard(),
+                  );
+                  request.log.info({ msg: '[midas:bot:webhook] ac: account created via onboarding', workspaceId: acResolved.workspaceId });
+                }
+              }
+
+            } else {
+              // currency_custom: prompt free-text currency input
+              const rawState = await redisConnection.get(acKey);
+              if (rawState) {
+                let state: AccountOnboardState;
+                try { state = JSON.parse(rawState) as AccountOnboardState; }
+                catch { state = { step: 'cur_input' }; }
+                state.step = 'cur_input';
+                await redisConnection.set(acKey, JSON.stringify(state), 'EX', ONBOARD_STATE_TTL_SEC);
+              }
+              if (acMsgId) void editMessageText(chatId, acMsgId, CURRENCY_INPUT_PROMPT, { inline_keyboard: [] });
+            }
+
+          } catch (err: unknown) {
+            const errorClass = err instanceof Error ? err.constructor.name : 'UnknownError';
+            request.log.error({ msg: '[midas:bot:webhook] ac: callback failed', callbackId: cq.id, errorClass });
+          }
+
+          await answerCallbackQuery(cq.id);
+          await reply.status(200).send({ ok: true });
+          return;
+        }
 
       // ── Phase 1.28: edit callbacks (prefix "ed:") ─────────────
       // Handled synchronously — direct DB update, no queue.
@@ -720,6 +880,11 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
               chatId,
               '✅ Вы уже зарегистрированы. Просто отправьте сообщение о расходе или доходе.',
             );
+          } else {
+            // Phase 1.30: new user — show guided account onboarding keyboard (Scenario Е).
+            // The default account was already created by system_find_or_create_user.
+            // This keyboard allows the user to add NAMED accounts on top of the default.
+            void sendMessageWithKeyboard(chatId, START_ONBOARD_TEXT, buildStartOnboardKeyboard());
           }
         } catch (err: unknown) {
           const errorClass = err instanceof Error ? err.constructor.name : 'UnknownError';
@@ -863,17 +1028,25 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
         return;
       }
 
-      // ── 5d-acc: /accounts (Phase 1.14) ───────────────────────
+      // ── 5d-acc: /accounts (Phase 1.14 + 1.30) ───────────────
       if (commandToken === '/accounts') {
         try {
           const resolved = await resolveWorkspace(telegramUserId, chatId);
-          const accountText = await getAccountList(resolved.workspaceId, resolved.userId);
-          void sendMessage(chatId, accountText);
+          // Phase 1.30: if workspace has no accounts, show guided onboarding keyboard.
+          // Otherwise show the regular flat list (unchanged).
+          const accountsExist = await hasAccounts(resolved.workspaceId, resolved.userId);
+          if (!accountsExist) {
+            void sendMessageWithKeyboard(chatId, ACCOUNTS_EMPTY_TEXT, buildAccountTypeKeyboard());
+          } else {
+            const accountText = await getAccountList(resolved.workspaceId, resolved.userId);
+            void sendMessage(chatId, accountText);
+          }
 
           request.log.info({
             msg: '[midas:bot:webhook] /accounts sent',
             telegramUserId,
             workspaceId: resolved.workspaceId,
+            hasAccounts: accountsExist,
           });
         } catch (err: unknown) {
           const errorClass = err instanceof Error ? err.constructor.name : 'UnknownError';
@@ -1147,6 +1320,86 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
         });
         await reply.status(200).send({ ok: true });
         return;
+      }
+    }
+
+    // ── Step 5f-ac: Phase 1.30 — account onboarding text intercept ───────
+    // If user is in account onboarding (name_input or cur_input step), intercept
+    // their next text message as account name or currency code.
+    // Runs BEFORE edit-amount intercept and BEFORE AI parse.
+    if (!commandToken) {
+      const acKey = onboardStateKey(telegramUserId, chatId);
+      const acRaw = await redisConnection.get(acKey);
+      if (acRaw) {
+        let acState: AccountOnboardState;
+        try { acState = JSON.parse(acRaw) as AccountOnboardState; }
+        catch {
+          await redisConnection.del(acKey);
+          // Malformed state — fall through to normal flow
+          acState = { step: 'type_pick' };
+        }
+
+        if (acState.step === 'name_input') {
+          // User typed the account name — validate and move to currency pick
+          const trimmed = message.text.trim();
+          if (trimmed.length === 0 || trimmed.length > 100) {
+            void sendMessage(chatId, '⚠️ Название не может быть пустым или длиннее 100 символов. Попробуй ещё раз:');
+          } else {
+            const updatedState: AccountOnboardState = { ...acState, step: 'cur_pick', name: trimmed };
+            await redisConnection.set(acKey, JSON.stringify(updatedState), 'EX', ONBOARD_STATE_TTL_SEC);
+            try {
+              const resolved = await resolveWorkspace(telegramUserId, chatId);
+              void sendMessageWithKeyboard(chatId, CURRENCY_PICKER_TEXT, buildOnboardCurrencyKeyboard());
+              request.log.info({ msg: '[midas:bot:webhook] ac: name input received', workspaceId: resolved.workspaceId });
+            } catch {
+              void sendMessage(chatId, CURRENCY_PICKER_TEXT);
+            }
+          }
+          await reply.status(200).send({ ok: true });
+          return;
+
+        } else if (acState.step === 'cur_input') {
+          // User typed a custom currency code — validate and create account
+          const rawCode = message.text.trim().toUpperCase();
+          if (!/^[A-Z]{1,10}$/.test(rawCode)) {
+            void sendMessage(chatId, '⚠️ Неверный код валюты. Используй латинские буквы, например: <i>SOL</i>, <i>UAH</i>, <i>MATIC</i>.');
+            await reply.status(200).send({ ok: true });
+            return;
+          }
+
+          await redisConnection.del(acKey);
+          try {
+            const resolved = await resolveWorkspace(telegramUserId, chatId);
+            let accountName: string;
+            if (acState.accountType === 'cash') {
+              accountName = `Наличные ${rawCode}`;
+            } else {
+              accountName = acState.name ?? 'Счёт';
+            }
+            const res = await addAccountWithCurrency(resolved.workspaceId, resolved.userId, accountName, rawCode);
+            if (res === 'duplicate') {
+              void sendMessageWithKeyboard(
+                chatId,
+                `⚠️ Счёт <b>${escapeHtml(accountName)}</b> уже существует.`,
+                buildAfterCreateKeyboard(),
+              );
+            } else {
+              void sendMessageWithKeyboard(
+                chatId,
+                `✅ Счёт <b>${escapeHtml(accountName)}</b> (${escapeHtml(rawCode)}) создан!`,
+                buildAfterCreateKeyboard(),
+              );
+              request.log.info({ msg: '[midas:bot:webhook] ac: account created via custom currency text', workspaceId: resolved.workspaceId });
+            }
+          } catch (err: unknown) {
+            const errorClass = err instanceof Error ? err.constructor.name : 'UnknownError';
+            request.log.error({ msg: '[midas:bot:webhook] ac: cur_input account create failed', errorClass });
+            void sendMessage(chatId, '⚠️ Не удалось создать счёт. Попробуйте позже.');
+          }
+          await reply.status(200).send({ ok: true });
+          return;
+        }
+        // Other steps (type_pick, cur_pick) don't intercept text — fall through
       }
     }
 
