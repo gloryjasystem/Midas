@@ -10,11 +10,11 @@
 | Параметр | Значение |
 |---|---|
 | **PHASE** | `1 — MVP Implementation` |
-| **STEP** | `1.26 — /settings UI — COMPLETED / ACCEPTED` |
-| **AGENT STATUS** | `WAITING_FOR_OWNER_APPROVAL_TO_START_NEXT_PHASE` |
-| **LAST COMPLETED** | `Phase 1.26 DONE. /settings inline keyboard UI. 45/45 smoke + 782/782 regression + 13/13 typecheck = 840/840 PASS. HEAD fb338db.` |
-| **BLOCKER** | None — awaiting owner approval to start next phase |
-| **NEXT ACTION** | Prepare next phase advisory only — do not implement Phase 1.27 |
+| **STEP** | `1.27 — Multicurrency Balance — READY_FOR_OWNER_ACCEPTANCE` |
+| **AGENT STATUS** | `READY_FOR_OWNER_ACCEPTANCE` |
+| **LAST COMPLETED** | `Phase 1.27 DONE. Multicurrency balance hardening. 27/27 smoke + 814/814 regression + 13/13 typecheck = 854/854 PASS.` |
+| **BLOCKER** | None — awaiting owner acceptance |
+| **NEXT ACTION** | Owner acceptance only — do not create tag or start Phase 1.28 without approval |
 
 ---
 

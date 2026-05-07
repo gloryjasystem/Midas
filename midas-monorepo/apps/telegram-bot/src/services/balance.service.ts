@@ -1,5 +1,5 @@
 /**
- * Balance Service — Phase 1.21
+ * Balance Service — Phase 1.21 / Phase 1.27
  *
  * Generates a per-account balance report for a workspace.
  *
@@ -21,10 +21,17 @@
  *
  * Balance formula per account (computed entirely in SQL — SEC-02):
  *   balance = initial_balance
- *           + SUM(income)
- *           + SUM(debt_received)
- *           − SUM(expense)
- *           − SUM(debt_given)
+ *           + SUM(income WHERE base_currency = account.currency)
+ *           + SUM(debt_received WHERE base_currency = account.currency)
+ *           − SUM(expense WHERE base_currency = account.currency)
+ *           − SUM(debt_given WHERE base_currency = account.currency)
+ *
+ * Phase 1.27 — Multicurrency Mismatch Handling:
+ *   Transactions where base_currency ≠ account_sources.currency are EXCLUDED
+ *   from the balance sum. This prevents silent currency mixing (e.g. EUR amounts
+ *   counted as USD). Excluded transactions are counted and shown as a warning
+ *   footnote per account. No conversion is performed. No backfill.
+ *   This is the safest Phase 1 handling — Phase 2.4 will add exchange rates.
  *
  * SEC-02: All financial arithmetic done in PostgreSQL NUMERIC — no JS float math.
  *         toFixed(2) used for string output only.
@@ -46,10 +53,12 @@ interface AccountBalanceRow {
   name: string;
   type: string;
   currency: string;
-  /** Computed in SQL: initial_balance + income + debt_received − expense − debt_given */
+  /** Computed in SQL: initial_balance + matched-currency income/debt − expense/debt_given */
   balance: { toFixed: (dp: number) => string }; // Decimal (pg NUMERIC parser)
   transfer_count: string; // COUNT() returns string from pg
   transfer_sum: { toFixed: (dp: number) => string }; // Decimal
+  /** Phase 1.27: transactions excluded due to base_currency ≠ account.currency */
+  mismatch_count: string;
 }
 
 /** Row from the currency totals query. */
@@ -74,6 +83,8 @@ function resolveTypeLabel(type: string): string {
 
 // ─────────────────────────────────────────────────────────────
 // SQL — per-account balances (D1–D3, D4, D6: all-time)
+// Phase 1.27: ONLY transactions where base_currency = account.currency are
+//   included in balance sum. Mismatched transactions are counted separately.
 // ─────────────────────────────────────────────────────────────
 
 const PER_ACCOUNT_SQL = `
@@ -83,17 +94,34 @@ const PER_ACCOUNT_SQL = `
     a.type,
     a.currency,
     -- Balance formula: D1 sign rules, D2 debt integrated, D3 transfer excluded.
+    -- Phase 1.27: ONLY transactions with base_currency = account currency are summed.
+    -- This prevents silent cross-currency mixing (e.g. EUR amounts counted as USD).
     -- All arithmetic in PostgreSQL NUMERIC — SEC-02: no JS float math.
     a.initial_balance
-      + COALESCE(SUM(CASE WHEN t.transaction_intent = 'income'        THEN t.base_amount END), 0)
-      + COALESCE(SUM(CASE WHEN t.transaction_intent = 'debt_received' THEN t.base_amount END), 0)
-      - COALESCE(SUM(CASE WHEN t.transaction_intent = 'expense'       THEN t.base_amount END), 0)
-      - COALESCE(SUM(CASE WHEN t.transaction_intent = 'debt_given'    THEN t.base_amount END), 0)
+      + COALESCE(SUM(CASE
+          WHEN t.transaction_intent = 'income'        AND t.base_currency = a.currency
+          THEN t.base_amount END), 0)
+      + COALESCE(SUM(CASE
+          WHEN t.transaction_intent = 'debt_received' AND t.base_currency = a.currency
+          THEN t.base_amount END), 0)
+      - COALESCE(SUM(CASE
+          WHEN t.transaction_intent = 'expense'       AND t.base_currency = a.currency
+          THEN t.base_amount END), 0)
+      - COALESCE(SUM(CASE
+          WHEN t.transaction_intent = 'debt_given'    AND t.base_currency = a.currency
+          THEN t.base_amount END), 0)
       AS balance,
     -- Transfer: counted + summed but NOT added to balance (D3 = neutral).
     COUNT(CASE WHEN t.transaction_intent = 'transfer' THEN 1 END) AS transfer_count,
     COALESCE(SUM(CASE WHEN t.transaction_intent = 'transfer' THEN t.base_amount END), 0)
-      AS transfer_sum
+      AS transfer_sum,
+    -- Phase 1.27: count transactions excluded due to base_currency ≠ account.currency
+    -- (excluding transfer intent which is always neutral).
+    COUNT(CASE
+      WHEN t.base_currency IS NOT NULL
+       AND t.base_currency != a.currency
+       AND t.transaction_intent != 'transfer'
+      THEN 1 END) AS mismatch_count
   FROM account_sources a
   -- D6: all-time (no date filter)
   LEFT JOIN transactions t
@@ -106,6 +134,7 @@ const PER_ACCOUNT_SQL = `
 
 // ─────────────────────────────────────────────────────────────
 // SQL — per-currency workspace totals (D5: currency grouping)
+// Phase 1.27: uses the same mismatch-safe formula as PER_ACCOUNT_SQL
 // ─────────────────────────────────────────────────────────────
 
 const CURRENCY_TOTALS_SQL = `
@@ -116,10 +145,18 @@ const CURRENCY_TOTALS_SQL = `
     SELECT
       a.currency,
       a.initial_balance
-        + COALESCE(SUM(CASE WHEN t.transaction_intent = 'income'        THEN t.base_amount END), 0)
-        + COALESCE(SUM(CASE WHEN t.transaction_intent = 'debt_received' THEN t.base_amount END), 0)
-        - COALESCE(SUM(CASE WHEN t.transaction_intent = 'expense'       THEN t.base_amount END), 0)
-        - COALESCE(SUM(CASE WHEN t.transaction_intent = 'debt_given'    THEN t.base_amount END), 0)
+        + COALESCE(SUM(CASE
+            WHEN t.transaction_intent = 'income'        AND t.base_currency = a.currency
+            THEN t.base_amount END), 0)
+        + COALESCE(SUM(CASE
+            WHEN t.transaction_intent = 'debt_received' AND t.base_currency = a.currency
+            THEN t.base_amount END), 0)
+        - COALESCE(SUM(CASE
+            WHEN t.transaction_intent = 'expense'       AND t.base_currency = a.currency
+            THEN t.base_amount END), 0)
+        - COALESCE(SUM(CASE
+            WHEN t.transaction_intent = 'debt_given'    AND t.base_currency = a.currency
+            THEN t.base_amount END), 0)
         AS balance
     FROM account_sources a
     LEFT JOIN transactions t
@@ -139,15 +176,24 @@ const CURRENCY_TOTALS_SQL = `
 /**
  * Generate a per-account balance report for the current workspace.
  *
- * Output format (non-empty, D5=B):
+ * Output format (Phase 1.27 roadmap style, non-empty):
  *
  *   💰 <b>Баланс по счетам:</b>
  *
- *   • Default — Ручной ввод (RUB)
- *     Баланс: 85,576.50 RUB
- *     🔄 Переводы: 5 шт. на 5,000.00 RUB (не учитываются в балансе)
+ *   • Binance — Крипто (USDT)
+ *     └─ <b>2,847.50</b> USDT
+ *     🔄 Переводы: 5 шт. на 5,000.00 USDT (не учитываются в балансе)
  *
- *   Итого (RUB): 85,576.50
+ *   • MetaMask — Крипто (ETH)
+ *     └─ <b>1.25</b> ETH
+ *
+ *   ────────────────────
+ *   📊 Итого по валютам:
+ *   ETH: <b>1.25</b>
+ *   USDT: <b>2,847.50</b>
+ *
+ * Phase 1.27 mismatch warning (when base_currency ≠ account.currency):
+ *   ⚠️ Пропущено 3 транзакций с другой валютой (без конвертации)
  *
  * Output format (empty):
  *   💰 <b>Баланс по счетам:</b>
@@ -185,7 +231,7 @@ export async function getAccountBalances(
     return '💰 <b>Баланс по счетам:</b>\n\nСчетов пока нет.';
   }
 
-  // ── Per-account lines (D5=B) ────────────────────────────────
+  // ── Per-account lines (Phase 1.27 roadmap style) ────────────
   const accountLines = accounts.map((row) => {
     // escapeHtml: DB-sourced strings rendered in parse_mode:'HTML' context (Phase 1.15 policy).
     const name = escapeHtml(row.name);
@@ -194,8 +240,10 @@ export async function getAccountBalances(
     // SEC-02: balance is a Decimal object from pg NUMERIC parser. toFixed(2) = string output.
     const balanceStr = row.balance.toFixed(2);
     const transferCount = parseInt(row.transfer_count, 10);
+    const mismatchCount = parseInt(row.mismatch_count, 10);
 
-    let line = `• ${name} — ${typeLabel} (${currency})\n  Баланс: <b>${balanceStr}</b> ${currency}`;
+    // Phase 1.27: roadmap-style "└─" format
+    let line = `• ${name} — ${typeLabel} (${currency})\n  └─ <b>${balanceStr}</b> ${currency}`;
 
     // D3: Transfer neutral — shown as informational footnote only.
     if (transferCount > 0) {
@@ -203,21 +251,26 @@ export async function getAccountBalances(
       line += `\n  🔄 Переводы: ${String(transferCount)} шт. на ${transferSumStr} ${currency} (не учитываются в балансе)`;
     }
 
+    // Phase 1.27: mismatch warning — transactions excluded to prevent silent mixing.
+    if (mismatchCount > 0) {
+      line += `\n  ⚠️ Пропущено ${String(mismatchCount)} тр. с другой валютой (без конвертации)`;
+    }
+
     return line;
   });
 
-  // ── Currency totals (D5: workspace totals per currency) ─────
+  // ── Currency totals (Phase 1.27 roadmap style) ──────────────
   const totalLines = currencyTotals.map((row) => {
     const currency = escapeHtml(row.currency);
     // SEC-02: currency_total is Decimal from NUMERIC subquery. toFixed(2) for display.
     const totalStr = row.currency_total.toFixed(2);
-    return `Итого (${currency}): <b>${totalStr}</b>`;
+    return `${currency}: <b>${totalStr}</b>`;
   });
 
   return (
     '💰 <b>Баланс по счетам:</b>\n\n' +
     accountLines.join('\n\n') +
-    '\n\n' +
+    '\n\n────────────────────\n📊 Итого по валютам:\n' +
     totalLines.join('\n')
   );
 }
