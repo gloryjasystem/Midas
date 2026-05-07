@@ -12,7 +12,7 @@
 | **PHASE** | `1 — MVP Implementation` |
 | **STEP** | `1.26 — /settings UI — READY_FOR_OWNER_ACCEPTANCE` |
 | **AGENT STATUS** | `READY_FOR_OWNER_ACCEPTANCE` |
-| **LAST COMPLETED** | `Phase 1.26 DONE. /settings inline keyboard UI. 45/45 smoke + 782/782 regression + 13/13 typecheck = 840/840 PASS.` |
+| **LAST COMPLETED** | `Phase 1.26 DONE. /settings inline keyboard UI. 45/45 smoke + 782/782 regression + 13/13 typecheck = 840/840 PASS. HEAD fb338db.` |
 | **BLOCKER** | None — awaiting owner acceptance decision |
 | **NEXT ACTION** | Owner acceptance only — do not create tag or start Phase 1.27 without approval |
 
