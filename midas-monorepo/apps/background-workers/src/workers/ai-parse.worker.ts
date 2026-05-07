@@ -23,7 +23,8 @@ import { Worker, type Job } from 'bullmq';
 import { QUEUE_NAMES, type AiParseJobPayload, IdempotencyKeyBuilder } from '@midas/shared';
 import { parseTransaction } from '@midas/ai-core';
 import { redisConnection } from '../queues/redis.js';
-import { createDraft, resolveUserId } from '../services/draft.service.js';
+import { createDraft, resolveUserId, setDraftAccountId } from '../services/draft.service.js';
+import { resolveAccountFromHint } from '../services/account-resolver.service.js'; // Phase 1.31
 import { notificationsQueue } from '../queues/queue-definitions.js';
 import { ulid } from 'ulid';
 
@@ -131,24 +132,102 @@ async function processAiParse(job: Job<AiParseJobPayload>): Promise<void> {
     botId,
   });
 
-  // ── Step 6: Send draft confirmation notification (Phase 1.6-B) ──
+  // ── Step 6: Send draft confirmation notification (Phase 1.6-B + Phase 1.31) ──
   // Only send inline keyboard for drafts awaiting user confirmation.
   if (status === 'pending_user') {
     const { chatId } = job.data;
     const alertId = ulid();
 
-    // Build inline keyboard for approve / reject
-    const inlineKeyboard = {
-      inline_keyboard: [
-        [
-          { text: '✅ Подтвердить', callback_data: `approve:${draftId}` },
-          { text: '❌ Отклонить', callback_data: `reject:${draftId}` },
-        ],
-      ],
-    };
+    // ── Phase 1.31 (Option A): Resolve account_hint BEFORE first keyboard ──
+    // If AI extracted an account_hint, resolve it against workspace accounts.
+    // Depending on the result, send either:
+    //   a) Standard approve/reject keyboard (exact match — account silently used)
+    //   b) Inline account creation keyboard (fuzzy or no match)
+    // Exact match: account_id is written to draft row by confirmation worker.
+    // For fuzzy/none: webhook route handles ia: callbacks.
 
-    // Draft preview — note: do NOT include raw_text or amount in log (SEC-12)
-    const previewMsg = `📝 Транзакция распознана. Подтвердите или отклоните:`;
+    const accountHint = parseResult.status === 'ok' ? (parseResult.data.account_hint ?? null) : null;
+
+    let inlineKeyboard: object;
+    let previewMsg: string;
+
+    if (accountHint) {
+      // Try to resolve account hint against workspace accounts
+      let resolution;
+      try {
+        resolution = await resolveAccountFromHint(workspaceId, userId, accountHint);
+      } catch {
+        // Non-fatal: fall back to standard keyboard if resolution fails
+        resolution = { kind: 'none' as const };
+      }
+
+      if (resolution.kind === 'exact') {
+        // Exact match — silently set account_id on the draft.
+        // The confirmation worker will use it directly (no keyboard needed for account).
+        try {
+          await setDraftAccountId(workspaceId, userId, draftId, resolution.accountId);
+        } catch {
+          // Non-fatal: confirmation worker will fall back to default account
+        }
+        inlineKeyboard = {
+          inline_keyboard: [
+            [
+              { text: '✅ Подтвердить', callback_data: `approve:${draftId}` },
+              { text: '❌ Отклонить', callback_data: `reject:${draftId}` },
+            ],
+          ],
+        };
+        previewMsg = `📝 Транзакция распознана. Подтвердите или отклоните:`;
+        console.log('[midas:ai-parse-worker] Phase 1.31: exact account match', {
+          workspaceId, draftId, // accountName NOT logged (SEC-12)
+        });
+
+      } else if (resolution.kind === 'fuzzy') {
+        // Fuzzy match — ask user to confirm the matched account name.
+        inlineKeyboard = {
+          inline_keyboard: [
+            [{ text: `✅ Да, «${resolution.accountName}»`, callback_data: `ia:fuzzy:${resolution.accountId}:${draftId}` }],
+            [{ text: '🏦 Другой счёт',           callback_data: `ia:skip:${draftId}` }],
+          ],
+        };
+        previewMsg =
+          `📝 Транзакция распознана.\n` +
+          `Счёт «${accountHint}» не найден точно.\n` +
+          `Возможно, имеется в виду <b>${resolution.accountName}</b>?`;
+        console.log('[midas:ai-parse-worker] Phase 1.31: fuzzy account match', {
+          workspaceId, draftId,
+        });
+
+      } else {
+        // No match — offer inline account creation.
+        const currency = parseResult.status === 'ok' ? (parseResult.data.currency ?? 'USDT') : 'USDT';
+        inlineKeyboard = {
+          inline_keyboard: [
+            [{ text: `✅ Создать «${accountHint}» (${currency})`, callback_data: `ia:create:${draftId}` }],
+            [{ text: '✏️ Другое название',                          callback_data: `ia:rename:${draftId}` }],
+            [{ text: '📋 Записать без счёта',                        callback_data: `ia:skip:${draftId}` }],
+          ],
+        };
+        previewMsg =
+          `📝 Транзакция распознана.\n` +
+          `Счёта <b>${accountHint}</b> нет в вашем списке.\n\n` +
+          `Создать счёт <b>${accountHint}</b> (${currency})?`;
+        console.log('[midas:ai-parse-worker] Phase 1.31: no account match, inline create offered', {
+          workspaceId, draftId,
+        });
+      }
+    } else {
+      // No account_hint from AI — standard approve/reject keyboard
+      inlineKeyboard = {
+        inline_keyboard: [
+          [
+            { text: '✅ Подтвердить', callback_data: `approve:${draftId}` },
+            { text: '❌ Отклонить', callback_data: `reject:${draftId}` },
+          ],
+        ],
+      };
+      previewMsg = `📝 Транзакция распознана. Подтвердите или отклоните:`;
+    }
 
     await notificationsQueue.add(
       QUEUE_NAMES.NOTIFICATIONS,

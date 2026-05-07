@@ -76,9 +76,12 @@ export async function approveDraft(
       parsed_amount: string | null;
       parsed_currency: string | null;
       parsed_intent: string | null;  // Phase 1.8-A: must be non-NULL for Transaction creation
+      parsed_account_hint: string | null; // Phase 1.31
+      account_id: string | null;          // Phase 1.31: set by ia: callback before approval
       expires_at: string;
     }>(
-      `SELECT id, workspace_id, status, parsed_amount, parsed_currency, parsed_intent, expires_at
+      `SELECT id, workspace_id, status, parsed_amount, parsed_currency, parsed_intent,
+              parsed_account_hint, account_id, expires_at
        FROM transaction_drafts
        WHERE id = $1 AND workspace_id = $2
        FOR UPDATE SKIP LOCKED`,
@@ -188,28 +191,55 @@ export async function approveDraft(
       categoryId = catResult.rows[0]?.id ?? ulid();
     }
 
-    // Determine account_id: use workspace first account source or create a default one.
+    // Determine account_id: Phase 1.31 — use draft.account_id if set by ia: handler.
+    // Otherwise fall back to workspace first account source or create a Default.
     // account_sources.type is an ENUM: 'manual' | 'crypto_read_only' | 'bank_sync'
-    const acctResult = await client.query<{ id: string }>(
-      `SELECT id FROM account_sources WHERE workspace_id = $1 LIMIT 1`,
-      [workspaceId],
-    );
     let accountId: string;
-    if (acctResult.rows.length === 0) {
-      accountId = ulid();
-      await client.query(
-        `INSERT INTO account_sources (id, workspace_id, name, type, currency)
-         VALUES ($1, $2, 'Default', 'manual'::account_source_type, $3)
-         ON CONFLICT DO NOTHING`,
-        [accountId, workspaceId, currency],
+    if (draft.account_id) {
+      // Phase 1.31: account was resolved inline by user via ia: callback.
+      // Validate it still belongs to this workspace (defense-in-depth).
+      const acctCheck = await client.query<{ id: string }>(
+        `SELECT id FROM account_sources WHERE id = $1 AND workspace_id = $2`,
+        [draft.account_id, workspaceId],
       );
-      const refetch = await client.query<{ id: string }>(
-        `SELECT id FROM account_sources WHERE workspace_id = $1 AND name = 'Default' LIMIT 1`,
+      if (acctCheck.rows.length > 0) {
+        accountId = draft.account_id;
+      } else {
+        // IDOR guard: account not in workspace — fall back to default
+        accountId = ulid();
+        await client.query(
+          `INSERT INTO account_sources (id, workspace_id, name, type, currency)
+           VALUES ($1, $2, 'Default', 'manual'::account_source_type, $3)
+           ON CONFLICT DO NOTHING`,
+          [accountId, workspaceId, currency],
+        );
+        const refetch = await client.query<{ id: string }>(
+          `SELECT id FROM account_sources WHERE workspace_id = $1 AND name = 'Default' LIMIT 1`,
+          [workspaceId],
+        );
+        accountId = refetch.rows[0]?.id ?? accountId;
+      }
+    } else {
+      const acctResult = await client.query<{ id: string }>(
+        `SELECT id FROM account_sources WHERE workspace_id = $1 LIMIT 1`,
         [workspaceId],
       );
-      accountId = refetch.rows[0]?.id ?? accountId;
-    } else {
-      accountId = acctResult.rows[0]?.id ?? ulid();
+      if (acctResult.rows.length === 0) {
+        accountId = ulid();
+        await client.query(
+          `INSERT INTO account_sources (id, workspace_id, name, type, currency)
+           VALUES ($1, $2, 'Default', 'manual'::account_source_type, $3)
+           ON CONFLICT DO NOTHING`,
+          [accountId, workspaceId, currency],
+        );
+        const refetch = await client.query<{ id: string }>(
+          `SELECT id FROM account_sources WHERE workspace_id = $1 AND name = 'Default' LIMIT 1`,
+          [workspaceId],
+        );
+        accountId = refetch.rows[0]?.id ?? accountId;
+      } else {
+        accountId = acctResult.rows[0]?.id ?? ulid();
+      }
     }
 
     await client.query(

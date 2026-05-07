@@ -224,6 +224,172 @@ export async function addAccount(
   return rowsInserted === 0 ? 'duplicate' : 'created';
 }
 
+// ─────────────────────────────────────────────────────────────
+// getWorkspaceAccountsForInline — Phase 1.31
+// ─────────────────────────────────────────────────────────────
+
+/** Minimal account row for inline resolution. */
+export interface InlineAccountRow {
+  id: string;
+  name: string;
+  currency: string;
+}
+
+/**
+ * Fetch all account_sources rows for the workspace for inline account resolution.
+ *
+ * Used by the Phase 1.31 ia: callback handler to:
+ *   1. Run fuzzy/exact matching against parsed_account_hint.
+ *   2. Build picker keyboards when multiple accounts share a currency.
+ *
+ * Returns an empty array if the workspace has no accounts (safe for callers).
+ *
+ * SEC-03: Runs inside withTenantTransaction + explicit workspace_id (defense-in-depth).
+ * SEC-12: Account names NOT logged.
+ */
+export async function getWorkspaceAccountsForInline(
+  workspaceId: string,
+  userId: string,
+): Promise<InlineAccountRow[]> {
+  return withTenantTransaction<InlineAccountRow[]>(
+    workspaceId,
+    userId,
+    async (client) => {
+      const result = await client.query<InlineAccountRow>(
+        `SELECT id, name, currency
+         FROM account_sources
+         WHERE workspace_id = $1
+         ORDER BY name`,
+        [workspaceId],
+      );
+      return result.rows;
+    },
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// getAccountById — Phase 1.31
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Fetch a single account_sources row by its ID.
+ *
+ * Used by the Phase 1.31 ia:use / ia:fuzzy handlers to confirm the account
+ * the user selected exists in the workspace (cross-workspace ULID poisoning guard).
+ *
+ * Returns null if not found or not in the workspace.
+ *
+ * SEC-03: Explicit workspace_id filter + RLS inside withTenantTransaction.
+ */
+export async function getAccountById(
+  workspaceId: string,
+  userId: string,
+  accountId: string,
+): Promise<InlineAccountRow | null> {
+  return withTenantTransaction<InlineAccountRow | null>(
+    workspaceId,
+    userId,
+    async (client) => {
+      const result = await client.query<InlineAccountRow>(
+        `SELECT id, name, currency
+         FROM account_sources
+         WHERE id = $1 AND workspace_id = $2`,
+        [accountId, workspaceId],
+      );
+      return result.rows[0] ?? null;
+    },
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// getDraftAccountHint — Phase 1.31
+// ─────────────────────────────────────────────────────────────
+
+/** Draft row data needed for inline account resolution. */
+export interface DraftAccountHintRow {
+  parsed_account_hint: string | null;
+  parsed_currency: string | null;
+  workspace_id: string;
+}
+
+/**
+ * Fetch the parsed_account_hint and parsed_currency from a draft.
+ *
+ * Used by the ai-parse worker (Option A) to decide whether to send the
+ * standard approve/reject keyboard or an inline account creation keyboard.
+ *
+ * SEC-03: explicit workspace_id + RLS.
+ * SEC-12: hint text NOT logged.
+ */
+export async function getDraftAccountHint(
+  workspaceId: string,
+  userId: string,
+  draftId: string,
+): Promise<DraftAccountHintRow | null> {
+  return withTenantTransaction<DraftAccountHintRow | null>(
+    workspaceId,
+    userId,
+    async (client) => {
+      const result = await client.query<DraftAccountHintRow>(
+        `SELECT parsed_account_hint, parsed_currency, workspace_id
+         FROM transaction_drafts
+         WHERE id = $1 AND workspace_id = $2`,
+        [draftId, workspaceId],
+      );
+      return result.rows[0] ?? null;
+    },
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// setDraftAccountId — Phase 1.31
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Update a transaction draft's account_id inline.
+ *
+ * Called by the ia:use / ia:fuzzy / ia:create handlers after the user
+ * confirms or selects an account. The draft is then forwarded to approveDraft.
+ *
+ * Only updates if draft is still pending_user and not expired (safe guard).
+ *
+ * SEC-03: explicit workspace_id + RLS.
+ * SEC-01: accountId is validated against account_sources before calling this fn.
+ */
+export async function setDraftAccountId(
+  workspaceId: string,
+  userId: string,
+  draftId: string,
+  accountId: string,
+): Promise<'updated' | 'not_found' | 'not_pending'> {
+  return withTenantTransaction<'updated' | 'not_found' | 'not_pending'>(
+    workspaceId,
+    userId,
+    async (client) => {
+      const result = await client.query<{ id: string; status: string }>(
+        `UPDATE transaction_drafts
+         SET account_id = $1, updated_at = NOW()
+         WHERE id = $2
+           AND workspace_id = $3
+           AND status = 'pending_user'
+           AND expires_at > NOW()
+         RETURNING id, status`,
+        [accountId, draftId, workspaceId],
+      );
+      if (result.rowCount === 0) {
+        // Check if exists at all
+        const check = await client.query<{ status: string }>(
+          `SELECT status FROM transaction_drafts WHERE id = $1 AND workspace_id = $2`,
+          [draftId, workspaceId],
+        );
+        if (check.rows.length === 0) return 'not_found';
+        return 'not_pending';
+      }
+      return 'updated';
+    },
+  );
+}
+
 /**
  * Parse and validate the arguments of the /add_account command.
  *

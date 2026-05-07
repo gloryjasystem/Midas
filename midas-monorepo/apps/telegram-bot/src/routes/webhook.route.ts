@@ -144,6 +144,17 @@ import {
   CURRENCY_INPUT_PROMPT,             // Phase 1.30
   type AccountOnboardState,          // Phase 1.30
 } from '../services/account-onboard-keyboard.service.js';
+import {
+  parseInlineAccountCallback,        // Phase 1.31
+  RENAME_PROMPT,                     // Phase 1.31
+  type InlineAccountState,           // Phase 1.31
+} from '../services/account-inline-keyboard.service.js';
+import {
+  getWorkspaceAccountsForInline,     // Phase 1.31
+  getAccountById,                    // Phase 1.31
+  getDraftAccountHint,               // Phase 1.31
+  setDraftAccountId,                 // Phase 1.31
+} from '../services/account.service.js';
 
 import { callbackConfirmQueue } from '../queues/callback-confirm-queue.js';
 
@@ -280,6 +291,14 @@ function editStateKey(telegramUserId: string, chatId: string): string {
 const ONBOARD_STATE_TTL_SEC = 300; // 5 minutes
 function onboardStateKey(telegramUserId: string, chatId: string): string {
   return `midas:ac:${telegramUserId}:${chatId}`;
+}
+
+// Phase 1.31: Redis key for inline account creation sub-flow (rename step)
+// Value format: JSON.stringify(InlineAccountState)
+// Key is scoped to draftId — deterministic and tenant-isolated.
+const INLINE_ACCOUNT_TTL_SEC = 300; // 5 minutes
+function inlineAccountKey(draftId: string): string {
+  return `midas:ia:${draftId}`;
 }
 
 const webhookRoute: FastifyPluginAsync = async (fastify) => {
@@ -443,6 +462,126 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
           } catch (err: unknown) {
             const errorClass = err instanceof Error ? err.constructor.name : 'UnknownError';
             request.log.error({ msg: '[midas:bot:webhook] ac: callback failed', callbackId: cq.id, errorClass });
+          }
+
+          await answerCallbackQuery(cq.id);
+          await reply.status(200).send({ ok: true });
+          return;
+        }
+
+        // ── Phase 1.31: inline account creation callbacks (prefix "ia:") ────
+        if (callbackData.startsWith('ia:')) {
+          const iaCmd = parseInlineAccountCallback(callbackData);
+          if (!iaCmd) {
+            request.log.warn({
+              msg: '[midas:bot:webhook] ia: callback: unrecognised data — acknowledged',
+              callbackId: cq.id,
+            });
+            await answerCallbackQuery(cq.id);
+            await reply.status(200).send({ ok: true });
+            return;
+          }
+
+          let iaResolved: { workspaceId: string; userId: string };
+          try {
+            iaResolved = await resolveWorkspace(telegramUserId, chatId);
+          } catch {
+            await answerCallbackQuery(cq.id);
+            await reply.status(200).send({ ok: true });
+            return;
+          }
+
+          const iaMsgId = cq.message ? String(cq.message.message_id) : null;
+
+          try {
+            if (iaCmd.cmd === 'skip') {
+              // User chose to record without a specific account — proceed with draft as-is.
+              // draft-confirmation.service will use the default account fallback.
+              await redisConnection.del(inlineAccountKey(iaCmd.draftId));
+              if (iaMsgId) void editMessageText(
+                chatId, iaMsgId,
+                '📋 Транзакция будет записана без указания конкретного счёта.',
+                { inline_keyboard: [
+                  [{ text: '✅ Подтвердить', callback_data: `approve:${iaCmd.draftId}` }],
+                  [{ text: '❌ Отклонить',   callback_data: `reject:${iaCmd.draftId}` }],
+                ]},
+              );
+
+            } else if (iaCmd.cmd === 'rename') {
+              // User wants to type a custom account name.
+              // Store draft state in Redis — next text message will be intercepted.
+              // Use getDraftAccountHint to get parsed_currency from the draft (SEC-03).
+              const draftHint = await getDraftAccountHint(iaResolved.workspaceId, iaResolved.userId, iaCmd.draftId);
+              const draftCurrency = draftHint?.parsed_currency ?? 'USDT';
+              const suggestedName = draftHint?.parsed_account_hint ?? '';
+              const iaState: InlineAccountState = {
+                step: 'name_input',
+                suggestedName,
+                currency: draftCurrency,
+                draftId: iaCmd.draftId,
+              };
+              await redisConnection.set(inlineAccountKey(iaCmd.draftId), JSON.stringify(iaState), 'EX', INLINE_ACCOUNT_TTL_SEC);
+              // Set user-scoped pointer key so the text intercept can find the active draft.
+              const iaPointerKey = `midas:ia:ptr:${telegramUserId}:${chatId}`;
+              await redisConnection.set(iaPointerKey, iaCmd.draftId, 'EX', INLINE_ACCOUNT_TTL_SEC);
+              void sendMessage(chatId, RENAME_PROMPT);
+
+            } else if (iaCmd.cmd === 'create') {
+              // User confirmed creation with AI-suggested name.
+              // Fetch suggested name and currency from getDraftAccountHint (SEC-03).
+              await redisConnection.del(inlineAccountKey(iaCmd.draftId));
+              const draftHintForCreate = await getDraftAccountHint(iaResolved.workspaceId, iaResolved.userId, iaCmd.draftId);
+              const createName = draftHintForCreate?.parsed_account_hint ?? 'Счёт';
+              const createCurrency = draftHintForCreate?.parsed_currency ?? 'USDT';
+
+              const createRes = await addAccountWithCurrency(
+                iaResolved.workspaceId, iaResolved.userId, createName, createCurrency,
+              );
+              // Fetch the new or existing account id
+              const allAccounts = await getWorkspaceAccountsForInline(iaResolved.workspaceId, iaResolved.userId);
+              const foundAcc = allAccounts.find((a) => a.name.trim().toLowerCase() === createName.trim().toLowerCase());
+              if (foundAcc) {
+                await setDraftAccountId(iaResolved.workspaceId, iaResolved.userId, iaCmd.draftId, foundAcc.id);
+              }
+              const label = createRes === 'duplicate' ? `⚠️ Счёт уже существует.` : `✅ Счёт <b>${escapeHtml(createName)}</b> (${escapeHtml(createCurrency)}) создан!`;
+              if (iaMsgId) void editMessageText(
+                chatId, iaMsgId,
+                `${label}\n\nПодтвердить транзакцию?`,
+                { inline_keyboard: [
+                  [{ text: '✅ Подтвердить', callback_data: `approve:${iaCmd.draftId}` }],
+                  [{ text: '❌ Отклонить',   callback_data: `reject:${iaCmd.draftId}` }],
+                ]},
+              );
+              request.log.info({ msg: '[midas:bot:webhook] ia: account created inline', workspaceId: iaResolved.workspaceId });
+
+            } else {
+              // iaCmd.cmd === 'use' | 'fuzzy' — user selected an existing account.
+              // SEC-01: Validate accountId belongs to this workspace before using.
+              const acct = await getAccountById(iaResolved.workspaceId, iaResolved.userId, iaCmd.accountId);
+              if (!acct) {
+                // IDOR guard: accountId not in this workspace — safe fallback
+                if (iaMsgId) void editMessageText(
+                  chatId, iaMsgId,
+                  '⚠️ Счёт не найден.',
+                  { inline_keyboard: [] },
+                );
+              } else {
+                await setDraftAccountId(iaResolved.workspaceId, iaResolved.userId, iaCmd.draftId, acct.id);
+                await redisConnection.del(inlineAccountKey(iaCmd.draftId));
+                if (iaMsgId) void editMessageText(
+                  chatId, iaMsgId,
+                  `✅ Счёт <b>${escapeHtml(acct.name)}</b> выбран.\n\nПодтвердить транзакцию?`,
+                  { inline_keyboard: [
+                    [{ text: '✅ Подтвердить', callback_data: `approve:${iaCmd.draftId}` }],
+                    [{ text: '❌ Отклонить',   callback_data: `reject:${iaCmd.draftId}` }],
+                  ]},
+                );
+                request.log.info({ msg: '[midas:bot:webhook] ia: account selected', workspaceId: iaResolved.workspaceId });
+              }
+            }
+          } catch (err: unknown) {
+            const errorClass = err instanceof Error ? err.constructor.name : 'UnknownError';
+            request.log.error({ msg: '[midas:bot:webhook] ia: callback failed', callbackId: cq.id, errorClass });
           }
 
           await answerCallbackQuery(cq.id);
@@ -1320,6 +1459,76 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
         });
         await reply.status(200).send({ ok: true });
         return;
+      }
+    }
+
+    // ── Step 5f-ia: Phase 1.31 — inline account creation name intercept ──
+    // If user is in the ia:rename sub-flow (tapped ✏️ Другое название), intercept
+    // their next text message as the custom account name.
+    // Runs BEFORE Phase 1.30 onboarding intercept and BEFORE AI parse.
+    if (!commandToken) {
+      // Scan active ia: keys for this user — keyed by draftId.
+      // We use a unique-per-draft key; check by pattern is not needed:
+      // the text intercept is only active after ia:rename sets it.
+      // We cannot easily enumerate all draftIds per-user without a separate index.
+      // Solution: store the active ia draftId in a user-scoped "pointer" key.
+      const iaPointerKey = `midas:ia:ptr:${telegramUserId}:${chatId}`;
+      const activeDraftId = await redisConnection.get(iaPointerKey);
+      if (activeDraftId) {
+        const iaRaw = await redisConnection.get(inlineAccountKey(activeDraftId));
+        if (iaRaw) {
+          let iaState: InlineAccountState;
+          try { iaState = JSON.parse(iaRaw) as InlineAccountState; }
+          catch {
+            await redisConnection.del(inlineAccountKey(activeDraftId));
+            await redisConnection.del(iaPointerKey);
+            iaState = { step: 'name_input', suggestedName: '', currency: 'USDT', draftId: activeDraftId };
+          }
+
+          // iaState.step is always 'name_input' at this point (the only step in this flow)
+          {
+            const trimmedName = message.text.trim();
+            if (trimmedName.length === 0 || trimmedName.length > 100) {
+              void sendMessage(chatId, '⚠️ Название не может быть пустым или длиннее 100 символов. Попробуй ещё раз:');
+              await reply.status(200).send({ ok: true });
+              return;
+            }
+
+            await redisConnection.del(inlineAccountKey(activeDraftId));
+            await redisConnection.del(iaPointerKey);
+
+            try {
+              const resolved = await resolveWorkspace(telegramUserId, chatId);
+              const createRes = await addAccountWithCurrency(
+                resolved.workspaceId, resolved.userId, trimmedName, iaState.currency,
+              );
+              // Link account to draft
+              const allAccounts = await getWorkspaceAccountsForInline(resolved.workspaceId, resolved.userId);
+              const foundAcc = allAccounts.find((a) => a.name.trim().toLowerCase() === trimmedName.toLowerCase());
+              if (foundAcc) {
+                await setDraftAccountId(resolved.workspaceId, resolved.userId, activeDraftId, foundAcc.id);
+              }
+              const label = createRes === 'duplicate'
+                ? `⚠️ Счёт <b>${escapeHtml(trimmedName)}</b> уже существует.`
+                : `✅ Счёт <b>${escapeHtml(trimmedName)}</b> (${escapeHtml(iaState.currency)}) создан!`;
+              void sendMessageWithKeyboard(
+                chatId,
+                `${label}\n\nПодтвердить транзакцию?`,
+                { inline_keyboard: [
+                  [{ text: '✅ Подтвердить', callback_data: `approve:${activeDraftId}` }],
+                  [{ text: '❌ Отклонить',   callback_data: `reject:${activeDraftId}` }],
+                ]},
+              );
+              request.log.info({ msg: '[midas:bot:webhook] ia: account created via text rename', workspaceId: resolved.workspaceId });
+            } catch (err: unknown) {
+              const errorClass = err instanceof Error ? err.constructor.name : 'UnknownError';
+              request.log.error({ msg: '[midas:bot:webhook] ia: rename text create failed', errorClass });
+              void sendMessage(chatId, '⚠️ Не удалось создать счёт. Попробуйте позже.');
+            }
+            await reply.status(200).send({ ok: true });
+            return;
+          }
+        }
       }
     }
 

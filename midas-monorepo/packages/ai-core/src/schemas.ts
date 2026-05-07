@@ -103,6 +103,18 @@ export const AiOutputSchema = z
     person_hint: z.string().trim().min(1).max(100).optional(),
 
     /**
+     * Account or place name hint from AI (NOT an account_id — SEC-01).
+     * Backend resolves via fuzzy/exact matching (Phase 1.31).
+     * Only set when user explicitly mentions a named account, exchange, or
+     * place where money is kept (e.g. «с Binance», «на карту», «из PayPal»).
+     * Backend maps to actual account_sources row by name match or prompts
+     * inline account creation.
+     * Max 100 chars to prevent injection via account field.
+     * SEC-01: this is a hint string only — never an account_id or system field.
+     */
+    account_hint: z.string().trim().min(1).max(100).optional(),
+
+    /**
      * Note or description AI extracted from the message.
      * Stored in draft.note. NOT used for any financial calculation.
      * Max 500 chars.

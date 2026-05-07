@@ -108,6 +108,12 @@ export async function createDraft(input: CreateDraftInput): Promise<CreatedDraft
   // SEC-01: aiData.intent is Zod-validated — cannot contain system fields or injection.
   const parsedIntent: string | null = aiData?.intent ?? null;
 
+  // Phase 1.31: extract account_hint from AI output.
+  // Stored in parsed_account_hint for use by the inline account creation flow.
+  // NULL when AI does not identify a named account/place — existing fallback applies.
+  // SEC-01: this is a hint string only — validated by Zod, not a system field.
+  const parsedAccountHint: string | null = aiData?.account_hint ?? null;
+
   await withTenantTransaction(workspaceId, userId, async (client) => {
     // SEC-03: withTenantTransaction sets SET LOCAL app.workspace_id = $workspaceId
     // All RLS policies will see the correct tenant context.
@@ -120,6 +126,7 @@ export async function createDraft(input: CreateDraftInput): Promise<CreatedDraft
         parsed_amount,
         parsed_currency,
         parsed_intent,
+        parsed_account_hint,
         category_id,
         person_id,
         account_id,
@@ -128,11 +135,11 @@ export async function createDraft(input: CreateDraftInput): Promise<CreatedDraft
         created_at,
         updated_at
       ) VALUES (
-        $1, $2, $3, $4, $5, $6, $7,
+        $1, $2, $3, $4, $5, $6, $7, $8,
         NULL,  -- category_id: not resolved in Phase 1.6-A (fuzzy matching deferred)
         NULL,  -- person_id: not resolved in Phase 1.6-A
-        NULL,  -- account_id: not set in Phase 1.6-A
-        $8, $9,
+        NULL,  -- account_id: not set here; resolved in ai-parse worker (Phase 1.31) or approveDraft
+        $9, $10,
         NOW(), NOW()
       )`,
       [
@@ -143,6 +150,7 @@ export async function createDraft(input: CreateDraftInput): Promise<CreatedDraft
         aiData?.amount ?? null,                         // NUMERIC string or null
         aiData?.currency ?? null,                       // ISO 4217 or null
         parsedIntent,                                   // Phase 1.8-A: intent from AI (or null)
+        parsedAccountHint,                              // Phase 1.31: account hint from AI (or null)
         status,
         expiresAt.toISOString(),
       ],
@@ -161,4 +169,33 @@ export async function createDraft(input: CreateDraftInput): Promise<CreatedDraft
   });
 
   return { draftId, status };
+}
+
+// ─────────────────────────────────────────────────────────────
+// setDraftAccountId — Phase 1.31
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Set account_id on a transaction_drafts row (Phase 1.31 — exact match path).
+ *
+ * Called by the ai-parse worker when an exact account match is found,
+ * so the confirmation worker can use the resolved account directly.
+ *
+ * SEC-03: explicit workspace_id + RLS inside withTenantTransaction.
+ * SEC-01: accountId is validated against account_sources before calling this.
+ */
+export async function setDraftAccountId(
+  workspaceId: string,
+  userId: string,
+  draftId: string,
+  accountId: string,
+): Promise<void> {
+  await withTenantTransaction(workspaceId, userId, async (client) => {
+    await client.query(
+      `UPDATE transaction_drafts
+       SET account_id = $1, updated_at = NOW()
+       WHERE id = $2 AND workspace_id = $3 AND status = 'pending_user'`,
+      [accountId, draftId, workspaceId],
+    );
+  });
 }
