@@ -57,6 +57,7 @@ import { resolveWorkspace } from '../services/workspace-resolver.js';
 import { checkOnboardingRateLimit } from '../services/rate-limiter.js';
 import { sendMessage } from '../services/telegram-api.js';
 import { getMonthlyReport } from '../services/report.service.js';
+import { getAccountBalances } from '../services/balance.service.js';
 import {
   getCategoryList,
   addCategory,
@@ -146,7 +147,7 @@ function parseCommandToken(text: string): string | null {
  * Any command NOT in this set is blocked before AI parse.
  * Extend only when a new command is implemented in a future phase.
  */
-const KNOWN_COMMANDS = new Set(['/start', '/report', '/help', '/category', '/add_category', '/accounts', '/add_account']);
+const KNOWN_COMMANDS = new Set(['/start', '/report', '/help', '/category', '/add_category', '/accounts', '/add_account', '/balance']);
 
 /**
  * Russian-language help text listing all currently available commands.
@@ -160,6 +161,7 @@ const HELP_TEXT =
   'ℹ️ <b>Доступные команды Midas:</b>\n\n' +
   '/start — Регистрация и приветствие\n' +
   '/report — Отчёт о доходах и расходах за текущий месяц\n' +
+  '/balance — Баланс по всем счетам (за всё время)\n' +
   '/category — Список категорий вашего кошелька\n' +
   '/add_category <группа> <название> — Добавить категорию\n' +
   '/accounts — Список ваших счетов\n' +
@@ -412,6 +414,32 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
             errorClass,
           });
           void sendMessage(chatId, '⚠️ Не удалось сформировать отчёт. Попробуйте позже.');
+        }
+
+        await reply.status(200).send({ ok: true });
+        return;
+      }
+
+      // ── 5c-bal: /balance (Phase 1.21) ────────────────────────
+      if (commandToken === '/balance') {
+        try {
+          const resolved = await resolveWorkspace(telegramUserId, chatId);
+          const balanceText = await getAccountBalances(resolved.workspaceId, resolved.userId);
+          void sendMessage(chatId, balanceText);
+
+          request.log.info({
+            msg: '[midas:bot:webhook] /balance sent',
+            telegramUserId,
+            workspaceId: resolved.workspaceId,
+          });
+        } catch (err: unknown) {
+          const errorClass = err instanceof Error ? err.constructor.name : 'UnknownError';
+          request.log.error({
+            msg: '[midas:bot:webhook] /balance failed',
+            telegramUserId,
+            errorClass,
+          });
+          void sendMessage(chatId, '⚠️ Не удалось получить баланс. Попробуйте позже.');
         }
 
         await reply.status(200).send({ ok: true });

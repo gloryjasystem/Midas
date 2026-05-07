@@ -1,7 +1,7 @@
 # WORKFLOW_STATE.MD — Диспетчер задач ИИ-агента Midas
 
 > **Тип:** MUTABLE — кратковременная память агента. Обновляется на каждом шаге работы.
-> **Обновлён:** 2026-05-07 09:45 (UTC+3)
+> **Обновлён:** 2026-05-07 10:00 (UTC+3)
 
 ---
 
@@ -10,11 +10,11 @@
 | Параметр | Значение |
 |---|---|
 | **PHASE** | `1 — MVP Implementation` |
-| **STEP** | `1.20 — Balance Semantics Design Document — COMPLETED / ACCEPTED` |
-| **AGENT STATUS** | `WAITING_FOR_OWNER_APPROVAL_TO_START_NEXT_PHASE` |
-| **LAST COMPLETED** | `Phase 1.20 ACCEPTED. docs/balance-semantics.md finalized. D1–D6 all approved by owner (all recommended options). Traceability ✅ Adversarial Security ✅ Scope Guard ✅. No code, no migrations, no DB changes. Tag phase-1.20-accepted pushed.` |
-| **BLOCKER** | None — awaiting owner approval to start next phase |
-| **NEXT ACTION** | Prepare next phase advisory only — do not implement |
+| **STEP** | `1.21 — Unified Balance Implementation — READY_FOR_OWNER_ACCEPTANCE` |
+| **AGENT STATUS** | `READY_FOR_OWNER_ACCEPTANCE` |
+| **LAST COMPLETED** | `Phase 1.21 — migration+service+route+smoke tests. 28/28 Phase 1.21 + 668/668 regression (Ph1.6-A–Ph1.19) + 13/13 typecheck+lint = 709/709 PASS. Traceability ✅ Adversarial Security ✅ Scope Guard ✅. /balance command implemented. initial_balance migration applied.` |
+| **BLOCKER** | Owner review and acceptance of Phase 1.21 required |
+| **NEXT ACTION** | Owner tests /balance, accepts Phase 1.21, creates phase-1.21-accepted tag |
 
 ---
 
@@ -48,6 +48,7 @@
 | 1.18 /report Currency Label (base_currency grouping) | ✅ ACCEPTED | `report.service.ts` (MODIFY), `smoke-test-phase118.mjs` (NEW), `smoke-test-phase19.mjs` (MODIFY — runReportQuery SQL helper sync) — 34/34 Phase 1.18 + 644/644 total PASS. Traceability ✅ Adversarial Security ✅ Scope Guard ✅. Implementation commit `700a244`. Tag `phase-1.18-accepted` pushed. |
 | 1.19 account_sources.currency CHECK Constraint | ✅ ACCEPTED | `packages/database/migrations/1778300000000_account-sources-currency-check.js` (NEW), `packages/database/smoke-test-phase119.mjs` (NEW) — CHECK (currency ~ '^[A-Z]{3,5}$'); pre-flight 0 invalid rows; 24/24 Phase 1.19 + 668/668 total PASS. Traceability ✅ Adversarial Security ✅ Scope Guard ✅. Implementation commit `9d288bd`. Tag `phase-1.19-accepted` pushed. |
 | 1.20 Balance Semantics Design Document | ✅ ACCEPTED | `docs/balance-semantics.md` (NEW) — 6 design decisions D1–D6 all approved. Formula: income+1/expense−1/debt_given−1/debt_received+1/transfer neutral. initial_balance NUMERIC(19,4) DEFAULT 0 approved (allow negative, account currency implicit, no date). Per-account output, all-time scope. Traceability ✅ Adversarial Security ✅ Scope Guard ✅. No code. Tag `phase-1.20-accepted` pushed. |
+| 1.21 Unified Balance Implementation | 🔄 READY_FOR_OWNER_ACCEPTANCE | `migrations/1778400000000_account-sources-initial-balance.js` (NEW), `balance.service.ts` (NEW), `webhook.route.ts` (MODIFY — /balance added, KNOWN_COMMANDS 7→8, HELP_TEXT), `smoke-test-phase121.mjs` (NEW). 28/28 Phase 1.21 + 668/668 regression + 13/13 typecheck+lint = 709/709 PASS. Traceability ✅ Adversarial Security ✅ Scope Guard ✅. |
 
 ---
 
@@ -110,12 +111,39 @@ midas-monorepo/
 
 ---
 
-## 6. ТЕКУЩАЯ ФАЗА — PHASE 1.20: Balance Semantics Design Document
+## 6. ТЕКУЩАЯ ФАЗА — PHASE 1.21: Unified Balance Implementation
 
-> ✅ **COMPLETED / ACCEPTED. docs/balance-semantics.md finalized. D1–D6 all approved by owner. Tag phase-1.20-accepted pushed.**
+> 🔄 **READY_FOR_OWNER_ACCEPTANCE. 28/28 Phase 1.21 + 668/668 regression + 13/13 typecheck+lint = 709/709 PASS.**
 
 **Objective:**
-Produce `docs/balance-semantics.md` — a complete balance semantics design document that defines and resolves all design decisions required before implementing `/balance`. No TypeScript, no migrations, no new commands.
+Implement the `/balance` command as a single unified phase: schema migration + balance service + route handler + smoke tests. Based on the approved design decisions from `docs/balance-semantics.md`.
+
+**Scope:**
+- `packages/database/migrations/1778400000000_account-sources-initial-balance.js` (NEW):
+  - Idempotent `ADD COLUMN initial_balance NUMERIC(19,4) NOT NULL DEFAULT 0`
+  - `down()`: `DROP COLUMN IF EXISTS initial_balance`
+- `apps/telegram-bot/src/services/balance.service.ts` (NEW):
+  - `getAccountBalances(workspaceId, userId)`: two SQL queries inside `withTenantTransaction`
+  - D1 sign rules in SQL CASE WHEN; D2 debt integrated; D3 transfer shown separately
+  - D5 per-account output + currency totals; D6 all-time (no date filter)
+  - SEC-02: all arithmetic in PostgreSQL NUMERIC; SEC-03: RLS + workspace filter; escapeHtml applied
+- `apps/telegram-bot/src/routes/webhook.route.ts` (MODIFY):
+  - Import `getAccountBalances`
+  - `KNOWN_COMMANDS` 7 → 8 (added `/balance`)
+  - `HELP_TEXT` updated with `/balance` description
+  - Handler block `5c-bal` added after `/report` handler
+- `packages/database/smoke-test-phase121.mjs` (NEW): 28 smoke tests
+
+**Запрещено в Phase 1.21:**
+- Transfer two-sided model (`dest_account_id`)
+- `/set_balance`, `/balance_month`, `/balance_range`
+- Edit/delete commands
+- AI / queue / worker changes
+- New npm dependencies
+- `project_config.md` changes
+
+**Предыдущая завершённая фаза (Phase 1.20):**
+- `docs/balance-semantics.md` (NEW). D1–D6 all approved. Tag `phase-1.20-accepted` pushed. 0/0 tests (design doc).
 
 **Scope:**
 - `docs/balance-semantics.md` (NEW): defines 6 design decisions (D1–D6):
@@ -156,19 +184,22 @@ Produce `docs/balance-semantics.md` — a complete balance semantics design docu
 
 ---
 
-## 8. ФАЙЛЫ ДЛЯ ЧТЕНИЯ В НОВОМ ЧАТЕ (Phase 1.20 acceptance / Phase 1.21 advisory)
+## 8. ФАЙЛЫ ДЛЯ ЧТЕНИЯ В НОВОМ ЧАТЕ (Phase 1.21 acceptance)
 
 **Required (читать обязательно):**
 ```
 project_config.md
 workflow_state.md
-docs/balance-semantics.md                              # Phase 1.20 output — decisions D1–D6
+docs/balance-semantics.md                                     # approved D1–D6 decisions
+apps/telegram-bot/src/services/balance.service.ts             # Phase 1.21 implementation
+apps/telegram-bot/src/routes/webhook.route.ts                 # /balance handler
+packages/database/migrations/1778400000000_*                  # initial_balance migration
 ```
 
 **Опционально (читать при необходимости):**
 ```
-apps/telegram-bot/src/services/report.service.ts      # balance grouping pattern reference
-packages/ai-core/src/schemas.ts                       # intent type definitions
+packages/database/smoke-test-phase121.mjs
+apps/telegram-bot/src/services/report.service.ts              # balance pattern reference
 ```
 
 **Do not load (не читать — тратит контекст):**
@@ -177,7 +208,7 @@ docs/event_storming_part*.md
 docs/client-roadmap-architecture-overview.md
 docs/adr/*
 apps/background-workers/
-packages/database/smoke-test-phase1*.mjs              # not needed for design review
+packages/database/smoke-test-phase1[0-9]*.mjs    # except phase121
 Crypto / Notion / Sheets / Mini App files
 ```
 
@@ -187,9 +218,10 @@ Crypto / Notion / Sheets / Mini App files
 
 > Read workflow_state.md and project_config.md first.
 > Before any action, read workflow_state.md Section 11 — Agent Operating Protocol and follow it strictly.
-> Phase 1.20 (Balance Semantics Design Document) is READY_FOR_OWNER_ACCEPTANCE.
-> docs/balance-semantics.md has been created with decisions D1–D6 and recommended options.
-> Do NOT implement Phase 1.21 until owner explicitly accepts Phase 1.20 and approves D1–D6.
+> Phase 1.21 (Unified Balance Implementation) is READY_FOR_OWNER_ACCEPTANCE.
+> /balance command is implemented. initial_balance migration applied. 28/28 smoke tests PASS.
+> Do NOT create phase-1.21-accepted tag until owner explicitly accepts.
+> Do NOT start Phase 1.22 without owner approval.
 > Verify git status, git log --oneline -10, and origin/main are clean.
 > Do not modify project_config.md.
 
@@ -258,6 +290,7 @@ Crypto / Notion / Sheets / Mini App files
 | 2026-05-07 02:25 | Phase 1.19 accepted after final verification; account_sources.currency CHECK constraint added with regex ^[A-Z]{3,5}$; 668/668 tests passed; Traceability Review PASS; Adversarial Security Review PASS; Scope Guard Review PASS; implementation commit 9d288bd. Tag phase-1.19-accepted pushed. Status: WAITING_FOR_OWNER_APPROVAL_TO_START_NEXT_PHASE. |
 | 2026-05-07 09:40 | Phase 1.20 Balance Semantics Design Document complete. Owner APPROVED. docs/balance-semantics.md created: 6 design decisions D1–D6 with recommended options (D1=A standard signed formula, D2=A integrated debt, D3=B transfer neutral, D4a=Yes add initial_balance, D4b=Yes allow negative, D4c=Yes account currency implicit, D4d=No defer initial_balance_at, D5=B per-account breakdown, D6=A all-time). Traceability ✅ Adversarial Security ✅ Scope Guard ✅. No TypeScript, no migrations, no new commands. Status: READY_FOR_OWNER_ACCEPTANCE. |
 | 2026-05-07 09:45 | Phase 1.20 ACCEPTED by owner. D1–D6 all confirmed as recommended. Owner Choice column filled in docs/balance-semantics.md. Approved formula and schema changes documented. No code, no migrations, no DB changes made in this phase. Tag phase-1.20-accepted pushed. Status: WAITING_FOR_OWNER_APPROVAL_TO_START_NEXT_PHASE. |
+| 2026-05-07 10:00 | Phase 1.21 Unified Balance Implementation complete. Owner APPROVED. Files: migrations/1778400000000_account-sources-initial-balance.js (NEW, migration applied, initial_balance NUMERIC(19,4) NOT NULL DEFAULT 0), balance.service.ts (NEW, two-query NUMERIC arithmetic in SQL, withTenantTransaction, escapeHtml), webhook.route.ts (MODIFY, /balance handler added, KNOWN_COMMANDS 7→8, HELP_TEXT updated). smoke-test-phase121.mjs (NEW, 28/28 PASS). 28/28 Phase 1.21 + 668/668 regression (Ph1.6-A–Ph1.19) + 13/13 typecheck+lint = 709/709 PASS. Traceability ✅ Adversarial Security ✅ Scope Guard ✅. Status: READY_FOR_OWNER_ACCEPTANCE. |
 
 ---
 
