@@ -1,4 +1,4 @@
-# WORKFLOW_STATE.MD — Диспетчер задач ИИ-агента Midas
+﻿# WORKFLOW_STATE.MD — Диспетчер задач ИИ-агента Midas
 
 > **Тип:** MUTABLE — кратковременная память агента. Обновляется на каждом шаге работы.
 > **Обновлён:** 2026-05-07 14:51 (UTC+3)
@@ -10,11 +10,11 @@
 | Параметр | Значение |
 |---|---|
 | **PHASE** | `1 — MVP Implementation` |
-| **STEP** | `1.23 — /set_balance — COMPLETED / ACCEPTED` |
-| **AGENT STATUS** | `WAITING_FOR_OWNER_APPROVAL_TO_START_NEXT_PHASE` |
-| **LAST COMPLETED** | `Phase 1.23 ACCEPTED. /set_balance implemented. 730/730 tests PASS. Traceability ✅ Adversarial Security ✅ Scope Guard ✅. Tag phase-1.23-accepted pushed.` |
-| **BLOCKER** | None — awaiting owner approval to start next phase |
-| **NEXT ACTION** | Prepare next phase advisory only — do not implement |
+| **STEP** | `1.24 — Default Currency RUB → USDT — READY_FOR_OWNER_ACCEPTANCE` |
+| **AGENT STATUS** | `READY_FOR_OWNER_ACCEPTANCE` |
+| **LAST COMPLETED** | `Phase 1.24 DONE. Migration 1778500000000 applied. dynamic currency in account.service.ts. smoke-test-phase124.mjs (20/20). 13/13 typecheck+lint PASS. 750/750 tests PASS.` |
+| **BLOCKER** | None — awaiting owner acceptance decision |
+| **NEXT ACTION** | Owner acceptance only — do not create tag or start Phase 1.25 without approval |
 
 ---
 
@@ -91,121 +91,69 @@ midas-monorepo/
 │   ├── telegram-bot/          # @midas/telegram-bot
 │   └── background-workers/    # @midas/background-workers
 ├── packages/
-## 6. ТЕКУЩАЯ ФАЗА — PHASE 1.23: /set_balance (Balance Synchronization)
+## 6. ТЕКУЩАЯ ФАЗА — PHASE 1.24: Default Currency RUB → USDT
 
-> ✅ **COMPLETED / ACCEPTED. 730/730 tests PASS. Traceability ✅ Adversarial Security ✅ Scope Guard ✅. Tag phase-1.23-accepted pushed.**
+> ✅ **READY_FOR_OWNER_ACCEPTANCE. 20/20 Phase 1.24 + 717/717 regression + 13/13 typecheck+lint = 750/750 PASS.**
 
 **Objective:**
-Implement `/set_balance <account> <amount>` — synchronizes the real balance of an account by recalculating `account_sources.initial_balance` so that `/balance` shows the target value. No new transactions created.
+Change default currency for ALL new workspaces from 'RUB' to 'USDT'.
+Existing workspaces remain untouched (no backfill). /add_account reads workspace.default_currency dynamically.
 
-**Formula:**
-```
-new_initial_balance = target_balance − SUM(income + debt_received) + SUM(expense + debt_given)
-```
-Equivalently: compute `computed_from_transactions` (balance contribution from all non-transfer txns), then:
-```
-new_initial_balance = target_balance − computed_from_transactions
-```
+**Key Decision: dynamic workspace.default_currency in /add_account:**
+  - ddAccount() executes SELECT default_currency FROM workspaces WHERE id = $1 inside the same withTenantTransaction.
+  - Correct for all workspaces regardless of their default — future-proofed for multi-currency.
 
-**Scope — exactly 3 files:**
-- `apps/telegram-bot/src/services/setBalance.service.ts` (NEW):
-  - `parseSetBalanceArgs(text)` — parse `/set_balance <account> <amount>`: account name (fuzzy not needed — exact or prefix), amount (NUMERIC-safe via Decimal/pg)
-  - `setAccountBalance(workspaceId, userId, accountName, targetAmount)` — find account, compute new initial_balance, UPDATE inside withTenantTransaction
-  - Returns typed result: `'done' | 'account_not_found' | 'ambiguous'`
-- `apps/telegram-bot/src/routes/webhook.route.ts` (MODIFY):
-  - Import `setAccountBalance`, `parseSetBalanceArgs` from `setBalance.service.js`
-  - `KNOWN_COMMANDS` 8 → 9 (add `/set_balance`)
-  - `HELP_TEXT` updated with `/set_balance` line
-  - Comment header updated: Phase 1.23 added
-  - Handler block `5c-setbal` added
-- `packages/database/smoke-test-phase123.mjs` (NEW): ~30 smoke tests
+**Scope — exactly 5 files:**
+- packages/database/migrations/1778500000000_default-currency-usdt.js (NEW): ALTER TABLE + CREATE OR REPLACE FUNCTION system_find_or_create_user with 'USDT'
+- pps/telegram-bot/src/services/account.service.ts (MODIFY): addAccount() reads workspace.default_currency dynamically; update header comment
+- packages/database/smoke-test-phase112.mjs (MODIFY): 1 assertion === 'RUB' → === 'USDT'
+- packages/database/smoke-test-phase117.mjs (MODIFY): 2 assertions + doc comment 'RUB' → 'USDT'
+- packages/database/smoke-test-phase124.mjs (NEW): ~18 smoke tests
 
-**Forbidden in Phase 1.23:**
-- No new migrations, no new tables, no new columns
-- No correction transactions or `balance_adjustments` table
-- No new transaction_intent values
-- No `/report` changes
-- No settings, USDT default, edit/delete, voice, vision, Mini App, AI, queues, workers
-- No external integrations, no new npm dependencies
-- No `project_config.md` changes
-- Do not proceed beyond Phase 1.23
+**Forbidden in Phase 1.24:**
+- No backfill of existing workspaces or accounts
+- No transaction recalculation
+- No /report or /balance logic changes
+- No settings command, no external integrations, no new dependencies
+- No project_config.md changes
+- Do not proceed beyond Phase 1.24
 
-**Previous phase:** Phase 1.22 ACCEPTED — comment-only cleanup in webhook.route.ts. Tag `phase-1.22-accepted` pushed.
+**Previous phase:** Phase 1.23 ACCEPTED — /set_balance. Tag phase-1.23-accepted pushed.
 
 ---
 
-## 7. MCP REQUIREMENTS (Phase 1.23)
+## 7. MCP REQUIREMENTS (Phase 1.24)
 
 | MCP-сервер | Доступ | Примечание |
 |---|---|---|
-| Filesystem MCP | ✅ read/write | Create/modify TypeScript files, smoke test, workflow_state |
-| Postgres MCP | ✅ read-only | Verify schema, test data, constraint validation |
+| Filesystem MCP | ✅ read/write | Create/modify migration, TypeScript, smoke test, workflow_state |
+| Postgres MCP | ✅ read-only | Verify schema DEFAULT, stored function body, test data |
 | GitHub MCP | ⚪ read-only (опционально) | Verify remote sync after commit |
 | Browser / DevTools | ❌ Запрещён | — |
 | Notion MCP | ❌ Запрещён | — |
-| Google Sheets | ❌ Запрещён | — |
 | Crypto / Blockchain | ❌ Запрещён | — |
 
 ---
 
-## 8. ФАЙЛЫ ДЛЯ ЧТЕНИЯ В НОВОМ ЧАТЕ (Phase 1.23)
+## 8. ФАЙЛЫ ДЛЯ ЧТЕНИЯ В НОВОМ ЧАТЕ (Phase 1.24)
 
 **Required (читать обязательно):**
-```
+`
 project_config.md
 workflow_state.md
-docs/product-roadmap.md                                          # Phase 1.23 spec
-docs/balance-semantics.md                                        # D1-D6 formula reference
-apps/telegram-bot/src/services/balance.service.ts                # balance formula pattern
-apps/telegram-bot/src/services/setBalance.service.ts             # Phase 1.23 implementation
-apps/telegram-bot/src/routes/webhook.route.ts                    # /set_balance handler
-packages/database/smoke-test-phase123.mjs                        # Phase 1.23 tests
-```
-
-**Опционально (читать при необходимости):**
-```
-apps/telegram-bot/src/services/account.service.ts    # parseAddAccountArgs pattern
-```
+docs/product-roadmap.md
+packages/database/migrations/1778500000000_default-currency-usdt.js
+apps/telegram-bot/src/services/account.service.ts
+packages/database/smoke-test-phase124.mjs
+`
 
 **Do not load:**
-```
+`
 docs/event_storming_part*.md
 docs/adr/*
 apps/background-workers/
-packages/database/smoke-test-phase1[0-2]*.mjs   # except phase123
-Crypto / Notion / Sheets / Mini App files
-```
-
----
-
-## 9. ПРОМПТ ДЛЯ СТАРТА НОВОГО ЧАТА
-
-> Read workflow_state.md, project_config.md, docs/product-roadmap.md, docs/balance-semantics.md first.
-> Before any action, read workflow_state.md Section 11 — Agent Operating Protocol and follow it strictly.
-> Phase 1.23 (/set_balance) is IN_PROGRESS (owner APPROVED).
-> Do NOT create phase-1.23-accepted tag until owner explicitly accepts.
-> Do NOT start Phase 1.24 without owner approval.
-> Verify git status, git log --oneline -5, origin/main are clean.
-> Do not modify project_config.md.
-> Compact mode: read only files listed in Section 8. /balance handler
-packages/database/migrations/1778400000000_*                  # initial_balance migration
-```
-
-**Опционально (читать при необходимости):**
-```
-packages/database/smoke-test-phase121.mjs
-apps/telegram-bot/src/services/report.service.ts              # balance pattern reference
-```
-
-**Do not load (не читать — тратит контекст):**
-```
-docs/event_storming_part*.md
-docs/client-roadmap-architecture-overview.md
-docs/adr/*
-apps/background-workers/
-packages/database/smoke-test-phase1[0-9]*.mjs    # except phase121
-Crypto / Notion / Sheets / Mini App files
-```
+docs/balance-semantics.md
+`
 
 ---
 
@@ -213,12 +161,11 @@ Crypto / Notion / Sheets / Mini App files
 
 > Read workflow_state.md and project_config.md first.
 > Before any action, read workflow_state.md Section 11 — Agent Operating Protocol and follow it strictly.
-> Phase 1.23 (/set_balance) is COMPLETED / ACCEPTED. Tag phase-1.23-accepted pushed.
-> Do NOT start Phase 1.24 without owner approval.
+> Phase 1.24 (Default Currency USDT) is READY_FOR_OWNER_ACCEPTANCE.
+> Do NOT create phase-1.24-accepted tag until owner explicitly accepts.
+> Do NOT start Phase 1.25 without owner approval.
 > Verify git status, git log --oneline -5, origin/main are clean.
 > Do not modify project_config.md.
-
----
 
 ## 10. ИСТОРИЯ ДЕЙСТВИЙ (СЖАТАЯ)
 
@@ -289,6 +236,7 @@ Crypto / Notion / Sheets / Mini App files
 | 2026-05-07 10:35 | Phase 1.22 accepted after final verification; stale /balance comment in webhook.route.ts fixed; comment-only change; 13/13 typecheck+lint PASS; Traceability Review PASS; Adversarial Security Review PASS; Scope Guard Review PASS; implementation commit d2ea3fd. Tag phase-1.22-accepted pushed. Status: WAITING_FOR_OWNER_APPROVAL_TO_START_NEXT_PHASE. |
 | 2026-05-07 14:00 | Phase 1.23 /set_balance implementation complete. Owner APPROVED. `setBalance.service.ts` (NEW): `parseSetBalanceArgs()` (last-token-as-amount, AMOUNT_REGEX 15-digit cap, SEC-02), `setAccountBalance()` (LOWER() exact match, formula `new_initial_balance = target − SUM(txns)` in PostgreSQL NUMERIC, withTenantTransaction SEC-03, defensive undefined guard replacing `!` non-null assertion), `formatSetBalanceResult()` (escapeHtml for all user strings). `webhook.route.ts` (MODIFY): import 3 functions from setBalance.service.js, KNOWN_COMMANDS 8→9, HELP_TEXT updated with /set_balance line, handler `5c-setbal` added (parseSetBalanceArgs → resolveWorkspace → setAccountBalance → formatSetBalanceResult). `smoke-test-phase123.mjs` (NEW): 34/34 PASS — Groups A (10 parse tests), B (12 DB formula tests including negative/idempotent/resync/precision), C (8 security/scope tests), D (4 regression). 13/13 typecheck+lint PASS. No migrations, no new tables, no transactions created, no /report changes. Commit 65a8e56 pushed. Status: READY_FOR_OWNER_ACCEPTANCE. |
 | 2026-05-07 14:51 | Phase 1.23 accepted after final verification; /set_balance implemented; synchronizes account balance by recalculating account_sources.initial_balance; no transactions created; no categories used; /report unaffected; 730/730 tests passed; Traceability Review PASS; Adversarial Security Review PASS; Scope Guard Review PASS; implementation commit 65a8e56; workflow_state sync commit 6b1df77. Tag phase-1.23-accepted pushed. Status: WAITING_FOR_OWNER_APPROVAL_TO_START_NEXT_PHASE. |
+| 2026-05-07 15:15 | Phase 1.24 Default Currency RUB → USDT implementation complete. Owner APPROVED. Migration 1778500000000_default-currency-usdt.js (NEW): ALTER TABLE workspaces SET DEFAULT 'USDT' + CREATE OR REPLACE FUNCTION system_find_or_create_user (7-param) with 'USDT' for workspace and account_sources INSERTs. ccount.service.ts (MODIFY): addAccount() reads workspace.default_currency dynamically via SELECT inside withTenantTransaction (SEC-03) — fallback 'USDT'. smoke-test-phase112.mjs (MODIFY): 1 assertion USDT. smoke-test-phase117.mjs (MODIFY): doc comment + assertion updated. smoke-test-phase124.mjs (NEW): 20/20 PASS. No backfill. 1184 RUB workspaces untouched. 13/13 typecheck+lint PASS. 20/20 Phase 1.24 + 717/717 regression smoke (Ph1.6-A–Ph1.23) + 13/13 typecheck+lint = 750/750 PASS. Traceability ✅ Adversarial Security ✅ Scope Guard ✅. Status: READY_FOR_OWNER_ACCEPTANCE. |
 
 ---
 

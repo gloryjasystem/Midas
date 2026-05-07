@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Smoke Tests — Phase 1.12: Onboarding Default Data Seeding
  *
  * Tests (16 scenarios covering all required test cases):
@@ -6,7 +6,7 @@
  * DB-backed tests (require live PostgreSQL):
  *   1.  New user onboarding creates exactly one default account_sources row
  *   2.  New user onboarding creates exactly one default category row 'Разное' / 'Жизнь'
- *   3.  New user's default account_sources currency = workspace default_currency ('RUB')
+ *   3.  New user's Default account_sources currency = workspace default_currency ('USDT')
  *   4.  New user's default account_sources type = 'manual', name = 'Default'
  *   5.  Existing user onboarding does NOT create duplicate account_sources rows
  *   6.  Existing user onboarding does NOT create duplicate category rows
@@ -196,9 +196,9 @@ async function runTests() {
       assert(catRows.rows[0].group === 'Жизнь', `category group = 'Жизнь' (got: ${catRows.rows[0].group})`);
 
       // ── TEST 3 & 4: currency, type, name of default account ───────────────
-      console.log('\n[TEST 3] Default account_sources currency = workspace default_currency (RUB)');
+      console.log('\n[TEST 3] Default account_sources currency = workspace default_currency (USDT)');
       const acct = acctRows.rows[0];
-      assert(acct.currency === 'RUB', `account_sources.currency = 'RUB' (got: ${acct.currency})`);
+      assert(acct.currency === 'USDT', `account_sources.currency = 'USDT' (got: ${acct.currency})`);
 
       console.log('\n[TEST 4] Default account_sources type = manual, name = Default');
       assert(acct.type === 'manual', `account_sources.type = 'manual' (got: ${acct.type})`);

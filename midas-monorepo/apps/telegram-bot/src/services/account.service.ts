@@ -1,8 +1,11 @@
-/**
- * Account Service — Phase 1.14 + Phase 1.17
- *
+﻿/**
+ * Account Service — Phase 1.14 + Phase 1.17 + Phase 1.24
+ * 
  * Phase 1.14: Read-only list of account_sources for a workspace.
  * Phase 1.17: addAccount() — strict-format write path for /add_account command.
+ * Phase 1.24: addAccount() now reads workspace.default_currency dynamically
+ *             instead of hardcoding 'RUB'. Ensures new accounts always match
+ *             the workspace's configured default currency (USDT for new workspaces).
  *
  * Scope:
  *   - getAccountList(): read-only, flat list sorted by type, name.
@@ -13,7 +16,7 @@
  *   - addAccount(): insert a new account_sources row for the workspace.
  *     - Name: trimmed, non-empty, max 100 chars, spaces allowed.
  *     - Type: always 'manual' (Phase 1.17 scope).
- *     - Currency: always 'RUB' (workspace default, Phase 1.17 scope).
+ *     - Currency: read from workspace.default_currency (Phase 1.24).
  *     - Duplicate: detected via ON CONFLICT → returns 'duplicate' result.
  *
  * SEC-02: No financial amounts involved. No float arithmetic.
@@ -171,7 +174,7 @@ export type AddAccountResult = 'created' | 'duplicate';
  * SEC-12: Name is NOT logged.
  *
  * Type is always 'manual' (Phase 1.17 scope — crypto/bank types are Phase 2+).
- * Currency is always 'RUB' (workspace default; no user input accepted in this phase).
+ * Currency: read from workspace.default_currency (Phase 1.24 — USDT for new workspaces).
  *
  * Duplicate detection: ON CONFLICT ON CONSTRAINT account_sources_workspace_id_name_key DO NOTHING.
  * If the row already exists, INSERT returns 0 rows → 'duplicate' result.
@@ -187,15 +190,26 @@ export async function addAccount(
     workspaceId,
     userId,
     async (client) => {
+      // ── Phase 1.24: Read workspace.default_currency dynamically ──────────────
+      // Ensures the new account always matches the workspace's configured default
+      // currency (USDT for new workspaces, RUB for existing ones, etc.).
+      // Defense-in-depth: explicit WHERE id = $1 alongside RLS (SEC-03).
+      const wsResult = await client.query<{ default_currency: string }>(
+        `SELECT default_currency FROM workspaces WHERE id = $1`,
+        [workspaceId],
+      );
+      // Fallback to 'USDT' if workspace not found (defensive; should not happen).
+      const currency: string = wsResult.rows[0]?.default_currency ?? 'USDT';
+
       const result = await client.query<{ id: string }>(
         // Defense-in-depth: explicit workspace_id = $2 alongside RLS WITH CHECK.
         // ON CONFLICT ON CONSTRAINT: uses the named unique constraint (added Phase 1.16)
         // to prevent duplicate account names within the same workspace.
         `INSERT INTO account_sources (id, workspace_id, name, type, currency)
-         VALUES ($1, $2, $3, 'manual'::account_source_type, 'RUB')
+         VALUES ($1, $2, $3, 'manual'::account_source_type, $4)
          ON CONFLICT ON CONSTRAINT account_sources_workspace_id_name_key DO NOTHING
          RETURNING id`,
-        [accountId, workspaceId, name],
+        [accountId, workspaceId, name, currency],
       );
       return result.rowCount ?? 0;
     },
