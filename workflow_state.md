@@ -1,4 +1,4 @@
-﻿# WORKFLOW_STATE.MD — Диспетчер задач ИИ-агента Midas
+# WORKFLOW_STATE.MD — Диспетчер задач ИИ-агента Midas
 
 > **Тип:** MUTABLE — кратковременная память агента. Обновляется на каждом шаге работы.
 > **Обновлён:** 2026-05-07 14:51 (UTC+3)
@@ -10,11 +10,11 @@
 | Параметр | Значение |
 |---|---|
 | **PHASE** | `1 — MVP Implementation` |
-| **STEP** | `1.28 — /edit Transactions MVP — IN_PROGRESS` |
-| **AGENT STATUS** | `IN_PROGRESS` |
-| **LAST COMPLETED** | `Phase 1.27 DONE. Multicurrency balance hardening. 27/27 smoke + 814/814 regression + 13/13 typecheck = 854/854 PASS. HEAD 12e70d9.` |
-| **BLOCKER** | None — implementation in progress |
-| **NEXT ACTION** | Implement Phase 1.28: /edit transactions MVP (amount, category, account, intent) |
+| **STEP** | `1.28 — /edit Transactions MVP — READY_FOR_OWNER_ACCEPTANCE` |
+| **AGENT STATUS** | `READY_FOR_OWNER_ACCEPTANCE` |
+| **LAST COMPLETED** | `Phase 1.28 DONE. /edit transactions MVP. 43/43 smoke + 104/104 regression (Phase 1.25-1.27) + 13/13 typecheck = 880/880 PASS. HEAD c8bbc7d.` |
+| **BLOCKER** | None — awaiting owner acceptance of Phase 1.28 |
+| **NEXT ACTION** | Owner to review and accept Phase 1.28. Do not start Phase 1.29 advisory until owner approval. |
 
 ---
 
@@ -50,6 +50,12 @@
 | 1.20 Balance Semantics Design Document | ✅ ACCEPTED | `docs/balance-semantics.md` (NEW) — 6 design decisions D1–D6 all approved. Formula: income+1/expense−1/debt_given−1/debt_received+1/transfer neutral. initial_balance NUMERIC(19,4) DEFAULT 0 approved (allow negative, account currency implicit, no date). Per-account output, all-time scope. Traceability ✅ Adversarial Security ✅ Scope Guard ✅. No code. Tag `phase-1.20-accepted` pushed. |
 | 1.21 Unified Balance Implementation | ✅ ACCEPTED | `migrations/1778400000000_account-sources-initial-balance.js` (NEW), `balance.service.ts` (NEW), `webhook.route.ts` (MODIFY — /balance added, KNOWN_COMMANDS 7→8, HELP_TEXT), `smoke-test-phase121.mjs` (NEW). 28/28 Phase 1.21 + 655/655 regression smoke + 13/13 typecheck+lint = 696/696 PASS. Phase 1.5 server-dependent tests excluded from baseline (pre-existing). Tech debt: stale /balance comment in webhook.route.ts line 31 (cosmetic, not blocking). Traceability ✅ Adversarial Security ✅ Scope Guard ✅. Implementation commit `976418a`. Tag `phase-1.21-accepted` pushed. |
 | 1.22 Stale Comment Cleanup | ✅ ACCEPTED | `webhook.route.ts` (MODIFY — comment-only: slash-command routing header updated, all 8 known commands listed, stale “(e.g. /balance)” example removed, Phase 1.21 added to phase refs). 0 logic changes. 13/13 typecheck+lint PASS (FULL TURBO). Traceability ✅ Adversarial Security ✅ Scope Guard ✅. Implementation commit `d2ea3fd`. Tag `phase-1.22-accepted` pushed. |
+| 1.23 /set_balance Command | ✅ ACCEPTED | `setBalance.service.ts` (NEW), `webhook.route.ts` (MODIFY). Tag `phase-1.23-accepted` pushed. |
+| 1.24 /balance Formatting Polish | ✅ ACCEPTED | `balance.service.ts` (MODIFY). Tag `phase-1.24-accepted` pushed. |
+| 1.25 /settings Text Commands | ✅ ACCEPTED | `settings.service.ts` (NEW). /settings currency, /settings timezone. Tag `phase-1.25-accepted` pushed. |
+| 1.26 /settings UI | ✅ ACCEPTED | `settings-keyboard.service.ts` (NEW), `currencies.ts` (NEW). Inline keyboards, groups, pagination, Redis search state. 45/45 smoke. Tag `phase-1.26-accepted` pushed. |
+| 1.27 Multicurrency Balance Hardening | ✅ ACCEPTED | `balance.service.ts` (MODIFY). SQL-level mismatch exclusion, mismatch footnote. 27/27 smoke. Tag `phase-1.27-accepted` pushed. |
+| 1.28 /edit Transactions MVP | 🟡 READY_FOR_OWNER_ACCEPTANCE | `edit.service.ts` (NEW), `edit-keyboard.service.ts` (NEW), `webhook.route.ts` (MODIFY), `confirmation.worker.ts` (MODIFY), `smoke-test-phase128.mjs` (NEW). /edit list+card+edit amount/category/account/intent. Permanent [✏️ Изменить] on confirmed msgs. Redis TTL 300s. ULID+workspace guards. 43/43 smoke + 13/13 typecheck+lint. HEAD c8bbc7d. |
 
 ---
 
