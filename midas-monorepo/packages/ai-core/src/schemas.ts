@@ -16,6 +16,14 @@
  *   - All monetary amounts from AI are strings (AI outputs a human-readable number).
  *   - The backend converts to Decimal AFTER Zod validation.
  *   - AI must not output Infinity, NaN, or negative amounts for expenses.
+ *
+ * Phase 1.32 additions:
+ *   - amount is now OPTIONAL — AI may omit it when unclear (triggers missing-amount
+ *     clarification round instead of hard needs_clarification).
+ *   - intent is now OPTIONAL — AI may omit it at very low confidence.
+ *   - PARTIAL_CONFIDENCE_THRESHOLD (0.3): below this = nonsense, ≥ this = targeted
+ *     clarification. MIN_CONFIDENCE_THRESHOLD (0.5) remains = full parse threshold.
+ *   - MissingFields type: tracks which fields need clarification.
  */
 
 import { z } from 'zod';
@@ -68,14 +76,15 @@ const AmountString = z
 
 export const AiOutputSchema = z
   .object({
-    /** Intent classification */
-    intent: ParsedIntentType,
+    /** Intent classification. Phase 1.32: optional — AI may omit when very uncertain. */
+    intent: ParsedIntentType.optional(),
 
     /**
      * Amount as string (SEC-02: not a JS number).
      * AI outputs human-readable value, backend converts to Decimal.
+     * Phase 1.32: optional — AI may omit when amount is not in the message.
      */
-    amount: AmountString,
+    amount: AmountString.optional(),
 
     /**
      * Currency code (ISO 4217 or ticker). Optional.
@@ -132,8 +141,31 @@ export const AiOutputSchema = z
 export type AiOutput = z.infer<typeof AiOutputSchema>;
 
 // ─────────────────────────────────────────────────────────────
-// Minimum confidence threshold for pending_user status
-// Below this → needs_clarification
+// Confidence thresholds (Phase 1.32)
 // ─────────────────────────────────────────────────────────────
 
+/**
+ * Full confidence threshold: AI output accepted as-is.
+ * Below this → targeted clarification (ask about missing/unclear fields).
+ */
 export const MIN_CONFIDENCE_THRESHOLD = 0.5;
+
+/**
+ * Partial confidence threshold (Phase 1.32).
+ * confidence >= PARTIAL_CONFIDENCE_THRESHOLD AND < MIN_CONFIDENCE_THRESHOLD
+ *   → "partial" parse — targeted clarification for missing/unclear fields.
+ * confidence < PARTIAL_CONFIDENCE_THRESHOLD
+ *   → "nonsense" — show shortcut buttons, draft is abandoned.
+ */
+export const PARTIAL_CONFIDENCE_THRESHOLD = 0.3;
+
+// ─────────────────────────────────────────────────────────────
+// MissingFields — Phase 1.32
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Identifies which fields need clarification after a partial parse.
+ * Priority order for one-question-at-a-time UX: amount → intent → category.
+ * Only the FIRST missing field triggers a clarification question.
+ */
+export type MissingField = 'amount' | 'intent' | 'category';

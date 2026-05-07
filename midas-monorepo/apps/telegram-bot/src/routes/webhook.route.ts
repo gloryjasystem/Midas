@@ -155,6 +155,12 @@ import {
   getDraftAccountHint,               // Phase 1.31
   setDraftAccountId,                 // Phase 1.31
 } from '../services/account.service.js';
+import {
+  patchDraftAmount,                  // Phase 1.32
+  patchDraftIntent,                  // Phase 1.32
+  patchDraftCategory,                // Phase 1.32
+  validateAmountString,              // Phase 1.32
+} from '../services/clarification.service.js';
 
 import { callbackConfirmQueue } from '../queues/callback-confirm-queue.js';
 
@@ -299,6 +305,15 @@ function onboardStateKey(telegramUserId: string, chatId: string): string {
 const INLINE_ACCOUNT_TTL_SEC = 300; // 5 minutes
 function inlineAccountKey(draftId: string): string {
   return `midas:ia:${draftId}`;
+}
+
+// Phase 1.32: Redis key for clarification amount-text intercept.
+// Value format: "{draftId}:amt" — identifies draft and field being clarified.
+// Key scoped to userId+chatId — same user in same chat.
+// TTL: 300s (same as other text intercepts).
+const CLARIFICATION_STATE_TTL_SEC = 300; // 5 minutes
+function clarStateKey(telegramUserId: string, chatId: string): string {
+  return `midas:clar:${telegramUserId}:${chatId}`;
 }
 
 const webhookRoute: FastifyPluginAsync = async (fastify) => {
@@ -845,6 +860,152 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
             callbackId: cq.id,
             errorClass,
           });
+        }
+
+        await answerCallbackQuery(cq.id);
+        await reply.status(200).send({ ok: true });
+        return;
+      }
+
+      // ── Phase 1.32: clarification callbacks (prefix "clar:") ─────
+      // Handles: clar:intent:{value}:{draftId}, clar:cat:{catId}:{draftId},
+      //          clar:nocat:{draftId}, clar:cmd:{balance|report}
+      // All callback_data ≤ 62 bytes (verified in advisory).
+      if (callbackData.startsWith('clar:')) {
+        const parts = callbackData.split(':');
+        const clarAction = parts[1] ?? '';
+
+        // ── clar:cmd:balance / clar:cmd:report ──
+        // These are shortcut buttons from nonsense keyboard — trigger commands,
+        // do NOT patch any draft. The nonsense draft is simply abandoned.
+        if (clarAction === 'cmd') {
+          const cmdTarget = parts[2] ?? '';
+          if (cmdTarget === 'balance') {
+            try {
+              const cmdResolved = await resolveWorkspace(telegramUserId, chatId);
+              const { getAccountBalances } = await import('../services/balance.service.js');
+              const balanceText = await getAccountBalances(cmdResolved.workspaceId, cmdResolved.userId);
+              void sendMessage(chatId, balanceText);
+            } catch {
+              void sendMessage(chatId, '⚠️ Не удалось получить баланс. Попробуйте позже.');
+            }
+          } else if (cmdTarget === 'report') {
+            try {
+              const cmdResolved = await resolveWorkspace(telegramUserId, chatId);
+              const reportText = await getMonthlyReport(cmdResolved.workspaceId, cmdResolved.userId);
+              void sendMessage(chatId, reportText);
+            } catch {
+              void sendMessage(chatId, '⚠️ Не удалось получить отчёт. Попробуйте позже.');
+            }
+          }
+          await answerCallbackQuery(cq.id);
+          await reply.status(200).send({ ok: true });
+          return;
+        }
+
+        // All remaining clar: callbacks require workspace resolution.
+        let clarResolved: { workspaceId: string; userId: string };
+        try {
+          clarResolved = await resolveWorkspace(telegramUserId, chatId);
+        } catch {
+          await answerCallbackQuery(cq.id);
+          await reply.status(200).send({ ok: true });
+          return;
+        }
+
+        const clarMsgId = cq.message ? String(cq.message.message_id) : null;
+
+        try {
+          if (clarAction === 'intent') {
+            // ── clar:intent:{value}:{draftId} ──
+            const intentValue = parts[2] ?? '';
+            const intentDraftId = parts[3] ?? '';
+            // Validate draftId format (ULID)
+            if (!/^[0-9A-Z]{26}$/.test(intentDraftId)) {
+              await answerCallbackQuery(cq.id);
+              await reply.status(200).send({ ok: true });
+              return;
+            }
+            const intentResult = await patchDraftIntent(
+              clarResolved.workspaceId, clarResolved.userId, intentDraftId, intentValue,
+            );
+            if (intentResult.status === 'ready') {
+              if (clarMsgId) void editMessageText(
+                chatId, clarMsgId,
+                '📝 Готово. Подтвердите или отклоните транзакцию:',
+                { inline_keyboard: [
+                  [{ text: '✅ Подтвердить', callback_data: `approve:${intentDraftId}` }],
+                  [{ text: '❌ Отклонить',   callback_data: `reject:${intentDraftId}` }],
+                ]},
+              );
+            } else if (intentResult.status === 'still_needs' && intentResult.field === 'amount') {
+              // Set Redis intercept for amount
+              const clarKey = clarStateKey(telegramUserId, chatId);
+              await redisConnection.set(clarKey, `${intentDraftId}:amt`, 'EX', CLARIFICATION_STATE_TTL_SEC);
+              if (clarMsgId) void editMessageText(chatId, clarMsgId, '💰 Сколько потратил? Напиши сумму:', { inline_keyboard: [] });
+            } else {
+              if (clarMsgId) void editMessageText(chatId, clarMsgId, '⚠️ Транзакция не найдена или уже обработана.', { inline_keyboard: [] });
+            }
+            request.log.info({ msg: '[midas:bot:webhook] clar: intent patched', workspaceId: clarResolved.workspaceId, intentResult: intentResult.status });
+
+          } else if (clarAction === 'cat') {
+            // ── clar:cat:{catId}:{draftId} ──
+            const catId = parts[2] ?? '';
+            const catDraftId = parts[3] ?? '';
+            if (!/^[0-9A-Z]{26}$/.test(catId) || !/^[0-9A-Z]{26}$/.test(catDraftId)) {
+              await answerCallbackQuery(cq.id);
+              await reply.status(200).send({ ok: true });
+              return;
+            }
+            const catResult = await patchDraftCategory(
+              clarResolved.workspaceId, clarResolved.userId, catDraftId, catId,
+            );
+            if (catResult.status === 'ready') {
+              if (clarMsgId) void editMessageText(
+                chatId, clarMsgId,
+                '📝 Категория выбрана. Подтвердите или отклоните транзакцию:',
+                { inline_keyboard: [
+                  [{ text: '✅ Подтвердить', callback_data: `approve:${catDraftId}` }],
+                  [{ text: '❌ Отклонить',   callback_data: `reject:${catDraftId}` }],
+                ]},
+              );
+            } else {
+              if (clarMsgId) void editMessageText(chatId, clarMsgId, '⚠️ Категория не найдена или транзакция уже обработана.', { inline_keyboard: [] });
+            }
+            request.log.info({ msg: '[midas:bot:webhook] clar: category patched', workspaceId: clarResolved.workspaceId, catResult: catResult.status });
+
+          } else if (clarAction === 'nocat') {
+            // ── clar:nocat:{draftId} ── (without category)
+            const nocatDraftId = parts[2] ?? '';
+            if (!/^[0-9A-Z]{26}$/.test(nocatDraftId)) {
+              await answerCallbackQuery(cq.id);
+              await reply.status(200).send({ ok: true });
+              return;
+            }
+            const nocatResult = await patchDraftCategory(
+              clarResolved.workspaceId, clarResolved.userId, nocatDraftId, null,
+            );
+            if (nocatResult.status === 'ready') {
+              if (clarMsgId) void editMessageText(
+                chatId, clarMsgId,
+                '📝 Записано без категории. Подтвердите или отклоните:',
+                { inline_keyboard: [
+                  [{ text: '✅ Подтвердить', callback_data: `approve:${nocatDraftId}` }],
+                  [{ text: '❌ Отклонить',   callback_data: `reject:${nocatDraftId}` }],
+                ]},
+              );
+            } else {
+              if (clarMsgId) void editMessageText(chatId, clarMsgId, '⚠️ Транзакция не найдена или уже обработана.', { inline_keyboard: [] });
+            }
+            request.log.info({ msg: '[midas:bot:webhook] clar: no-category patched', workspaceId: clarResolved.workspaceId });
+
+          } else {
+            // Unknown clar: sub-command — silently acknowledge
+            request.log.warn({ msg: '[midas:bot:webhook] clar: unknown action', clarAction, callbackId: cq.id });
+          }
+        } catch (err: unknown) {
+          const errorClass = err instanceof Error ? err.constructor.name : 'UnknownError';
+          request.log.error({ msg: '[midas:bot:webhook] clar: callback failed', callbackId: cq.id, errorClass });
         }
 
         await answerCallbackQuery(cq.id);
@@ -1459,6 +1620,78 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
         });
         await reply.status(200).send({ ok: true });
         return;
+      }
+    }
+
+    // ── Step 5f-clar: Phase 1.32 — clarification amount text intercept ────
+    // If user is in the midas:clar: state (bot asked "Сколько?"), intercept
+    // their next text message as the new amount.
+    // Runs BEFORE ia: intercept, BEFORE ac: onboarding, BEFORE edit, BEFORE AI parse.
+    if (!commandToken) {
+      const clarIntKey = clarStateKey(telegramUserId, chatId);
+      const clarIntState = await redisConnection.get(clarIntKey);
+      if (clarIntState) {
+        // clarIntState format: "{draftId}:amt"
+        const colonPos = clarIntState.indexOf(':');
+        const clarDraftId = colonPos === -1 ? clarIntState : clarIntState.slice(0, colonPos);
+        const clarField   = colonPos === -1 ? '' : clarIntState.slice(colonPos + 1);
+
+        if (clarField === 'amt' && /^[0-9A-Z]{26}$/.test(clarDraftId)) {
+          // Validate amount (SEC-02: NUMERIC regex)
+          const validAmount = validateAmountString(message.text);
+          if (!validAmount) {
+            void sendMessage(chatId, '⚠️ Неверная сумма. Напиши число, например: 380 или 1500.50');
+            // Keep Redis key alive — user can try again within TTL
+            await reply.status(200).send({ ok: true });
+            return;
+          }
+
+          // Valid amount — delete intercept key and patch draft
+          await redisConnection.del(clarIntKey);
+
+          let clarIntResolved: { workspaceId: string; userId: string };
+          try {
+            clarIntResolved = await resolveWorkspace(telegramUserId, chatId);
+          } catch {
+            void sendMessage(chatId, '⚠️ Не удалось обработать. Попробуйте позже.');
+            await reply.status(200).send({ ok: true });
+            return;
+          }
+
+          const amtPatchResult = await patchDraftAmount(
+            clarIntResolved.workspaceId, clarIntResolved.userId, clarDraftId, validAmount,
+          );
+
+          if (amtPatchResult.status === 'ready') {
+            void sendMessageWithKeyboard(
+              chatId,
+              '📝 Готово. Подтвердите или отклоните транзакцию:',
+              { inline_keyboard: [
+                [{ text: '✅ Подтвердить', callback_data: `approve:${clarDraftId}` }],
+                [{ text: '❌ Отклонить',   callback_data: `reject:${clarDraftId}` }],
+              ]},
+            );
+          } else if (amtPatchResult.status === 'still_needs' && amtPatchResult.field === 'intent') {
+            void sendMessageWithKeyboard(
+              chatId,
+              '🤔 Уточни, что произошло:',
+              { inline_keyboard: [
+                [{ text: '💸 Расход', callback_data: `clar:intent:expense:${clarDraftId}` }, { text: '💰 Доход', callback_data: `clar:intent:income:${clarDraftId}` }],
+                [{ text: '🤝 Долг (дал)', callback_data: `clar:intent:debt_given:${clarDraftId}` }, { text: '🤲 Долг (взял)', callback_data: `clar:intent:debt_received:${clarDraftId}` }],
+              ]},
+            );
+          } else {
+            void sendMessage(chatId, '⚠️ Транзакция не найдена или уже обработана.');
+          }
+
+          request.log.info({ msg: '[midas:bot:webhook] clar: amount patched via text', workspaceId: clarIntResolved.workspaceId, result: amtPatchResult.status });
+          await reply.status(200).send({ ok: true });
+          return;
+        } else {
+          // Malformed state — clear and fall through
+          await redisConnection.del(clarIntKey);
+          request.log.warn({ msg: '[midas:bot:webhook] clar: malformed Redis state — cleared', clarField });
+        }
       }
     }
 

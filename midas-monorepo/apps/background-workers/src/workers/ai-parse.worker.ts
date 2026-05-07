@@ -1,5 +1,5 @@
 /**
- * ai-parse Worker — Phase 1.6-A
+ * ai-parse Worker — Phase 1.6-A / Phase 1.31 / Phase 1.32
  *
  * Processes jobs from the `ai-parse` queue.
  * Concurrency: 5 (per queue_model.md)
@@ -10,6 +10,15 @@
  *   3. Track token usage in Redis (SEC-09, date-scoped key)
  *   4. Create TransactionDraft via withTenantTransaction (SEC-03)
  *   5. On final failure: sanitize raw_text in job payload (SEC-12)
+ *
+ * Phase 1.32 additions:
+ *   - 'partial' ParseResult: creates needs_clarification draft with clarification_field set.
+ *   - Sends targeted clarification message instead of generic "не понял":
+ *     - missing amount  → text question "Сколько потратил?"
+ *     - missing intent  → 2-button intent picker keyboard
+ *     - missing category → category picker keyboard (fetched from DB)
+ *   - Nonsense (confidence < 0.3) → shortcut buttons keyboard.
+ *   - All clarification keyboards use 'clar:' callback namespace (≤62 bytes).
  *
  * SEC-12 raw_text handling:
  *   - raw_text IS present in job.data (approved internal transit)
@@ -27,6 +36,7 @@ import { createDraft, resolveUserId, setDraftAccountId } from '../services/draft
 import { resolveAccountFromHint } from '../services/account-resolver.service.js'; // Phase 1.31
 import { notificationsQueue } from '../queues/queue-definitions.js';
 import { ulid } from 'ulid';
+import { pool } from '@midas/database';
 
 // ─────────────────────────────────────────────────────────────
 // Token budget (SEC-09, date-scoped)
@@ -41,6 +51,113 @@ const AI_BUDGET_MAX_DAILY_TOKENS = parseInt(
 /** Date-scoped Redis key — auto-rotates daily without a CRON (SEC-09) */
 function aiDailyBudgetKey(): string {
   return `ai_budget:${new Date().toISOString().slice(0, 10)}`; // YYYY-MM-DD
+}
+
+// ─────────────────────────────────────────────────────────────
+// Clarification keyboard helpers — Phase 1.32
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Build the intent clarification keyboard for unclear intent.
+ * callback_data format: clar:intent:{value}:{draftId}
+ * Max bytes: "clar:intent:debt_received:" (26) + ULID(26) = 52 bytes ✅
+ */
+function buildIntentClarKeyboard(draftId: string, currentIntent?: string | null): object {
+  // Show the most likely pair based on what AI guessed (or show all 4 non-transfer)
+  if (currentIntent === 'debt_given' || currentIntent === 'debt_received') {
+    return {
+      inline_keyboard: [
+        [
+          { text: '🤝 Дал в долг', callback_data: `clar:intent:debt_given:${draftId}` },
+          { text: '💸 Просто расход', callback_data: `clar:intent:expense:${draftId}` },
+        ],
+        [
+          { text: '🤲 Взял в долг', callback_data: `clar:intent:debt_received:${draftId}` },
+          { text: '💰 Доход', callback_data: `clar:intent:income:${draftId}` },
+        ],
+      ],
+    };
+  }
+  return {
+    inline_keyboard: [
+      [
+        { text: '💸 Расход', callback_data: `clar:intent:expense:${draftId}` },
+        { text: '💰 Доход', callback_data: `clar:intent:income:${draftId}` },
+      ],
+      [
+        { text: '🤝 Долг (дал)', callback_data: `clar:intent:debt_given:${draftId}` },
+        { text: '🤲 Долг (взял)', callback_data: `clar:intent:debt_received:${draftId}` },
+      ],
+    ],
+  };
+}
+
+/**
+ * Build the category clarification keyboard.
+ * Shows first 6 workspace categories + "Без категории" button.
+ * callback_data: clar:cat:{catId}:{draftId} — max 5+4+26+1+26 = 62 bytes ✅
+ * callback_data: clar:nocat:{draftId} — max 5+6+26 = 37 bytes ✅
+ */
+function buildCategoryClarKeyboard(
+  categories: { id: string; name: string }[],
+  draftId: string,
+): object {
+  const top6 = categories.slice(0, 6);
+  const rows: { text: string; callback_data: string }[][] = [];
+
+  // 2 per row
+  for (let i = 0; i < top6.length; i += 2) {
+    const row = [
+      { text: top6[i]?.name ?? '', callback_data: `clar:cat:${top6[i]?.id ?? ''}:${draftId}` },
+    ];
+    if (top6[i + 1]) {
+      row.push({ text: top6[i + 1]?.name ?? '', callback_data: `clar:cat:${top6[i + 1]?.id ?? ''}:${draftId}` });
+    }
+    rows.push(row);
+  }
+
+  rows.push([{ text: '📋 Без категории', callback_data: `clar:nocat:${draftId}` }]);
+
+  return { inline_keyboard: rows };
+}
+
+/**
+ * Build the nonsense shortcut keyboard.
+ * Buttons trigger slash commands — NOT draft patching.
+ * callback_data: 'clar:cmd:balance' / 'clar:cmd:report' (no draftId needed)
+ * Note: expense/income buttons DO carry draftId for recovery.
+ * Max bytes: clar:intent:expense:{26} = 34 bytes ✅
+ */
+function buildNonsenseKeyboard(draftId: string): object {
+  return {
+    inline_keyboard: [
+      [
+        { text: '💸 Расход', callback_data: `clar:intent:expense:${draftId}` },
+        { text: '💰 Доход',  callback_data: `clar:intent:income:${draftId}` },
+      ],
+      [
+        { text: '📊 Баланс',  callback_data: 'clar:cmd:balance' },
+        { text: '📋 Отчёт',   callback_data: 'clar:cmd:report' },
+      ],
+    ],
+  };
+}
+
+// ─────────────────────────────────────────────────────────────
+// fetchWorkspaceCategories — Phase 1.32
+// ─────────────────────────────────────────────────────────────
+
+async function fetchWorkspaceCategories(
+  workspaceId: string,
+): Promise<{ id: string; name: string }[]> {
+  const result = await pool.query<{ id: string; name: string }>(
+    `SELECT id, name FROM categories
+     WHERE workspace_id = $1 AND deleted_at IS NULL
+     ORDER BY name ASC
+     LIMIT 6`,
+    [workspaceId],
+  );
+  return result.rows;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -116,7 +233,7 @@ async function processAiParse(job: Job<AiParseJobPayload>): Promise<void> {
     throw new Error(`Invalid messageId: ${messageId}`);
   }
 
-  const { draftId, status } = await createDraft({
+  const { draftId, status, clarificationField, partialData } = await createDraft({
     workspaceId,
     userId,
     telegramMessageId,
@@ -130,64 +247,50 @@ async function processAiParse(job: Job<AiParseJobPayload>): Promise<void> {
     draftId,
     status,
     botId,
+    clarificationField,
   });
 
-  // ── Step 6: Send draft confirmation notification (Phase 1.6-B + Phase 1.31) ──
-  // Only send inline keyboard for drafts awaiting user confirmation.
+  const { chatId } = job.data;
+  const alertId = ulid();
+
+  // ── Step 6: Send response based on parse result ──────────
   if (status === 'pending_user') {
-    const { chatId } = job.data;
-    const alertId = ulid();
-
     // ── Phase 1.31 (Option A): Resolve account_hint BEFORE first keyboard ──
-    // If AI extracted an account_hint, resolve it against workspace accounts.
-    // Depending on the result, send either:
-    //   a) Standard approve/reject keyboard (exact match — account silently used)
-    //   b) Inline account creation keyboard (fuzzy or no match)
-    // Exact match: account_id is written to draft row by confirmation worker.
-    // For fuzzy/none: webhook route handles ia: callbacks.
-
     const accountHint = parseResult.status === 'ok' ? (parseResult.data.account_hint ?? null) : null;
 
     let inlineKeyboard: object;
     let previewMsg: string;
 
     if (accountHint) {
-      // Try to resolve account hint against workspace accounts
       let resolution;
       try {
         resolution = await resolveAccountFromHint(workspaceId, userId, accountHint);
       } catch {
-        // Non-fatal: fall back to standard keyboard if resolution fails
         resolution = { kind: 'none' as const };
       }
 
       if (resolution.kind === 'exact') {
-        // Exact match — silently set account_id on the draft.
-        // The confirmation worker will use it directly (no keyboard needed for account).
         try {
           await setDraftAccountId(workspaceId, userId, draftId, resolution.accountId);
         } catch {
           // Non-fatal: confirmation worker will fall back to default account
         }
         inlineKeyboard = {
-          inline_keyboard: [
-            [
-              { text: '✅ Подтвердить', callback_data: `approve:${draftId}` },
-              { text: '❌ Отклонить', callback_data: `reject:${draftId}` },
-            ],
-          ],
+          inline_keyboard: [[
+            { text: '✅ Подтвердить', callback_data: `approve:${draftId}` },
+            { text: '❌ Отклонить', callback_data: `reject:${draftId}` },
+          ]],
         };
         previewMsg = `📝 Транзакция распознана. Подтвердите или отклоните:`;
         console.log('[midas:ai-parse-worker] Phase 1.31: exact account match', {
-          workspaceId, draftId, // accountName NOT logged (SEC-12)
+          workspaceId, draftId,
         });
 
       } else if (resolution.kind === 'fuzzy') {
-        // Fuzzy match — ask user to confirm the matched account name.
         inlineKeyboard = {
           inline_keyboard: [
             [{ text: `✅ Да, «${resolution.accountName}»`, callback_data: `ia:fuzzy:${resolution.accountId}:${draftId}` }],
-            [{ text: '🏦 Другой счёт',           callback_data: `ia:skip:${draftId}` }],
+            [{ text: '🏦 Другой счёт', callback_data: `ia:skip:${draftId}` }],
           ],
         };
         previewMsg =
@@ -199,13 +302,12 @@ async function processAiParse(job: Job<AiParseJobPayload>): Promise<void> {
         });
 
       } else {
-        // No match — offer inline account creation.
         const currency = parseResult.status === 'ok' ? (parseResult.data.currency ?? 'USDT') : 'USDT';
         inlineKeyboard = {
           inline_keyboard: [
             [{ text: `✅ Создать «${accountHint}» (${currency})`, callback_data: `ia:create:${draftId}` }],
-            [{ text: '✏️ Другое название',                          callback_data: `ia:rename:${draftId}` }],
-            [{ text: '📋 Записать без счёта',                        callback_data: `ia:skip:${draftId}` }],
+            [{ text: '✏️ Другое название', callback_data: `ia:rename:${draftId}` }],
+            [{ text: '📋 Записать без счёта', callback_data: `ia:skip:${draftId}` }],
           ],
         };
         previewMsg =
@@ -217,14 +319,12 @@ async function processAiParse(job: Job<AiParseJobPayload>): Promise<void> {
         });
       }
     } else {
-      // No account_hint from AI — standard approve/reject keyboard
+      // No account_hint — standard approve/reject keyboard
       inlineKeyboard = {
-        inline_keyboard: [
-          [
-            { text: '✅ Подтвердить', callback_data: `approve:${draftId}` },
-            { text: '❌ Отклонить', callback_data: `reject:${draftId}` },
-          ],
-        ],
+        inline_keyboard: [[
+          { text: '✅ Подтвердить', callback_data: `approve:${draftId}` },
+          { text: '❌ Отклонить', callback_data: `reject:${draftId}` },
+        ]],
       };
       previewMsg = `📝 Транзакция распознана. Подтвердите или отклоните:`;
     }
@@ -249,20 +349,77 @@ async function processAiParse(job: Job<AiParseJobPayload>): Promise<void> {
       draftId,
       workspaceId,
     });
+
   } else {
-    // needs_clarification — send simple message, no keyboard
-    const { chatId } = job.data;
-    const alertId = ulid();
+    // ── status === 'needs_clarification' ─────────────────────
+    // Phase 1.32: targeted clarification if clarificationField is set,
+    // nonsense shortcuts if not.
+
+    let clarMsg: string;
+    let clarKeyboard: object;
+
+    if (clarificationField === 'amount') {
+      // Missing amount — ask text question; set Redis intercept key
+      // The Redis key is set here so the next text message is intercepted.
+      // Key: midas:clar:{telegramUserId}:{chatId} → "{draftId}:amt"
+      const clarKey = `midas:clar:${telegramUserId}:${chatId}`;
+      await redisConnection.set(clarKey, `${draftId}:amt`, 'EX', 300);
+
+      const categoryLabel = partialData?.category_hint ?? 'Транзакция';
+      clarMsg = `🛒 <b>${categoryLabel}</b> — понял.\n   Сколько потратил?`;
+      // No keyboard for amount — user types a number
+      clarKeyboard = { inline_keyboard: [] };
+
+    } else if (clarificationField === 'intent') {
+      // Unclear intent — show intent picker
+      clarMsg = `🤔 Уточни, что произошло:`;
+      clarKeyboard = buildIntentClarKeyboard(draftId, partialData?.intent ?? null);
+
+    } else if (clarificationField === 'category') {
+      // Missing category — show category picker
+      let categories: { id: string; name: string }[];
+      try {
+        categories = await fetchWorkspaceCategories(workspaceId);
+      } catch {
+        categories = [];
+      }
+      if (categories.length === 0) {
+        // No categories — fall back to nonsense keyboard (category clarification impossible)
+        clarMsg = `🤔 Не понял. Что хотел записать?`;
+        clarKeyboard = buildNonsenseKeyboard(draftId);
+      } else {
+        const amtLabel = partialData?.amount ? `${partialData.amount} ${partialData.currency ?? 'USDT'}` : 'Транзакция';
+        clarMsg = `💸 <b>${amtLabel}</b> — на что потратил?\n\nВыбери категорию:`;
+        clarKeyboard = buildCategoryClarKeyboard(categories, draftId);
+      }
+
+    } else {
+      // No clarificationField — nonsense (confidence < 0.3)
+      clarMsg = `🤔 Не понял. Что хотел записать?`;
+      clarKeyboard = buildNonsenseKeyboard(draftId);
+    }
+
     await notificationsQueue.add(
       QUEUE_NAMES.NOTIFICATIONS,
       {
         alertId,
         workspaceId,
         chatId,
-        message: '🤔 Не удалось распознать транзакцию. Попробуйте сформулировать иначе.',
+        message: clarMsg,
+        draftId,
+        inlineKeyboardJson: JSON.stringify(clarKeyboard),
       },
-      { jobId: IdempotencyKeyBuilder.notification(workspaceId, alertId) },
+      {
+        jobId: IdempotencyKeyBuilder.notification(workspaceId, alertId),
+      },
     );
+
+    console.log('[midas:ai-parse-worker] Clarification notification enqueued', {
+      jobId: job.id,
+      draftId,
+      workspaceId,
+      clarificationField,
+    });
   }
 }
 
@@ -294,7 +451,6 @@ async function sanitizeFailedJobPayload(
     });
   } catch (sanitizeErr) {
     // Non-fatal: log sanitization failure but don't rethrow
-    // (the original failure is already recorded)
     const errClass =
       sanitizeErr instanceof Error ? sanitizeErr.constructor.name : 'UnknownError';
     console.error('[midas:ai-parse-worker] Failed to sanitize job payload', {

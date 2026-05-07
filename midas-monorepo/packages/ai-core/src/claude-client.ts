@@ -10,12 +10,31 @@
  *
  * Returns a discriminated union:
  *   { status: 'ok', data: AiOutput, tokensUsed: number }
- *   { status: 'needs_clarification', reason: string }
- *   { status: 'rejected', reason: string }
+ *     → Full parse success. All required fields present and confidence >= 0.5.
+ *
+ *   { status: 'partial', data: AiOutput, missingFields: MissingField[], tokensUsed: number }
+ *     → Partial parse success (confidence 0.3–0.49 OR amount/intent missing).
+ *     → missingFields lists which fields need clarification (priority: amount > intent > category).
+ *     → data contains what the AI DID return (intent, currency, category_hint, etc.).
+ *
+ *   { status: 'needs_clarification', reason: string, tokensUsed: number }
+ *     → Low confidence (< 0.3) OR Zod validation failure OR JSON parse failure.
+ *     → No usable data — show nonsense shortcuts.
+ *
+ *   { status: 'rejected', reason: string, tokensUsed: number }
+ *     → Claude returned no text content. Should not happen in normal operation.
+ *
+ * Phase 1.32: Added 'partial' status for targeted clarification.
  */
 
 import Anthropic from '@anthropic-ai/sdk';
-import { AiOutputSchema, type AiOutput, MIN_CONFIDENCE_THRESHOLD } from './schemas.js';
+import {
+  AiOutputSchema,
+  type AiOutput,
+  type MissingField,
+  MIN_CONFIDENCE_THRESHOLD,
+  PARTIAL_CONFIDENCE_THRESHOLD,
+} from './schemas.js';
 import { SYSTEM_PROMPT, buildUserMessage } from './prompts.js';
 
 // ─────────────────────────────────────────────────────────────
@@ -24,6 +43,7 @@ import { SYSTEM_PROMPT, buildUserMessage } from './prompts.js';
 
 export type ParseResult =
   | { status: 'ok'; data: AiOutput; tokensUsed: number }
+  | { status: 'partial'; data: AiOutput; missingFields: MissingField[]; tokensUsed: number }
   | { status: 'needs_clarification'; reason: string; tokensUsed: number }
   | { status: 'rejected'; reason: string; tokensUsed: number };
 
@@ -44,6 +64,33 @@ function getClient(): Anthropic {
     _client = new Anthropic({ apiKey });
   }
   return _client;
+}
+
+// ─────────────────────────────────────────────────────────────
+// computeMissingFields — Phase 1.32
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Given a validated AiOutput, determine which fields are missing.
+ * Priority order (one-question-at-a-time): amount → intent → category.
+ *
+ * SEC-01: only looks at data fields — never produces system field names.
+ */
+function computeMissingFields(data: AiOutput): MissingField[] {
+  const missing: MissingField[] = [];
+  if (!data.amount) missing.push('amount');
+  if (!data.intent) missing.push('intent');
+  // category is not in AiOutput directly — category_hint is the hint.
+  // Missing category means category_hint is absent AND intent is not 'transfer'.
+  // We only flag category as missing when it's an expense/income/debt and no hint.
+  if (
+    !data.category_hint &&
+    data.intent &&
+    data.intent !== 'transfer'
+  ) {
+    missing.push('category');
+  }
+  return missing;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -132,13 +179,33 @@ export async function parseTransaction(rawText: string): Promise<ParseResult> {
   const aiData: AiOutput = result.data;
 
   // ── Confidence check ──────────────────────────────────────
-  if (aiData.confidence < MIN_CONFIDENCE_THRESHOLD) {
+  // Below PARTIAL_CONFIDENCE_THRESHOLD (0.3) → nonsense → needs_clarification (no data)
+  if (aiData.confidence < PARTIAL_CONFIDENCE_THRESHOLD) {
     return {
       status: 'needs_clarification',
-      reason: `Low confidence: ${aiData.confidence.toFixed(2)}`,
+      reason: `Very low confidence: ${aiData.confidence.toFixed(2)}`,
       tokensUsed,
     };
   }
 
+  // ── Check for missing required fields ─────────────────────
+  // If confidence is high enough (>= 0.5) but a field is missing, it's still partial.
+  // If confidence is 0.3–0.49, always treat as partial regardless of fields.
+  const missingFields = computeMissingFields(aiData);
+
+  const isLowConfidence = aiData.confidence < MIN_CONFIDENCE_THRESHOLD;
+  const hasMissingFields = missingFields.length > 0;
+
+  if (isLowConfidence || hasMissingFields) {
+    // Partial parse: some data is present but clarification is needed.
+    return {
+      status: 'partial',
+      data: aiData,
+      missingFields,
+      tokensUsed,
+    };
+  }
+
+  // ── Full success ──────────────────────────────────────────
   return { status: 'ok', data: aiData, tokensUsed };
 }
