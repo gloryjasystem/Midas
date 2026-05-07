@@ -1,7 +1,7 @@
 # WORKFLOW_STATE.MD — Диспетчер задач ИИ-агента Midas
 
 > **Тип:** MUTABLE — кратковременная память агента. Обновляется на каждом шаге работы.
-> **Обновлён:** 2026-05-07 13:40 (UTC+3)
+> **Обновлён:** 2026-05-07 14:00 (UTC+3)
 
 ---
 
@@ -10,11 +10,11 @@
 | Параметр | Значение |
 |---|---|
 | **PHASE** | `1 — MVP Implementation` |
-| **STEP** | `1.23 — /set_balance — IN_PROGRESS` |
-| **AGENT STATUS** | `IN_PROGRESS` |
-| **LAST COMPLETED** | `Phase 1.22 ACCEPTED. Stale /balance comment fixed in webhook.route.ts (comment-only). 13/13 typecheck+lint PASS. Traceability ✅ Adversarial Security ✅ Scope Guard ✅. Tag phase-1.22-accepted pushed.` |
-| **BLOCKER** | None — implementation in progress |
-| **NEXT ACTION** | Implement /set_balance — setBalance.service.ts (NEW), webhook.route.ts (MODIFY), smoke-test-phase123.mjs (NEW) |
+| **STEP** | `1.23 — /set_balance — READY_FOR_OWNER_ACCEPTANCE` |
+| **AGENT STATUS** | `READY_FOR_OWNER_ACCEPTANCE` |
+| **LAST COMPLETED** | `Phase 1.23 DONE. setBalance.service.ts (NEW), webhook.route.ts (MODIFY), smoke-test-phase123.mjs (NEW). 13/13 typecheck+lint PASS. 34/34 smoke tests PASS. Commit 65a8e56 pushed.` |
+| **BLOCKER** | None — awaiting owner acceptance decision |
+| **NEXT ACTION** | Owner acceptance only — do not create tag or start Phase 1.24 without approval |
 
 ---
 
@@ -289,6 +289,7 @@ Crypto / Notion / Sheets / Mini App files
 | 2026-05-07 10:15 | Phase 1.21 accepted after final verification; initial_balance migration and /balance command implemented; actual applicable tests 696/696 passed; Traceability Review PASS; Adversarial Security Review PASS; Scope Guard Review PASS; implementation commit 976418a; note: stale /balance comment in webhook.route.ts line 31 is cosmetic tech debt, not fixed in this acceptance step. Tag phase-1.21-accepted pushed. Status: WAITING_FOR_OWNER_APPROVAL_TO_START_NEXT_PHASE. |
 | 2026-05-07 10:30 | Phase 1.22 Stale Comment Cleanup implementation complete. Owner APPROVED. `webhook.route.ts` (MODIFY, comment-only): slash-command routing header updated — Phase 1.21 added to phase refs, all 8 known commands listed, stale “(e.g. /balance)” example removed. 0 logic changes. 13/13 typecheck+lint PASS. 696/696 regression baseline unchanged. Traceability ✅ Adversarial Security ✅ Scope Guard ✅. Status: READY_FOR_OWNER_ACCEPTANCE. |
 | 2026-05-07 10:35 | Phase 1.22 accepted after final verification; stale /balance comment in webhook.route.ts fixed; comment-only change; 13/13 typecheck+lint PASS; Traceability Review PASS; Adversarial Security Review PASS; Scope Guard Review PASS; implementation commit d2ea3fd. Tag phase-1.22-accepted pushed. Status: WAITING_FOR_OWNER_APPROVAL_TO_START_NEXT_PHASE. |
+| 2026-05-07 14:00 | Phase 1.23 /set_balance implementation complete. Owner APPROVED. `setBalance.service.ts` (NEW): `parseSetBalanceArgs()` (last-token-as-amount, AMOUNT_REGEX 15-digit cap, SEC-02), `setAccountBalance()` (LOWER() exact match, formula `new_initial_balance = target − SUM(txns)` in PostgreSQL NUMERIC, withTenantTransaction SEC-03, defensive undefined guard replacing `!` non-null assertion), `formatSetBalanceResult()` (escapeHtml for all user strings). `webhook.route.ts` (MODIFY): import 3 functions from setBalance.service.js, KNOWN_COMMANDS 8→9, HELP_TEXT updated with /set_balance line, handler `5c-setbal` added (parseSetBalanceArgs → resolveWorkspace → setAccountBalance → formatSetBalanceResult). `smoke-test-phase123.mjs` (NEW): 34/34 PASS — Groups A (10 parse tests), B (12 DB formula tests including negative/idempotent/resync/precision), C (8 security/scope tests), D (4 regression). 13/13 typecheck+lint PASS. No migrations, no new tables, no transactions created, no /report changes. Commit 65a8e56 pushed. Status: READY_FOR_OWNER_ACCEPTANCE. |
 
 ---
 
