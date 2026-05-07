@@ -26,8 +26,8 @@
  *   SEC-12: Logging privacy
  *     → `raw_text` is NEVER logged. Only job metadata is logged.
  *
- * Slash-command routing (Phase 1.10 + Phase 1.13 + Phase 1.21):
- *   Known commands: /start, /report, /balance, /help, /category,
+ * Slash-command routing (Phase 1.10 + Phase 1.13 + Phase 1.21 + Phase 1.23):
+ *   Known commands: /start, /report, /balance, /set_balance, /help, /category,
  *                   /add_category, /accounts, /add_account
  *   Unknown slash commands are rejected with a safe Russian message
  *   and do NOT reach the AI parse queue.
@@ -59,6 +59,11 @@ import { checkOnboardingRateLimit } from '../services/rate-limiter.js';
 import { sendMessage } from '../services/telegram-api.js';
 import { getMonthlyReport } from '../services/report.service.js';
 import { getAccountBalances } from '../services/balance.service.js';
+import {
+  setAccountBalance,
+  parseSetBalanceArgs,
+  formatSetBalanceResult,
+} from '../services/setBalance.service.js';
 import {
   getCategoryList,
   addCategory,
@@ -148,7 +153,7 @@ function parseCommandToken(text: string): string | null {
  * Any command NOT in this set is blocked before AI parse.
  * Extend only when a new command is implemented in a future phase.
  */
-const KNOWN_COMMANDS = new Set(['/start', '/report', '/help', '/category', '/add_category', '/accounts', '/add_account', '/balance']);
+const KNOWN_COMMANDS = new Set(['/start', '/report', '/help', '/category', '/add_category', '/accounts', '/add_account', '/balance', '/set_balance']);
 
 /**
  * Russian-language help text listing all currently available commands.
@@ -157,12 +162,15 @@ const KNOWN_COMMANDS = new Set(['/start', '/report', '/help', '/category', '/add
  * Phase 1.13: /add_category
  * Phase 1.14: /accounts
  * Phase 1.17: /add_account
+ * Phase 1.21: /balance
+ * Phase 1.23: /set_balance
  */
 const HELP_TEXT =
   'ℹ️ <b>Доступные команды Midas:</b>\n\n' +
   '/start — Регистрация и приветствие\n' +
   '/report — Отчёт о доходах и расходах за текущий месяц\n' +
   '/balance — Баланс по всем счетам (за всё время)\n' +
+  '/set_balance <название> <сумма> — Синхронизировать баланс счёта\n' +
   '/category — Список категорий вашего кошелька\n' +
   '/add_category <группа> <название> — Добавить категорию\n' +
   '/accounts — Список ваших счетов\n' +
@@ -441,6 +449,56 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
             errorClass,
           });
           void sendMessage(chatId, '⚠️ Не удалось получить баланс. Попробуйте позже.');
+        }
+
+        await reply.status(200).send({ ok: true });
+        return;
+      }
+
+      // ── 5c-setbal: /set_balance (Phase 1.23) ─────────────────
+      if (commandToken === '/set_balance') {
+        // Parse and validate args before any DB call
+        const parsed = parseSetBalanceArgs(message.text);
+
+        if ('error' in parsed) {
+          // Argument validation failed — send usage hint, do NOT enqueue
+          void sendMessage(chatId, parsed.error);
+          request.log.info({
+            msg: '[midas:bot:webhook] /set_balance bad args',
+            telegramUserId,
+            // accountName and amount NOT logged (SEC-12)
+          });
+          await reply.status(200).send({ ok: true });
+          return;
+        }
+
+        try {
+          const resolved = await resolveWorkspace(telegramUserId, chatId);
+          const result = await setAccountBalance(
+            resolved.workspaceId,
+            resolved.userId,
+            parsed.accountName,
+            parsed.amountStr,
+          );
+
+          const replyText = formatSetBalanceResult(result, parsed.accountName);
+          void sendMessage(chatId, replyText);
+
+          request.log.info({
+            msg: '[midas:bot:webhook] /set_balance processed',
+            telegramUserId,
+            workspaceId: resolved.workspaceId,
+            resultStatus: result.status,
+            // accountName and amount NOT logged (SEC-12)
+          });
+        } catch (err: unknown) {
+          const errorClass = err instanceof Error ? err.constructor.name : 'UnknownError';
+          request.log.error({
+            msg: '[midas:bot:webhook] /set_balance failed',
+            telegramUserId,
+            errorClass,
+          });
+          void sendMessage(chatId, '⚠️ Не удалось синхронизировать баланс. Попробуйте позже.');
         }
 
         await reply.status(200).send({ ok: true });

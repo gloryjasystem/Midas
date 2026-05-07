@@ -1,7 +1,7 @@
 # WORKFLOW_STATE.MD — Диспетчер задач ИИ-агента Midas
 
 > **Тип:** MUTABLE — кратковременная память агента. Обновляется на каждом шаге работы.
-> **Обновлён:** 2026-05-07 12:38 (UTC+3)
+> **Обновлён:** 2026-05-07 13:40 (UTC+3)
 
 ---
 
@@ -10,11 +10,11 @@
 | Параметр | Значение |
 |---|---|
 | **PHASE** | `1 — MVP Implementation` |
-| **STEP** | `1.22 — Stale Comment Cleanup — COMPLETED / ACCEPTED` |
-| **AGENT STATUS** | `WAITING_FOR_OWNER_APPROVAL_TO_START_NEXT_PHASE` |
+| **STEP** | `1.23 — /set_balance — IN_PROGRESS` |
+| **AGENT STATUS** | `IN_PROGRESS` |
 | **LAST COMPLETED** | `Phase 1.22 ACCEPTED. Stale /balance comment fixed in webhook.route.ts (comment-only). 13/13 typecheck+lint PASS. Traceability ✅ Adversarial Security ✅ Scope Guard ✅. Tag phase-1.22-accepted pushed.` |
-| **BLOCKER** | None — awaiting owner approval to start next phase |
-| **NEXT ACTION** | Prepare next phase advisory only — do not implement |
+| **BLOCKER** | None — implementation in progress |
+| **NEXT ACTION** | Implement /set_balance — setBalance.service.ts (NEW), webhook.route.ts (MODIFY), smoke-test-phase123.mjs (NEW) |
 
 ---
 
@@ -91,108 +91,56 @@ midas-monorepo/
 │   ├── telegram-bot/          # @midas/telegram-bot
 │   └── background-workers/    # @midas/background-workers
 ├── packages/
-│   ├── database/              # @midas/database
-│   ├── shared/                # @midas/shared
-│   └── ai-core/               # @midas/ai-core
-├── docker-compose.yml         # PostgreSQL 18 + Redis 8
-├── turbo.json                 # Turborepo pipeline
-├── tsconfig.base.json         # ES2024, strict, noUncheckedIndexedAccess
-├── eslint.config.mjs          # Strict TS + SEC-02 (parseFloat/Number ban)
-├── .prettierrc
-├── .env.example
-├── .gitignore
-├── pnpm-workspace.yaml
-└── package.json               # pnpm 10.8.1, Node.js >=24
-```
+## 6. ТЕКУЩАЯ ФАЗА — PHASE 1.23: /set_balance (Balance Synchronization)
 
-- `pnpm install` — 6 workspace projects resolved ✅
-- `npx turbo typecheck` — 8/8 tasks passed, 0 errors ✅
-- SEC-02 ESLint rule active for financial paths ✅
-- Бизнес-логика НЕ реализована (только скелеты)
-
----
-
-## 6. ТЕКУЩАЯ ФАЗА — PHASE 1.22: Stale Comment Cleanup
-
-> ✅ **COMPLETED / ACCEPTED. Comment-only fix. 13/13 typecheck+lint PASS (FULL TURBO). 0 logic changes. Tag phase-1.22-accepted pushed.**
+> 🔄 **IN_PROGRESS — Owner APPROVED. Implementation started.**
 
 **Objective:**
-Fix the stale file-level comment in `webhook.route.ts` that incorrectly listed `/balance` as an example of an unknown command.
+Implement `/set_balance <account> <amount>` — synchronizes the real balance of an account by recalculating `account_sources.initial_balance` so that `/balance` shows the target value. No new transactions created.
 
-**Scope — exactly 1 file, comment lines only:**
+**Formula:**
+```
+new_initial_balance = target_balance − SUM(income + debt_received) + SUM(expense + debt_given)
+```
+Equivalently: compute `computed_from_transactions` (balance contribution from all non-transfer txns), then:
+```
+new_initial_balance = target_balance − computed_from_transactions
+```
+
+**Scope — exactly 3 files:**
+- `apps/telegram-bot/src/services/setBalance.service.ts` (NEW):
+  - `parseSetBalanceArgs(text)` — parse `/set_balance <account> <amount>`: account name (fuzzy not needed — exact or prefix), amount (NUMERIC-safe via Decimal/pg)
+  - `setAccountBalance(workspaceId, userId, accountName, targetAmount)` — find account, compute new initial_balance, UPDATE inside withTenantTransaction
+  - Returns typed result: `'done' | 'account_not_found' | 'ambiguous'`
 - `apps/telegram-bot/src/routes/webhook.route.ts` (MODIFY):
-  - Lines 29–33: updated slash-command routing comment
-  - Added Phase 1.21 to phase list
-  - Added all 8 known commands to comment
-  - Removed stale “(e.g. /balance)” unknown-command example
+  - Import `setAccountBalance`, `parseSetBalanceArgs` from `setBalance.service.js`
+  - `KNOWN_COMMANDS` 8 → 9 (add `/set_balance`)
+  - `HELP_TEXT` updated with `/set_balance` line
+  - Comment header updated: Phase 1.23 added
+  - Handler block `5c-setbal` added
+- `packages/database/smoke-test-phase123.mjs` (NEW): ~30 smoke tests
 
-**Forbidden in Phase 1.22:**
-- No TypeScript logic changes
-- No new commands, no migrations, no service changes
-- No new smoke test file
+**Forbidden in Phase 1.23:**
+- No new migrations, no new tables, no new columns
+- No correction transactions or `balance_adjustments` table
+- No new transaction_intent values
+- No `/report` changes
+- No settings, USDT default, edit/delete, voice, vision, Mini App, AI, queues, workers
+- No external integrations, no new npm dependencies
 - No `project_config.md` changes
+- Do not proceed beyond Phase 1.23
 
-**Previous phase:** Phase 1.21 ACCEPTED — `/balance` command + `initial_balance` migration. Tag `phase-1.21-accepted` pushed.
-
-**Scope:**
-- `packages/database/migrations/1778400000000_account-sources-initial-balance.js` (NEW):
-  - Idempotent `ADD COLUMN initial_balance NUMERIC(19,4) NOT NULL DEFAULT 0`
-  - `down()`: `DROP COLUMN IF EXISTS initial_balance`
-- `apps/telegram-bot/src/services/balance.service.ts` (NEW):
-  - `getAccountBalances(workspaceId, userId)`: two SQL queries inside `withTenantTransaction`
-  - D1 sign rules in SQL CASE WHEN; D2 debt integrated; D3 transfer shown separately
-  - D5 per-account output + currency totals; D6 all-time (no date filter)
-  - SEC-02: all arithmetic in PostgreSQL NUMERIC; SEC-03: RLS + workspace filter; escapeHtml applied
-- `apps/telegram-bot/src/routes/webhook.route.ts` (MODIFY):
-  - Import `getAccountBalances`
-  - `KNOWN_COMMANDS` 7 → 8 (added `/balance`)
-  - `HELP_TEXT` updated with `/balance` description
-  - Handler block `5c-bal` added after `/report` handler
-- `packages/database/smoke-test-phase121.mjs` (NEW): 28 smoke tests
-
-**Запрещено в Phase 1.21:**
-- Transfer two-sided model (`dest_account_id`)
-- `/set_balance`, `/balance_month`, `/balance_range`
-- Edit/delete commands
-- AI / queue / worker changes
-- New npm dependencies
-- `project_config.md` changes
-
-**Предыдущая завершённая фаза (Phase 1.20):**
-- `docs/balance-semantics.md` (NEW). D1–D6 all approved. Tag `phase-1.20-accepted` pushed. 0/0 tests (design doc).
-
-**Scope:**
-- `docs/balance-semantics.md` (NEW): defines 6 design decisions (D1–D6):
-  - D1: Sign rule per transaction_intent (expense/income/debt_given/debt_received/transfer)
-  - D2: Debt integration vs separate section
-  - D3: Transfer model (one-sided vs two-sided)
-  - D4: initial_balance (needed? negative? currency? date?)
-  - D5: /balance output format (per-account vs aggregate)
-  - D6: /balance time scope (all-time vs monthly)
-- `workflow_state.md` (MODIFY): Sections 1, 2, 6–10
-- No TypeScript changes. No migrations. No new commands. No new dependencies.
-
-**Запрещено в Phase 1.20:**
-- `/balance` implementation
-- Any DB migration
-- Any TypeScript/route/service/worker/AI changes
-- New npm dependencies
-- `project_config.md` changes
-- Phase 1.21
-
-**Предыдущая завершённая фаза (Phase 1.19):**
-- `migrations/1778300000000_account-sources-currency-check.js` (NEW), `smoke-test-phase119.mjs` (NEW).
-- Implementation commit `9d288bd`. Tag `phase-1.19-accepted` pushed. 668/668 PASS.
+**Previous phase:** Phase 1.22 ACCEPTED — comment-only cleanup in webhook.route.ts. Tag `phase-1.22-accepted` pushed.
 
 ---
 
-## 7. MCP REQUIREMENTS (Phase 1.20 — design doc)
+## 7. MCP REQUIREMENTS (Phase 1.23)
 
 | MCP-сервер | Доступ | Примечание |
 |---|---|---|
-| Filesystem MCP | ✅ read/write | Создание docs/balance-semantics.md, обновление workflow_state.md |
-| Postgres MCP | ✅ read-only | Инспекция схемы, данных, constraints для обоснования решений |
-| GitHub MCP | ⚪ read-only (опционально) | Проверка remote sync после commit |
+| Filesystem MCP | ✅ read/write | Create/modify TypeScript files, smoke test, workflow_state |
+| Postgres MCP | ✅ read-only | Verify schema, test data, constraint validation |
+| GitHub MCP | ⚪ read-only (опционально) | Verify remote sync after commit |
 | Browser / DevTools | ❌ Запрещён | — |
 | Notion MCP | ❌ Запрещён | — |
 | Google Sheets | ❌ Запрещён | — |
@@ -200,15 +148,46 @@ Fix the stale file-level comment in `webhook.route.ts` that incorrectly listed `
 
 ---
 
-## 8. ФАЙЛЫ ДЛЯ ЧТЕНИЯ В НОВОМ ЧАТЕ (Phase 1.21 acceptance)
+## 8. ФАЙЛЫ ДЛЯ ЧТЕНИЯ В НОВОМ ЧАТЕ (Phase 1.23)
 
 **Required (читать обязательно):**
 ```
 project_config.md
 workflow_state.md
-docs/balance-semantics.md                                     # approved D1–D6 decisions
-apps/telegram-bot/src/services/balance.service.ts             # Phase 1.21 implementation
-apps/telegram-bot/src/routes/webhook.route.ts                 # /balance handler
+docs/product-roadmap.md                                          # Phase 1.23 spec
+docs/balance-semantics.md                                        # D1-D6 formula reference
+apps/telegram-bot/src/services/balance.service.ts                # balance formula pattern
+apps/telegram-bot/src/services/setBalance.service.ts             # Phase 1.23 implementation
+apps/telegram-bot/src/routes/webhook.route.ts                    # /set_balance handler
+packages/database/smoke-test-phase123.mjs                        # Phase 1.23 tests
+```
+
+**Опционально (читать при необходимости):**
+```
+apps/telegram-bot/src/services/account.service.ts    # parseAddAccountArgs pattern
+```
+
+**Do not load:**
+```
+docs/event_storming_part*.md
+docs/adr/*
+apps/background-workers/
+packages/database/smoke-test-phase1[0-2]*.mjs   # except phase123
+Crypto / Notion / Sheets / Mini App files
+```
+
+---
+
+## 9. ПРОМПТ ДЛЯ СТАРТА НОВОГО ЧАТА
+
+> Read workflow_state.md, project_config.md, docs/product-roadmap.md, docs/balance-semantics.md first.
+> Before any action, read workflow_state.md Section 11 — Agent Operating Protocol and follow it strictly.
+> Phase 1.23 (/set_balance) is IN_PROGRESS (owner APPROVED).
+> Do NOT create phase-1.23-accepted tag until owner explicitly accepts.
+> Do NOT start Phase 1.24 without owner approval.
+> Verify git status, git log --oneline -5, origin/main are clean.
+> Do not modify project_config.md.
+> Compact mode: read only files listed in Section 8. /balance handler
 packages/database/migrations/1778400000000_*                  # initial_balance migration
 ```
 
@@ -232,14 +211,14 @@ Crypto / Notion / Sheets / Mini App files
 
 ## 9. ПРОМПТ ДЛЯ СТАРТА НОВОГО ЧАТА
 
-> Read workflow_state.md and project_config.md first.
+> Read workflow_state.md, project_config.md, docs/product-roadmap.md, docs/balance-semantics.md first.
 > Before any action, read workflow_state.md Section 11 — Agent Operating Protocol and follow it strictly.
-> Phase 1.21 (Unified Balance Implementation) is READY_FOR_OWNER_ACCEPTANCE.
-> /balance command is implemented. initial_balance migration applied. 28/28 smoke tests PASS.
-> Do NOT create phase-1.21-accepted tag until owner explicitly accepts.
-> Do NOT start Phase 1.22 without owner approval.
-> Verify git status, git log --oneline -10, and origin/main are clean.
+> Phase 1.23 (/set_balance) is IN_PROGRESS (owner APPROVED).
+> Do NOT create phase-1.23-accepted tag until owner explicitly accepts.
+> Do NOT start Phase 1.24 without owner approval.
+> Verify git status, git log --oneline -5, origin/main are clean.
 > Do not modify project_config.md.
+> Compact mode: read only files listed in Section 8.
 
 ---
 
