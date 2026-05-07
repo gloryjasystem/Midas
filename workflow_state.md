@@ -10,11 +10,11 @@
 | Параметр | Значение |
 |---|---|
 | **PHASE** | `1 — MVP Implementation` |
-| **STEP** | `1.30 — Smart Account Onboarding — ACCEPTED` |
-| **AGENT STATUS** | `WAITING_FOR_OWNER_APPROVAL_TO_START_NEXT_PHASE` |
-| **LAST COMPLETED** | `Phase 1.30 ACCEPTED. Smart account onboarding UX for /start + empty /accounts; ac: namespace (max 17 bytes); Redis TTL midas:ac:; Default account creation preserved; all new accounts type='manual'; no migrations; 64/64 Phase 1.30 smoke + 318/318 accessible gates PASS. Implementation commit 4593867. Workflow commit 99a2964.` |
-| **BLOCKER** | None — Phase 1.31 advisory delivered. Waiting for owner APPROVED to start implementation. |
-| **NEXT ACTION** | Wait for owner APPROVED — do not implement Phase 1.31 without explicit approval. |
+| **STEP** | `1.31 — Inline Account Creation — READY_FOR_OWNER_ACCEPTANCE` |
+| **AGENT STATUS** | `READY_FOR_OWNER_ACCEPTANCE` |
+| **LAST COMPLETED** | `Phase 1.31 IMPLEMENTED. Inline account creation during transaction input: parsed_account_hint in transaction_drafts + AI schema; Jaro-Winkler fuzzy matching (>=0.85, len>=4, short-ticker exact-only); ia: callback namespace (5 cmds, <=62 bytes); Option A (resolve before first keyboard); draft-confirmation uses draft.account_id first; 27/27 Phase 1.31 smoke + 13/13 typecheck/lint PASS. Implementation commit 7c065f7.` |
+| **BLOCKER** | None — awaiting owner ACCEPTED. |
+| **NEXT ACTION** | Owner reviews Phase 1.31 implementation and marks ACCEPTED or requests fixes. |
 
 ---
 
@@ -56,6 +56,9 @@
 | 1.26 /settings UI | ✅ ACCEPTED | `settings-keyboard.service.ts` (NEW), `currencies.ts` (NEW). Inline keyboards, groups, pagination, Redis search state. 45/45 smoke. Tag `phase-1.26-accepted` pushed. |
 | 1.27 Multicurrency Balance Hardening | ✅ ACCEPTED | `balance.service.ts` (MODIFY). SQL-level mismatch exclusion, mismatch footnote. 27/27 smoke. Tag `phase-1.27-accepted` pushed. |
 | 1.28 /edit Transactions MVP | ✅ ACCEPTED | `edit.service.ts` (NEW), `edit-keyboard.service.ts` (NEW), `webhook.route.ts` (MODIFY), `confirmation.worker.ts` (MODIFY), `smoke-test-phase128.mjs` (NEW). /edit list+card+edit amount/category/account/intent. Permanent [✏️ Изменить] on confirmed msgs. Redis TTL 300s. ULID+workspace guards. Strict callback_data ≤62 bytes verified. No search/date/delete/soft-delete/GIN, no migrations, no /balance or /report changes. 43/43 Phase 1.28 smoke + 841/841 regression smoke + 13/13 typecheck/lint = 897/897 PASS. Traceability ✅ Adversarial Security ✅ Scope Guard ✅. Implementation commit c8bbc7d. Tag `phase-1.28-accepted` pushed. |
+| 1.29 Transaction Soft Delete | ✅ ACCEPTED | `migrations/1778700000000_transactions-soft-delete.js` (NEW). deleted_at TIMESTAMPTZ DEFAULT NULL; soft delete via UPDATE; excluded from /edit, /balance (LEFT JOIN ON), /report, /set_balance; 941/941 gates PASS. Traceability ✅ Adversarial Security ✅ Scope Guard ✅. impl commit 7082540. Tag `phase-1.29-accepted` pushed. |
+| 1.30 Smart Account Onboarding | ✅ ACCEPTED | `account-onboard-keyboard.service.ts` (NEW), `account.service.ts` (hasAccounts, addAccountWithCurrency), `webhook.route.ts` (MODIFY — ac: callbacks, /start onboarding, /accounts empty-state, text intercept). Redis TTL midas:ac: 300s. 64/64 Phase 1.30 smoke + 318/318 accessible gates PASS. impl commit 4593867. Tag `phase-1.30-accepted` pushed. |
+| 1.31 Inline Account Creation | 🔄 READY_FOR_OWNER_ACCEPTANCE | `migrations/1778800000000_drafts-account-hint.js`, `account-fuzzy.service.ts`, `account-inline-keyboard.service.ts`, `account-resolver.service.ts` (bg-workers), `account.service.ts` (MODIFY), `draft.service.ts` (MODIFY), `ai-parse.worker.ts` (MODIFY), `webhook.route.ts` (MODIFY), `draft-confirmation.service.ts` (MODIFY), `schemas.ts`+`prompts.ts` (MODIFY). Option A: resolve before keyboard. ia: namespace ≤62 bytes. 27/27 smoke + 13/13 typecheck/lint PASS. Implementation commit 7c065f7. |
 
 ---
 
