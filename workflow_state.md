@@ -1,7 +1,7 @@
 # WORKFLOW_STATE.MD — Диспетчер задач ИИ-агента Midas
 
 > **Тип:** MUTABLE — кратковременная память агента. Обновляется на каждом шаге работы.
-> **Обновлён:** 2026-05-07 19:25 (UTC+3)
+> **Обновлён:** 2026-05-07 20:23 (UTC+3)
 
 ---
 
@@ -10,11 +10,11 @@
 | Параметр | Значение |
 |---|---|
 | **PHASE** | `1 — MVP Implementation` |
-| **STEP** | `1.29 — Soft Delete for Transactions — READY_FOR_OWNER_ACCEPTANCE` |
-| **AGENT STATUS** | `WAITING_FOR_OWNER_ACCEPTANCE` |
-| **LAST COMPLETED** | `Phase 1.29 implemented. Migration 1778700000000_transactions-soft-delete applied. deleted_at IS NULL guard added to 11 query locations across 4 services. Double-confirmation UX. 44/44 Phase 1.29 smoke + 853/853 regression + 13/13 typecheck/lint = 910/910 PASS. Implementation commit 7082540.` |
-| **BLOCKER** | None — Phase 1.29 implemented. Waiting for owner acceptance. |
-| **NEXT ACTION** | Owner acceptance of Phase 1.29 — then prepare Phase 1.30 advisory. |
+| **STEP** | `1.29 — Soft Delete for Transactions — ACCEPTED` |
+| **AGENT STATUS** | `WAITING_FOR_OWNER_APPROVAL_TO_START_NEXT_PHASE` |
+| **LAST COMPLETED** | `Phase 1.29 ACCEPTED. Soft delete (transactions.deleted_at) implemented; deleted txs excluded from all financial queries; double-confirmation UX; 941/941 gates PASS. Implementation commit 7082540. Workflow commit 723a89b.` |
+| **BLOCKER** | None — Phase 1.29 accepted. Waiting for owner to approve Phase 1.30 advisory. |
+| **NEXT ACTION** | Prepare Phase 1.30 advisory only when owner approves — do not implement Phase 1.30. |
 
 ---
 
@@ -99,7 +99,7 @@ midas-monorepo/
 ├── packages/
 ## 6. ТЕКУЩАЯ ФАЗА — PHASE 1.29: Soft Delete for Transactions
 
-> 🔄 **READY_FOR_OWNER_ACCEPTANCE** — Implementation complete. Awaiting owner acceptance.
+> ✅ **COMPLETED / ACCEPTED (Phase 1.29). See Section 10 history.**
 
 **Objective:**
 Add soft delete support for transactions. Users can delete a transaction from the edit card via a double-confirmation flow. Deleted transactions are excluded from all financial queries (/balance, /report, /set_balance, /edit list). No hard delete. No restore.
@@ -169,9 +169,9 @@ docs/balance-semantics.md
 
 > Read workflow_state.md and project_config.md first.
 > Before any action, read workflow_state.md Section 11 — Agent Operating Protocol and follow it strictly.
-> Phase 1.29 (Soft Delete for Transactions) is READY_FOR_OWNER_ACCEPTANCE. Implementation commit 7082540 pushed.
+> Phase 1.29 (Soft Delete for Transactions) is COMPLETED / ACCEPTED. Tag phase-1.29-accepted pushed.
 > Do NOT start Phase 1.30 implementation without explicit owner approval.
-> Do NOT create phase-1.29-accepted tag until owner explicitly accepts.
+> Do NOT create any new tags until owner approves next phase.
 > Verify git status, git log --oneline -5, origin/main are clean before any action.
 > Do not modify project_config.md.
 
@@ -251,6 +251,7 @@ docs/balance-semantics.md
 | 2026-05-07 18:33 | Phase 1.27 accepted after final verification; /balance currency-mixing defect fixed via SQL-level exclusion where transactions.base_currency != account_sources.currency; mismatch warning footnote added; roadmap output format improved; no conversion, no backfill, no migration, no /report changes; 854/854 tests passed; Traceability Review PASS; Adversarial Security Review PASS; Scope Guard Review PASS; implementation commit 12e70d9; docs fix commit dec0a52. Tag phase-1.27-accepted pushed. |
 | 2026-05-07 19:25 | Phase 1.28 accepted after final verification; /edit command implemented with recent paginated list (10/page), transaction card, amount/category/account/intent edit flows, Redis TTL 300s state for amount input (key midas:edit:{userId}:{chatId}), permanent [✏️ Изменить] button after approval, strict callback_data limit verified at max 62 bytes (ed:c:cat:<26>:<26>), no search/date/delete/soft-delete/GIN index, no migrations, no /balance or /report changes, no new dependencies; amount edits blocked for cross-currency (exchange_rate ≠ 1.0); all DB mutations via withTenantTransaction + explicit workspace_id filter; 43/43 Phase 1.28 smoke + 841/841 regression smoke + 13/13 typecheck/lint = 897/897 total gates PASS; Traceability Review PASS; Adversarial Security Review PASS; Scope Guard Review PASS; implementation commit c8bbc7d; workflow commit 1807d93. Tag phase-1.28-accepted pushed. Status: WAITING_FOR_OWNER_APPROVAL_TO_START_NEXT_PHASE. |
 | 2026-05-07 22:06 | Phase 1.29 implemented: soft delete for transactions. Migration 1778700000000_transactions-soft-delete applied (deleted_at TIMESTAMPTZ DEFAULT NULL). deleted_at IS NULL guard added to 11 query locations (7 in edit.service, 2 JOIN ON in balance.service, 1 in report.service, 1 subquery in setBalance.service). Double-confirmation UX: [🗑️ Удалить] → warning → [🗑️ Да, удалить]/[◀️ Отмена]. softDeleteTransaction() with D1+D6 fetch-before-update. callback_data max 35 bytes (ed:d:ask:<ULID> ≤ 64 ✅). Graceful fallback for old edit buttons on already-deleted transactions. smoke-test-phase128.mjs A3/J1 scope guards updated to reflect Phase 1.29. smoke-test-phase129.mjs: 44/44 PASS. Full regression: 44/44 Phase 1.29 + 43/43 Phase 1.28 + 841/841 prior phases + 13/13 typecheck/lint = 941/941 total gates PASS (excl. Phase 1.5 bot-server tests — pre-existing). No hard delete. No restore. No new deps. No project_config.md changes. Implementation commit 7082540. Status: READY_FOR_OWNER_ACCEPTANCE. |
+| 2026-05-07 20:23 | Phase 1.29 accepted after final verification; soft delete (transactions.deleted_at) added; double-confirmation delete UX implemented; deleted txs safely excluded from /edit, /balance (LEFT JOIN preserved), /report, /set_balance; zero hard deletes/restores; 941/941 gates PASS; Traceability, Adversarial Security & Scope Guard PASS; impl commit 7082540; workflow commit 723a89b. Tag phase-1.29-accepted pushed. Status: WAITING_FOR_OWNER_APPROVAL_TO_START_NEXT_PHASE. |
 
 ---
 
