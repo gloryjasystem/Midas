@@ -26,10 +26,11 @@
  *   SEC-12: Logging privacy
  *     → `raw_text` is NEVER logged. Only job metadata is logged.
  *
- * Slash-command routing (Phase 1.10 + Phase 1.13):
- *   Known commands: /start, /report, /help, /category, /add_category
- *   Unknown slash commands (e.g. /balance) are rejected with a safe
- *   Russian message and do NOT reach the AI parse queue.
+ * Slash-command routing (Phase 1.10 + Phase 1.13 + Phase 1.21):
+ *   Known commands: /start, /report, /balance, /help, /category,
+ *                   /add_category, /accounts, /add_account
+ *   Unknown slash commands are rejected with a safe Russian message
+ *   and do NOT reach the AI parse queue.
  *   Normal free-text (no leading "/") continues to AI parse exactly as before.
  *
  * Flow:
