@@ -124,9 +124,13 @@ const PER_ACCOUNT_SQL = `
       THEN 1 END) AS mismatch_count
   FROM account_sources a
   -- D6: all-time (no date filter)
+  -- Phase 1.29: AND t.deleted_at IS NULL in the JOIN ON clause — NOT in a WHERE.
+  --   WHERE deleted_at IS NULL would silently convert LEFT JOIN to INNER JOIN,
+  --   excluding accounts that have zero non-deleted transactions from /balance.
   LEFT JOIN transactions t
     ON t.account_id = a.id
    AND t.workspace_id = $1   -- defense-in-depth alongside RLS (SEC-03)
+   AND t.deleted_at IS NULL   -- Phase 1.29: exclude soft-deleted from balance sum
   WHERE a.workspace_id = $1  -- explicit workspace filter (SEC-03)
   GROUP BY a.id, a.name, a.type, a.currency, a.initial_balance
   ORDER BY a.currency, a.name
@@ -159,9 +163,12 @@ const CURRENCY_TOTALS_SQL = `
             THEN t.base_amount END), 0)
         AS balance
     FROM account_sources a
+    -- Phase 1.29: AND t.deleted_at IS NULL in the JOIN ON clause (not WHERE) to
+    --   preserve accounts with zero non-deleted transactions in LEFT JOIN semantics.
     LEFT JOIN transactions t
       ON t.account_id = a.id
      AND t.workspace_id = $1
+     AND t.deleted_at IS NULL   -- Phase 1.29: exclude soft-deleted from currency totals
     WHERE a.workspace_id = $1
     GROUP BY a.id, a.currency, a.initial_balance
   ) AS account_balances

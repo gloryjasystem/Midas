@@ -13,10 +13,11 @@
  *   ed:c:cat:<txId>:<catId>  → confirm category change            [54 bytes max]
  *   ed:c:acc:<txId>:<accId>  → confirm account change             [54 bytes max]
  *   ed:c:int:<txId>:<intent> → confirm intent change              [≤50 bytes]
+ *   ed:d:ask:<txId>          → Phase 1.29: show delete warning     [36 bytes]
+ *   ed:d:yes:<txId>          → Phase 1.29: confirm soft delete     [36 bytes]
  *   ed:x                     → close / cancel                      [4 bytes]
  *
- * All callback_data values are strictly ≤ 64 bytes (Telegram limit).
- * Verified: longest is ed:c:cat:<26>:<26> = 4+1+3+1+26+1+26 = 62 bytes ✅
+ * All callback_data values are strictly ≤ 64 bytes (Telegram limit).\n * Verified longest: ed:c:cat:<26>:<26> = 62 bytes ✅  Phase 1.29 max: ed:d:ask:<26> = 36 bytes ✅
  *
  * Security:
  *   - All callback_data parsed strictly in parseEditCallback().
@@ -25,9 +26,11 @@
  *   - No user-provided text enters callback_data.
  *
  * Phase 1.28 scope guard:
- *   - No delete button (Phase 1.29).
  *   - No date edit button (deferred).
  *   - No search button (deferred, needs GIN index).
+ * Phase 1.29 scope guard:
+ *   - No restore / undelete UI.
+ *   - No hard delete path.
  */
 
 import type { InlineKeyboardButton, InlineKeyboardMarkup } from './telegram-api.js';
@@ -110,8 +113,8 @@ export function buildTransactionListKeyboard(
 
 /**
  * Build the transaction card keyboard.
- * Buttons: edit amount, category, account, intent.
- * No delete button (Phase 1.29). No date button (deferred).
+ * Buttons: edit amount, category, account, intent, delete.
+ * Phase 1.29: [🗑️ Удалить] triggers double-confirmation flow (ed:d:ask).
  */
 export function buildTransactionCardKeyboard(txId: string, isCrossCurrency: boolean): InlineKeyboardMarkup {
   const rows: InlineKeyboardButton[][] = [];
@@ -124,6 +127,8 @@ export function buildTransactionCardKeyboard(txId: string, isCrossCurrency: bool
   rows.push([{ text: '📁 Изменить категорию', callback_data: `ed:f:cat:${txId}:0` }]);
   rows.push([{ text: '🏦 Изменить счёт',      callback_data: `ed:f:acc:${txId}` }]);
   rows.push([{ text: '🔄 Изменить тип',        callback_data: `ed:f:int:${txId}` }]);
+  // Phase 1.29: delete button — triggers warning state (ed:d:ask:<txId>, 36 bytes ≤ 64 ✅)
+  rows.push([{ text: '🗑️ Удалить',             callback_data: `ed:d:ask:${txId}` }]);
   rows.push([{ text: '◀️ Назад к списку',      callback_data: 'ed:l:0' }]);
 
   return { inline_keyboard: rows };
@@ -242,6 +247,9 @@ export type EditCallbackCmd =
   | { cmd: 'confirm_cat'; txId: string; catId: string }
   | { cmd: 'confirm_acc'; txId: string; accId: string }
   | { cmd: 'confirm_int'; txId: string; intent: string }
+  // Phase 1.29: soft delete double-confirmation
+  | { cmd: 'delete_ask'; txId: string }     // show warning state
+  | { cmd: 'delete_confirm'; txId: string } // execute soft delete
   | { cmd: 'cancel' };
 
 /**
@@ -309,5 +317,35 @@ export function parseEditCallback(data: string): EditCallbackCmd | null {
     return null;
   }
 
+  // Phase 1.29: delete flow (ed:d:ask:<txId> or ed:d:yes:<txId>)
+  if (sub === 'd') {
+    const action = parts[2] ?? '';
+    const txId   = parts[3] ?? '';
+    if (!ULID_RE.test(txId)) return null;
+    if (action === 'ask') return { cmd: 'delete_ask', txId };
+    if (action === 'yes') return { cmd: 'delete_confirm', txId };
+    return null;
+  }
+
   return null;
+}
+
+// ─────────────────────────────────────────────────────────────
+// Delete confirmation keyboard (Phase 1.29)
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Build the delete warning keyboard.
+ * Shown after [🗑️ Удалить] tap on the card.
+ * Two buttons: [🗑️ Да, удалить] (ed:d:yes:<txId>, 36 bytes) and [◀️ Отмена] (ed:v:<txId>, 31 bytes).
+ */
+export function buildDeleteConfirmKeyboard(txId: string): InlineKeyboardMarkup {
+  return {
+    inline_keyboard: [
+      [
+        { text: '🗑️ Да, удалить', callback_data: `ed:d:yes:${txId}` },
+        { text: '◀️ Отмена',      callback_data: `ed:v:${txId}` },
+      ],
+    ],
+  };
 }

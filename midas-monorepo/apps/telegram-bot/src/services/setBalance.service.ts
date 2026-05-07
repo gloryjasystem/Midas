@@ -289,6 +289,7 @@ export async function setAccountBalance(
                FROM transactions t
                WHERE t.account_id  = $2
                  AND t.workspace_id = $1
+                 AND t.deleted_at IS NULL  -- Phase 1.29: exclude soft-deleted from balance computation
            ), 0)
          )
          WHERE id           = $2

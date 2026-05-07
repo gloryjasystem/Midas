@@ -15,7 +15,7 @@
  *   D4: Returned amounts are NUMERIC strings — no Number() conversion (SEC-02).
  *   D5: category_id and account_id are validated to belong to the same workspace
  *       before UPDATE (prevents cross-workspace reference injection).
- *   D6: No deleted_at guard — Phase 1.29 only.
+ *   D6: deleted_at IS NULL guard added in Phase 1.29 — excludes soft-deleted rows.
  *   D7: No date editing — deferred.
  *   D8: Pagination: 10 transactions per page (EDIT_PAGE_SIZE), ordered by
  *       transaction_time DESC. Uses existing idx_transactions_workspace_time.
@@ -114,7 +114,8 @@ export type UpdateResult =
   | { status: 'invalid_amount' }
   | { status: 'invalid_category' }
   | { status: 'invalid_account' }
-  | { status: 'invalid_intent' };
+  | { status: 'invalid_intent' }
+  | { status: 'already_deleted' };         // D6: Phase 1.29 soft-delete idempotency
 
 // ─────────────────────────────────────────────────────────────
 // Queries
@@ -145,9 +146,11 @@ export async function getRecentTransactions(
        LEFT JOIN categories     c ON c.id = t.category_id
        LEFT JOIN account_sources a ON a.id = t.account_id
        WHERE t.workspace_id = $1
+         AND t.deleted_at IS NULL
        ORDER BY t.transaction_time DESC
        LIMIT $2 OFFSET $3`,
       [workspaceId, EDIT_PAGE_SIZE, offset],
+      // Phase 1.29: deleted_at IS NULL excludes soft-deleted transactions from list
     );
     return r.rows;
   });
@@ -160,7 +163,8 @@ export async function getRecentTransactions(
 export async function countTransactions(workspaceId: string, userId: string): Promise<number> {
   const result = await withTenantTransaction(workspaceId, userId, async (client) => {
     const r = await client.query<{ cnt: string }>(
-      `SELECT COUNT(*)::text AS cnt FROM transactions WHERE workspace_id = $1`,
+      // Phase 1.29: deleted_at IS NULL — pagination count excludes soft-deleted rows.
+      `SELECT COUNT(*)::text AS cnt FROM transactions WHERE workspace_id = $1 AND deleted_at IS NULL`,
       [workspaceId],
     );
     return parseInt(r.rows[0]?.cnt ?? '0', 10);
@@ -181,6 +185,8 @@ export async function getTransactionCard(
 
   const result = await withTenantTransaction(workspaceId, userId, async (client) => {
     const r = await client.query<TransactionCard & { exchange_rate: string }>(
+      // Phase 1.29: AND t.deleted_at IS NULL — returns null for soft-deleted transactions.
+      // Callers handle null gracefully (show "not found" message).
       `SELECT
          t.id,
          ROUND(t.base_amount, 2)::text  AS base_amount,
@@ -197,7 +203,8 @@ export async function getTransactionCard(
        LEFT JOIN categories     c ON c.id = t.category_id
        LEFT JOIN account_sources a ON a.id = t.account_id
        WHERE t.id = $1
-         AND t.workspace_id = $2`,
+         AND t.workspace_id = $2
+         AND t.deleted_at IS NULL`,
       [txId, workspaceId],
     );
     return r.rows[0] ?? null;
@@ -228,9 +235,10 @@ export async function updateTransactionAmount(
   if (!isPositiveAmountStr(trimmed)) return { status: 'invalid_amount' };
 
   return withTenantTransaction(workspaceId, userId, async (client) => {
-    // Fetch-before-update (D1) — also checks exchange_rate (D2)
+    // Fetch-before-update (D1) — also checks exchange_rate (D2) and deleted_at (D6)
     const check = await client.query<{ exchange_rate: string }>(
-      `SELECT exchange_rate::text FROM transactions WHERE id = $1 AND workspace_id = $2`,
+      // Phase 1.29: AND deleted_at IS NULL — prevents editing soft-deleted transactions.
+      `SELECT exchange_rate::text FROM transactions WHERE id = $1 AND workspace_id = $2 AND deleted_at IS NULL`,
       [txId, workspaceId],
     );
     if (check.rows.length === 0) return { status: 'not_found' };
@@ -262,9 +270,10 @@ export async function updateTransactionCategory(
   if (!ULID_RE.test(txId) || !ULID_RE.test(categoryId)) return { status: 'not_found' };
 
   return withTenantTransaction(workspaceId, userId, async (client) => {
-    // Validate transaction exists in workspace (D1)
+    // Validate transaction exists in workspace (D1) and is not soft-deleted (D6)
     const txCheck = await client.query(
-      `SELECT 1 FROM transactions WHERE id = $1 AND workspace_id = $2`,
+      // Phase 1.29: AND deleted_at IS NULL — prevents editing soft-deleted transactions.
+      `SELECT 1 FROM transactions WHERE id = $1 AND workspace_id = $2 AND deleted_at IS NULL`,
       [txId, workspaceId],
     );
     if (txCheck.rows.length === 0) return { status: 'not_found' };
@@ -297,9 +306,10 @@ export async function updateTransactionAccount(
   if (!ULID_RE.test(txId) || !ULID_RE.test(accountId)) return { status: 'not_found' };
 
   return withTenantTransaction(workspaceId, userId, async (client) => {
-    // Validate transaction exists in workspace (D1)
+    // Validate transaction exists in workspace (D1) and is not soft-deleted (D6)
     const txCheck = await client.query(
-      `SELECT 1 FROM transactions WHERE id = $1 AND workspace_id = $2`,
+      // Phase 1.29: AND deleted_at IS NULL — prevents editing soft-deleted transactions.
+      `SELECT 1 FROM transactions WHERE id = $1 AND workspace_id = $2 AND deleted_at IS NULL`,
       [txId, workspaceId],
     );
     if (txCheck.rows.length === 0) return { status: 'not_found' };
@@ -333,8 +343,9 @@ export async function updateTransactionIntent(
   if (!(EDITABLE_INTENTS as readonly string[]).includes(intent)) return { status: 'invalid_intent' };
 
   return withTenantTransaction(workspaceId, userId, async (client) => {
+    // Phase 1.29: AND deleted_at IS NULL — prevents editing soft-deleted transactions.
     const check = await client.query(
-      `SELECT 1 FROM transactions WHERE id = $1 AND workspace_id = $2`,
+      `SELECT 1 FROM transactions WHERE id = $1 AND workspace_id = $2 AND deleted_at IS NULL`,
       [txId, workspaceId],
     );
     if (check.rows.length === 0) return { status: 'not_found' };
@@ -367,6 +378,48 @@ export async function getWorkspaceCategories(
     return r.rows;
   });
   return result;
+}
+
+// ─────────────────────────────────────────────────────────────
+// Soft delete
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Soft-delete a transaction by setting deleted_at = NOW().
+ *
+ * D1: Fetch-before-update verifies workspace ownership AND that
+ *     the transaction is not already soft-deleted.
+ * D3: withTenantTransaction + explicit WHERE workspace_id (SEC-03).
+ * SEC-12: No amount or description is logged.
+ *
+ * Returns:
+ *   'ok'             — deleted successfully.
+ *   'not_found'      — txId invalid, not in this workspace, or already deleted.
+ *   'already_deleted'— row exists but deleted_at IS NOT NULL (idempotency guard).
+ */
+export async function softDeleteTransaction(
+  txId: string,
+  workspaceId: string,
+  userId: string,
+): Promise<UpdateResult> {
+  if (!ULID_RE.test(txId)) return { status: 'not_found' };
+
+  return withTenantTransaction(workspaceId, userId, async (client) => {
+    // Step 1: verify ownership and current delete status (D1).
+    const check = await client.query<{ deleted_at: string | null }>(
+      `SELECT deleted_at FROM transactions WHERE id = $1 AND workspace_id = $2`,
+      [txId, workspaceId],
+    );
+    if (check.rows.length === 0) return { status: 'not_found' };
+    if (check.rows[0]?.deleted_at !== null) return { status: 'already_deleted' };
+
+    // Step 2: soft delete — UPDATE only (no hard DELETE).
+    await client.query(
+      `UPDATE transactions SET deleted_at = NOW() WHERE id = $1 AND workspace_id = $2`,
+      [txId, workspaceId],
+    );
+    return { status: 'ok' };
+  });
 }
 
 /** Fetch all accounts for this workspace (for account picker). */

@@ -113,7 +113,7 @@ async function runTests() {
       const cols = r.rows.map(row => row.column_name);
       assert(cols.includes('id'),          'A1: transactions.id exists');
       assert(cols.includes('base_amount'), 'A2: transactions.base_amount exists');
-      assert(!cols.includes('deleted_at'), 'A3: deleted_at not in transactions (Phase 1.29 excluded)');
+      assert(cols.includes('deleted_at'), 'A3: deleted_at now in transactions (added Phase 1.29 — Phase 1.28 test updated)');
     }
 
     // ── [B] Transaction list & pagination ────────────────────────
@@ -438,7 +438,7 @@ async function runTests() {
         `SELECT column_name FROM information_schema.columns
          WHERE table_name = 'transactions' AND column_name = 'deleted_at'`,
       );
-      assert(r.rows.length === 0, 'J1: deleted_at NOT in transactions (Phase 1.29 excluded)');
+      assert(r.rows.length === 1, 'J1: deleted_at IS in transactions (Phase 1.29 implemented — scope guard updated)');
     }
     {
       const r = await client.query(

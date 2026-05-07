@@ -106,6 +106,7 @@ export async function getMonthlyReport(
          WHERE workspace_id = $1
            AND transaction_time >= $2
            AND transaction_time < $3
+           AND deleted_at IS NULL  -- Phase 1.29: exclude soft-deleted from monthly report
          GROUP BY transaction_intent, base_currency
          ORDER BY transaction_intent, base_currency`,
         [workspaceId, start, end],

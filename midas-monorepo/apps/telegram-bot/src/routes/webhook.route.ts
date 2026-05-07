@@ -110,6 +110,7 @@ import {
   updateTransactionCategory,
   updateTransactionAccount,
   updateTransactionIntent,
+  softDeleteTransaction,      // Phase 1.29
   getWorkspaceCategories,
   getWorkspaceAccounts,
   formatTransactionListHeader,
@@ -124,6 +125,7 @@ import {
   buildCategoryPickerKeyboard,
   buildAccountPickerKeyboard,
   buildIntentPickerKeyboard,
+  buildDeleteConfirmKeyboard,   // Phase 1.29
 } from '../services/edit-keyboard.service.js';
 
 import { callbackConfirmQueue } from '../queues/callback-confirm-queue.js';
@@ -332,7 +334,10 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
           } else if (cmd.cmd === 'view') {
             const card = await getTransactionCard(cmd.txId, edResolved.workspaceId, edResolved.userId);
             if (!card) {
-              if (messageId) void editMessageText(chatId, messageId, '⚠️ Транзакция не найдена.', { inline_keyboard: [] });
+              // Phase 1.29: transaction may be soft-deleted (deleted_at IS NOT NULL).
+              // Graceful degradation: safe message + clear keyboard.
+              // Also handles IDOR attempt (txId not in this workspace).
+              if (messageId) void editMessageText(chatId, messageId, '⚠️ Транзакция не найдена или уже удалена.', { inline_keyboard: [] });
             } else {
               const text = formatTransactionCard(card);
               const keyboard = buildTransactionCardKeyboard(cmd.txId, card.is_cross_currency);
@@ -400,20 +405,50 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
             }
 
           } else {
-            // confirm_int: last branch of exhausted union
-            const res = await updateTransactionIntent(
-              cmd.txId, edResolved.workspaceId, edResolved.userId, (cmd as { intent: string }).intent,
-            );
-            if (res.status === 'ok') {
-              const card = await getTransactionCard(cmd.txId, edResolved.workspaceId, edResolved.userId);
-              if (card && messageId) {
-                void editMessageText(chatId, messageId, formatTransactionCard(card), buildTransactionCardKeyboard(cmd.txId, card.is_cross_currency));
+            // confirm_int | delete_ask | delete_confirm
+            // All other branches exhausted above — remaining union is always one of these three.
+            if (cmd.cmd === 'confirm_int') {
+              // confirm_int
+              const res = await updateTransactionIntent(
+                cmd.txId, edResolved.workspaceId, edResolved.userId, cmd.intent,
+              );
+              if (res.status === 'ok') {
+                const card = await getTransactionCard(cmd.txId, edResolved.workspaceId, edResolved.userId);
+                if (card && messageId) {
+                  void editMessageText(chatId, messageId, formatTransactionCard(card), buildTransactionCardKeyboard(cmd.txId, card.is_cross_currency));
+                }
+                request.log.info({ msg: '[midas:bot:webhook] edit: intent updated', txId: cmd.txId, workspaceId: edResolved.workspaceId });
+              } else {
+                void sendMessage(chatId, '⚠️ Транзакция не найдена.');
               }
-              request.log.info({ msg: '[midas:bot:webhook] edit: intent updated', txId: cmd.txId, workspaceId: edResolved.workspaceId });
+
+            } else if (cmd.cmd === 'delete_ask') {
+              // Phase 1.29: show delete warning state.
+              const card = await getTransactionCard(cmd.txId, edResolved.workspaceId, edResolved.userId);
+              if (!card) {
+                // Soft-deleted already, or IDOR — graceful degradation.
+                if (messageId) void editMessageText(chatId, messageId, '⚠️ Транзакция не найдена или уже удалена.', { inline_keyboard: [] });
+              } else {
+                const warningText =
+                  '⚠️ <b>Удалить транзакцию?</b>\n\n' +
+                  `${formatTransactionCard(card)}\n` +
+                  'Транзакция будет скрыта из всех отчётов и баланс автоматически пересчитается.';
+                const keyboard = buildDeleteConfirmKeyboard(cmd.txId);
+                if (messageId) void editMessageText(chatId, messageId, warningText, keyboard);
+              }
+
             } else {
-              void sendMessage(chatId, '⚠️ Транзакция не найдена.');
+              // delete_confirm: last branch — Phase 1.29 execute soft delete.
+              const res = await softDeleteTransaction(cmd.txId, edResolved.workspaceId, edResolved.userId);
+              if (res.status === 'ok') {
+                if (messageId) void editMessageText(chatId, messageId, '✅ Транзакция удалена. Баланс и отчёт пересчитаны автоматически.', { inline_keyboard: [] });
+                request.log.info({ msg: '[midas:bot:webhook] edit: transaction soft-deleted', txId: cmd.txId, workspaceId: edResolved.workspaceId });
+              } else {
+                // 'not_found' or 'already_deleted' — safe fallback
+                if (messageId) void editMessageText(chatId, messageId, '⚠️ Транзакция не найдена или уже удалена.', { inline_keyboard: [] });
+              }
             }
-          }
+          } // end Phase 1.29 delete / confirm_int branch
         } catch (err: unknown) {
           const errorClass = err instanceof Error ? err.constructor.name : 'UnknownError';
           request.log.error({
