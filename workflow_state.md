@@ -1,7 +1,7 @@
-﻿# WORKFLOW_STATE.MD — Диспетчер задач ИИ-агента Midas
+# WORKFLOW_STATE.MD — Диспетчер задач ИИ-агента Midas
 
 > **Тип:** MUTABLE — кратковременная память агента. Обновляется на каждом шаге работы.
-> **Обновлён:** 2026-05-07 02:40 (UTC+3)
+> **Обновлён:** 2026-05-07 09:40 (UTC+3)
 
 ---
 
@@ -10,11 +10,11 @@
 | Параметр | Значение |
 |---|---|
 | **PHASE** | `1 — MVP Implementation` |
-| **STEP** | `1.19 — account_sources.currency CHECK Constraint — COMPLETED / ACCEPTED` |
-| **AGENT STATUS** | `WAITING_FOR_OWNER_APPROVAL_TO_START_NEXT_PHASE` |
-| **LAST COMPLETED** | `Phase 1.19 ACCEPTED. 24/24 Phase 1.19 + 644/644 regression (Ph1.6-A–Ph1.18) + 13/13 typecheck+lint = 668/668 PASS. Traceability ✅ Adversarial Security ✅ Scope Guard ✅. Constraint account_sources_currency_check CHECK (currency ~ '^[A-Z]{3,5}$') added. Implementation commit 9d288bd. Tag phase-1.19-accepted pushed.` |
-| **BLOCKER** | None — awaiting owner approval to start next phase |
-| **NEXT ACTION** | Prepare next phase advisory only — do not implement |
+| **STEP** | `1.20 — Balance Semantics Design Document — READY_FOR_OWNER_ACCEPTANCE` |
+| **AGENT STATUS** | `READY_FOR_OWNER_ACCEPTANCE` |
+| **LAST COMPLETED** | `Phase 1.20 — docs/balance-semantics.md created. 6 design decisions (D1–D6) with recommended options. Traceability ✅ Adversarial Security ✅ Scope Guard ✅. No code written, no migrations, no new commands.` |
+| **BLOCKER** | Owner review of docs/balance-semantics.md required — must approve/override D1–D6 before Phase 1.21 |
+| **NEXT ACTION** | Owner reviews docs/balance-semantics.md → approves D1–D6 decisions → Phase 1.20 ACCEPTED → Phase 1.21 (initial_balance migration if D4a=Yes) |
 
 ---
 
@@ -47,6 +47,7 @@
 | 1.17 /add_account Strict-Format Command | ✅ ACCEPTED | `account.service.ts` (MODIFY), `webhook.route.ts` (MODIFY), `smoke-test-phase117.mjs` (NEW) — 27/27 Phase 1.17 + 610/610 total PASS. Traceability ✅ Adversarial Security ✅ Scope Guard ✅. Implementation commit `8c370e3`. Tag `phase-1.17-accepted` pushed. |
 | 1.18 /report Currency Label (base_currency grouping) | ✅ ACCEPTED | `report.service.ts` (MODIFY), `smoke-test-phase118.mjs` (NEW), `smoke-test-phase19.mjs` (MODIFY — runReportQuery SQL helper sync) — 34/34 Phase 1.18 + 644/644 total PASS. Traceability ✅ Adversarial Security ✅ Scope Guard ✅. Implementation commit `700a244`. Tag `phase-1.18-accepted` pushed. |
 | 1.19 account_sources.currency CHECK Constraint | ✅ ACCEPTED | `packages/database/migrations/1778300000000_account-sources-currency-check.js` (NEW), `packages/database/smoke-test-phase119.mjs` (NEW) — CHECK (currency ~ '^[A-Z]{3,5}$'); pre-flight 0 invalid rows; 24/24 Phase 1.19 + 668/668 total PASS. Traceability ✅ Adversarial Security ✅ Scope Guard ✅. Implementation commit `9d288bd`. Tag `phase-1.19-accepted` pushed. |
+| 1.20 Balance Semantics Design Document | 🔄 READY_FOR_OWNER_ACCEPTANCE | `docs/balance-semantics.md` (NEW) — 6 design decisions D1–D6: sign rule per intent, debt integration model, transfer model, initial_balance design, /balance output format, /balance time scope. Recommended options defined. Traceability ✅ Adversarial Security ✅ Scope Guard ✅. No code. |
 
 ---
 
@@ -109,58 +110,45 @@ midas-monorepo/
 
 ---
 
-## 6. ПОСЛЕДНЯЯ ЗАВЕРШЁННАЯ ФАЗА — PHASE 1.19: account_sources.currency CHECK Constraint
+## 6. ТЕКУЩАЯ ФАЗА — PHASE 1.20: Balance Semantics Design Document
 
-> ✅ **COMPLETED / ACCEPTED. 24/24 Phase 1.19 + 644/644 previous accepted baseline = 668/668 PASS.**
+> ✅ **READY_FOR_OWNER_ACCEPTANCE — docs/balance-semantics.md created. No code written.**
 
 **Objective:**
-Add a DB-level CHECK constraint on `account_sources.currency` to enforce that only well-formed currency codes (ISO 4217 fiat + crypto codes) can be stored. This closes a latent DB integrity gap — the column was `TEXT NOT NULL` with no pattern guard.
-
-**Owner Decisions:**
-- Regex pattern: `^[A-Z]{3,5}$` (permissive — covers all current codes without an explicit allowlist)
-- Pre-flight guard: aborts if any invalid rows found (0 found in live DB)
-- Scope: migration-only hardening + smoke tests
+Produce `docs/balance-semantics.md` — a complete balance semantics design document that defines and resolves all design decisions required before implementing `/balance`. No TypeScript, no migrations, no new commands.
 
 **Scope:**
-- `packages/database/migrations/1778300000000_account-sources-currency-check.js` (NEW):
-  - Pre-flight: `SELECT COUNT(*) WHERE currency !~ '^[A-Z]{3,5}$'` — RAISE EXCEPTION if > 0
-  - `ALTER TABLE account_sources ADD CONSTRAINT account_sources_currency_check CHECK (currency ~ '^[A-Z]{3,5}$')`
-  - `down()`: `DROP CONSTRAINT IF EXISTS account_sources_currency_check`
-- `packages/database/smoke-test-phase119.mjs` (NEW): 24 smoke tests
-- No TypeScript changes. No route changes. No new dependencies. No AI/queue/worker changes.
+- `docs/balance-semantics.md` (NEW): defines 6 design decisions (D1–D6):
+  - D1: Sign rule per transaction_intent (expense/income/debt_given/debt_received/transfer)
+  - D2: Debt integration vs separate section
+  - D3: Transfer model (one-sided vs two-sided)
+  - D4: initial_balance (needed? negative? currency? date?)
+  - D5: /balance output format (per-account vs aggregate)
+  - D6: /balance time scope (all-time vs monthly)
+- `workflow_state.md` (MODIFY): Sections 1, 2, 6–10
+- No TypeScript changes. No migrations. No new commands. No new dependencies.
 
-**Результаты Phase 1.19:**
-- Migration applied: `account_sources_currency_check` constraint present in live DB ✅
-- Pre-flight: 0 invalid rows in 553 existing account_sources rows ✅
-- Smoke tests: 24/24 PASS ✅
-- Full regression: 644/644 PASS (Ph1.6-A through Ph1.18) ✅
-- Typecheck + lint: 13/13 PASS ✅
-- Traceability Review: ✅ PASS
-- Adversarial Security Review: ✅ PASS
-- Scope Guard Review: ✅ PASS
-
-**Запрещено в этой фазе:**
-- `/balance`
-- `/add_currency` или любые новые команды
-- Изменения `/report`, `/accounts`, `/add_account`, `/category`, `/add_category`
-- AI / queue / worker changes
+**Запрещено в Phase 1.20:**
+- `/balance` implementation
+- Any DB migration
+- Any TypeScript/route/service/worker/AI changes
 - New npm dependencies
 - `project_config.md` changes
-- Phase 1.20
+- Phase 1.21
 
-**Предыдущая завершённая фаза (Phase 1.18):**
-- `report.service.ts` (MODIFY), `smoke-test-phase118.mjs` (NEW), `smoke-test-phase19.mjs` (MODIFY).
-- Implementation commit `700a244`. Tag `phase-1.18-accepted` pushed. 644/644 PASS.
+**Предыдущая завершённая фаза (Phase 1.19):**
+- `migrations/1778300000000_account-sources-currency-check.js` (NEW), `smoke-test-phase119.mjs` (NEW).
+- Implementation commit `9d288bd`. Tag `phase-1.19-accepted` pushed. 668/668 PASS.
 
 ---
 
-## 7. MCP REQUIREMENTS (advisory для Phase 1.20)
+## 7. MCP REQUIREMENTS (Phase 1.20 — design doc)
 
 | MCP-сервер | Доступ | Примечание |
 |---|---|---|
-| Filesystem MCP | ✅ read-only | Анализ существующего кода для advisory |
-| Postgres MCP | ✅ read-only | Инспекция схемы, RLS, constraints |
-| GitHub MCP | ⚪ read-only (опционально) | Проверка remote sync |
+| Filesystem MCP | ✅ read/write | Создание docs/balance-semantics.md, обновление workflow_state.md |
+| Postgres MCP | ✅ read-only | Инспекция схемы, данных, constraints для обоснования решений |
+| GitHub MCP | ⚪ read-only (опционально) | Проверка remote sync после commit |
 | Browser / DevTools | ❌ Запрещён | — |
 | Notion MCP | ❌ Запрещён | — |
 | Google Sheets | ❌ Запрещён | — |
@@ -168,21 +156,19 @@ Add a DB-level CHECK constraint on `account_sources.currency` to enforce that on
 
 ---
 
-## 8. ФАЙЛЫ ДЛЯ ЧТЕНИЯ В НОВОМ ЧАТЕ (advisory Phase 1.20)
+## 8. ФАЙЛЫ ДЛЯ ЧТЕНИЯ В НОВОМ ЧАТЕ (Phase 1.20 acceptance / Phase 1.21 advisory)
 
 **Required (читать обязательно):**
 ```
 project_config.md
 workflow_state.md
-apps/telegram-bot/src/routes/webhook.route.ts          # KNOWN_COMMANDS, /balance area
-apps/telegram-bot/src/services/account.service.ts     # balance logic candidate
-apps/telegram-bot/src/services/report.service.ts      # reference: runReportQuery pattern
+docs/balance-semantics.md                              # Phase 1.20 output — decisions D1–D6
 ```
 
 **Опционально (читать при необходимости):**
 ```
-packages/database/smoke-test-phase117.mjs             # addAccount pattern reference
-packages/database/migrations/1778300000000_*          # Phase 1.19 migration (last applied)
+apps/telegram-bot/src/services/report.service.ts      # balance grouping pattern reference
+packages/ai-core/src/schemas.ts                       # intent type definitions
 ```
 
 **Do not load (не читать — тратит контекст):**
@@ -190,8 +176,8 @@ packages/database/migrations/1778300000000_*          # Phase 1.19 migration (la
 docs/event_storming_part*.md
 docs/client-roadmap-architecture-overview.md
 docs/adr/*
-packages/ai-core/
 apps/background-workers/
+packages/database/smoke-test-phase1*.mjs              # not needed for design review
 Crypto / Notion / Sheets / Mini App files
 ```
 
@@ -201,9 +187,10 @@ Crypto / Notion / Sheets / Mini App files
 
 > Read workflow_state.md and project_config.md first.
 > Before any action, read workflow_state.md Section 11 — Agent Operating Protocol and follow it strictly.
-> Phase 1.19 (account_sources.currency CHECK Constraint) is COMPLETED / ACCEPTED. Tag phase-1.19-accepted pushed.
-> Do NOT implement Phase 1.20. Prepare next phase advisory only — do not write any code.
-> Verify git status, git log --oneline -10, tag phase-1.19-accepted, and origin/main are clean.
+> Phase 1.20 (Balance Semantics Design Document) is READY_FOR_OWNER_ACCEPTANCE.
+> docs/balance-semantics.md has been created with decisions D1–D6 and recommended options.
+> Do NOT implement Phase 1.21 until owner explicitly accepts Phase 1.20 and approves D1–D6.
+> Verify git status, git log --oneline -10, and origin/main are clean.
 > Do not modify project_config.md.
 
 ---
@@ -269,6 +256,7 @@ Crypto / Notion / Sheets / Mini App files
 | 2026-05-07 00:08 | Phase 1.18 accepted after final verification; /report now shows base_currency labels and groups by transaction_intent + base_currency; smoke-test-phase19 runReportQuery() helper synced to production SQL; smoke-test-phase118.mjs (34 tests) added; 644/644 tests passed (34 Ph1.18 + 47 Ph1.9 + 563 Ph1.6-A–Ph1.17 + 13 typecheck+lint); Traceability Review PASS; Adversarial Security Review PASS; Scope Guard Review PASS; implementation commit 700a244. Tag phase-1.18-accepted pushed. Status: WAITING_FOR_OWNER_APPROVAL_TO_START_NEXT_PHASE. |
 | 2026-05-07 02:00 | Phase 1.19 account_sources.currency CHECK Constraint implementation complete. Owner APPROVED. Migration `1778300000000_account-sources-currency-check.js` (NEW): pre-flight check (0 invalid rows found in 553 existing rows) + `ALTER TABLE account_sources ADD CONSTRAINT account_sources_currency_check CHECK (currency ~ '^[A-Z]{3,5}$')`. `smoke-test-phase119.mjs` (NEW): 24/24 PASS — constraint existence, type, definition, valid codes (RUB/USD/EUR/GBP/BTC/ETH/USDT), invalid rejection (empty/lowercase/digits/spaces/6-char/2-char), no backfill, scope guard. No TypeScript/route/dep/AI/queue changes. 24/24 Phase 1.19 + 644/644 regression + 13/13 typecheck+lint = 668/668 PASS. Traceability ✅ Adversarial Security ✅ Scope Guard ✅. Status: READY_FOR_OWNER_ACCEPTANCE. |
 | 2026-05-07 02:25 | Phase 1.19 accepted after final verification; account_sources.currency CHECK constraint added with regex ^[A-Z]{3,5}$; 668/668 tests passed; Traceability Review PASS; Adversarial Security Review PASS; Scope Guard Review PASS; implementation commit 9d288bd. Tag phase-1.19-accepted pushed. Status: WAITING_FOR_OWNER_APPROVAL_TO_START_NEXT_PHASE. |
+| 2026-05-07 09:40 | Phase 1.20 Balance Semantics Design Document complete. Owner APPROVED. docs/balance-semantics.md created: 6 design decisions D1–D6 with recommended options (D1=A standard signed formula, D2=A integrated debt, D3=B transfer neutral, D4a=Yes add initial_balance, D4b=Yes allow negative, D4c=Yes account currency implicit, D4d=No defer initial_balance_at, D5=B per-account breakdown, D6=A all-time). Traceability ✅ Adversarial Security ✅ Scope Guard ✅. No TypeScript, no migrations, no new commands. Status: READY_FOR_OWNER_ACCEPTANCE. |
 
 ---
 
