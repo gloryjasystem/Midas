@@ -12,7 +12,7 @@
 | **PHASE** | `1 — MVP Implementation` |
 | **STEP** | `1.27 — Multicurrency Balance — READY_FOR_OWNER_ACCEPTANCE` |
 | **AGENT STATUS** | `READY_FOR_OWNER_ACCEPTANCE` |
-| **LAST COMPLETED** | `Phase 1.27 DONE. Multicurrency balance hardening. 27/27 smoke + 814/814 regression + 13/13 typecheck = 854/854 PASS.` |
+| **LAST COMPLETED** | `Phase 1.27 DONE. Multicurrency balance hardening. 27/27 smoke + 814/814 regression + 13/13 typecheck = 854/854 PASS. HEAD 12e70d9.` |
 | **BLOCKER** | None — awaiting owner acceptance |
 | **NEXT ACTION** | Owner acceptance only — do not create tag or start Phase 1.28 without approval |
 
