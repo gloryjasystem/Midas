@@ -79,10 +79,28 @@ import {
   updateCurrency,
   updateTimezone,
   parseSettingsArgs,
-  formatSettingsView,
   formatCurrencyUpdated,
   formatTimezoneUpdated,
 } from '../services/settings.service.js';
+import {
+  sendMessageWithKeyboard,
+  editMessageText,
+  answerCallbackQuery,
+} from '../services/telegram-api.js';
+import { redisConnection } from '../queues/redis.js';
+import { searchCurrencies } from '../services/currencies.js';
+import {
+  parseSettingsCallback,
+  buildSettingsMainKeyboard,
+  buildGroupPickerKeyboard,
+  buildCurrencyPageKeyboard,
+  buildSearchResultsKeyboard,
+  formatSettingsMenuText,
+  formatCurrencyPageText,
+  formatPickConfirmText,
+  GROUP_PICKER_TEXT,
+  EMPTY_KEYBOARD,
+} from '../services/settings-keyboard.service.js';
 import { escapeHtml } from '../utils/html-escape.js';
 
 import { callbackConfirmQueue } from '../queues/callback-confirm-queue.js';
@@ -200,6 +218,12 @@ const UNKNOWN_COMMAND_TEXT = 'Команда не распознана или п
 
 const BOT_ID = process.env.TELEGRAM_BOT_ID ?? 'unknown_bot';
 
+// Phase 1.26: Redis key for settings search mode TTL state
+const SEARCH_MODE_TTL_SEC = 120;
+function searchModeKey(telegramUserId: string, chatId: string): string {
+  return `midas:settings:search:${telegramUserId}:${chatId}`;
+}
+
 const webhookRoute: FastifyPluginAsync = async (fastify) => {
   // Await a no-op: Fastify route plugins must be async; the actual async work
   // happens inside the route handler. Promise.resolve() satisfies require-await.
@@ -232,6 +256,97 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
       const chatId = cq.message ? String(cq.message.chat.id) : String(cq.from.id);
       const callbackData = cq.data ?? '';
 
+      // ── Phase 1.26: settings callbacks (prefix "st:") ────────
+      // Handled synchronously — no queue needed (no transactions, lightweight DB).
+      if (callbackData.startsWith('st:')) {
+        const cmd = parseSettingsCallback(callbackData);
+        if (!cmd) {
+          // Malformed settings callback — silently ack
+          request.log.warn({
+            msg: '[midas:bot:webhook] settings callback: unrecognised data — acknowledged',
+            callbackId: cq.id,
+          });
+          await reply.status(200).send({ ok: true });
+          return;
+        }
+
+        // SEC-03: resolve workspace from trusted source (DB), NOT from callback_data
+        let stResolved: { workspaceId: string; userId: string };
+        try {
+          stResolved = await resolveWorkspace(telegramUserId, chatId);
+        } catch {
+          await answerCallbackQuery(cq.id);
+          await reply.status(200).send({ ok: true });
+          return;
+        }
+
+        const messageId = cq.message ? String(cq.message.message_id) : null;
+
+        try {
+          if (cmd.cmd === 'cancel') {
+            // Remove keyboard from the message
+            if (messageId) {
+              void editMessageText(chatId, messageId, '⚙️ Настройки закрыты.', EMPTY_KEYBOARD);
+            }
+          } else if (cmd.cmd === 'menu' || cmd.cmd === 'grouppicker') {
+            if (cmd.cmd === 'menu') {
+              // Re-show main menu (refresh)
+              const settings = await getSettings(stResolved.workspaceId, stResolved.userId);
+              const text = formatSettingsMenuText(
+                settings?.default_currency ?? 'USDT',
+                settings?.timezone ?? 'UTC',
+              );
+              if (messageId) {
+                void editMessageText(chatId, messageId, text, buildSettingsMainKeyboard());
+              }
+            } else {
+              // Show group picker
+              if (messageId) {
+                void editMessageText(chatId, messageId, GROUP_PICKER_TEXT, buildGroupPickerKeyboard());
+              }
+            }
+          } else if (cmd.cmd === 'group' || cmd.cmd === 'page') {
+            const text = formatCurrencyPageText(cmd.group, cmd.page);
+            const keyboard = buildCurrencyPageKeyboard(cmd.group, cmd.page);
+            if (messageId) {
+              void editMessageText(chatId, messageId, text, keyboard);
+            }
+          } else if (cmd.cmd === 'pick') {
+            // Validate code is 3-5 uppercase letters (already done in parseSettingsCallback)
+            const before = await getSettings(stResolved.workspaceId, stResolved.userId);
+            const oldCode = before?.default_currency ?? '?';
+            await updateCurrency(stResolved.workspaceId, stResolved.userId, cmd.code);
+            const confirmText = formatPickConfirmText(cmd.code, oldCode);
+            if (messageId) {
+              void editMessageText(chatId, messageId, confirmText, EMPTY_KEYBOARD);
+            }
+            request.log.info({
+              msg: '[midas:bot:webhook] settings: currency updated via UI',
+              telegramUserId,
+              workspaceId: stResolved.workspaceId,
+              // code NOT logged (SEC-12 consistency)
+            });
+          } else {
+            // Set Redis TTL search mode key
+            const rKey = searchModeKey(telegramUserId, chatId);
+            await redisConnection.set(rKey, '1', 'EX', SEARCH_MODE_TTL_SEC);
+            void sendMessage(chatId, '🔍 Напиши символ или название валюты:');
+          }
+        } catch (err: unknown) {
+          const errorClass = err instanceof Error ? err.constructor.name : 'UnknownError';
+          request.log.error({
+            msg: '[midas:bot:webhook] settings callback failed',
+            callbackId: cq.id,
+            errorClass,
+          });
+        }
+
+        await answerCallbackQuery(cq.id);
+        await reply.status(200).send({ ok: true });
+        return;
+      }
+
+      // ── Phase 1.6-B: approve/reject callbacks ─────────────────
       // Parse callback_data — format: "action:draftId"
       const colonIdx = callbackData.indexOf(':');
       if (colonIdx === -1) {
@@ -681,7 +796,9 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
         return;
       }
 
-      // ── 5f-settings: /settings (Phase 1.25) ─────────────────
+      // ── 5f-settings: /settings (Phase 1.25 + Phase 1.26) ────
+      // /settings alone → show inline keyboard UI (Phase 1.26)
+      // /settings currency <CODE> and /settings timezone <ZONE> → text mode (Phase 1.25)
       if (commandToken === '/settings') {
         const parsed = parseSettingsArgs(message.text);
 
@@ -700,19 +817,20 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
           const resolved = await resolveWorkspace(telegramUserId, chatId);
 
           if (parsed.action === 'view') {
+            // Phase 1.26: /settings alone → inline keyboard UI
             const settings = await getSettings(resolved.workspaceId, resolved.userId);
-            if (!settings) {
-              void sendMessage(chatId, '⚠️ Не удалось получить настройки. Попробуйте позже.');
-            } else {
-              void sendMessage(chatId, formatSettingsView(settings));
-            }
+            const menuText = formatSettingsMenuText(
+              settings?.default_currency ?? 'USDT',
+              settings?.timezone ?? 'UTC',
+            );
+            void sendMessageWithKeyboard(chatId, menuText, buildSettingsMainKeyboard());
             request.log.info({
-              msg: '[midas:bot:webhook] /settings view',
+              msg: '[midas:bot:webhook] /settings menu sent',
               telegramUserId,
               workspaceId: resolved.workspaceId,
             });
           } else if (parsed.action === 'currency') {
-            // Fetch old value for display in confirmation
+            // Phase 1.25 text mode — kept for backward compatibility
             const before = await getSettings(resolved.workspaceId, resolved.userId);
             const oldCode = before?.default_currency ?? '?';
 
@@ -723,12 +841,13 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
               void sendMessage(chatId, formatCurrencyUpdated(parsed.code, oldCode));
             }
             request.log.info({
-              msg: '[midas:bot:webhook] /settings currency updated',
+              msg: '[midas:bot:webhook] /settings currency updated (text mode)',
               telegramUserId,
               workspaceId: resolved.workspaceId,
               // code NOT logged (SEC-12 consistency)
             });
           } else {
+            // Phase 1.25 text mode: /settings timezone <ZONE>
             const before = await getSettings(resolved.workspaceId, resolved.userId);
             const oldZone = before?.timezone ?? 'UTC';
 
@@ -739,7 +858,7 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
               void sendMessage(chatId, formatTimezoneUpdated(parsed.zone, oldZone));
             }
             request.log.info({
-              msg: '[midas:bot:webhook] /settings timezone updated',
+              msg: '[midas:bot:webhook] /settings timezone updated (text mode)',
               telegramUserId,
               workspaceId: resolved.workspaceId,
               // zone NOT logged (SEC-12 consistency)
@@ -779,6 +898,39 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
           msg: '[midas:bot:webhook] unknown slash command blocked',
           telegramUserId,
           commandToken,
+        });
+        await reply.status(200).send({ ok: true });
+        return;
+      }
+    }
+
+    // ── Step 5g: Phase 1.26 — settings search mode intercept ───
+    // If user is in settings search mode (pressed 🔍 in /settings UI),
+    // intercept their next text message as a currency search query.
+    // This check runs BEFORE AI parse — search messages must never reach AI.
+    if (!commandToken) {
+      const rKey = searchModeKey(telegramUserId, chatId);
+      const inSearch = await redisConnection.get(rKey);
+      if (inSearch) {
+        await redisConnection.del(rKey);
+        const results = searchCurrencies(message.text);
+        if (results.length === 0) {
+          void sendMessage(
+            chatId,
+            '❌ Ничего не найдено. Попробуй: USDT, BTC, EUR — или /settings для меню.',
+          );
+        } else {
+          void sendMessageWithKeyboard(
+            chatId,
+            `🔍 Результаты (${String(results.length)}):`,
+            buildSearchResultsKeyboard(results),
+          );
+        }
+        request.log.info({
+          msg: '[midas:bot:webhook] settings search handled',
+          telegramUserId,
+          resultCount: results.length,
+          // query NOT logged (SEC-12)
         });
         await reply.status(200).send({ ok: true });
         return;

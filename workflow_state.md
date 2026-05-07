@@ -10,11 +10,11 @@
 | Параметр | Значение |
 |---|---|
 | **PHASE** | `1 — MVP Implementation` |
-| **STEP** | `1.25 — /settings text mode — COMPLETED / ACCEPTED` |
-| **AGENT STATUS** | `WAITING_FOR_OWNER_APPROVAL_TO_START_NEXT_PHASE` |
-| **LAST COMPLETED** | `Phase 1.25 ACCEPTED. /settings text mode, timezone column, draft fallback fix. 782/782 tests PASS. Tag phase-1.25-accepted pushed.` |
-| **BLOCKER** | None — awaiting owner approval to start next phase |
-| **NEXT ACTION** | Prepare next phase advisory only — do not implement |
+| **STEP** | `1.26 — /settings UI — READY_FOR_OWNER_ACCEPTANCE` |
+| **AGENT STATUS** | `READY_FOR_OWNER_ACCEPTANCE` |
+| **LAST COMPLETED** | `Phase 1.26 DONE. /settings inline keyboard UI. 45/45 smoke + 782/782 regression + 13/13 typecheck = 840/840 PASS.` |
+| **BLOCKER** | None — awaiting owner acceptance decision |
+| **NEXT ACTION** | Owner acceptance only — do not create tag or start Phase 1.27 without approval |
 
 ---
 
