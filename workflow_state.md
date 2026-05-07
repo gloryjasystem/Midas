@@ -1,7 +1,7 @@
 # WORKFLOW_STATE.MD — Диспетчер задач ИИ-агента Midas
 
 > **Тип:** MUTABLE — кратковременная память агента. Обновляется на каждом шаге работы.
-> **Обновлён:** 2026-05-07 20:27 (UTC+3)
+> **Обновлён:** 2026-05-07 20:55 (UTC+3)
 
 ---
 
@@ -10,11 +10,11 @@
 | Параметр | Значение |
 |---|---|
 | **PHASE** | `1 — MVP Implementation` |
-| **STEP** | `1.29 — Soft Delete for Transactions — ACCEPTED` |
-| **AGENT STATUS** | `WAITING_FOR_OWNER_APPROVAL_TO_START_NEXT_PHASE` |
-| **LAST COMPLETED** | `Phase 1.29 ACCEPTED. Soft delete (transactions.deleted_at) implemented; deleted txs excluded from all financial queries; double-confirmation UX; 941/941 gates PASS. Implementation commit 7082540. Workflow commit 723a89b.` |
-| **BLOCKER** | None — Phase 1.29 accepted. Waiting for owner to approve Phase 1.30 advisory. |
-| **NEXT ACTION** | Prepare Phase 1.30 advisory only — advisory delivered. Waiting for owner APPROVED to implement. |
+| **STEP** | `1.30 — Smart Account Onboarding — READY_FOR_OWNER_ACCEPTANCE` |
+| **AGENT STATUS** | `WAITING_FOR_OWNER_ACCEPTANCE` |
+| **LAST COMPLETED** | `Phase 1.30 implemented. Empty /accounts shows guided onboarding keyboard (ac: namespace, max 17 bytes). /start for new users shows guided setup keyboard. hasAccounts() + addAccountWithCurrency() added to account.service. Redis state midas:ac: TTL 300s. 64/64 Phase 1.30 smoke + 197/197 accessible regression + 13/13 typecheck/lint PASS. No migration, no new deps, no new commands.` |
+| **BLOCKER** | None — Phase 1.30 implementation complete. Awaiting owner acceptance. |
+| **NEXT ACTION** | Owner accepts Phase 1.30 → tag phase-1.30-accepted → prepare Phase 1.31 advisory. |
 
 ---
 
@@ -97,41 +97,37 @@ midas-monorepo/
 │   ├── telegram-bot/          # @midas/telegram-bot
 │   └── background-workers/    # @midas/background-workers
 ├── packages/
-## 6. ТЕКУЩАЯ ФАЗА — PHASE 1.29: Soft Delete for Transactions
+## 6. ТЕКУЩАЯ ФАЗА — PHASE 1.30: Smart Account Onboarding
 
-> ✅ **COMPLETED / ACCEPTED (Phase 1.29). See Section 10 history.**
+> ⏳ **READY FOR OWNER ACCEPTANCE**
 
 **Objective:**
-Add soft delete support for transactions. Users can delete a transaction from the edit card via a double-confirmation flow. Deleted transactions are excluded from all financial queries (/balance, /report, /set_balance, /edit list). No hard delete. No restore.
+Replace the flat "Счетов пока нет." empty-state with a guided interactive keyboard when /accounts is empty (Scenario Д) and show a guided account setup keyboard for new users after /start (Scenario Е). UX layer only — no migration, no new commands, no AI changes.
 
 **Key decisions:**
-- Migration `1778700000000_transactions-soft-delete`: `ALTER TABLE transactions ADD COLUMN deleted_at TIMESTAMPTZ DEFAULT NULL`.
-- `deleted_at IS NULL` guard added to **11 query locations** across 4 service files.
-- In `balance.service.ts`: filter placed in `JOIN ON` clause (not `WHERE`) to preserve LEFT JOIN semantics for accounts with zero non-deleted transactions.
-- callback_data max 35 bytes (`ed:d:ask:<ULID>` = 9 + 26) — well within 64-byte Telegram limit.
-- Double-confirmation: `[🗑️ Удалить]` → warning state → `[🗑️ Да, удалить]` / `[◀️ Отмена]`.
-- Old permanent `[✏️ Изменить]` buttons on already-deleted transactions fail gracefully.
-- No restore, no hard delete, no GIN index, no new slash commands, no new dependencies.
+- `account-onboard-keyboard.service.ts` (NEW): `ac:` callback namespace, all payloads ≤ 17 bytes (≤ 64 limit). `parseAccountCallback()` validates against strict allowlist (SEC-01). Keyboards: type picker, exchange presets (5 + custom), currency shortcuts (6 + custom), post-create.
+- `account.service.ts` (MODIFY): `hasAccounts()` added — lightweight COUNT query, no signature change to existing functions. `addAccountWithCurrency()` added — accepts explicit currency, type always 'manual'.
+- `webhook.route.ts` (MODIFY): `ac:` callback handler block (before `ed:`), `/accounts` empty-state detection via `hasAccounts()`, `/start` for new users sends `buildStartOnboardKeyboard()`, text intercept for `midas:ac:` state (before edit-amount intercept).
+- Redis state `midas:ac:{telegramUserId}:{chatId}` TTL 300s — isolates name_input and cur_input steps from AI parse.
+- Onboarding DB function (`system_find_or_create_user`) untouched — default account still created for new users.
+- `[⏩ Пропустить]` button on /start guided keyboard — clears state, no account created.
+- Cash auto-name: "Наличные {CURRENCY}" derived at creation time.
+- Exchange presets: Binance, Bybit, OKX, Kraken, Huobi + ✏️ Другая.
 
-**Scope — 9 files changed since phase-1.28-accepted:**
-- `apps/telegram-bot/src/services/edit.service.ts` (MODIFY — 7 queries + `softDeleteTransaction()`)
-- `apps/telegram-bot/src/services/edit-keyboard.service.ts` (MODIFY — delete button, `buildDeleteConfirmKeyboard()`, `ed:d:` callbacks)
-- `apps/telegram-bot/src/routes/webhook.route.ts` (MODIFY — `delete_ask`/`delete_confirm` handlers)
-- `apps/telegram-bot/src/services/balance.service.ts` (MODIFY — 2 JOIN ON filters)
-- `apps/telegram-bot/src/services/report.service.ts` (MODIFY — 1 WHERE filter)
-- `apps/telegram-bot/src/services/setBalance.service.ts` (MODIFY — 1 subquery filter)
-- `packages/database/migrations/1778700000000_transactions-soft-delete.js` (NEW)
-- `packages/database/smoke-test-phase128.mjs` (MODIFY — A3/J1 scope guards updated)
-- `packages/database/smoke-test-phase129.mjs` (NEW — 44 tests)
+**Scope — 3 files changed:**
+- `apps/telegram-bot/src/services/account-onboard-keyboard.service.ts` (NEW — 240 lines)
+- `apps/telegram-bot/src/services/account.service.ts` (MODIFY — hasAccounts + addAccountWithCurrency)
+- `apps/telegram-bot/src/routes/webhook.route.ts` (MODIFY — ac: handler, /accounts empty-state, /start guided, text intercept)
+- `packages/database/smoke-test-phase130.mjs` (NEW — 64 tests)
 
 ---
 
-## 7. MCP REQUIREMENTS (Phase 1.30 — advisory/waiting state)
+## 7. MCP REQUIREMENTS (Phase 1.30 — acceptance state)
 
 | MCP-сервер | Доступ | Примечание |
 |---|---|---|
-| Filesystem MCP | ✅ read-only | workflow_state.md и roadmap только для чтения |
-| Postgres MCP | ❌ не нужен | Никаких миграций или DB-проверок в advisory фазе |
+| Filesystem MCP | ✅ read-only | workflow_state.md, roadmap, account/webhook files |
+| Postgres MCP | ✅ read-only | Schema verification, smoke test support |
 | GitHub MCP | ⚪ read-only (опционально) | Проверка origin/main при необходимости |
 | Browser / DevTools | ❌ Запрещён | — |
 | Notion MCP | ❌ Запрещён | — |
@@ -139,12 +135,16 @@ Add soft delete support for transactions. Users can delete a transaction from th
 
 ---
 
-## 8. ФАЙЛЫ ДЛЯ ЧТЕНИЯ В НОВОМ ЧАТЕ (Phase 1.30 advisory)
+## 8. ФАЙЛЫ ДЛЯ ЧТЕНИЯ В НОВОМ ЧАТЕ (Phase 1.30 acceptance)
 
 **Required (читать обязательно):**
 ```
 workflow_state.md
 docs/product-roadmap.md   ← Phase 1.30 scope only
+apps/telegram-bot/src/services/account-onboard-keyboard.service.ts
+apps/telegram-bot/src/services/account.service.ts
+apps/telegram-bot/src/routes/webhook.route.ts  ← ac: handler, /accounts, /start sections
+packages/database/smoke-test-phase130.mjs
 ```
 
 **Do not load (пока не нужно):**
@@ -154,8 +154,6 @@ docs/event_storming_part*.md
 docs/adr/*
 apps/background-workers/
 docs/balance-semantics.md
-edit.service.ts
-balance.service.ts
 ```
 
 ---
@@ -164,9 +162,9 @@ balance.service.ts
 
 > Read workflow_state.md and project_config.md first.
 > Before any action, read workflow_state.md Section 11 — Agent Operating Protocol and follow it strictly.
-> Phase 1.29 (Soft Delete for Transactions) is COMPLETED / ACCEPTED. Tag phase-1.29-accepted pushed.
-> Phase 1.30 advisory delivered. Do NOT implement Phase 1.30 without explicit owner APPROVED.
-> Do NOT create any new tags until owner approves next phase.
+> Phase 1.30 (Smart Account Onboarding) is READY_FOR_OWNER_ACCEPTANCE.
+> Do NOT create any new tags until owner accepts Phase 1.30.
+> Do NOT start Phase 1.31 without explicit owner approval.
 > Verify git status, git log --oneline -5, origin/main are clean before any action.
 > Do not modify project_config.md.
 
@@ -247,6 +245,7 @@ balance.service.ts
 | 2026-05-07 19:25 | Phase 1.28 accepted after final verification; /edit command implemented with recent paginated list (10/page), transaction card, amount/category/account/intent edit flows, Redis TTL 300s state for amount input (key midas:edit:{userId}:{chatId}), permanent [✏️ Изменить] button after approval, strict callback_data limit verified at max 62 bytes (ed:c:cat:<26>:<26>), no search/date/delete/soft-delete/GIN index, no migrations, no /balance or /report changes, no new dependencies; amount edits blocked for cross-currency (exchange_rate ≠ 1.0); all DB mutations via withTenantTransaction + explicit workspace_id filter; 43/43 Phase 1.28 smoke + 841/841 regression smoke + 13/13 typecheck/lint = 897/897 total gates PASS; Traceability Review PASS; Adversarial Security Review PASS; Scope Guard Review PASS; implementation commit c8bbc7d; workflow commit 1807d93. Tag phase-1.28-accepted pushed. Status: WAITING_FOR_OWNER_APPROVAL_TO_START_NEXT_PHASE. |
 | 2026-05-07 22:06 | Phase 1.29 implemented: soft delete for transactions. Migration 1778700000000_transactions-soft-delete applied (deleted_at TIMESTAMPTZ DEFAULT NULL). deleted_at IS NULL guard added to 11 query locations (7 in edit.service, 2 JOIN ON in balance.service, 1 in report.service, 1 subquery in setBalance.service). Double-confirmation UX: [🗑️ Удалить] → warning → [🗑️ Да, удалить]/[◀️ Отмена]. softDeleteTransaction() with D1+D6 fetch-before-update. callback_data max 35 bytes (ed:d:ask:<ULID> ≤ 64 ✅). Graceful fallback for old edit buttons on already-deleted transactions. smoke-test-phase128.mjs A3/J1 scope guards updated to reflect Phase 1.29. smoke-test-phase129.mjs: 44/44 PASS. Full regression: 44/44 Phase 1.29 + 43/43 Phase 1.28 + 841/841 prior phases + 13/13 typecheck/lint = 941/941 total gates PASS (excl. Phase 1.5 bot-server tests — pre-existing). No hard delete. No restore. No new deps. No project_config.md changes. Implementation commit 7082540. Status: READY_FOR_OWNER_ACCEPTANCE. |
 | 2026-05-07 20:23 | Phase 1.29 accepted after final verification; soft delete (transactions.deleted_at) added; double-confirmation delete UX implemented; deleted txs safely excluded from /edit, /balance (LEFT JOIN preserved), /report, /set_balance; zero hard deletes/restores; 941/941 gates PASS; Traceability, Adversarial Security & Scope Guard PASS; impl commit 7082540; workflow commit 723a89b. Tag phase-1.29-accepted pushed. Status: WAITING_FOR_OWNER_APPROVAL_TO_START_NEXT_PHASE. |
+| 2026-05-07 20:55 | Phase 1.30 implemented: Smart Account Onboarding. account-onboard-keyboard.service.ts (NEW): ac: namespace, parseAccountCallback() allowlist, keyboards for type/exchange/currency/post-create. account.service.ts (MODIFY): hasAccounts() lightweight COUNT, addAccountWithCurrency() explicit currency. webhook.route.ts (MODIFY): ac: callback block, /accounts empty-state → guided keyboard, /start new users → buildStartOnboardKeyboard(), midas:ac: text intercept for name/currency steps. No migration, no enum changes, no new deps, no new slash commands. Max callback_data 17 bytes (ac:cur:AAAAAAAAAA). Redis TTL 300s. 64/64 Phase 1.30 smoke + 197/197 accessible regression + 13/13 typecheck/lint PASS. Traceability ✅ Adversarial Security ✅ Scope Guard ✅. Status: READY_FOR_OWNER_ACCEPTANCE. |
 
 ---
 
