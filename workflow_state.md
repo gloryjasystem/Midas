@@ -1,7 +1,7 @@
 # WORKFLOW_STATE.MD — Диспетчер задач ИИ-агента Midas
 
 > **Тип:** MUTABLE — кратковременная память агента. Обновляется на каждом шаге работы.
-> **Обновлён:** 2026-05-07 09:40 (UTC+3)
+> **Обновлён:** 2026-05-07 09:45 (UTC+3)
 
 ---
 
@@ -10,11 +10,11 @@
 | Параметр | Значение |
 |---|---|
 | **PHASE** | `1 — MVP Implementation` |
-| **STEP** | `1.20 — Balance Semantics Design Document — READY_FOR_OWNER_ACCEPTANCE` |
-| **AGENT STATUS** | `READY_FOR_OWNER_ACCEPTANCE` |
-| **LAST COMPLETED** | `Phase 1.20 — docs/balance-semantics.md created. 6 design decisions (D1–D6) with recommended options. Traceability ✅ Adversarial Security ✅ Scope Guard ✅. No code written, no migrations, no new commands.` |
-| **BLOCKER** | Owner review of docs/balance-semantics.md required — must approve/override D1–D6 before Phase 1.21 |
-| **NEXT ACTION** | Owner reviews docs/balance-semantics.md → approves D1–D6 decisions → Phase 1.20 ACCEPTED → Phase 1.21 (initial_balance migration if D4a=Yes) |
+| **STEP** | `1.20 — Balance Semantics Design Document — COMPLETED / ACCEPTED` |
+| **AGENT STATUS** | `WAITING_FOR_OWNER_APPROVAL_TO_START_NEXT_PHASE` |
+| **LAST COMPLETED** | `Phase 1.20 ACCEPTED. docs/balance-semantics.md finalized. D1–D6 all approved by owner (all recommended options). Traceability ✅ Adversarial Security ✅ Scope Guard ✅. No code, no migrations, no DB changes. Tag phase-1.20-accepted pushed.` |
+| **BLOCKER** | None — awaiting owner approval to start next phase |
+| **NEXT ACTION** | Prepare next phase advisory only — do not implement |
 
 ---
 
@@ -47,7 +47,7 @@
 | 1.17 /add_account Strict-Format Command | ✅ ACCEPTED | `account.service.ts` (MODIFY), `webhook.route.ts` (MODIFY), `smoke-test-phase117.mjs` (NEW) — 27/27 Phase 1.17 + 610/610 total PASS. Traceability ✅ Adversarial Security ✅ Scope Guard ✅. Implementation commit `8c370e3`. Tag `phase-1.17-accepted` pushed. |
 | 1.18 /report Currency Label (base_currency grouping) | ✅ ACCEPTED | `report.service.ts` (MODIFY), `smoke-test-phase118.mjs` (NEW), `smoke-test-phase19.mjs` (MODIFY — runReportQuery SQL helper sync) — 34/34 Phase 1.18 + 644/644 total PASS. Traceability ✅ Adversarial Security ✅ Scope Guard ✅. Implementation commit `700a244`. Tag `phase-1.18-accepted` pushed. |
 | 1.19 account_sources.currency CHECK Constraint | ✅ ACCEPTED | `packages/database/migrations/1778300000000_account-sources-currency-check.js` (NEW), `packages/database/smoke-test-phase119.mjs` (NEW) — CHECK (currency ~ '^[A-Z]{3,5}$'); pre-flight 0 invalid rows; 24/24 Phase 1.19 + 668/668 total PASS. Traceability ✅ Adversarial Security ✅ Scope Guard ✅. Implementation commit `9d288bd`. Tag `phase-1.19-accepted` pushed. |
-| 1.20 Balance Semantics Design Document | 🔄 READY_FOR_OWNER_ACCEPTANCE | `docs/balance-semantics.md` (NEW) — 6 design decisions D1–D6: sign rule per intent, debt integration model, transfer model, initial_balance design, /balance output format, /balance time scope. Recommended options defined. Traceability ✅ Adversarial Security ✅ Scope Guard ✅. No code. |
+| 1.20 Balance Semantics Design Document | ✅ ACCEPTED | `docs/balance-semantics.md` (NEW) — 6 design decisions D1–D6 all approved. Formula: income+1/expense−1/debt_given−1/debt_received+1/transfer neutral. initial_balance NUMERIC(19,4) DEFAULT 0 approved (allow negative, account currency implicit, no date). Per-account output, all-time scope. Traceability ✅ Adversarial Security ✅ Scope Guard ✅. No code. Tag `phase-1.20-accepted` pushed. |
 
 ---
 
@@ -112,7 +112,7 @@ midas-monorepo/
 
 ## 6. ТЕКУЩАЯ ФАЗА — PHASE 1.20: Balance Semantics Design Document
 
-> ✅ **READY_FOR_OWNER_ACCEPTANCE — docs/balance-semantics.md created. No code written.**
+> ✅ **COMPLETED / ACCEPTED. docs/balance-semantics.md finalized. D1–D6 all approved by owner. Tag phase-1.20-accepted pushed.**
 
 **Objective:**
 Produce `docs/balance-semantics.md` — a complete balance semantics design document that defines and resolves all design decisions required before implementing `/balance`. No TypeScript, no migrations, no new commands.
@@ -257,6 +257,7 @@ Crypto / Notion / Sheets / Mini App files
 | 2026-05-07 02:00 | Phase 1.19 account_sources.currency CHECK Constraint implementation complete. Owner APPROVED. Migration `1778300000000_account-sources-currency-check.js` (NEW): pre-flight check (0 invalid rows found in 553 existing rows) + `ALTER TABLE account_sources ADD CONSTRAINT account_sources_currency_check CHECK (currency ~ '^[A-Z]{3,5}$')`. `smoke-test-phase119.mjs` (NEW): 24/24 PASS — constraint existence, type, definition, valid codes (RUB/USD/EUR/GBP/BTC/ETH/USDT), invalid rejection (empty/lowercase/digits/spaces/6-char/2-char), no backfill, scope guard. No TypeScript/route/dep/AI/queue changes. 24/24 Phase 1.19 + 644/644 regression + 13/13 typecheck+lint = 668/668 PASS. Traceability ✅ Adversarial Security ✅ Scope Guard ✅. Status: READY_FOR_OWNER_ACCEPTANCE. |
 | 2026-05-07 02:25 | Phase 1.19 accepted after final verification; account_sources.currency CHECK constraint added with regex ^[A-Z]{3,5}$; 668/668 tests passed; Traceability Review PASS; Adversarial Security Review PASS; Scope Guard Review PASS; implementation commit 9d288bd. Tag phase-1.19-accepted pushed. Status: WAITING_FOR_OWNER_APPROVAL_TO_START_NEXT_PHASE. |
 | 2026-05-07 09:40 | Phase 1.20 Balance Semantics Design Document complete. Owner APPROVED. docs/balance-semantics.md created: 6 design decisions D1–D6 with recommended options (D1=A standard signed formula, D2=A integrated debt, D3=B transfer neutral, D4a=Yes add initial_balance, D4b=Yes allow negative, D4c=Yes account currency implicit, D4d=No defer initial_balance_at, D5=B per-account breakdown, D6=A all-time). Traceability ✅ Adversarial Security ✅ Scope Guard ✅. No TypeScript, no migrations, no new commands. Status: READY_FOR_OWNER_ACCEPTANCE. |
+| 2026-05-07 09:45 | Phase 1.20 ACCEPTED by owner. D1–D6 all confirmed as recommended. Owner Choice column filled in docs/balance-semantics.md. Approved formula and schema changes documented. No code, no migrations, no DB changes made in this phase. Tag phase-1.20-accepted pushed. Status: WAITING_FOR_OWNER_APPROVAL_TO_START_NEXT_PHASE. |
 
 ---
 

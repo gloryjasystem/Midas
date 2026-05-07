@@ -1,9 +1,9 @@
 # Balance Semantics Design Document
 > **Phase:** 1.20 — Design Document Only  
-> **Status:** READY_FOR_OWNER_ACCEPTANCE  
+> **Status:** ✅ ACCEPTED — 2026-05-07  
 > **Created:** 2026-05-07  
 > **Purpose:** Define all semantic rules for the `/balance` command before any schema migration or implementation begins.  
-> Owner must review decisions D1–D6 and confirm (or override) recommended options before Phase 1.21 can start.
+> All decisions D1–D6 approved by owner. Phase 1.21 may proceed.
 
 ---
 
@@ -291,17 +291,48 @@ Requires argument parsing — out of scope for Phase 1.
 
 ## Owner Decisions Summary
 
-| # | Decision | Options | **Recommended** | Owner Choice |
+| # | Decision | Options | **Recommended** | **Owner Choice** |
 |---|---|---|---|---|
-| **D1** | Sign rule per intent | A (standard ±1) / B (debt separate) / C (income+expense only) | **A** | ___ |
-| **D2** | Debt: integrated or separate? | A (integrated ±1) / B (separate section) | **A** | ___ |
-| **D3** | Transfer model | A (debit source −1) / B (neutral, shown separately) / C (two-sided, future) | **B** | ___ |
-| **D4a** | Add `initial_balance` column? | Yes / No | **Yes** | ___ |
-| **D4b** | Allow negative `initial_balance`? | Yes (no CHECK) / No (CHECK >= 0) | **Yes** | ___ |
-| **D4c** | `initial_balance` currency = `account.currency`? | Yes (implicit) / No (separate column) | **Yes** | ___ |
-| **D4d** | `initial_balance_at` in Phase 1? | Yes (add column) / No (defer) | **No** | ___ |
-| **D5** | Output format | A (aggregate) / B (per-account) / C (combined) | **B** | ___ |
-| **D6** | Time scope | A (all-time) / B (current month) / C (date range) | **A** | ___ |
+| **D1** | Sign rule per intent | A (standard ±1) / B (debt separate) / C (income+expense only) | **A** | ✅ **A** |
+| **D2** | Debt: integrated or separate? | A (integrated ±1) / B (separate section) | **A** | ✅ **A** |
+| **D3** | Transfer model | A (debit source −1) / B (neutral, shown separately) / C (two-sided, future) | **B** | ✅ **B** |
+| **D4a** | Add `initial_balance` column? | Yes / No | **Yes** | ✅ **Yes** |
+| **D4b** | Allow negative `initial_balance`? | Yes (no CHECK) / No (CHECK >= 0) | **Yes** | ✅ **Yes** |
+| **D4c** | `initial_balance` currency = `account.currency`? | Yes (implicit) / No (separate column) | **Yes** | ✅ **Yes** |
+| **D4d** | `initial_balance_at` in Phase 1? | Yes (add column) / No (defer) | **No** | ✅ **No** |
+| **D5** | Output format | A (aggregate) / B (per-account) / C (combined) | **B** | ✅ **B** |
+| **D6** | Time scope | A (all-time) / B (current month) / C (date range) | **A** | ✅ **A** |
+
+---
+
+## Owner Approved Decisions
+
+> **Approved:** 2026-05-07 by project owner.  
+> All recommended options accepted without override. Phase 1.21 is unblocked.
+
+### Approved Balance Formula (per D1 + D2 + D3)
+
+```
+balance(account) =
+    initial_balance                          -- D4a: new column, DEFAULT 0
+  + SUM(base_amount WHERE intent = 'income')          -- D1: +1
+  + SUM(base_amount WHERE intent = 'debt_received')   -- D1+D2: +1, integrated
+  − SUM(base_amount WHERE intent = 'expense')         -- D1: −1
+  − SUM(base_amount WHERE intent = 'debt_given')      -- D1+D2: −1, integrated
+  -- 'transfer' excluded from sum (D3: neutral)       -- shown separately
+```
+
+### Approved Schema Change (per D4)
+- Column: `account_sources.initial_balance NUMERIC(19,4) NOT NULL DEFAULT 0`
+- No `CHECK (initial_balance >= 0)` — negative values allowed (credit cards, loans)
+- No `initial_balance_at` column — deferred; assumption: all Midas transactions post-date account creation
+- Currency of `initial_balance` = `account_sources.currency` (implicit, no extra column)
+
+### Approved Output Format (per D5 + D6)
+- Per-account breakdown + workspace currency totals
+- All-time running balance (not filtered by month)
+- Transfer shown as informational footnote (count + sum), does not affect balance
+- Debt integrated into balance sum (not shown as separate section)
 
 ---
 
