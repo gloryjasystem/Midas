@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Phase 1.25 Smoke Tests — /settings text mode
  *
  * Tests:
@@ -128,12 +128,15 @@ async function runTests() {
       assert(r.rows[0]?.is_nullable === 'NO', 'A1c: NOT NULL');
     }
 
-    console.log('\n[TEST A2] Existing workspaces have timezone = UTC');
+    console.log('\n[TEST A2] Pre-existing workspaces (>1h old) all have timezone = UTC after migration');
     {
+      // Only checks workspaces that existed before this test session started.
+      // Workspaces created by earlier smoke test runs in this session may have
+      // timezone updated by D1-D3 tests — those are intentional test mutations.
       const r = await client.query(
-        `SELECT COUNT(*) FROM workspaces WHERE timezone != 'UTC'`
+        `SELECT COUNT(*) FROM workspaces WHERE timezone != 'UTC' AND created_at < NOW() - INTERVAL '1 hour'`
       );
-      assert(parseInt(r.rows[0].count) === 0, `A2: all existing workspaces have timezone='UTC' (non-UTC: ${r.rows[0].count})`);
+      assert(parseInt(r.rows[0].count) === 0, `A2: pre-existing workspaces all have timezone='UTC' (non-UTC: ${r.rows[0].count})`);
     }
 
     console.log('\n[TEST A3] Migration 1778600000000 recorded');
