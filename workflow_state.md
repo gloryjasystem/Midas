@@ -1,7 +1,7 @@
 # WORKFLOW_STATE.MD — Диспетчер задач ИИ-агента Midas
 
 > **Тип:** MUTABLE — кратковременная память агента. Обновляется на каждом шаге работы.
-> **Обновлён:** 2026-05-07 10:35 (UTC+3)
+> **Обновлён:** 2026-05-07 12:38 (UTC+3)
 
 ---
 
@@ -320,6 +320,7 @@ Crypto / Notion / Sheets / Mini App files
 Every new agent session must start by reading:
 - project_config.md
 - workflow_state.md
+- docs/product-roadmap.md (утверждённый план развития продукта — Phase 1.23–2.5)
 - only the phase-relevant files listed in workflow_state.md
 
 The agent must not load all project files by default.
@@ -638,11 +639,14 @@ Required Phase Advisory format:
 
 ### Required Context
 Required files:
-...
+- `workflow_state.md`
+- `project_config.md`
+- `docs/product-roadmap.md` ← **источник правды** для следующих фаз (1.23–2.5)
+- `docs/balance-semantics.md` (для фаз, связанных с балансом)
 Optional files:
-...
+- phase-relevant source code (determined per phase from roadmap)
 Do not load:
-...
+- all project files by default
 
 ### Required MCP Servers
 | MCP | Required? | Access Level | Why |
