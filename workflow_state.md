@@ -12,7 +12,7 @@
 | **PHASE** | `1 — MVP Implementation` |
 | **STEP** | `1.25 — /settings text mode — READY_FOR_OWNER_ACCEPTANCE` |
 | **AGENT STATUS** | `READY_FOR_OWNER_ACCEPTANCE` |
-| **LAST COMPLETED** | `Phase 1.25 DONE. /settings view/currency/timezone. Timezone migration. Draft fallback fix. 32/32 + 737/737 + 13/13 = 782/782 PASS.` |
+| **LAST COMPLETED** | `Phase 1.25 DONE. /settings view/currency/timezone. Timezone migration. Draft fallback fix. 32/32 + 737/737 + 13/13 = 782/782 PASS. Test A2 scope fixed (commit 2eaccc7).` |
 | **BLOCKER** | None — awaiting owner acceptance decision |
 | **NEXT ACTION** | Owner acceptance only — do not create tag or start Phase 1.26 without approval |
 
