@@ -1,7 +1,7 @@
 # WORKFLOW_STATE.MD — Диспетчер задач ИИ-агента Midas
 
 > **Тип:** MUTABLE — кратковременная память агента. Обновляется на каждом шаге работы.
-> **Обновлён:** 2026-05-07 20:23 (UTC+3)
+> **Обновлён:** 2026-05-07 20:27 (UTC+3)
 
 ---
 
@@ -14,7 +14,7 @@
 | **AGENT STATUS** | `WAITING_FOR_OWNER_APPROVAL_TO_START_NEXT_PHASE` |
 | **LAST COMPLETED** | `Phase 1.29 ACCEPTED. Soft delete (transactions.deleted_at) implemented; deleted txs excluded from all financial queries; double-confirmation UX; 941/941 gates PASS. Implementation commit 7082540. Workflow commit 723a89b.` |
 | **BLOCKER** | None — Phase 1.29 accepted. Waiting for owner to approve Phase 1.30 advisory. |
-| **NEXT ACTION** | Prepare Phase 1.30 advisory only when owner approves — do not implement Phase 1.30. |
+| **NEXT ACTION** | Prepare Phase 1.30 advisory only — advisory delivered. Waiting for owner APPROVED to implement. |
 
 ---
 
@@ -126,12 +126,12 @@ Add soft delete support for transactions. Users can delete a transaction from th
 
 ---
 
-## 7. MCP REQUIREMENTS (Phase 1.29 — acceptance state)
+## 7. MCP REQUIREMENTS (Phase 1.30 — advisory/waiting state)
 
 | MCP-сервер | Доступ | Примечание |
 |---|---|---|
 | Filesystem MCP | ✅ read-only | workflow_state.md и roadmap только для чтения |
-| Postgres MCP | ✅ read-only | Проверка схемы и smoke тестов |
+| Postgres MCP | ❌ не нужен | Никаких миграций или DB-проверок в advisory фазе |
 | GitHub MCP | ⚪ read-only (опционально) | Проверка origin/main при необходимости |
 | Browser / DevTools | ❌ Запрещён | — |
 | Notion MCP | ❌ Запрещён | — |
@@ -139,19 +139,12 @@ Add soft delete support for transactions. Users can delete a transaction from th
 
 ---
 
-## 8. ФАЙЛЫ ДЛЯ ЧТЕНИЯ В НОВОМ ЧАТЕ (Phase 1.29 acceptance)
+## 8. ФАЙЛЫ ДЛЯ ЧТЕНИЯ В НОВОМ ЧАТЕ (Phase 1.30 advisory)
 
 **Required (читать обязательно):**
 ```
 workflow_state.md
-docs/product-roadmap.md   ← Phase 1.29 scope
-edit.service.ts
-edit-keyboard.service.ts
-balance.service.ts
-report.service.ts
-setBalance.service.ts
-webhook.route.ts (edit/callback sections)
-smoke-test-phase129.mjs
+docs/product-roadmap.md   ← Phase 1.30 scope only
 ```
 
 **Do not load (пока не нужно):**
@@ -161,6 +154,8 @@ docs/event_storming_part*.md
 docs/adr/*
 apps/background-workers/
 docs/balance-semantics.md
+edit.service.ts
+balance.service.ts
 ```
 
 ---
@@ -170,7 +165,7 @@ docs/balance-semantics.md
 > Read workflow_state.md and project_config.md first.
 > Before any action, read workflow_state.md Section 11 — Agent Operating Protocol and follow it strictly.
 > Phase 1.29 (Soft Delete for Transactions) is COMPLETED / ACCEPTED. Tag phase-1.29-accepted pushed.
-> Do NOT start Phase 1.30 implementation without explicit owner approval.
+> Phase 1.30 advisory delivered. Do NOT implement Phase 1.30 without explicit owner APPROVED.
 > Do NOT create any new tags until owner approves next phase.
 > Verify git status, git log --oneline -5, origin/main are clean before any action.
 > Do not modify project_config.md.
