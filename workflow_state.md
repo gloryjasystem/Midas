@@ -1,7 +1,7 @@
 # WORKFLOW_STATE.MD — Диспетчер задач ИИ-агента Midas
 
 > **Тип:** MUTABLE — кратковременная память агента. Обновляется на каждом шаге работы.
-> **Обновлён:** 2026-05-07 14:51 (UTC+3)
+> **Обновлён:** 2026-05-07 19:25 (UTC+3)
 
 ---
 
@@ -10,11 +10,11 @@
 | Параметр | Значение |
 |---|---|
 | **PHASE** | `1 — MVP Implementation` |
-| **STEP** | `1.28 — /edit Transactions MVP — READY_FOR_OWNER_ACCEPTANCE` |
-| **AGENT STATUS** | `READY_FOR_OWNER_ACCEPTANCE` |
-| **LAST COMPLETED** | `Phase 1.28 DONE. /edit transactions MVP. 43/43 smoke + 104/104 regression (Phase 1.25-1.27) + 13/13 typecheck = 880/880 PASS. HEAD c8bbc7d.` |
-| **BLOCKER** | None — awaiting owner acceptance of Phase 1.28 |
-| **NEXT ACTION** | Owner to review and accept Phase 1.28. Do not start Phase 1.29 advisory until owner approval. |
+| **STEP** | `1.28 — /edit Transactions MVP — ACCEPTED` |
+| **AGENT STATUS** | `WAITING_FOR_OWNER_APPROVAL_TO_START_NEXT_PHASE` |
+| **LAST COMPLETED** | `Phase 1.28 ACCEPTED. /edit transactions MVP. 43/43 Phase 1.28 smoke + 841/841 regression smoke + 13/13 typecheck/lint = 897/897 PASS. Implementation commit c8bbc7d. Workflow commit 1807d93.` |
+| **BLOCKER** | None — Phase 1.28 accepted. Waiting for owner to approve Phase 1.29 advisory. |
+| **NEXT ACTION** | Prepare Phase 1.29 advisory only when owner approves — do not implement Phase 1.29. |
 
 ---
 
@@ -55,7 +55,7 @@
 | 1.25 /settings Text Commands | ✅ ACCEPTED | `settings.service.ts` (NEW). /settings currency, /settings timezone. Tag `phase-1.25-accepted` pushed. |
 | 1.26 /settings UI | ✅ ACCEPTED | `settings-keyboard.service.ts` (NEW), `currencies.ts` (NEW). Inline keyboards, groups, pagination, Redis search state. 45/45 smoke. Tag `phase-1.26-accepted` pushed. |
 | 1.27 Multicurrency Balance Hardening | ✅ ACCEPTED | `balance.service.ts` (MODIFY). SQL-level mismatch exclusion, mismatch footnote. 27/27 smoke. Tag `phase-1.27-accepted` pushed. |
-| 1.28 /edit Transactions MVP | 🟡 READY_FOR_OWNER_ACCEPTANCE | `edit.service.ts` (NEW), `edit-keyboard.service.ts` (NEW), `webhook.route.ts` (MODIFY), `confirmation.worker.ts` (MODIFY), `smoke-test-phase128.mjs` (NEW). /edit list+card+edit amount/category/account/intent. Permanent [✏️ Изменить] on confirmed msgs. Redis TTL 300s. ULID+workspace guards. 43/43 smoke + 13/13 typecheck+lint. HEAD c8bbc7d. |
+| 1.28 /edit Transactions MVP | ✅ ACCEPTED | `edit.service.ts` (NEW), `edit-keyboard.service.ts` (NEW), `webhook.route.ts` (MODIFY), `confirmation.worker.ts` (MODIFY), `smoke-test-phase128.mjs` (NEW). /edit list+card+edit amount/category/account/intent. Permanent [✏️ Изменить] on confirmed msgs. Redis TTL 300s. ULID+workspace guards. Strict callback_data ≤62 bytes verified. No search/date/delete/soft-delete/GIN, no migrations, no /balance or /report changes. 43/43 Phase 1.28 smoke + 841/841 regression smoke + 13/13 typecheck/lint = 897/897 PASS. Traceability ✅ Adversarial Security ✅ Scope Guard ✅. Implementation commit c8bbc7d. Tag `phase-1.28-accepted` pushed. |
 
 ---
 
@@ -97,69 +97,62 @@ midas-monorepo/
 │   ├── telegram-bot/          # @midas/telegram-bot
 │   └── background-workers/    # @midas/background-workers
 ├── packages/
-## 6. ТЕКУЩАЯ ФАЗА — PHASE 1.24: Default Currency RUB → USDT
+## 6. ТЕКУЩАЯ ФАЗА — PHASE 1.28: /edit Transactions MVP
 
-> ✅ **COMPLETED / ACCEPTED (Phase 1.24). See Section 10 history.**
+> ✅ **COMPLETED / ACCEPTED (Phase 1.28). See Section 10 history.**
 
 **Objective:**
-Change default currency for ALL new workspaces from 'RUB' to 'USDT'.
-Existing workspaces remain untouched (no backfill). /add_account reads workspace.default_currency dynamically.
+Implement `/edit` command: paginated recent transaction list, transaction card view, and field-level editing for amount, category, account, and intent. Permanent [✏️ Изменить] button attached to approval confirmation messages.
 
-**Key Decision: dynamic workspace.default_currency in /add_account:**
-  - ddAccount() executes SELECT default_currency FROM workspaces WHERE id = $1 inside the same withTenantTransaction.
-  - Correct for all workspaces regardless of their default — future-proofed for multi-currency.
+**Key decisions:**
+- Redis state key `midas:edit:{telegramUserId}:{chatId}` with TTL 300s for amount intercept.
+- All DB mutations use `withTenantTransaction` + explicit `WHERE id=$X AND workspace_id=$Y`.
+- Amount edits blocked for cross-currency transactions (exchange_rate ≠ 1.0).
+- callback_data max 62 bytes (`ed:c:cat:<26>:<26>`) — within 64-byte Telegram limit.
+- No search, no date editing, no soft-delete, no GIN index, no migrations, no new dependencies.
 
-**Scope — exactly 5 files:**
-- packages/database/migrations/1778500000000_default-currency-usdt.js (NEW): ALTER TABLE + CREATE OR REPLACE FUNCTION system_find_or_create_user with 'USDT'
-- pps/telegram-bot/src/services/account.service.ts (MODIFY): addAccount() reads workspace.default_currency dynamically; update header comment
-- packages/database/smoke-test-phase112.mjs (MODIFY): 1 assertion === 'RUB' → === 'USDT'
-- packages/database/smoke-test-phase117.mjs (MODIFY): 2 assertions + doc comment 'RUB' → 'USDT'
-- packages/database/smoke-test-phase124.mjs (NEW): ~18 smoke tests
+**Scope — exactly 5 files changed since phase-1.27-accepted:**
+- `apps/telegram-bot/src/services/edit.service.ts` (NEW)
+- `apps/telegram-bot/src/services/edit-keyboard.service.ts` (NEW)
+- `apps/telegram-bot/src/routes/webhook.route.ts` (MODIFY — /edit command + edit callbacks + amount intercept)
+- `apps/background-workers/src/workers/confirmation.worker.ts` (MODIFY — permanent edit button on approval)
+- `packages/database/smoke-test-phase128.mjs` (NEW — 43 tests)
 
-**Forbidden in Phase 1.24:**
-- No backfill of existing workspaces or accounts
-- No transaction recalculation
-- No /report or /balance logic changes
-- No settings command, no external integrations, no new dependencies
-- No project_config.md changes
-- Do not proceed beyond Phase 1.24
-
-**Previous phase:** Phase 1.23 ACCEPTED — /set_balance. Tag phase-1.23-accepted pushed.
+**Phase 1.29 (Soft Delete):** NOT started. Requires separate owner approval.
 
 ---
 
-## 7. MCP REQUIREMENTS (Phase 1.24)
+## 7. MCP REQUIREMENTS (Phase 1.28 — advisory/waiting state)
 
 | MCP-сервер | Доступ | Примечание |
 |---|---|---|
-| Filesystem MCP | ✅ read/write | Create/modify migration, TypeScript, smoke test, workflow_state |
-| Postgres MCP | ✅ read-only | Verify schema DEFAULT, stored function body, test data |
-| GitHub MCP | ⚪ read-only (опционально) | Verify remote sync after commit |
+| Filesystem MCP | ✅ read-only | workflow_state.md и roadmap только для чтения |
+| Postgres MCP | ❌ не нужен | Никаких миграций или DB-проверок в advisory фазе |
+| GitHub MCP | ⚪ read-only (опционально) | Проверка origin/main при необходимости |
 | Browser / DevTools | ❌ Запрещён | — |
 | Notion MCP | ❌ Запрещён | — |
 | Crypto / Blockchain | ❌ Запрещён | — |
 
 ---
 
-## 8. ФАЙЛЫ ДЛЯ ЧТЕНИЯ В НОВОМ ЧАТЕ (Phase 1.24)
+## 8. ФАЙЛЫ ДЛЯ ЧТЕНИЯ В НОВОМ ЧАТЕ (Phase 1.29 advisory)
 
 **Required (читать обязательно):**
-`
-project_config.md
+```
 workflow_state.md
-docs/product-roadmap.md
-packages/database/migrations/1778500000000_default-currency-usdt.js
-apps/telegram-bot/src/services/account.service.ts
-packages/database/smoke-test-phase124.mjs
-`
+docs/product-roadmap.md   ← Phase 1.29 scope
+```
 
-**Do not load:**
-`
+**Do not load (пока не нужно):**
+```
+project_config.md
 docs/event_storming_part*.md
 docs/adr/*
 apps/background-workers/
 docs/balance-semantics.md
-`
+edit.service.ts
+edit-keyboard.service.ts
+```
 
 ---
 
@@ -167,10 +160,10 @@ docs/balance-semantics.md
 
 > Read workflow_state.md and project_config.md first.
 > Before any action, read workflow_state.md Section 11 — Agent Operating Protocol and follow it strictly.
-> Phase 1.24 (Default Currency USDT) is COMPLETED / ACCEPTED. Tag phase-1.24-accepted pushed.
-> Do NOT create phase-1.24-accepted tag until owner explicitly accepts.
-> Do NOT start Phase 1.25 without owner approval.
-> Verify git status, git log --oneline -5, origin/main are clean.
+> Phase 1.28 (/edit Transactions MVP) is COMPLETED / ACCEPTED. Tag phase-1.28-accepted pushed.
+> Do NOT start Phase 1.29 implementation without explicit owner approval.
+> Do NOT create any new tags until owner approves next phase.
+> Verify git status, git log --oneline -5, origin/main are clean before any action.
 > Do not modify project_config.md.
 
 ## 10. ИСТОРИЯ ДЕЙСТВИЙ (СЖАТАЯ)
@@ -247,6 +240,7 @@ docs/balance-semantics.md
 | 2026-05-07 17:26 | Phase 1.25 accepted after final verification; /settings text mode implemented; timezone column added; default_currency and timezone settings supported; draft fallback now uses workspace.default_currency instead of hardcoded USD; existing transactions/accounts were not recalculated or backfilled; 782/782 tests passed; Traceability Review PASS; Adversarial Security Review PASS; Scope Guard Review PASS; implementation commit f6307a1; test fix commit 2eaccc7; workflow sync commit f79dc7b. Tag phase-1.25-accepted pushed. |
 | 2026-05-07 18:03 | Phase 1.26 accepted after final verification; /settings UI with inline keyboards implemented; stablecoins/crypto/fiat pagination added; Redis-backed search state with strict TTL implemented securely; timezone UI deferred; 100 currency constants isolated; 827/827 tests passed; Traceability Review PASS; Adversarial Security Review PASS; Scope Guard Review PASS; implementation commit fb338db; docs fix commit d8d896b. Tag phase-1.26-accepted pushed. |
 | 2026-05-07 18:33 | Phase 1.27 accepted after final verification; /balance currency-mixing defect fixed via SQL-level exclusion where transactions.base_currency != account_sources.currency; mismatch warning footnote added; roadmap output format improved; no conversion, no backfill, no migration, no /report changes; 854/854 tests passed; Traceability Review PASS; Adversarial Security Review PASS; Scope Guard Review PASS; implementation commit 12e70d9; docs fix commit dec0a52. Tag phase-1.27-accepted pushed. |
+| 2026-05-07 19:25 | Phase 1.28 accepted after final verification; /edit command implemented with recent paginated list (10/page), transaction card, amount/category/account/intent edit flows, Redis TTL 300s state for amount input (key midas:edit:{userId}:{chatId}), permanent [✏️ Изменить] button after approval, strict callback_data limit verified at max 62 bytes (ed:c:cat:<26>:<26>), no search/date/delete/soft-delete/GIN index, no migrations, no /balance or /report changes, no new dependencies; amount edits blocked for cross-currency (exchange_rate ≠ 1.0); all DB mutations via withTenantTransaction + explicit workspace_id filter; 43/43 Phase 1.28 smoke + 841/841 regression smoke + 13/13 typecheck/lint = 897/897 total gates PASS; Traceability Review PASS; Adversarial Security Review PASS; Scope Guard Review PASS; implementation commit c8bbc7d; workflow commit 1807d93. Tag phase-1.28-accepted pushed. Status: WAITING_FOR_OWNER_APPROVAL_TO_START_NEXT_PHASE. |
 
 ---
 
