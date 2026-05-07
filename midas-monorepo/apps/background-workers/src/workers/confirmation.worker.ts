@@ -126,7 +126,10 @@ async function processConfirmation(job: Job<CallbackConfirmJobPayload>): Promise
   let notificationMessage: string;
   switch (result.outcome) {
     case 'approved':
-      notificationMessage = `✅ Транзакция создана успешно.`;
+      // Phase 1.28: attach permanent [✏️ Изменить] button.
+      // callback_data = "ed:v:<transactionId>" (31 bytes — within 64-byte limit).
+      // The button persists indefinitely in the message — no TTL needed.
+      notificationMessage = `✅ Транзакция создана успешно.\n\nНажмите кнопку, чтобы изменить детали.`;
       break;
     case 'rejected':
       notificationMessage = `❌ Черновик отклонён. Отправьте новое сообщение для создания транзакции.`;
@@ -150,6 +153,17 @@ async function processConfirmation(job: Job<CallbackConfirmJobPayload>): Promise
   }
 
   const alertId = ulid();
+
+  // Phase 1.28: for approved transactions, attach the permanent [✏️ Изменить] edit button.
+  const inlineKeyboardJson =
+    result.outcome === 'approved'
+      ? JSON.stringify({
+          inline_keyboard: [
+            [{ text: '✏️ Изменить', callback_data: `ed:v:${result.transactionId}` }],
+          ],
+        })
+      : undefined;
+
   await notificationsQueue.add(
     QUEUE_NAMES.NOTIFICATIONS,
     {
@@ -157,6 +171,7 @@ async function processConfirmation(job: Job<CallbackConfirmJobPayload>): Promise
       workspaceId,
       chatId,
       message: notificationMessage,
+      inlineKeyboardJson,
       // No draftId in result notification (user already confirmed)
     },
     {

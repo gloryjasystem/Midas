@@ -10,11 +10,11 @@
 | Параметр | Значение |
 |---|---|
 | **PHASE** | `1 — MVP Implementation` |
-| **STEP** | `1.27 — Multicurrency Balance — COMPLETED / ACCEPTED` |
-| **AGENT STATUS** | `WAITING_FOR_OWNER_APPROVAL_TO_START_NEXT_PHASE` |
+| **STEP** | `1.28 — /edit Transactions MVP — IN_PROGRESS` |
+| **AGENT STATUS** | `IN_PROGRESS` |
 | **LAST COMPLETED** | `Phase 1.27 DONE. Multicurrency balance hardening. 27/27 smoke + 814/814 regression + 13/13 typecheck = 854/854 PASS. HEAD 12e70d9.` |
-| **BLOCKER** | None — awaiting owner approval to start next phase |
-| **NEXT ACTION** | Prepare next phase advisory only — do not implement Phase 1.28 |
+| **BLOCKER** | None — implementation in progress |
+| **NEXT ACTION** | Implement Phase 1.28: /edit transactions MVP (amount, category, account, intent) |
 
 ---
 

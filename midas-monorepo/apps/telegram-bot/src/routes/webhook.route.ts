@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Telegram Webhook Route — POST /webhook
  *
  * Entry point for all incoming Telegram updates.
@@ -102,6 +102,29 @@ import {
   EMPTY_KEYBOARD,
 } from '../services/settings-keyboard.service.js';
 import { escapeHtml } from '../utils/html-escape.js';
+import {
+  getRecentTransactions,
+  countTransactions,
+  getTransactionCard,
+  updateTransactionAmount,
+  updateTransactionCategory,
+  updateTransactionAccount,
+  updateTransactionIntent,
+  getWorkspaceCategories,
+  getWorkspaceAccounts,
+  formatTransactionListHeader,
+  formatTransactionListLine,
+  formatTransactionCard,
+  EDIT_PAGE_SIZE,
+} from '../services/edit.service.js';
+import {
+  parseEditCallback,
+  buildTransactionListKeyboard,
+  buildTransactionCardKeyboard,
+  buildCategoryPickerKeyboard,
+  buildAccountPickerKeyboard,
+  buildIntentPickerKeyboard,
+} from '../services/edit-keyboard.service.js';
 
 import { callbackConfirmQueue } from '../queues/callback-confirm-queue.js';
 
@@ -180,7 +203,7 @@ function parseCommandToken(text: string): string | null {
  * Any command NOT in this set is blocked before AI parse.
  * Extend only when a new command is implemented in a future phase.
  */
-const KNOWN_COMMANDS = new Set(['/start', '/report', '/help', '/category', '/add_category', '/accounts', '/add_account', '/balance', '/set_balance', '/settings']);
+const KNOWN_COMMANDS = new Set(['/start', '/report', '/help', '/category', '/add_category', '/accounts', '/add_account', '/balance', '/set_balance', '/settings', '/edit']);
 
 /**
  * Russian-language help text listing all currently available commands.
@@ -191,6 +214,7 @@ const KNOWN_COMMANDS = new Set(['/start', '/report', '/help', '/category', '/add
  * Phase 1.17: /add_account
  * Phase 1.21: /balance
  * Phase 1.23: /set_balance
+ * Phase 1.28: /edit
  */
 const HELP_TEXT =
   'ℹ️ <b>Доступные команды Midas:</b>\n\n' +
@@ -203,6 +227,7 @@ const HELP_TEXT =
   '/add_category <группа> <название> — Добавить категорию\n' +
   '/accounts — Список ваших счетов\n' +
   '/add_account <название> — Добавить счёт\n' +
+  '/edit — Редактировать последние транзакции\n' +
   '/help — Показать это сообщение\n\n' +
   'Группы для /add_category: Бизнес, Жизнь\n' +
   'Пример: /add_category Жизнь Кофе\n\n' +
@@ -222,6 +247,13 @@ const BOT_ID = process.env.TELEGRAM_BOT_ID ?? 'unknown_bot';
 const SEARCH_MODE_TTL_SEC = 120;
 function searchModeKey(telegramUserId: string, chatId: string): string {
   return `midas:settings:search:${telegramUserId}:${chatId}`;
+}
+
+// Phase 1.28: Redis key for edit-amount waiting state
+// Value format: "amt:<txId>" — identifies which field and which transaction
+const EDIT_STATE_TTL_SEC = 300; // 5 minutes
+function editStateKey(telegramUserId: string, chatId: string): string {
+  return `midas:edit:${telegramUserId}:${chatId}`;
 }
 
 const webhookRoute: FastifyPluginAsync = async (fastify) => {
@@ -255,6 +287,146 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
       const telegramUserId = String(cq.from.id);
       const chatId = cq.message ? String(cq.message.chat.id) : String(cq.from.id);
       const callbackData = cq.data ?? '';
+
+      // ── Phase 1.28: edit callbacks (prefix "ed:") ─────────────
+      // Handled synchronously — direct DB update, no queue.
+      if (callbackData.startsWith('ed:')) {
+        const cmd = parseEditCallback(callbackData);
+        if (!cmd) {
+          request.log.warn({
+            msg: '[midas:bot:webhook] edit callback: unrecognised data — acknowledged',
+            callbackId: cq.id,
+          });
+          await answerCallbackQuery(cq.id);
+          await reply.status(200).send({ ok: true });
+          return;
+        }
+
+        let edResolved: { workspaceId: string; userId: string };
+        try {
+          edResolved = await resolveWorkspace(telegramUserId, chatId);
+        } catch {
+          await answerCallbackQuery(cq.id);
+          await reply.status(200).send({ ok: true });
+          return;
+        }
+
+        const messageId = cq.message ? String(cq.message.message_id) : null;
+
+        try {
+          if (cmd.cmd === 'cancel') {
+            if (messageId) void editMessageText(chatId, messageId, '✅ Редактирование закрыто.', { inline_keyboard: [] });
+
+          } else if (cmd.cmd === 'list') {
+            const [items, total] = await Promise.all([
+              getRecentTransactions(edResolved.workspaceId, edResolved.userId, cmd.page),
+              countTransactions(edResolved.workspaceId, edResolved.userId),
+            ]);
+            const totalPages = Math.max(1, Math.ceil(total / EDIT_PAGE_SIZE));
+            const header = formatTransactionListHeader(cmd.page, totalPages);
+            const lines = items.map((tx, i) => formatTransactionListLine(tx, cmd.page * EDIT_PAGE_SIZE + i));
+            const text = [header, ...lines].join('\n');
+            const keyboard = buildTransactionListKeyboard(items, cmd.page, totalPages);
+            if (messageId) void editMessageText(chatId, messageId, text, keyboard);
+
+          } else if (cmd.cmd === 'view') {
+            const card = await getTransactionCard(cmd.txId, edResolved.workspaceId, edResolved.userId);
+            if (!card) {
+              if (messageId) void editMessageText(chatId, messageId, '⚠️ Транзакция не найдена.', { inline_keyboard: [] });
+            } else {
+              const text = formatTransactionCard(card);
+              const keyboard = buildTransactionCardKeyboard(cmd.txId, card.is_cross_currency);
+              if (messageId) void editMessageText(chatId, messageId, text, keyboard);
+            }
+
+          } else if (cmd.cmd === 'field_amount') {
+            // Set Redis state — next text message from this user is the new amount
+            const rKey = editStateKey(telegramUserId, chatId);
+            await redisConnection.set(rKey, `amt:${cmd.txId}`, 'EX', EDIT_STATE_TTL_SEC);
+            void sendMessage(chatId, '💰 Текущая сумма изменится. Напиши новое значение (например: 380 или 1500.50):');
+
+          } else if (cmd.cmd === 'field_cat') {
+            const categories = await getWorkspaceCategories(edResolved.workspaceId, edResolved.userId);
+            if (categories.length === 0) {
+              void sendMessage(chatId, '⚠️ В рабочем пространстве нет категорий.');
+            } else {
+              const keyboard = buildCategoryPickerKeyboard(cmd.txId, categories, cmd.page);
+              if (messageId) void editMessageText(chatId, messageId, '📁 Выберите новую категорию:', keyboard);
+            }
+
+          } else if (cmd.cmd === 'field_acc') {
+            const accounts = await getWorkspaceAccounts(edResolved.workspaceId, edResolved.userId);
+            if (accounts.length === 0) {
+              void sendMessage(chatId, '⚠️ В рабочем пространстве нет счетов.');
+            } else {
+              const keyboard = buildAccountPickerKeyboard(cmd.txId, accounts);
+              if (messageId) void editMessageText(chatId, messageId, '🏦 Выберите новый счёт:', keyboard);
+            }
+
+          } else if (cmd.cmd === 'field_int') {
+            const keyboard = buildIntentPickerKeyboard(cmd.txId);
+            if (messageId) void editMessageText(chatId, messageId, '🔄 Выберите тип транзакции:', keyboard);
+
+          } else if (cmd.cmd === 'confirm_cat') {
+            const res = await updateTransactionCategory(
+              cmd.txId, edResolved.workspaceId, edResolved.userId, cmd.catId,
+            );
+            if (res.status === 'ok') {
+              const card = await getTransactionCard(cmd.txId, edResolved.workspaceId, edResolved.userId);
+              if (card && messageId) {
+                void editMessageText(chatId, messageId, formatTransactionCard(card), buildTransactionCardKeyboard(cmd.txId, card.is_cross_currency));
+              }
+              request.log.info({ msg: '[midas:bot:webhook] edit: category updated', txId: cmd.txId, workspaceId: edResolved.workspaceId });
+            } else if (res.status === 'invalid_category') {
+              void sendMessage(chatId, '⚠️ Категория не найдена.');
+            } else {
+              void sendMessage(chatId, '⚠️ Транзакция не найдена.');
+            }
+
+          } else if (cmd.cmd === 'confirm_acc') {
+            const res = await updateTransactionAccount(
+              cmd.txId, edResolved.workspaceId, edResolved.userId, cmd.accId,
+            );
+            if (res.status === 'ok') {
+              const card = await getTransactionCard(cmd.txId, edResolved.workspaceId, edResolved.userId);
+              if (card && messageId) {
+                void editMessageText(chatId, messageId, formatTransactionCard(card), buildTransactionCardKeyboard(cmd.txId, card.is_cross_currency));
+              }
+              request.log.info({ msg: '[midas:bot:webhook] edit: account updated', txId: cmd.txId, workspaceId: edResolved.workspaceId });
+            } else if (res.status === 'invalid_account') {
+              void sendMessage(chatId, '⚠️ Счёт не найден.');
+            } else {
+              void sendMessage(chatId, '⚠️ Транзакция не найдена.');
+            }
+
+          } else {
+            // confirm_int: last branch of exhausted union
+            const res = await updateTransactionIntent(
+              cmd.txId, edResolved.workspaceId, edResolved.userId, (cmd as { intent: string }).intent,
+            );
+            if (res.status === 'ok') {
+              const card = await getTransactionCard(cmd.txId, edResolved.workspaceId, edResolved.userId);
+              if (card && messageId) {
+                void editMessageText(chatId, messageId, formatTransactionCard(card), buildTransactionCardKeyboard(cmd.txId, card.is_cross_currency));
+              }
+              request.log.info({ msg: '[midas:bot:webhook] edit: intent updated', txId: cmd.txId, workspaceId: edResolved.workspaceId });
+            } else {
+              void sendMessage(chatId, '⚠️ Транзакция не найдена.');
+            }
+          }
+        } catch (err: unknown) {
+          const errorClass = err instanceof Error ? err.constructor.name : 'UnknownError';
+          request.log.error({
+            msg: '[midas:bot:webhook] edit callback failed',
+            callbackId: cq.id,
+            errorClass,
+          });
+        }
+
+        await answerCallbackQuery(cq.id);
+        await reply.status(200).send({ ok: true });
+        return;
+      }
 
       // ── Phase 1.26: settings callbacks (prefix "st:") ────────
       // Handled synchronously — no queue needed (no transactions, lightweight DB).
@@ -878,6 +1050,45 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
         return;
       }
 
+      // ── 5f-edit: /edit (Phase 1.28) ──────────────────────────
+      if (commandToken === '/edit') {
+        try {
+          const resolved = await resolveWorkspace(telegramUserId, chatId);
+          const [items, total] = await Promise.all([
+            getRecentTransactions(resolved.workspaceId, resolved.userId, 0),
+            countTransactions(resolved.workspaceId, resolved.userId),
+          ]);
+
+          if (total === 0) {
+            void sendMessage(chatId, '🗒 У вас ещё нет транзакций для редактирования.');
+          } else {
+            const totalPages = Math.max(1, Math.ceil(total / EDIT_PAGE_SIZE));
+            const header = formatTransactionListHeader(0, totalPages);
+            const lines = items.map((tx, i) => formatTransactionListLine(tx, i));
+            const text = [header, ...lines].join('\n');
+            const keyboard = buildTransactionListKeyboard(items, 0, totalPages);
+            void sendMessageWithKeyboard(chatId, text, keyboard);
+          }
+
+          request.log.info({
+            msg: '[midas:bot:webhook] /edit list sent',
+            telegramUserId,
+            workspaceId: resolved.workspaceId,
+          });
+        } catch (err: unknown) {
+          const errorClass = err instanceof Error ? err.constructor.name : 'UnknownError';
+          request.log.error({
+            msg: '[midas:bot:webhook] /edit failed',
+            telegramUserId,
+            errorClass,
+          });
+          void sendMessage(chatId, '⚠️ Не удалось открыть список транзакций. Попробуйте позже.');
+        }
+
+        await reply.status(200).send({ ok: true });
+        return;
+      }
+
       // ── 5d: /help (Phase 1.10) ───────────────────────────────
       if (commandToken === '/help') {
         void sendMessage(chatId, HELP_TEXT);
@@ -904,7 +1115,51 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
       }
     }
 
-    // ── Step 5g: Phase 1.26 — settings search mode intercept ───
+    // ── Step 5g: Phase 1.28 — edit amount text intercept ─────────────
+    // If user is in edit-amount mode (tapped “✅ Изменить сумму”), intercept their next
+    // text message as the new amount value.
+    // This check runs BEFORE settings search and BEFORE AI parse.
+    if (!commandToken) {
+      const edKey = editStateKey(telegramUserId, chatId);
+      const edState = await redisConnection.get(edKey);
+      if (edState) {
+        await redisConnection.del(edKey);
+        // edState format: "amt:<txId>"
+        const colonIdx = edState.indexOf(':');
+        const field = colonIdx === -1 ? edState : edState.slice(0, colonIdx);
+        const txId  = colonIdx === -1 ? '' : edState.slice(colonIdx + 1);
+
+        if (field === 'amt' && /^[0-9A-Z]{26}$/.test(txId)) {
+          let edWorkspaceId: string;
+          try {
+            const resolved = await resolveWorkspace(telegramUserId, chatId);
+            edWorkspaceId = resolved.workspaceId;
+            const res = await updateTransactionAmount(txId, edWorkspaceId, resolved.userId, message.text);
+            if (res.status === 'ok') {
+              void sendMessage(chatId, '✅ Сумма изменена. Баланс пересчитан автоматически.');
+              request.log.info({ msg: '[midas:bot:webhook] edit: amount updated via text', txId, workspaceId: edWorkspaceId });
+            } else if (res.status === 'invalid_amount') {
+              void sendMessage(chatId, '⚠️ Неверная сумма. Отправьте число, например: 380 или 1500.50');
+            } else if (res.status === 'cross_currency_blocked') {
+              void sendMessage(chatId, '⚠️ Изменение суммы недоступно для мультивалютных транзакций.');
+            } else {
+              void sendMessage(chatId, '⚠️ Транзакция не найдена.');
+            }
+          } catch (err: unknown) {
+            const errorClass = err instanceof Error ? err.constructor.name : 'UnknownError';
+            request.log.error({ msg: '[midas:bot:webhook] edit amount update failed', txId, errorClass });
+            void sendMessage(chatId, '⚠️ Не удалось сохранить. Попробуйте позже.');
+          }
+        } else {
+          // Malformed state — discard silently, let message fall through
+          request.log.warn({ msg: '[midas:bot:webhook] edit: malformed Redis state — discarded', field });
+        }
+        await reply.status(200).send({ ok: true });
+        return;
+      }
+    }
+
+    // ── Step 5h: Phase 1.26 — settings search mode intercept ───────────
     // If user is in settings search mode (pressed 🔍 in /settings UI),
     // intercept their next text message as a currency search query.
     // This check runs BEFORE AI parse — search messages must never reach AI.
