@@ -1,7 +1,7 @@
 # WORKFLOW_STATE.MD — Диспетчер задач ИИ-агента Midas
 
 > **Тип:** MUTABLE — кратковременная память агента. Обновляется на каждом шаге работы.
-> **Обновлён:** 2026-05-07 22:00 (UTC+3)
+> **Обновлён:** 2026-05-08 11:40 (UTC+3)
 
 ---
 
@@ -10,11 +10,12 @@
 | Параметр | Значение |
 |---|---|
 | **PHASE** | `1 — MVP Implementation` |
-| **STEP** | `1.32 — Smart Text Input / Clarification Engine — COMPLETED / ACCEPTED` |
-| **AGENT STATUS** | `WAITING_FOR_OWNER_APPROVAL_TO_START_NEXT_PHASE` |
-| **LAST COMPLETED** | `Phase 1.32 ACCEPTED. Clarification Engine implemented; draft-clarification-state migration added with safe down(); needs_clarification→pending_user verified; AI amount/intent optional with strict schema preserved; <0.3 nonsense and 0.3–0.5 targeted clarification thresholds; one-question priority amount→intent→category; Redis midas:clar: TTL 300s for amount text flow; clar: callbacks max 62 bytes; DB patching secured with FOR UPDATE SKIP LOCKED and workspace_id guards; no inline category creation; no command-flow repair; no new deps; 57/57 Phase 1.32 smoke PASS; accessible regressions PASS; typecheck/lint PASS; Traceability ✅ Adversarial Security ✅ Scope Guard ✅; impl commit e00f37e; workflow commit e1c0170.` |
-| **BLOCKER** | None — Phase 1.32 accepted. Awaiting owner approval for next phase. |
-| **NEXT ACTION** | Prepare next phase advisory only — do not implement Phase 1.33. |
+| **STEP** | `PRODUCTION DEPLOYMENT + Intent Detection Enhancement` |
+| **AGENT STATUS** | `PRODUCTION_ACTIVE — Railway deployed, E2E testing` |
+| **DEPLOYMENT** | `Railway (spirited-happiness project)` — `Midas` bot service + `background-workers` service + `Postgres` + `Redis` |
+| **LAST COMPLETED** | `Production deployment on Railway. Fixed: RLS policies for postgres user (all 11 tables), Decimal→String type cast for NUMERIC fields, Claude markdown fence stripping, enhanced Russian intent detection (25+ examples, RUSSIAN LANGUAGE RULES block, 100+ regex post-processing patterns, temperature:0). All changes deployed via GitHub auto-deploy.` |
+| **BLOCKER** | None — production is live, verifying intent detection quality. |
+| **NEXT ACTION** | E2E verification in Telegram bot, then continue MVP development. |
 
 ---
 
@@ -77,6 +78,13 @@
 - **AI Output:** Strict Zod allowlist. AI не может возвращать/контролировать системные поля (SEC-01).
 - **Draft Lifecycle:** TransactionDraft → pending_user → approved/rejected/expired/needs_clarification.
 - **Security:** SEC-01 — SEC-12 обязательны для Phase 1.
+- **AI Pipeline (claude-client.ts + prompts.ts):**
+  - Модель: `claude-haiku-4-5`, `temperature: 0` (детерминизм), `max_tokens: 256`
+  - System prompt: OUTPUT RULES → RUSSIAN LANGUAGE RULES (50+ глаголов расхода/дохода) → CATEGORY→INTENT defaults (40+ expense, 15+ income категорий) → 25+ примеров (все 5 intent-типов + partial + nonsense)
+  - Markdown fence strip: Claude иногда оборачивает JSON в ` ```json `, парсер это убирает перед `JSON.parse`
+  - Zod validation: strict allowlist — только intent/amount/currency/category_hint/person_hint/account_hint/note/confidence
+  - Post-processing (safety net, ПОСЛЕ Claude): 7 групп regex с word-boundary `\b` (debt→transfer→expense verbs→income verbs→expense cats→income cats), negation guard («не потратил» → skip), confidence boost (+0.15/+0.25), intent fallback для partial results
+  - Результат: `ok` | `partial` (missing fields) | `needs_clarification` (nonsense) | `rejected`
 
 ---
 
@@ -126,50 +134,70 @@ Replace the flat "Счетов пока нет." empty-state with a guided inter
 
 ---
 
-## 7. MCP REQUIREMENTS (Phase 1.30 — acceptance state)
+## 7. MCP SERVERS & INFRASTRUCTURE (Production)
 
-| MCP-сервер | Доступ | Примечание |
+### Подключённые MCP-серверы
+
+| MCP-сервер | Статус | Назначение |
 |---|---|---|
-| Filesystem MCP | ✅ read-only | workflow_state.md, roadmap, account/webhook files |
-| Postgres MCP | ✅ read-only | Schema verification, smoke test support |
-| GitHub MCP | ⚪ read-only (опционально) | Проверка origin/main при необходимости |
-| Browser / DevTools | ❌ Запрещён | — |
-| Notion MCP | ❌ Запрещён | — |
-| Crypto / Blockchain | ❌ Запрещён | — |
+| **Railway MCP** | ✅ Active | Деплой, логи, переменные, сервисы. Project: `spirited-happiness`. |
+| **GitHub MCP** | ✅ Active | Repo: `gloryjasystem/Midas`. Auto-deploy on push to `main`. |
+| **Postgres MCP** | ✅ Active | Read-only SQL к production DB через Railway proxy. |
+| **Filesystem MCP** | ✅ Active | Чтение/запись файлов в workspace `C:\Users\secvency\Desktop\Midas` |
+
+### Railway Infrastructure
+
+| Сервис | Роль | Домен |
+|---|---|---|
+| **Midas** | Telegram Bot (Fastify webhook) | `midas-production-f4f1.up.railway.app` |
+| **background-workers** | BullMQ workers (ai-parse, confirm, notify, draft-expire, webhook) | Internal only |
+| **Postgres** | PostgreSQL 17 (managed) | `postgres.railway.internal:5432` |
+| **Redis** | BullMQ + state (Redis 7) | `redis.railway.internal:6379` |
+
+### Ключевые переменные (Railway Dashboard)
+
+| Переменная | Где | Примечание |
+|---|---|---|
+| `DATABASE_URL` | Midas + background-workers | `postgres.railway.internal` (internal) |
+| `REDIS_URL` | Midas + background-workers | `redis.railway.internal` |
+| `TELEGRAM_BOT_TOKEN` | Midas | ⚠️ Требует ротации (был виден в логах) |
+| `ANTHROPIC_API_KEY` | background-workers | ⚠️ Требует ротации |
+| `TELEGRAM_WEBHOOK_SECRET` | Midas | `midas_wh_secret_2026_prod` |
 
 ---
 
-## 8. ФАЙЛЫ ДЛЯ ЧТЕНИЯ В НОВОМ ЧАТЕ (Phase 1.30 acceptance)
+## 8. ФАЙЛЫ ДЛЯ ЧТЕНИЯ В НОВОМ ЧАТЕ (Production context)
 
 **Required (читать обязательно):**
 ```
-workflow_state.md
-docs/product-roadmap.md   ← Phase 1.30 scope only
-apps/telegram-bot/src/services/account-onboard-keyboard.service.ts
-apps/telegram-bot/src/services/account.service.ts
-apps/telegram-bot/src/routes/webhook.route.ts  ← ac: handler, /accounts, /start sections
-packages/database/smoke-test-phase130.mjs
+workflow_state.md                              ← Текущее состояние, архитектура, MCP серверы
+packages/ai-core/src/prompts.ts                ← System prompt с RUSSIAN LANGUAGE RULES
+packages/ai-core/src/claude-client.ts          ← parseTransaction + post-processing
+packages/ai-core/src/schemas.ts                ← Zod schema для AI output
+apps/background-workers/src/workers/ai-parse.worker.ts  ← AI parse pipeline
+apps/background-workers/src/services/draft-confirmation.service.ts ← Approval flow
+apps/telegram-bot/src/routes/webhook.route.ts  ← Все handlers
 ```
 
-**Do not load (пока не нужно):**
+**Полезно для контекста:**
 ```
-project_config.md
-docs/event_storming_part*.md
-docs/adr/*
-apps/background-workers/
-docs/balance-semantics.md
+packages/database/src/db.ts                    ← pg type parser (OID 1700)
+packages/database/fix-rls-policies.cjs         ← RLS fix script for Railway
+apps/background-workers/src/services/draft.service.ts  ← createDraft logic
 ```
 
 ---
 
 ## 9. ПРОМПТ ДЛЯ СТАРТА НОВОГО ЧАТА
 
-> Read workflow_state.md and project_config.md first.
-> Before any action, read workflow_state.md Section 11 — Agent Operating Protocol and follow it strictly.
-> Phase 1.30 (Smart Account Onboarding) is COMPLETED / ACCEPTED. Tag phase-1.30-accepted pushed.
-> Phase 1.31 advisory not yet delivered. Do NOT implement Phase 1.31 without explicit owner APPROVED.
-> Do NOT create any new tags until owner approves next phase.
-> Verify git status, git log --oneline -5, origin/main are clean before any action.
+> Read workflow_state.md first — Sections 1, 7, 8 for current context.
+> Midas is DEPLOYED to Railway (project: spirited-happiness, env: production).
+> MCP servers: Railway, GitHub, Postgres, Filesystem — all active.
+> Auto-deploy: push to `main` → GitHub → Railway builds both `Midas` and `background-workers`.
+> Phases 1.1–1.32 ACCEPTED. Production deployment and intent detection enhancement done.
+> Database: PostgreSQL on Railway, RLS enabled, permissive policies for `postgres` role added.
+> AI model: Claude Haiku 4.5 via Anthropic API, temperature: 0, post-processing intent recovery.
+> Key production fixes applied: markdown fence stripping, Decimal→String for NUMERIC, RLS policies.
 > Do not modify project_config.md.
 
 ## 10. ИСТОРИЯ ДЕЙСТВИЙ (СЖАТАЯ)
