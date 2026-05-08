@@ -1,24 +1,36 @@
 # Дорожная карта Midas — полный план развития
 
 > **Документ:** Утверждённый владельцем план развития продукта
-> **Дата:** 2026-05-07
+> **Дата:** 2026-05-08
 > **Статус:** Все решения одобрены владельцем
 
 ---
 
-## Текущее состояние (Phase 1.22 завершена)
+## Текущее состояние (Phase 1.35 завершена)
 
 Что реализовано и работает:
 - Запись транзакций текстом через AI + подтверждение кнопками (HitL)
+- Intelligent Transaction Understanding — AI извлекает товар/место (`item_hint`), подсказку категории (`category_hint`), счёт (`account_hint`)
+- 3-этапный CategoryResolverService: exact → alias → fallback «Другое»
+- 28-категорийная таксономия с двумя группами (Жизнь / Бизнес)
+- Rich preview cards: красивая карточка транзакции перед подтверждением (тип, сумма, валюта, товар, категория)
+- Post-confirm card: `✅ Записано` + данные + кнопки `[✏️ Изменить] [📊 Баланс] [📋 Отчёт]`
+- Clean Chat UX: edit-first strategy через Redis active-message pointer
+- Clarification engine: добор суммы, типа, категории через inline-кнопки
+- Inline account creation: создание счёта на лету при транзакции
+- Smart Account Onboarding: guided onboarding при первом /start
 - `/report` — отчёт за месяц, с разбивкой по валютам
 - `/balance` — баланс по всем счетам за всё время
 - `/accounts`, `/add_account` — управление счетами
 - `/category`, `/add_category` — управление категориями
+- `/settings` — смена валюты (UI с пагинацией), timezone
+- `/set_balance` — синхронизация баланса
+- `/edit` — редактирование транзакций (сумма, категория, счёт, тип) + soft delete
 - `/help` — справка, `/start` — онбординг
 - HTML-экранирование, RLS-изоляция, NUMERIC-арифметика в PostgreSQL
 - Slash-command guard — неизвестные команды не попадают в AI
 
-Базовая валюта сейчас: RUB (будет USDT с Phase 1.24).
+Базовая валюта: USDT (с Phase 1.24).
 
 ---
 
@@ -1028,18 +1040,138 @@ AI: тип=debt_given, сумма=500 USD
 | **1.29** | Soft delete | Миграция `deleted_at` + удаление с подтверждением | Средняя |
 | **1.30** | Умный онбординг | Guided создание счетов | Средняя |
 | **1.31** | Inline создание счёта | Создание на лету + fuzzy match | Средняя |
-| **1.32** | Умный текстовый ввод | Добор суммы/категории/счёта | Средняя |
-| **2.1** | Голосовые транзакции | Whisper + существующий AI | Средняя |
-| **2.2** | Голосовые команды | Расширение 2.1 — Router + intent | Средняя |
-| **2.3** | Vision AI | Распознавание фото/скриншотов | Большая |
-| **2.4** | Авто-курсы | CoinGecko/Binance API | Средняя |
-| **2.5** | Двусторонние переводы | OUT+IN связанная пара | Большая |
-| **2.6** | Регулярные транзакции | Автоповтор + cron-напоминания (зависит от timezone в 1.25) | Средняя |
-| **2.7** | Бюджеты / Лимиты | Лимиты по категориям (мультивалюта зависит от 2.4) | Средняя |
-| **3.0** | **REST API** | **Endpoints для Mini App, CORS, initData-авторизация** | **Большая** |
-| **3.1** | Mini App — Dashboard | Графики, балансы, список транзакций (зависит от 3.0) | Большая |
-| **3.2** | Mini App — Экспорт | CSV, PDF | Средняя |
-| **3.3** | Mini App — Интеграции | Notion sync | Средняя |
+### Phase 1.33 — Clean Chat / Single Active Message UX ✅
+
+**Зачем:** Бот отправлял новые сообщения на каждое действие — чат засорялся. Нужен «one-screen app» паттерн: редактировать текущее сообщение вместо отправки нового.
+
+**Что реализовано:**
+- `active-message.service.ts` (NEW): Redis pointer `midas:am:{userId}:{chatId}` (TTL 24h)
+- `upsertBotMessage()`: edit-first strategy — пытается `editMessageText`, если не получилось — `sendMessage`
+- Все worker'ы (ai-parse, confirmation, notifications) поддерживают edit-first
+- Результат: пользователь видит одно обновляющееся сообщение вместо ленты
+
+**Файлы:** `active-message.service.ts` (NEW), `telegram-api.ts` (MODIFY), `shared/index.ts` (MODIFY), `webhook.route.ts` (MODIFY), `notifications.worker.ts` (MODIFY), `confirmation.worker.ts` (MODIFY), `ai-parse.worker.ts` (MODIFY)
+
+---
+
+### Phase 1.34 — Rich Screen Cards ✅
+
+**Зачем:** Сообщения бота были примитивными текстовыми блоками. Нужны красивые карточки с эмоджи, форматированием и структурой.
+
+**Что реализовано:**
+- `screen-builder.ts` (NEW в обоих приложениях): набор чистых функций для построения экранов
+- `buildPreviewScreen()` — карточка-превью перед подтверждением (тип, сумма, валюта, товар, категория)
+- `buildConfirmedScreen()` — карточка после подтверждения (`✅ Записано`)
+- `buildConfirmKeyboard()` — стандартная клавиатура `[✅ Подтвердить] [❌ Отмена] [✏️ Изменить]`
+- `buildPostConfirmKeyboard()` — пост-подтверждение `[✏️ Изменить] [📊 Баланс] [📋 Отчёт]`
+- `buildClarificationScreen()`, `buildRejectedScreen()`, `buildExpiredScreen()`, etc.
+- `intentEmoji()` / `intentLabel()` — маппинг intent → эмоджи/текст
+- `escapeHtml()` — inline HTML-экранирование с defensive `String()` coercion
+
+**Файлы:** `apps/telegram-bot/src/utils/screen-builder.ts` (NEW), `apps/background-workers/src/utils/screen-builder.ts` (NEW)
+
+---
+
+### Phase 1.35 — Intelligent Transaction Understanding ✅
+
+**Зачем:** AI извлекал только intent/amount/currency. Не понимал «что именно купили», «в какой категории», «с какого счёта». Каждая транзакция была безликой.
+
+**Что реализовано:**
+
+**AI-слой:**
+- `item_hint` — название товара/услуги/места (`«кофе в Старбаксе»` → `item_hint: "кофе"`)
+- `category_hint` — подсказка для автокатегоризации (`«продукты»`, `«реклама»`)
+- Промпт Claude Haiku обновлён: 40+ категорий расхода, 15+ дохода, 25+ примеров
+
+**Категоризация:**
+- `CategoryResolverService` (NEW): 3-этапный пайплайн
+  1. **Exact match**: `WHERE LOWER(name) = LOWER($1)` — прямое совпадение по названию
+  2. **Alias match**: 200+ маппингов (`кофе`→`Кофе`, `uber`→`Транспорт`, `реклама`→`Маркетинг`)
+  3. **Fallback**: категория «Другое» (ulid, автосоздание)
+- 28-категорийная таксономия с двумя группами: `Жизнь` (18 категорий) и `Бизнес` (10 категорий)
+
+**Rich preview (все 8 точек входа):**
+- `confirmPreview()` + `confirmKb()` — централизованные helper'ы в webhook.route.ts
+- Все точки входа в confirmation (clarification суммы, выбор типа, выбор категории, выбор счёта, inline account creation) показывают полную карточку транзакции
+
+**Пример карточки (pre-confirm):**
+```
+💸 Расход
+
+Сумма: 1000 USDT
+📝 купил одежду
+📁 Категория: Одежда
+
+Всё верно?
+[✅ Подтвердить] [❌ Отмена]
+[✏️ Изменить]
+```
+
+**Пример карточки (post-confirm):**
+```
+✅ Записано
+💸 1000 USDT
+📝 купил одежду
+📁 Одежда
+🏦 Default
+[✏️ Изменить] [📊 Баланс] [📋 Отчёт]
+```
+
+**Миграция:**
+- `1779000000000_intelligent-transactions.js`:
+  - `transaction_drafts`: `item_name TEXT`, `parsed_category_hint TEXT`
+  - `transactions`: `item_name TEXT`
+  - `workspaces`: `default_expense_account_id`, `default_income_account_id` (FK → account_sources)
+  - `category_group` ENUM (`Жизнь`, `Бизнес`)
+  - 28 категорий backfill для всех существующих workspace'ов
+  - SECDEF-функция onboarding обновлена для новых категорий
+
+**Баг-фиксы в процессе:**
+- SQL column name fix: `amount` → `original_amount`, `account_source_id` → `account_id` в `fetchApprovedTransactionCard`
+- Defensive `String()` coercion: Postgres NUMERIC значения приводятся к string перед вызовом `escapeHtml()` — предотвращает `TypeError: input.replace is not a function`
+
+**Файлы:** 
+- `migrations/1779000000000_intelligent-transactions.js` (NEW)
+- `category-resolver.service.ts` (NEW)
+- `draft.service.ts` (MODIFY — item_name, parsed_category_hint)
+- `draft-confirmation.service.ts` (MODIFY — category resolve, default accounts, String coercion)
+- `ai-parse.worker.ts` (MODIFY — preview, item_hint)
+- `confirmation.worker.ts` (MODIFY — item/category in cards)
+- `webhook.route.ts` (MODIFY — confirmKb/confirmPreview helpers, 8 entry points)
+- `screen-builder.ts` (MODIFY — itemName, defensive escapeHtml)
+- `prompts.ts` + `schemas.ts` (MODIFY — item_hint, category_hint)
+- `smoke-test-phase135.mjs` (NEW — 55 tests)
+
+---
+
+## Сводная таблица всех фаз
+
+| Фаза | Название | Суть | Статус |
+|---|---|---|---|
+| **1.23** | `/set_balance` | Синхронизация баланса | ✅ |
+| **1.24** | USDT дефолт | Смена базовой с RUB на USDT | ✅ |
+| **1.25** | `/settings` текстовый | Смена валюты + timezone | ✅ |
+| **1.26** | `/settings` UI | Кнопки, пагинация, поиск 150 валют | ✅ |
+| **1.27** | Мультивалютный баланс | Каждая валюта отдельно | ✅ |
+| **1.28** | `/edit` транзакций | Поиск + карточка + изменение полей | ✅ |
+| **1.29** | Soft delete | Миграция `deleted_at` + удаление с подтверждением | ✅ |
+| **1.30** | Умный онбординг | Guided создание счетов | ✅ |
+| **1.31** | Inline создание счёта | Создание на лету + fuzzy match | ✅ |
+| **1.32** | Умный текстовый ввод | Добор суммы/категории/счёта (clarification engine) | ✅ |
+| **1.33** | Clean Chat UX | Single Active Message — edit-first strategy | ✅ |
+| **1.34** | Rich Screen Cards | Красивые карточки + стандартные клавиатуры | ✅ |
+| **1.35** | Intelligent Transaction | AI item_hint + category_hint + CategoryResolver + rich preview | ✅ |
+| **2.1** | Голосовые транзакции | Whisper + существующий AI | ⬜ |
+| **2.2** | Голосовые команды | Расширение 2.1 — Router + intent | ⬜ |
+| **2.3** | Vision AI | Распознавание фото/скриншотов | ⬜ |
+| **2.4** | Авто-курсы | CoinGecko/Binance API | ⬜ |
+| **2.5** | Двусторонние переводы | OUT+IN связанная пара | ⬜ |
+| **2.6** | Регулярные транзакции | Автоповтор + cron-напоминания (зависит от timezone в 1.25) | ⬜ |
+| **2.7** | Бюджеты / Лимиты | Лимиты по категориям (мультивалюта зависит от 2.4) | ⬜ |
+| **3.0** | **REST API** | **Endpoints для Mini App, CORS, initData-авторизация** | ⬜ |
+| **3.1** | Mini App — Dashboard | Графики, балансы, список транзакций (зависит от 3.0) | ⬜ |
+| **3.2** | Mini App — Экспорт | CSV, PDF | ⬜ |
+| **3.3** | Mini App — Интеграции | Notion sync | ⬜ |
 
 ---
 

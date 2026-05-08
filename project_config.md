@@ -1,12 +1,16 @@
 # PROJECT_CONFIG.MD — Конституция проекта Midas
 
 > **Статус документа:** IMMUTABLE — ИИ-агент НЕ ИМЕЕТ ПРАВА изменять этот файл без прямого приказа владельца проекта.
-> **Версия:** 1.2 | **Создан:** 2026-05-04 | **Обновлён:** 2026-05-04 (Phase 0.3.1 Security Patch Gate)
+> **Версия:** 1.3 | **Создан:** 2026-05-04 | **Обновлён:** 2026-05-08 (Phase 1.35 документация)
 > **Источники:** Midaz_TZ v1, Мастер-план Midas v2.0, User Decisions 2026-05-04
 
-### Changelog v1.2 (Phase 0.3.1 Security Patch Gate)
-- **Security & Traceability Patch Gate accepted**
-- **SEC-01 — SEC-12** from `phase1_scope.md` are mandatory implementation constraints for Phase 1
+### Changelog v1.3 (Phase 1.35 Documentation Update)
+- **Phase 1.23–1.35 implemented:** Все фазы Блока 1–3 реализованы и приняты
+- **Базовая валюта** изменена с RUB на USDT (Phase 1.24)
+- **Деплой:** Railway (spirited-happiness) — 2 сервиса (Midas bot + background-workers) + Postgres + Redis
+- **AI Pipeline:** Claude Haiku 4.5 с item_hint + category_hint извлечением, 3-этапная категоризация (exact → alias → fallback)
+- **UX:** Clean Chat (edit-first), Rich Screen Cards, полный clarification engine
+- **10 миграций PostgreSQL** от MVP schema до intelligent transactions
 
 ### Changelog v1.1 (Phase 0.2 Approved)
 - **Runtime:** Зафиксирован Node.js 24 + TypeScript (ADR-001). Python оставлен как опциональный изолированный микросервис. n8n отклонён.
@@ -82,6 +86,44 @@
 |---|---|---|
 | **Error Tracking** | Sentry (`@sentry/node`, `@sentry/react`) | **10.x** |
 | **Нагрузочное тестирование** | По выбору (k6 / Artillery) | — |
+
+### 2.6 Деплой (Railway)
+
+| Компонент | Описание |
+|---|---|
+| **Проект** | `spirited-happiness` (Railway) |
+| **Telegram Bot** | Сервис `Midas` — Fastify webhook, slash-commands, callback_query routing |
+| **Background Workers** | Сервис `background-workers` — BullMQ workers (ai-parse, confirmation, notifications, draft-expiration) |
+| **Postgres** | Railway PostgreSQL 18.x — RLS, NUMERIC precision, ULID PKs |
+| **Redis** | Railway Redis 8.x — BullMQ, session state (midas:clar:, midas:ac:, midas:ia:, midas:am:, midas:edit:), settings search |
+| **Auto-deploy** | GitHub main branch → Railway auto-deploy |
+
+### 2.7 Миграции PostgreSQL (Phase 1)
+
+| Миграция | Фаза | Назначение |
+|---|---|---|
+| `1777973748530_mvp-schema-and-types.js` | 1.2 | Core tables (workspaces, users, categories, account_sources, transaction_drafts, transactions), RLS |
+| `1777973834059_draft-lifecycle.js` | 1.7 | Draft state machine trigger (pending_user → approved/rejected/expired) |
+| `1778008338096_transaction-intent.js` | 1.8-A | transaction_intent NOT NULL on transactions |
+| `1778008400000_harden-onboarding-search-path.js` | 1.8-B | SECDEF search_path hardening |
+| `1778100000000_onboarding-default-seed.js` | 1.12 | 7-param onboarding function with default category + account |
+| `1778200000000_account-sources-unique-name.js` | 1.16 | UNIQUE(workspace_id, name) on account_sources |
+| `1778300000000_account-sources-currency-check.js` | 1.19 | CHECK (currency ~ '^[A-Z]{3,5}$') |
+| `1778400000000_account-sources-initial-balance.js` | 1.21 | initial_balance NUMERIC(19,4) DEFAULT 0 |
+| `1778700000000_transactions-soft-delete.js` | 1.29 | deleted_at TIMESTAMPTZ DEFAULT NULL |
+| `1778800000000_drafts-account-hint.js` | 1.31 | parsed_account_hint TEXT on transaction_drafts |
+| `1778900000000_draft-clarification-state.js` | 1.32 | needs_clarification status in state trigger |
+| `1779000000000_intelligent-transactions.js` | 1.35 | item_name, parsed_category_hint, category_group ENUM, 28-category taxonomy, workspace default accounts |
+
+### 2.8 AI Pipeline (claude-client.ts + prompts.ts)
+
+- Модель: `claude-haiku-4-5`, `temperature: 0` (детерминизм), `max_tokens: 256`
+- System prompt: OUTPUT RULES → RUSSIAN LANGUAGE RULES (50+ глаголов расхода/дохода) → CATEGORY→INTENT defaults (40+ expense, 15+ income категорий) → 25+ примеров (все 5 intent-типов + partial + nonsense)
+- Markdown fence strip: Claude иногда оборачивает JSON в ` ```json `, парсер это убирает перед `JSON.parse`
+- Zod validation: strict allowlist — только intent/amount/currency/category_hint/person_hint/account_hint/item_hint/note/confidence
+- Post-processing (safety net, ПОСЛЕ Claude): 7 групп regex с word-boundary `\b` (debt→transfer→expense verbs→income verbs→expense cats→income cats), negation guard («не потратил» → skip), confidence boost (+0.15/+0.25), intent fallback для partial results
+- Результат: `ok` | `partial` (missing fields) | `needs_clarification` (nonsense) | `rejected`
+- **Phase 1.35:** `item_hint` (extracted product/merchant name), `category_hint` (AI category suggestion) → `CategoryResolverService` (3-stage: exact → 200+ alias map → fallback «Другое»)
 
 ---
 
