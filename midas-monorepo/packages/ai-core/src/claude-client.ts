@@ -243,7 +243,11 @@ export async function parseTransaction(rawText: string): Promise<ParseResult> {
   }
 
   // textBlock.type === 'text' is guaranteed by the find predicate above
-  const rawJson = (textBlock as { type: 'text'; text: string }).text.trim();
+  let rawJson = (textBlock as { type: 'text'; text: string }).text.trim();
+
+  // Strip markdown code fences if Claude wrapped output (e.g. ```json ... ```)
+  // Haiku sometimes ignores "no markdown" instruction despite it being explicit.
+  rawJson = rawJson.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
 
   // ── Parse JSON ────────────────────────────────────────────
   let parsed: unknown;
