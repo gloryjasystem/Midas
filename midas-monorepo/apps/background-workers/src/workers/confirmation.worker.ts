@@ -26,6 +26,16 @@ import { callbackConfirmQueue, notificationsQueue } from '../queues/queue-defini
 import { approveDraft, rejectDraft } from '../services/draft-confirmation.service.js';
 import { resolveUserId } from '../services/draft.service.js';
 import { ulid } from 'ulid';
+import {
+  buildConfirmedScreen,
+  buildRejectedScreen,
+  buildExpiredScreen,
+  buildAlreadyProcessedScreen,
+  buildNotFoundScreen,
+  buildIntentMissingScreen,
+  buildPostConfirmKeyboard,
+  buildNavKeyboard,
+} from '../utils/screen-builder.js';
 
 // ─────────────────────────────────────────────────────────────
 // Telegram API — answer callback_query
@@ -122,47 +132,46 @@ async function processConfirmation(job: Job<CallbackConfirmJobPayload>): Promise
   // Fire-and-forget: don't fail the job if this times out
   void answerCallbackQuery(callbackQueryId, callbackText);
 
-  // ── Step 4: Send result notification ─────────────────────────
+  // ── Step 4: Send result notification — Phase 1.34 rich cards ──
   let notificationMessage: string;
+  let inlineKeyboardJson: string | undefined;
+
   switch (result.outcome) {
     case 'approved':
-      // Phase 1.28: attach permanent [✏️ Изменить] button.
-      // callback_data = "ed:v:<transactionId>" (31 bytes — within 64-byte limit).
-      // The button persists indefinitely in the message — no TTL needed.
-      notificationMessage = `✅ Транзакция создана успешно.\n\nНажмите кнопку, чтобы изменить детали.`;
+      notificationMessage = buildConfirmedScreen({
+        intent: result.intent,
+        amount: result.amount,
+        currency: result.currency,
+        categoryName: result.categoryName,
+        accountName: result.accountName,
+      });
+      inlineKeyboardJson = JSON.stringify(
+        buildPostConfirmKeyboard(result.transactionId),
+      );
       break;
     case 'rejected':
-      notificationMessage = `❌ Черновик отклонён. Отправьте новое сообщение для создания транзакции.`;
+      notificationMessage = buildRejectedScreen();
+      inlineKeyboardJson = JSON.stringify(buildNavKeyboard());
       break;
     case 'expired':
-      notificationMessage = `⏰ Черновик истёк (более 24 часов). Отправьте сообщение повторно.`;
+      notificationMessage = buildExpiredScreen();
+      inlineKeyboardJson = JSON.stringify(buildNavKeyboard());
       break;
     case 'already_processed':
-      notificationMessage = `ℹ️ Этот черновик уже обработан (статус: ${result.existingStatus}).`;
+      notificationMessage = buildAlreadyProcessedScreen(result.existingStatus);
       break;
     case 'not_found':
-      notificationMessage = `⚠️ Черновик не найден. Возможно, он уже был удалён.`;
+      notificationMessage = buildNotFoundScreen();
       break;
     case 'intent_missing':
-      // Phase 1.8-A: draft has NULL parsed_intent — AI could not determine transaction type.
-      // No Transaction was created. User should resend with clearer text.
-      notificationMessage = `❓ Не удалось определить тип операции (расход/доход/долг). Отправьте сообщение повторно с уточнением.`;
+      notificationMessage = buildIntentMissingScreen();
+      inlineKeyboardJson = JSON.stringify(buildNavKeyboard());
       break;
     default:
-      notificationMessage = `ℹ️ Обработка завершена.`;
+      notificationMessage = 'ℹ️ Обработка завершена.';
   }
 
   const alertId = ulid();
-
-  // Phase 1.28: for approved transactions, attach the permanent [✏️ Изменить] edit button.
-  const inlineKeyboardJson =
-    result.outcome === 'approved'
-      ? JSON.stringify({
-          inline_keyboard: [
-            [{ text: '✏️ Изменить', callback_data: `ed:v:${result.transactionId}` }],
-          ],
-        })
-      : undefined;
 
   // Phase 1.33: read active message pointer for edit-first in notification worker
   let activeMessageId: string | undefined;

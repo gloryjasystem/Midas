@@ -32,7 +32,17 @@ import { withTenantTransaction } from '@midas/database';
 // ─────────────────────────────────────────────────────────────
 
 export type ConfirmActionResult =
-  | { outcome: 'approved'; transactionId: string }
+  | {
+      outcome: 'approved';
+      transactionId: string;
+      // Phase 1.34: display data for rich post-confirmation card
+      amount: string;           // NUMERIC string from DB (SEC-02)
+      currency: string;         // e.g. 'USDT'
+      categoryName: string;     // resolved name or fallback
+      accountName: string;      // resolved name or fallback
+      intent: string;           // transaction_intent
+      transactionTime: string;  // ISO string
+    }
   | { outcome: 'rejected' }
   | { outcome: 'already_processed'; existingStatus: string }
   | { outcome: 'not_found' }
@@ -297,7 +307,27 @@ export async function approveDraft(
       // amount deliberately NOT logged (SEC-12)
     });
 
-    return { outcome: 'approved', transactionId };
+    // Phase 1.34: Fetch display names for rich post-confirmation card.
+    // These are read-only lookups — no business logic change.
+    const catNameResult = await client.query<{ name: string }>(
+      `SELECT name FROM categories WHERE id = $1 AND workspace_id = $2`,
+      [categoryId, workspaceId],
+    );
+    const acctNameResult = await client.query<{ name: string }>(
+      `SELECT name FROM account_sources WHERE id = $1 AND workspace_id = $2`,
+      [accountId, workspaceId],
+    );
+
+    return {
+      outcome: 'approved',
+      transactionId,
+      amount: draft.parsed_amount ?? '0',
+      currency,
+      categoryName: catNameResult.rows[0]?.name ?? 'Разное',
+      accountName: acctNameResult.rows[0]?.name ?? 'Счёт',
+      intent: draft.parsed_intent,  // Validated non-null at Step 5
+      transactionTime: new Date().toISOString(),
+    };
   });
 }
 

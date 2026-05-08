@@ -37,6 +37,13 @@ import { resolveAccountFromHint } from '../services/account-resolver.service.js'
 import { notificationsQueue } from '../queues/queue-definitions.js';
 import { ulid } from 'ulid';
 import { pool } from '@midas/database';
+import {
+  buildPreviewScreen,
+  buildClarificationScreen,
+  buildNonsenseScreen,
+  buildConfirmKeyboard,
+  escapeHtml,
+} from '../utils/screen-builder.js';
 
 // ─────────────────────────────────────────────────────────────
 // Token budget (SEC-09, date-scoped)
@@ -267,6 +274,16 @@ async function processAiParse(job: Job<AiParseJobPayload>): Promise<void> {
     let inlineKeyboard: object;
     let previewMsg: string;
 
+    // Phase 1.34: Build rich preview card with all known fields
+    const aiData = parseResult.status === 'ok' ? parseResult.data : null;
+    const richPreview = buildPreviewScreen({
+      intent: aiData?.intent ?? null,
+      amount: aiData?.amount ?? null,
+      currency: aiData?.currency ?? null,
+      categoryHint: aiData?.category_hint ?? null,
+      accountHint: accountHint,
+    });
+
     if (accountHint) {
       let resolution;
       try {
@@ -281,13 +298,8 @@ async function processAiParse(job: Job<AiParseJobPayload>): Promise<void> {
         } catch {
           // Non-fatal: confirmation worker will fall back to default account
         }
-        inlineKeyboard = {
-          inline_keyboard: [[
-            { text: '✅ Подтвердить', callback_data: `approve:${draftId}` },
-            { text: '❌ Отклонить', callback_data: `reject:${draftId}` },
-          ]],
-        };
-        previewMsg = `📝 Транзакция распознана. Подтвердите или отклоните:`;
+        inlineKeyboard = buildConfirmKeyboard(draftId);
+        previewMsg = richPreview;
         console.log('[midas:ai-parse-worker] Phase 1.31: exact account match', {
           workspaceId, draftId,
         });
@@ -295,14 +307,13 @@ async function processAiParse(job: Job<AiParseJobPayload>): Promise<void> {
       } else if (resolution.kind === 'fuzzy') {
         inlineKeyboard = {
           inline_keyboard: [
-            [{ text: `✅ Да, «${resolution.accountName}»`, callback_data: `ia:fuzzy:${resolution.accountId}:${draftId}` }],
+            [{ text: `✅ Да, «${escapeHtml(resolution.accountName)}»`, callback_data: `ia:fuzzy:${resolution.accountId}:${draftId}` }],
             [{ text: '🏦 Другой счёт', callback_data: `ia:skip:${draftId}` }],
           ],
         };
         previewMsg =
-          `📝 Транзакция распознана.\n` +
-          `Счёт «${accountHint}» не найден точно.\n` +
-          `Возможно, имеется в виду <b>${resolution.accountName}</b>?`;
+          richPreview + `\n\nСчёт «${escapeHtml(accountHint)}» не найден точно.\n` +
+          `Возможно, имеется в виду <b>${escapeHtml(resolution.accountName)}</b>?`;
         console.log('[midas:ai-parse-worker] Phase 1.31: fuzzy account match', {
           workspaceId, draftId,
         });
@@ -311,28 +322,22 @@ async function processAiParse(job: Job<AiParseJobPayload>): Promise<void> {
         const currency = parseResult.status === 'ok' ? (parseResult.data.currency ?? 'USDT') : 'USDT';
         inlineKeyboard = {
           inline_keyboard: [
-            [{ text: `✅ Создать «${accountHint}» (${currency})`, callback_data: `ia:create:${draftId}` }],
+            [{ text: `✅ Создать «${escapeHtml(accountHint)}» (${escapeHtml(currency)})`, callback_data: `ia:create:${draftId}` }],
             [{ text: '✏️ Другое название', callback_data: `ia:rename:${draftId}` }],
             [{ text: '📋 Записать без счёта', callback_data: `ia:skip:${draftId}` }],
           ],
         };
         previewMsg =
-          `📝 Транзакция распознана.\n` +
-          `Счёта <b>${accountHint}</b> нет в вашем списке.\n\n` +
-          `Создать счёт <b>${accountHint}</b> (${currency})?`;
+          richPreview + `\n\nСчёта <b>${escapeHtml(accountHint)}</b> нет в вашем списке.\n\n` +
+          `Создать счёт <b>${escapeHtml(accountHint)}</b> (${escapeHtml(currency)})?`;
         console.log('[midas:ai-parse-worker] Phase 1.31: no account match, inline create offered', {
           workspaceId, draftId,
         });
       }
     } else {
       // No account_hint — standard approve/reject keyboard
-      inlineKeyboard = {
-        inline_keyboard: [[
-          { text: '✅ Подтвердить', callback_data: `approve:${draftId}` },
-          { text: '❌ Отклонить', callback_data: `reject:${draftId}` },
-        ]],
-      };
-      previewMsg = `📝 Транзакция распознана. Подтвердите или отклоните:`;
+      inlineKeyboard = buildConfirmKeyboard(draftId);
+      previewMsg = richPreview;
     }
 
     await notificationsQueue.add(
@@ -373,14 +378,25 @@ async function processAiParse(job: Job<AiParseJobPayload>): Promise<void> {
       const clarKey = `midas:clar:${telegramUserId}:${chatId}`;
       await redisConnection.set(clarKey, `${draftId}:amt`, 'EX', 300);
 
-      const categoryLabel = partialData?.category_hint ?? 'Транзакция';
-      clarMsg = `🛒 <b>${categoryLabel}</b> — понял.\n   Сколько потратил?`;
+      clarMsg = buildClarificationScreen({
+        field: 'amount',
+        intent: partialData?.intent ?? null,
+        amount: null,
+        currency: partialData?.currency ?? null,
+        categoryHint: partialData?.category_hint ?? null,
+      });
       // No keyboard for amount — user types a number
       clarKeyboard = { inline_keyboard: [] };
 
     } else if (clarificationField === 'intent') {
       // Unclear intent — show intent picker
-      clarMsg = `🤔 Уточни, что произошло:`;
+      clarMsg = buildClarificationScreen({
+        field: 'intent',
+        intent: null,
+        amount: partialData?.amount ?? null,
+        currency: partialData?.currency ?? null,
+        categoryHint: partialData?.category_hint ?? null,
+      });
       clarKeyboard = buildIntentClarKeyboard(draftId, partialData?.intent ?? null);
 
     } else if (clarificationField === 'category') {
@@ -393,17 +409,22 @@ async function processAiParse(job: Job<AiParseJobPayload>): Promise<void> {
       }
       if (categories.length === 0) {
         // No categories — fall back to nonsense keyboard (category clarification impossible)
-        clarMsg = `🤔 Не понял. Что хотел записать?`;
+        clarMsg = buildNonsenseScreen();
         clarKeyboard = buildNonsenseKeyboard(draftId);
       } else {
-        const amtLabel = partialData?.amount ? `${partialData.amount} ${partialData.currency ?? 'USDT'}` : 'Транзакция';
-        clarMsg = `💸 <b>${amtLabel}</b> — на что потратил?\n\nВыбери категорию:`;
+        clarMsg = buildClarificationScreen({
+          field: 'category',
+          intent: partialData?.intent ?? null,
+          amount: partialData?.amount ?? null,
+          currency: partialData?.currency ?? null,
+          categoryHint: null,
+        });
         clarKeyboard = buildCategoryClarKeyboard(categories, draftId);
       }
 
     } else {
       // No clarificationField — nonsense (confidence < 0.3)
-      clarMsg = `🤔 Не понял. Что хотел записать?`;
+      clarMsg = buildNonsenseScreen();
       clarKeyboard = buildNonsenseKeyboard(draftId);
     }
 

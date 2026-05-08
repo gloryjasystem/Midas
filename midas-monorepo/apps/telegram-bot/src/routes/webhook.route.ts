@@ -1023,6 +1023,47 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
         await reply.status(200).send({ ok: true });
         return;
       }
+      // ── Phase 1.34: navigation callbacks (prefix "nav:") ───────
+      // Post-confirmation [📊 Баланс] and [📋 Отчёт] buttons.
+      if (callbackData.startsWith('nav:')) {
+        const navCmd = callbackData.slice(4); // 'balance' | 'report'
+
+        let navResolved: { workspaceId: string; userId: string };
+        try {
+          navResolved = await resolveWorkspace(telegramUserId, chatId);
+        } catch {
+          await answerCallbackQuery(cq.id);
+          await reply.status(200).send({ ok: true });
+          return;
+        }
+
+        try {
+          if (navCmd === 'balance') {
+            const balanceMsg = await getAccountBalances(navResolved.workspaceId, navResolved.userId);
+            await upsertBotMessage(telegramUserId, chatId, balanceMsg, {
+              inline_keyboard: [[
+                { text: '📋 Отчёт',    callback_data: 'nav:report' },
+                { text: '⚙️ Настройки', callback_data: 'stg:main' },
+              ]],
+            });
+          } else if (navCmd === 'report') {
+            const reportMsg = await getMonthlyReport(navResolved.workspaceId, navResolved.userId);
+            await upsertBotMessage(telegramUserId, chatId, reportMsg, {
+              inline_keyboard: [[
+                { text: '📊 Баланс',    callback_data: 'nav:balance' },
+                { text: '⚙️ Настройки', callback_data: 'stg:main' },
+              ]],
+            });
+          }
+        } catch (err: unknown) {
+          const errorClass = err instanceof Error ? err.constructor.name : 'UnknownError';
+          request.log.error({ msg: '[midas:bot:webhook] nav: callback failed', callbackId: cq.id, errorClass });
+        }
+
+        await answerCallbackQuery(cq.id);
+        await reply.status(200).send({ ok: true });
+        return;
+      }
 
       // ── Phase 1.6-B: approve/reject callbacks ─────────────────
       // Parse callback_data — format: "action:draftId"
