@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Draft Confirmation Service — Phase 1.6-B / Phase 1.8-A / Phase 1.25
  *
  * Implements atomic approve/reject for TransactionDraft records.
@@ -276,7 +276,10 @@ export async function approveDraft(
       [
         transactionId,              // $1 — ULID (ADR-004, SEC-01: not from AI)
         workspaceId,                // $2 — SEC-03: from backend session
-        draft.parsed_amount ?? '0', // $3 — NUMERIC string from DB (SEC-02)
+        // SEC-02: parsed_amount is NUMERIC(19,4). The pg type parser (OID 1700 → Decimal)
+        // returns a Decimal object, not a plain string. Calling toString() produces a clean
+        // numeric string ("2000.0000") that PostgreSQL NUMERIC accepts without error.
+        String(draft.parsed_amount ?? '0'), // $3 — safe NUMERIC string (SEC-02)
         currency,                   // $4
         baseCurrency,               // $5
         categoryId,                 // $6
