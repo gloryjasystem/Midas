@@ -326,6 +326,22 @@ function clarStateKey(telegramUserId: string, chatId: string): string {
   return `midas:clar:${telegramUserId}:${chatId}`;
 }
 
+// Phase 1.35: Standard confirmation keyboard with [Изменить] row.
+// Centralised so all confirm screens include the edit button.
+function confirmKb(draftId: string) {
+  return {
+    inline_keyboard: [
+      [
+        { text: '✅ Подтвердить', callback_data: `approve:${draftId}` },
+        { text: '❌ Отмена',      callback_data: `reject:${draftId}` },
+      ],
+      [
+        { text: '✏️ Изменить', callback_data: `draft:edit:${draftId}` },
+      ],
+    ],
+  };
+}
+
 const webhookRoute: FastifyPluginAsync = async (fastify) => {
   // Await a no-op: Fastify route plugins must be async; the actual async work
   // happens inside the route handler. Promise.resolve() satisfies require-await.
@@ -531,10 +547,7 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
               if (iaMsgId) void editMessageText(
                 chatId, iaMsgId,
                 '📋 Транзакция будет записана без указания конкретного счёта.',
-                { inline_keyboard: [
-                  [{ text: '✅ Подтвердить', callback_data: `approve:${iaCmd.draftId}` }],
-                  [{ text: '❌ Отклонить',   callback_data: `reject:${iaCmd.draftId}` }],
-                ]},
+                confirmKb(iaCmd.draftId),
               );
 
             } else if (iaCmd.cmd === 'rename') {
@@ -577,10 +590,7 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
               if (iaMsgId) void editMessageText(
                 chatId, iaMsgId,
                 `${label}\n\nПодтвердить транзакцию?`,
-                { inline_keyboard: [
-                  [{ text: '✅ Подтвердить', callback_data: `approve:${iaCmd.draftId}` }],
-                  [{ text: '❌ Отклонить',   callback_data: `reject:${iaCmd.draftId}` }],
-                ]},
+                confirmKb(iaCmd.draftId),
               );
               request.log.info({ msg: '[midas:bot:webhook] ia: account created inline', workspaceId: iaResolved.workspaceId });
 
@@ -601,10 +611,7 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
                 if (iaMsgId) void editMessageText(
                   chatId, iaMsgId,
                   `✅ Счёт <b>${escapeHtml(acct.name)}</b> выбран.\n\nПодтвердить транзакцию?`,
-                  { inline_keyboard: [
-                    [{ text: '✅ Подтвердить', callback_data: `approve:${iaCmd.draftId}` }],
-                    [{ text: '❌ Отклонить',   callback_data: `reject:${iaCmd.draftId}` }],
-                  ]},
+                  confirmKb(iaCmd.draftId),
                 );
                 request.log.info({ msg: '[midas:bot:webhook] ia: account selected', workspaceId: iaResolved.workspaceId });
               }
@@ -1278,10 +1285,7 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
               if (clarMsgId) void editMessageText(
                 chatId, clarMsgId,
                 '📝 Готово. Подтвердите или отклоните транзакцию:',
-                { inline_keyboard: [
-                  [{ text: '✅ Подтвердить', callback_data: `approve:${intentDraftId}` }],
-                  [{ text: '❌ Отклонить',   callback_data: `reject:${intentDraftId}` }],
-                ]},
+                confirmKb(intentDraftId),
               );
             } else if (intentResult.status === 'still_needs' && intentResult.field === 'amount') {
               // Set Redis intercept for amount
@@ -1309,10 +1313,7 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
               if (clarMsgId) void editMessageText(
                 chatId, clarMsgId,
                 '📝 Категория выбрана. Подтвердите или отклоните транзакцию:',
-                { inline_keyboard: [
-                  [{ text: '✅ Подтвердить', callback_data: `approve:${catDraftId}` }],
-                  [{ text: '❌ Отклонить',   callback_data: `reject:${catDraftId}` }],
-                ]},
+                confirmKb(catDraftId),
               );
             } else {
               if (clarMsgId) void editMessageText(chatId, clarMsgId, '⚠️ Категория не найдена или транзакция уже обработана.', { inline_keyboard: [] });
@@ -1334,10 +1335,7 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
               if (clarMsgId) void editMessageText(
                 chatId, clarMsgId,
                 '📝 Записано без категории. Подтвердите или отклоните:',
-                { inline_keyboard: [
-                  [{ text: '✅ Подтвердить', callback_data: `approve:${nocatDraftId}` }],
-                  [{ text: '❌ Отклонить',   callback_data: `reject:${nocatDraftId}` }],
-                ]},
+                confirmKb(nocatDraftId),
               );
             } else {
               if (clarMsgId) void editMessageText(chatId, clarMsgId, '⚠️ Транзакция не найдена или уже обработана.', { inline_keyboard: [] });
@@ -2065,10 +2063,7 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
               telegramUserId,
               chatId,
               '📝 Готово. Подтвердите или отклоните транзакцию:',
-              { inline_keyboard: [
-                [{ text: '✅ Подтвердить', callback_data: `approve:${clarDraftId}` }],
-                [{ text: '❌ Отклонить',   callback_data: `reject:${clarDraftId}` }],
-              ]},
+              confirmKb(clarDraftId),
             );
           } else if (amtPatchResult.status === 'still_needs' && amtPatchResult.field === 'intent') {
             void upsertBotMessage(
@@ -2148,10 +2143,7 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
                 telegramUserId,
                 chatId,
                 `${label}\n\nПодтвердить транзакцию?`,
-                { inline_keyboard: [
-                  [{ text: '✅ Подтвердить', callback_data: `approve:${activeDraftId}` }],
-                  [{ text: '❌ Отклонить',   callback_data: `reject:${activeDraftId}` }],
-                ]},
+                confirmKb(activeDraftId),
               );
               request.log.info({ msg: '[midas:bot:webhook] ia: account created via text rename', workspaceId: resolved.workspaceId });
             } catch (err: unknown) {
