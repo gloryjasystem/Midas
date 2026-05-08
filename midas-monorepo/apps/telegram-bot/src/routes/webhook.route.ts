@@ -56,7 +56,7 @@ import {
 import { webhookIngestionQueue } from '../queues/webhook-queue.js';
 import { resolveWorkspace } from '../services/workspace-resolver.js';
 import { checkOnboardingRateLimit } from '../services/rate-limiter.js';
-import { sendMessage } from '../services/telegram-api.js';
+// Phase 1.33: sendMessage no longer imported directly — all sends go via upsertBotMessage.
 import { getMonthlyReport } from '../services/report.service.js';
 import { getAccountBalances } from '../services/balance.service.js';
 import {
@@ -85,7 +85,7 @@ import {
   formatTimezoneUpdated,
 } from '../services/settings.service.js';
 import {
-  sendMessageWithKeyboard,
+  // Phase 1.33: sendMessageWithKeyboard no longer imported — routed via upsertBotMessage.
   editMessageText,
   answerCallbackQuery,
 } from '../services/telegram-api.js';
@@ -161,6 +161,12 @@ import {
   patchDraftCategory,                // Phase 1.32
   validateAmountString,              // Phase 1.32
 } from '../services/clarification.service.js';
+import {
+  upsertBotMessage,                  // Phase 1.33
+  tryDeleteUserMessage,              // Phase 1.33
+  setActiveMessageId,                // Phase 1.33
+  clearActiveMessageId,              // Phase 1.33
+} from '../services/active-message.service.js';
 
 import { callbackConfirmQueue } from '../queues/callback-confirm-queue.js';
 
@@ -347,6 +353,11 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
       const telegramUserId = String(cq.from.id);
       const chatId = cq.message ? String(cq.message.chat.id) : String(cq.from.id);
       const callbackData = cq.data ?? '';
+
+      // Phase 1.33: Sync active message pointer — the callback's message IS the active UI.
+      if (cq.message) {
+        void setActiveMessageId(telegramUserId, chatId, String(cq.message.message_id));
+      }
 
         // ── Phase 1.30: account onboarding callbacks (prefix "ac:") ────
         if (callbackData.startsWith('ac:')) {
@@ -539,7 +550,7 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
               // Set user-scoped pointer key so the text intercept can find the active draft.
               const iaPointerKey = `midas:ia:ptr:${telegramUserId}:${chatId}`;
               await redisConnection.set(iaPointerKey, iaCmd.draftId, 'EX', INLINE_ACCOUNT_TTL_SEC);
-              void sendMessage(chatId, RENAME_PROMPT);
+              void upsertBotMessage(telegramUserId, chatId, RENAME_PROMPT);
 
             } else if (iaCmd.cmd === 'create') {
               // User confirmed creation with AI-suggested name.
@@ -662,12 +673,12 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
             // Set Redis state — next text message from this user is the new amount
             const rKey = editStateKey(telegramUserId, chatId);
             await redisConnection.set(rKey, `amt:${cmd.txId}`, 'EX', EDIT_STATE_TTL_SEC);
-            void sendMessage(chatId, '💰 Текущая сумма изменится. Напиши новое значение (например: 380 или 1500.50):');
+            void upsertBotMessage(telegramUserId, chatId, '💰 Текущая сумма изменится. Напиши новое значение (например: 380 или 1500.50):');
 
           } else if (cmd.cmd === 'field_cat') {
             const categories = await getWorkspaceCategories(edResolved.workspaceId, edResolved.userId);
             if (categories.length === 0) {
-              void sendMessage(chatId, '⚠️ В рабочем пространстве нет категорий.');
+              void upsertBotMessage(telegramUserId, chatId, '⚠️ В рабочем пространстве нет категорий.');
             } else {
               const keyboard = buildCategoryPickerKeyboard(cmd.txId, categories, cmd.page);
               if (messageId) void editMessageText(chatId, messageId, '📁 Выберите новую категорию:', keyboard);
@@ -676,7 +687,7 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
           } else if (cmd.cmd === 'field_acc') {
             const accounts = await getWorkspaceAccounts(edResolved.workspaceId, edResolved.userId);
             if (accounts.length === 0) {
-              void sendMessage(chatId, '⚠️ В рабочем пространстве нет счетов.');
+              void upsertBotMessage(telegramUserId, chatId, '⚠️ В рабочем пространстве нет счетов.');
             } else {
               const keyboard = buildAccountPickerKeyboard(cmd.txId, accounts);
               if (messageId) void editMessageText(chatId, messageId, '🏦 Выберите новый счёт:', keyboard);
@@ -697,9 +708,9 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
               }
               request.log.info({ msg: '[midas:bot:webhook] edit: category updated', txId: cmd.txId, workspaceId: edResolved.workspaceId });
             } else if (res.status === 'invalid_category') {
-              void sendMessage(chatId, '⚠️ Категория не найдена.');
+              void upsertBotMessage(telegramUserId, chatId, '⚠️ Категория не найдена.');
             } else {
-              void sendMessage(chatId, '⚠️ Транзакция не найдена.');
+              void upsertBotMessage(telegramUserId, chatId, '⚠️ Транзакция не найдена.');
             }
 
           } else if (cmd.cmd === 'confirm_acc') {
@@ -713,9 +724,9 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
               }
               request.log.info({ msg: '[midas:bot:webhook] edit: account updated', txId: cmd.txId, workspaceId: edResolved.workspaceId });
             } else if (res.status === 'invalid_account') {
-              void sendMessage(chatId, '⚠️ Счёт не найден.');
+              void upsertBotMessage(telegramUserId, chatId, '⚠️ Счёт не найден.');
             } else {
-              void sendMessage(chatId, '⚠️ Транзакция не найдена.');
+              void upsertBotMessage(telegramUserId, chatId, '⚠️ Транзакция не найдена.');
             }
 
           } else {
@@ -733,7 +744,7 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
                 }
                 request.log.info({ msg: '[midas:bot:webhook] edit: intent updated', txId: cmd.txId, workspaceId: edResolved.workspaceId });
               } else {
-                void sendMessage(chatId, '⚠️ Транзакция не найдена.');
+                void upsertBotMessage(telegramUserId, chatId, '⚠️ Транзакция не найдена.');
               }
 
             } else if (cmd.cmd === 'delete_ask') {
@@ -851,7 +862,7 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
             // Set Redis TTL search mode key
             const rKey = searchModeKey(telegramUserId, chatId);
             await redisConnection.set(rKey, '1', 'EX', SEARCH_MODE_TTL_SEC);
-            void sendMessage(chatId, '🔍 Напиши символ или название валюты:');
+            void upsertBotMessage(telegramUserId, chatId, '🔍 Напиши символ или название валюты:');
           }
         } catch (err: unknown) {
           const errorClass = err instanceof Error ? err.constructor.name : 'UnknownError';
@@ -885,17 +896,17 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
               const cmdResolved = await resolveWorkspace(telegramUserId, chatId);
               const { getAccountBalances } = await import('../services/balance.service.js');
               const balanceText = await getAccountBalances(cmdResolved.workspaceId, cmdResolved.userId);
-              void sendMessage(chatId, balanceText);
+              void upsertBotMessage(telegramUserId, chatId, balanceText);
             } catch {
-              void sendMessage(chatId, '⚠️ Не удалось получить баланс. Попробуйте позже.');
+              void upsertBotMessage(telegramUserId, chatId, '⚠️ Не удалось получить баланс. Попробуйте позже.');
             }
           } else if (cmdTarget === 'report') {
             try {
               const cmdResolved = await resolveWorkspace(telegramUserId, chatId);
               const reportText = await getMonthlyReport(cmdResolved.workspaceId, cmdResolved.userId);
-              void sendMessage(chatId, reportText);
+              void upsertBotMessage(telegramUserId, chatId, reportText);
             } catch {
-              void sendMessage(chatId, '⚠️ Не удалось получить отчёт. Попробуйте позже.');
+              void upsertBotMessage(telegramUserId, chatId, '⚠️ Не удалось получить отчёт. Попробуйте позже.');
             }
           }
           await answerCallbackQuery(cq.id);
@@ -1149,6 +1160,10 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
 
     const commandToken = parseCommandToken(message.text);
 
+    // Phase 1.33: Best-effort delete user's text message to keep chat clean.
+    // Runs for ALL text messages (commands and free-text) before any processing.
+    tryDeleteUserMessage(chatId, messageId);
+
     if (commandToken !== null) {
       // ── 5b: /start ───────────────────────────────────────────
       if (commandToken === '/start') {
@@ -1174,9 +1189,13 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
             isNewUser: resolved.isNewUser,
           });
 
+          // Phase 1.33: /start resets the active message pointer — always fresh.
+          void clearActiveMessageId(telegramUserId, chatId);
+
           // If existing user, send a re-greeting (resolveWorkspace only sends for isNewUser)
           if (!resolved.isNewUser) {
-            void sendMessage(
+            void upsertBotMessage(
+              telegramUserId,
               chatId,
               '✅ Вы уже зарегистрированы. Просто отправьте сообщение о расходе или доходе.',
             );
@@ -1184,7 +1203,7 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
             // Phase 1.30: new user — show guided account onboarding keyboard (Scenario Е).
             // The default account was already created by system_find_or_create_user.
             // This keyboard allows the user to add NAMED accounts on top of the default.
-            void sendMessageWithKeyboard(chatId, START_ONBOARD_TEXT, buildStartOnboardKeyboard());
+            void upsertBotMessage(telegramUserId, chatId, START_ONBOARD_TEXT, buildStartOnboardKeyboard());
           }
         } catch (err: unknown) {
           const errorClass = err instanceof Error ? err.constructor.name : 'UnknownError';
@@ -1205,7 +1224,7 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
         try {
           const resolved = await resolveWorkspace(telegramUserId, chatId);
           const reportText = await getMonthlyReport(resolved.workspaceId, resolved.userId);
-          void sendMessage(chatId, reportText);
+          void upsertBotMessage(telegramUserId, chatId, reportText);
 
           request.log.info({
             msg: '[midas:bot:webhook] /report sent',
@@ -1219,7 +1238,7 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
             telegramUserId,
             errorClass,
           });
-          void sendMessage(chatId, '⚠️ Не удалось сформировать отчёт. Попробуйте позже.');
+          void upsertBotMessage(telegramUserId, chatId, '⚠️ Не удалось сформировать отчёт. Попробуйте позже.');
         }
 
         await reply.status(200).send({ ok: true });
@@ -1231,7 +1250,7 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
         try {
           const resolved = await resolveWorkspace(telegramUserId, chatId);
           const balanceText = await getAccountBalances(resolved.workspaceId, resolved.userId);
-          void sendMessage(chatId, balanceText);
+          void upsertBotMessage(telegramUserId, chatId, balanceText);
 
           request.log.info({
             msg: '[midas:bot:webhook] /balance sent',
@@ -1245,7 +1264,7 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
             telegramUserId,
             errorClass,
           });
-          void sendMessage(chatId, '⚠️ Не удалось получить баланс. Попробуйте позже.');
+          void upsertBotMessage(telegramUserId, chatId, '⚠️ Не удалось получить баланс. Попробуйте позже.');
         }
 
         await reply.status(200).send({ ok: true });
@@ -1259,7 +1278,7 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
 
         if ('error' in parsed) {
           // Argument validation failed — send usage hint, do NOT enqueue
-          void sendMessage(chatId, parsed.error);
+          void upsertBotMessage(telegramUserId, chatId, parsed.error);
           request.log.info({
             msg: '[midas:bot:webhook] /set_balance bad args',
             telegramUserId,
@@ -1279,7 +1298,7 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
           );
 
           const replyText = formatSetBalanceResult(result, parsed.accountName);
-          void sendMessage(chatId, replyText);
+          void upsertBotMessage(telegramUserId, chatId, replyText);
 
           request.log.info({
             msg: '[midas:bot:webhook] /set_balance processed',
@@ -1295,7 +1314,7 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
             telegramUserId,
             errorClass,
           });
-          void sendMessage(chatId, '⚠️ Не удалось синхронизировать баланс. Попробуйте позже.');
+          void upsertBotMessage(telegramUserId, chatId, '⚠️ Не удалось синхронизировать баланс. Попробуйте позже.');
         }
 
         await reply.status(200).send({ ok: true });
@@ -1307,7 +1326,7 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
         try {
           const resolved = await resolveWorkspace(telegramUserId, chatId);
           const categoryText = await getCategoryList(resolved.workspaceId, resolved.userId);
-          void sendMessage(chatId, categoryText);
+          void upsertBotMessage(telegramUserId, chatId, categoryText);
 
           request.log.info({
             msg: '[midas:bot:webhook] /category sent',
@@ -1321,7 +1340,7 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
             telegramUserId,
             errorClass,
           });
-          void sendMessage(chatId, '⚠️ Не удалось получить список категорий. Попробуйте позже.');
+          void upsertBotMessage(telegramUserId, chatId, '⚠️ Не удалось получить список категорий. Попробуйте позже.');
         }
 
         await reply.status(200).send({ ok: true });
@@ -1336,10 +1355,10 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
           // Otherwise show the regular flat list (unchanged).
           const accountsExist = await hasAccounts(resolved.workspaceId, resolved.userId);
           if (!accountsExist) {
-            void sendMessageWithKeyboard(chatId, ACCOUNTS_EMPTY_TEXT, buildAccountTypeKeyboard());
+            void upsertBotMessage(telegramUserId, chatId, ACCOUNTS_EMPTY_TEXT, buildAccountTypeKeyboard());
           } else {
             const accountText = await getAccountList(resolved.workspaceId, resolved.userId);
-            void sendMessage(chatId, accountText);
+            void upsertBotMessage(telegramUserId, chatId, accountText);
           }
 
           request.log.info({
@@ -1355,7 +1374,7 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
             telegramUserId,
             errorClass,
           });
-          void sendMessage(chatId, '⚠️ Не удалось получить список счетов. Попробуйте позже.');
+          void upsertBotMessage(telegramUserId, chatId, '⚠️ Не удалось получить список счетов. Попробуйте позже.');
         }
 
         await reply.status(200).send({ ok: true });
@@ -1369,7 +1388,7 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
 
         if ('error' in parsed) {
           // Argument validation failed — send usage hint, do NOT enqueue
-          void sendMessage(chatId, parsed.error);
+          void upsertBotMessage(telegramUserId, chatId, parsed.error);
           request.log.info({
             msg: '[midas:bot:webhook] /add_account bad args',
             telegramUserId,
@@ -1388,10 +1407,11 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
           );
 
           if (result === 'duplicate') {
-            void sendMessage(chatId, 'Счёт с таким названием уже существует.');
+            void upsertBotMessage(telegramUserId, chatId, 'Счёт с таким названием уже существует.');
           } else {
             // escapeHtml: parsed.name is user input rendered in parse_mode:'HTML' context (Phase 1.15 pattern).
-            void sendMessage(
+            void upsertBotMessage(
+              telegramUserId,
               chatId,
               `✅ Счёт добавлен: <b>${escapeHtml(parsed.name)}</b>`,
             );
@@ -1411,7 +1431,7 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
             telegramUserId,
             errorClass,
           });
-          void sendMessage(chatId, '⚠️ Не удалось добавить счёт. Попробуйте позже.');
+          void upsertBotMessage(telegramUserId, chatId, '⚠️ Не удалось добавить счёт. Попробуйте позже.');
         }
 
         await reply.status(200).send({ ok: true });
@@ -1425,7 +1445,7 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
 
         if ('error' in parsed) {
           // Argument validation failed — send usage hint, do NOT enqueue
-          void sendMessage(chatId, parsed.error);
+          void upsertBotMessage(telegramUserId, chatId, parsed.error);
           request.log.info({
             msg: '[midas:bot:webhook] /add_category bad args',
             telegramUserId,
@@ -1445,11 +1465,12 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
           );
 
           if (result === 'duplicate') {
-            void sendMessage(chatId, 'Категория с таким именем уже существует.');
+            void upsertBotMessage(telegramUserId, chatId, 'Категория с таким именем уже существует.');
           } else {
             // escapeHtml: parsed.canonicalGroup and parsed.name are user-influenced values
             // rendered in parse_mode:'HTML' context (Phase 1.15 hardening).
-            void sendMessage(
+            void upsertBotMessage(
+              telegramUserId,
               chatId,
               `✅ Категория добавлена: <b>${escapeHtml(parsed.canonicalGroup)}</b> / ${escapeHtml(parsed.name)}`,
             );
@@ -1469,7 +1490,7 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
             telegramUserId,
             errorClass,
           });
-          void sendMessage(chatId, '⚠️ Не удалось добавить категорию. Попробуйте позже.');
+          void upsertBotMessage(telegramUserId, chatId, '⚠️ Не удалось добавить категорию. Попробуйте позже.');
         }
 
         await reply.status(200).send({ ok: true });
@@ -1483,7 +1504,7 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
         const parsed = parseSettingsArgs(message.text);
 
         if ('error' in parsed) {
-          void sendMessage(chatId, parsed.error);
+          void upsertBotMessage(telegramUserId, chatId, parsed.error);
           request.log.info({
             msg: '[midas:bot:webhook] /settings bad args',
             telegramUserId,
@@ -1503,7 +1524,7 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
               settings?.default_currency ?? 'USDT',
               settings?.timezone ?? 'UTC',
             );
-            void sendMessageWithKeyboard(chatId, menuText, buildSettingsMainKeyboard());
+            void upsertBotMessage(telegramUserId, chatId, menuText, buildSettingsMainKeyboard());
             request.log.info({
               msg: '[midas:bot:webhook] /settings menu sent',
               telegramUserId,
@@ -1516,9 +1537,9 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
 
             const result = await updateCurrency(resolved.workspaceId, resolved.userId, parsed.code);
             if (result === 'not_found') {
-              void sendMessage(chatId, '⚠️ Не удалось обновить валюту. Попробуйте позже.');
+              void upsertBotMessage(telegramUserId, chatId, '⚠️ Не удалось обновить валюту. Попробуйте позже.');
             } else {
-              void sendMessage(chatId, formatCurrencyUpdated(parsed.code, oldCode));
+              void upsertBotMessage(telegramUserId, chatId, formatCurrencyUpdated(parsed.code, oldCode));
             }
             request.log.info({
               msg: '[midas:bot:webhook] /settings currency updated (text mode)',
@@ -1533,9 +1554,9 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
 
             const result = await updateTimezone(resolved.workspaceId, resolved.userId, parsed.zone);
             if (result === 'not_found') {
-              void sendMessage(chatId, '⚠️ Не удалось обновить часовой пояс. Попробуйте позже.');
+              void upsertBotMessage(telegramUserId, chatId, '⚠️ Не удалось обновить часовой пояс. Попробуйте позже.');
             } else {
-              void sendMessage(chatId, formatTimezoneUpdated(parsed.zone, oldZone));
+              void upsertBotMessage(telegramUserId, chatId, formatTimezoneUpdated(parsed.zone, oldZone));
             }
             request.log.info({
               msg: '[midas:bot:webhook] /settings timezone updated (text mode)',
@@ -1551,7 +1572,7 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
             telegramUserId,
             errorClass,
           });
-          void sendMessage(chatId, '⚠️ Ошибка настроек. Попробуйте позже.');
+          void upsertBotMessage(telegramUserId, chatId, '⚠️ Ошибка настроек. Попробуйте позже.');
         }
 
         await reply.status(200).send({ ok: true });
@@ -1568,14 +1589,14 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
           ]);
 
           if (total === 0) {
-            void sendMessage(chatId, '🗒 У вас ещё нет транзакций для редактирования.');
+            void upsertBotMessage(telegramUserId, chatId, '🗒 У вас ещё нет транзакций для редактирования.');
           } else {
             const totalPages = Math.max(1, Math.ceil(total / EDIT_PAGE_SIZE));
             const header = formatTransactionListHeader(0, totalPages);
             const lines = items.map((tx, i) => formatTransactionListLine(tx, i));
             const text = [header, ...lines].join('\n');
             const keyboard = buildTransactionListKeyboard(items, 0, totalPages);
-            void sendMessageWithKeyboard(chatId, text, keyboard);
+            void upsertBotMessage(telegramUserId, chatId, text, keyboard);
           }
 
           request.log.info({
@@ -1590,7 +1611,7 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
             telegramUserId,
             errorClass,
           });
-          void sendMessage(chatId, '⚠️ Не удалось открыть список транзакций. Попробуйте позже.');
+          void upsertBotMessage(telegramUserId, chatId, '⚠️ Не удалось открыть список транзакций. Попробуйте позже.');
         }
 
         await reply.status(200).send({ ok: true });
@@ -1599,7 +1620,7 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
 
       // ── 5d: /help (Phase 1.10) ───────────────────────────────
       if (commandToken === '/help') {
-        void sendMessage(chatId, HELP_TEXT);
+        void upsertBotMessage(telegramUserId, chatId, HELP_TEXT);
         request.log.info({
           msg: '[midas:bot:webhook] /help sent',
           telegramUserId,
@@ -1612,7 +1633,7 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
       // Any text starting with "/" that is NOT in KNOWN_COMMANDS is blocked here.
       // It does NOT reach the AI parse queue.
       if (!KNOWN_COMMANDS.has(commandToken)) {
-        void sendMessage(chatId, UNKNOWN_COMMAND_TEXT);
+        void upsertBotMessage(telegramUserId, chatId, UNKNOWN_COMMAND_TEXT);
         request.log.info({
           msg: '[midas:bot:webhook] unknown slash command blocked',
           telegramUserId,
@@ -1640,7 +1661,7 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
           // Validate amount (SEC-02: NUMERIC regex)
           const validAmount = validateAmountString(message.text);
           if (!validAmount) {
-            void sendMessage(chatId, '⚠️ Неверная сумма. Напиши число, например: 380 или 1500.50');
+            void upsertBotMessage(telegramUserId, chatId, '⚠️ Неверная сумма. Напиши число, например: 380 или 1500.50');
             // Keep Redis key alive — user can try again within TTL
             await reply.status(200).send({ ok: true });
             return;
@@ -1653,7 +1674,7 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
           try {
             clarIntResolved = await resolveWorkspace(telegramUserId, chatId);
           } catch {
-            void sendMessage(chatId, '⚠️ Не удалось обработать. Попробуйте позже.');
+            void upsertBotMessage(telegramUserId, chatId, '⚠️ Не удалось обработать. Попробуйте позже.');
             await reply.status(200).send({ ok: true });
             return;
           }
@@ -1663,7 +1684,8 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
           );
 
           if (amtPatchResult.status === 'ready') {
-            void sendMessageWithKeyboard(
+            void upsertBotMessage(
+              telegramUserId,
               chatId,
               '📝 Готово. Подтвердите или отклоните транзакцию:',
               { inline_keyboard: [
@@ -1672,7 +1694,8 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
               ]},
             );
           } else if (amtPatchResult.status === 'still_needs' && amtPatchResult.field === 'intent') {
-            void sendMessageWithKeyboard(
+            void upsertBotMessage(
+              telegramUserId,
               chatId,
               '🤔 Уточни, что произошло:',
               { inline_keyboard: [
@@ -1681,7 +1704,7 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
               ]},
             );
           } else {
-            void sendMessage(chatId, '⚠️ Транзакция не найдена или уже обработана.');
+            void upsertBotMessage(telegramUserId, chatId, '⚠️ Транзакция не найдена или уже обработана.');
           }
 
           request.log.info({ msg: '[midas:bot:webhook] clar: amount patched via text', workspaceId: clarIntResolved.workspaceId, result: amtPatchResult.status });
@@ -1722,7 +1745,7 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
           {
             const trimmedName = message.text.trim();
             if (trimmedName.length === 0 || trimmedName.length > 100) {
-              void sendMessage(chatId, '⚠️ Название не может быть пустым или длиннее 100 символов. Попробуй ещё раз:');
+              void upsertBotMessage(telegramUserId, chatId, '⚠️ Название не может быть пустым или длиннее 100 символов. Попробуй ещё раз:');
               await reply.status(200).send({ ok: true });
               return;
             }
@@ -1744,7 +1767,8 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
               const label = createRes === 'duplicate'
                 ? `⚠️ Счёт <b>${escapeHtml(trimmedName)}</b> уже существует.`
                 : `✅ Счёт <b>${escapeHtml(trimmedName)}</b> (${escapeHtml(iaState.currency)}) создан!`;
-              void sendMessageWithKeyboard(
+              void upsertBotMessage(
+                telegramUserId,
                 chatId,
                 `${label}\n\nПодтвердить транзакцию?`,
                 { inline_keyboard: [
@@ -1756,7 +1780,7 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
             } catch (err: unknown) {
               const errorClass = err instanceof Error ? err.constructor.name : 'UnknownError';
               request.log.error({ msg: '[midas:bot:webhook] ia: rename text create failed', errorClass });
-              void sendMessage(chatId, '⚠️ Не удалось создать счёт. Попробуйте позже.');
+              void upsertBotMessage(telegramUserId, chatId, '⚠️ Не удалось создать счёт. Попробуйте позже.');
             }
             await reply.status(200).send({ ok: true });
             return;
@@ -1785,16 +1809,16 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
           // User typed the account name — validate and move to currency pick
           const trimmed = message.text.trim();
           if (trimmed.length === 0 || trimmed.length > 100) {
-            void sendMessage(chatId, '⚠️ Название не может быть пустым или длиннее 100 символов. Попробуй ещё раз:');
+            void upsertBotMessage(telegramUserId, chatId, '⚠️ Название не может быть пустым или длиннее 100 символов. Попробуй ещё раз:');
           } else {
             const updatedState: AccountOnboardState = { ...acState, step: 'cur_pick', name: trimmed };
             await redisConnection.set(acKey, JSON.stringify(updatedState), 'EX', ONBOARD_STATE_TTL_SEC);
             try {
               const resolved = await resolveWorkspace(telegramUserId, chatId);
-              void sendMessageWithKeyboard(chatId, CURRENCY_PICKER_TEXT, buildOnboardCurrencyKeyboard());
+              void upsertBotMessage(telegramUserId, chatId, CURRENCY_PICKER_TEXT, buildOnboardCurrencyKeyboard());
               request.log.info({ msg: '[midas:bot:webhook] ac: name input received', workspaceId: resolved.workspaceId });
             } catch {
-              void sendMessage(chatId, CURRENCY_PICKER_TEXT);
+              void upsertBotMessage(telegramUserId, chatId, CURRENCY_PICKER_TEXT);
             }
           }
           await reply.status(200).send({ ok: true });
@@ -1804,7 +1828,7 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
           // User typed a custom currency code — validate and create account
           const rawCode = message.text.trim().toUpperCase();
           if (!/^[A-Z]{1,10}$/.test(rawCode)) {
-            void sendMessage(chatId, '⚠️ Неверный код валюты. Используй латинские буквы, например: <i>SOL</i>, <i>UAH</i>, <i>MATIC</i>.');
+            void upsertBotMessage(telegramUserId, chatId, '⚠️ Неверный код валюты. Используй латинские буквы, например: <i>SOL</i>, <i>UAH</i>, <i>MATIC</i>.');
             await reply.status(200).send({ ok: true });
             return;
           }
@@ -1820,13 +1844,15 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
             }
             const res = await addAccountWithCurrency(resolved.workspaceId, resolved.userId, accountName, rawCode);
             if (res === 'duplicate') {
-              void sendMessageWithKeyboard(
+              void upsertBotMessage(
+                telegramUserId,
                 chatId,
                 `⚠️ Счёт <b>${escapeHtml(accountName)}</b> уже существует.`,
                 buildAfterCreateKeyboard(),
               );
             } else {
-              void sendMessageWithKeyboard(
+              void upsertBotMessage(
+                telegramUserId,
                 chatId,
                 `✅ Счёт <b>${escapeHtml(accountName)}</b> (${escapeHtml(rawCode)}) создан!`,
                 buildAfterCreateKeyboard(),
@@ -1836,7 +1862,7 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
           } catch (err: unknown) {
             const errorClass = err instanceof Error ? err.constructor.name : 'UnknownError';
             request.log.error({ msg: '[midas:bot:webhook] ac: cur_input account create failed', errorClass });
-            void sendMessage(chatId, '⚠️ Не удалось создать счёт. Попробуйте позже.');
+            void upsertBotMessage(telegramUserId, chatId, '⚠️ Не удалось создать счёт. Попробуйте позже.');
           }
           await reply.status(200).send({ ok: true });
           return;
@@ -1866,19 +1892,19 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
             edWorkspaceId = resolved.workspaceId;
             const res = await updateTransactionAmount(txId, edWorkspaceId, resolved.userId, message.text);
             if (res.status === 'ok') {
-              void sendMessage(chatId, '✅ Сумма изменена. Баланс пересчитан автоматически.');
+              void upsertBotMessage(telegramUserId, chatId, '✅ Сумма изменена. Баланс пересчитан автоматически.');
               request.log.info({ msg: '[midas:bot:webhook] edit: amount updated via text', txId, workspaceId: edWorkspaceId });
             } else if (res.status === 'invalid_amount') {
-              void sendMessage(chatId, '⚠️ Неверная сумма. Отправьте число, например: 380 или 1500.50');
+              void upsertBotMessage(telegramUserId, chatId, '⚠️ Неверная сумма. Отправьте число, например: 380 или 1500.50');
             } else if (res.status === 'cross_currency_blocked') {
-              void sendMessage(chatId, '⚠️ Изменение суммы недоступно для мультивалютных транзакций.');
+              void upsertBotMessage(telegramUserId, chatId, '⚠️ Изменение суммы недоступно для мультивалютных транзакций.');
             } else {
-              void sendMessage(chatId, '⚠️ Транзакция не найдена.');
+              void upsertBotMessage(telegramUserId, chatId, '⚠️ Транзакция не найдена.');
             }
           } catch (err: unknown) {
             const errorClass = err instanceof Error ? err.constructor.name : 'UnknownError';
             request.log.error({ msg: '[midas:bot:webhook] edit amount update failed', txId, errorClass });
-            void sendMessage(chatId, '⚠️ Не удалось сохранить. Попробуйте позже.');
+            void upsertBotMessage(telegramUserId, chatId, '⚠️ Не удалось сохранить. Попробуйте позже.');
           }
         } else {
           // Malformed state — discard silently, let message fall through
@@ -1900,12 +1926,14 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
         await redisConnection.del(rKey);
         const results = searchCurrencies(message.text);
         if (results.length === 0) {
-          void sendMessage(
+          void upsertBotMessage(
+            telegramUserId,
             chatId,
             '❌ Ничего не найдено. Попробуй: USDT, BTC, EUR — или /settings для меню.',
           );
         } else {
-          void sendMessageWithKeyboard(
+          void upsertBotMessage(
+            telegramUserId,
             chatId,
             `🔍 Результаты (${String(results.length)}):`,
             buildSearchResultsKeyboard(results),

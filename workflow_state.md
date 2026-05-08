@@ -10,12 +10,12 @@
 | Параметр | Значение |
 |---|---|
 | **PHASE** | `1 — MVP Implementation` |
-| **STEP** | `PRODUCTION DEPLOYMENT + Intent Detection Enhancement` |
-| **AGENT STATUS** | `PRODUCTION_ACTIVE — Railway deployed, E2E testing` |
+| **STEP** | `Phase 1.33 — Clean Chat / Single Active Message UX` |
+| **AGENT STATUS** | `READY_FOR_OWNER_ACCEPTANCE` |
 | **DEPLOYMENT** | `Railway (spirited-happiness project)` — `Midas` bot service + `background-workers` service + `Postgres` + `Redis` |
-| **LAST COMPLETED** | `Production deployment on Railway. Fixed: RLS policies for postgres user (all 11 tables), Decimal→String type cast for NUMERIC fields, Claude markdown fence stripping, enhanced Russian intent detection (25+ examples, RUSSIAN LANGUAGE RULES block, 100+ regex post-processing patterns, temperature:0). All changes deployed via GitHub auto-deploy.` |
-| **BLOCKER** | None — production is live, verifying intent detection quality. |
-| **NEXT ACTION** | E2E verification in Telegram bot, then continue MVP development. |
+| **LAST COMPLETED** | `Phase 1.33: Clean Chat / Single Active Message UX. Redis pointer midas:am:{userId}:{chatId} (TTL 24h). upsertBotMessage() edit-first strategy. tryDeleteUserMessage() best-effort cleanup. All sendMessage/sendMessageWithKeyboard calls routed through upsertBotMessage. Callback pointer sync. Background workers: edit-first pattern in notifications.worker.ts, AM pointer pass-through in confirmation.worker.ts and ai-parse.worker.ts. 0 typecheck errors, 0 new lint errors.` |
+| **BLOCKER** | None — awaiting owner acceptance. |
+| **NEXT ACTION** | Owner review and acceptance of Phase 1.33. |
 
 ---
 
@@ -61,6 +61,7 @@
 | 1.30 Smart Account Onboarding | ✅ ACCEPTED | `account-onboard-keyboard.service.ts` (NEW), `account.service.ts` (hasAccounts, addAccountWithCurrency), `webhook.route.ts` (MODIFY — ac: callbacks, /start onboarding, /accounts empty-state, text intercept). Redis TTL midas:ac: 300s. 64/64 Phase 1.30 smoke + 318/318 accessible gates PASS. impl commit 4593867. Tag `phase-1.30-accepted` pushed. |
 | 1.31 Inline Account Creation | ✅ ACCEPTED | `migrations/1778800000000_drafts-account-hint.js`, `account-fuzzy.service.ts`, `account-inline-keyboard.service.ts`, `account-resolver.service.ts` (bg-workers), `account.service.ts` (MODIFY), `draft.service.ts` (MODIFY), `ai-parse.worker.ts` (MODIFY), `webhook.route.ts` (MODIFY), `draft-confirmation.service.ts` (MODIFY), `schemas.ts`+`prompts.ts` (MODIFY). Option A: resolve before keyboard. ia: namespace ≤62 bytes. 27/27 smoke + 13/13 typecheck/lint PASS. Implementation commit 7c065f7. |
 | 1.32 Smart Text Input / Clarification Engine | ✅ ACCEPTED | `migrations/1778900000000_draft-clarification-state.js` (NEW), `schemas.ts` (amount/intent optional, PARTIAL_CONFIDENCE_THRESHOLD=0.3, MissingField), `claude-client.ts` ('partial' ParseResult, computeMissingFields), `prompts.ts` (partial examples), `draft.service.ts` (patchDraftAmount/Intent/Category), `ai-parse.worker.ts` (targeted clarification messages), `clarification.service.ts` (NEW, telegram-bot), `webhook.route.ts` (clar: callbacks, midas:clar: intercept), `smoke-test-phase132.mjs` (57/57 PASS). 0 lint/typecheck errors. Traceability ✅ Adversarial Security ✅ Scope Guard ✅. Implementation commit e00f37e. Tag `phase-1.32-accepted` pushed. |
+| 1.33 Clean Chat / Single Active Message UX | ⏳ READY_FOR_OWNER_ACCEPTANCE | `active-message.service.ts` (NEW — Redis pointer CRUD, upsertBotMessage, tryDeleteUserMessage), `telegram-api.ts` (MODIFY — sendMessage/sendMessageWithKeyboard return message_id, deleteMessage added, telegramPostFull helper), `shared/index.ts` (MODIFY — NotificationJobPayload extended with telegramUserId? + activeMessageId?), `webhook.route.ts` (MODIFY — ALL sends routed through upsertBotMessage, tryDeleteUserMessage on all text messages, /start clears pointer, callback sync), `notifications.worker.ts` (MODIFY — edit-first pattern, Redis pointer update), `confirmation.worker.ts` (MODIFY — AM pointer pass-through), `ai-parse.worker.ts` (MODIFY — AM pointer read + pass-through). No migrations. No new deps. 0 typecheck errors, 0 new lint errors. |
 
 ---
 

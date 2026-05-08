@@ -1,5 +1,5 @@
 /**
- * notifications Worker — Phase 1.6-B
+ * notifications Worker — Phase 1.6-B / Phase 1.33
  *
  * Processes jobs from the `notifications` queue.
  * Sends real Telegram messages using Bot API.
@@ -9,6 +9,10 @@
  *   - Real Telegram Bot API calls (sendMessage)
  *   - Inline keyboard support (inlineKeyboardJson)
  *   - Draft confirmation messages
+ *
+ * Phase 1.33 additions:
+ *   - Edit-first pattern: if activeMessageId present, try editMessageText before send
+ *   - Active message pointer updated in Redis after send/edit
  *
  * SEC-12: message is system-generated — safe to log its length.
  *         Never log user-supplied financial text.
@@ -31,7 +35,7 @@ interface SendMessageOptions {
   replyMarkup?: object;
 }
 
-async function sendTelegramMessage(opts: SendMessageOptions): Promise<void> {
+async function sendTelegramMessage(opts: SendMessageOptions): Promise<string | null> {
   const body: Record<string, unknown> = {
     chat_id: opts.chatId,
     text: opts.text,
@@ -52,6 +56,57 @@ async function sendTelegramMessage(opts: SendMessageOptions): Promise<void> {
     const errorText = await res.text();
     throw new Error(`Telegram sendMessage failed: ${String(res.status)} — ${errorText}`);
   }
+
+  // Phase 1.33: extract message_id for active-message pointer tracking
+  try {
+    const data = (await res.json()) as { ok: boolean; result?: { message_id?: number } };
+    if (data.ok && data.result?.message_id) return String(data.result.message_id);
+  } catch {
+    // Non-fatal — message was sent, just can't track
+  }
+  return null;
+}
+
+/**
+ * Phase 1.33: Try to edit an existing Telegram message.
+ * Returns true if edit succeeded, false otherwise (non-throwing).
+ */
+async function editTelegramMessage(
+  chatId: string,
+  messageId: string,
+  text: string,
+  replyMarkup?: object,
+): Promise<boolean> {
+  try {
+    const body: Record<string, unknown> = {
+      chat_id: chatId,
+      message_id: parseInt(messageId, 10),
+      text,
+      parse_mode: 'HTML',
+    };
+    if (replyMarkup) body.reply_markup = replyMarkup;
+
+    const res = await fetch(`${TELEGRAM_API_BASE}/editMessageText`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+// Phase 1.33: Redis active-message pointer helpers for background workers
+const AM_KEY_PREFIX = 'midas:am:';
+const AM_TTL_SEC = 86400; // 24h
+
+async function setActiveMessagePointer(
+  telegramUserId: string, chatId: string, messageId: string,
+): Promise<void> {
+  try {
+    await redisConnection.set(`${AM_KEY_PREFIX}${telegramUserId}:${chatId}`, messageId, 'EX', AM_TTL_SEC);
+  } catch { /* non-fatal */ }
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -87,16 +142,41 @@ async function processNotification(job: Job<NotificationJobPayload>): Promise<vo
     }
   }
 
-  await sendTelegramMessage({
-    chatId,
-    text: job.data.message,
-    replyMarkup,
-  });
+  // Phase 1.33: Try edit-first if activeMessageId is available
+  let sentMessageId: string | null = null;
+
+  if (job.data.activeMessageId) {
+    const editOk = await editTelegramMessage(
+      chatId,
+      job.data.activeMessageId,
+      job.data.message,
+      replyMarkup,
+    );
+    if (editOk) {
+      sentMessageId = job.data.activeMessageId;
+    }
+  }
+
+  // If edit failed or no activeMessageId, send new message
+  if (!sentMessageId) {
+    sentMessageId = await sendTelegramMessage({
+      chatId,
+      text: job.data.message,
+      replyMarkup,
+    });
+  }
+
+  // Phase 1.33: Update Redis active-message pointer
+  if (sentMessageId && job.data.telegramUserId) {
+    void setActiveMessagePointer(job.data.telegramUserId, chatId, sentMessageId);
+  }
 
   console.log('[midas:notifications-worker] Notification sent', {
     jobId: job.id,
     alertId,
     workspaceId,
+    editFirst: !!job.data.activeMessageId,
+    edited: sentMessageId === job.data.activeMessageId,
   });
 }
 

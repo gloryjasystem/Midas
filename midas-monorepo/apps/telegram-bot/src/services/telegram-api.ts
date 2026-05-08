@@ -1,5 +1,5 @@
 /**
- * Telegram Bot API Client — Phase 1.5 / Phase 1.26
+ * Telegram Bot API Client — Phase 1.5 / Phase 1.26 / Phase 1.33
  *
  * Wrapper for Telegram Bot API.
  *
@@ -9,6 +9,9 @@
  *   - editMessageText — edit existing message text + keyboard
  *   - editMessageReplyMarkup — edit only keyboard (text unchanged)
  *   - answerCallbackQuery — dismiss Telegram spinner after callback_query
+ * Phase 1.33: Clean Chat UX additions:
+ *   - sendMessage / sendMessageWithKeyboard now return message_id (string | null)
+ *   - deleteMessage — best-effort delete user messages
  *
  * SEC-12: This module does NOT log message text or callback data.
  *         Only chatId, messageId, callbackQueryId, and success/failure are logged.
@@ -77,6 +80,38 @@ async function telegramPost(method: string, body: Record<string, unknown>): Prom
   }
 }
 
+/**
+ * Internal helper that returns the full parsed Telegram API response.
+ * Used by send functions that need to extract the message_id from the result.
+ * Phase 1.33: needed for active-message pointer tracking.
+ */
+async function telegramPostFull(
+  method: string,
+  body: Record<string, unknown>,
+): Promise<{ ok: boolean; result?: { message_id?: number } } | null> {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  if (!token) return null;
+
+  const url = `${TELEGRAM_API_BASE}/bot${token}/${method}`;
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => { controller.abort(); }, REQUEST_TIMEOUT_MS);
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+
+    clearTimeout(timeout);
+    if (!response.ok) return null;
+    return (await response.json()) as { ok: boolean; result?: { message_id?: number } };
+  } catch {
+    return null;
+  }
+}
+
 // ─────────────────────────────────────────────────────────────
 // sendMessage
 // ─────────────────────────────────────────────────────────────
@@ -84,16 +119,22 @@ async function telegramPost(method: string, body: Record<string, unknown>): Prom
 /**
  * Send a plain text message to a Telegram chat.
  *
+ * Phase 1.33: returns the sent message_id as string, or null on failure.
+ * Previously returned boolean — all callers used fire-and-forget (void) pattern,
+ * so this change is backward-compatible.
+ *
  * @param chatId - string Telegram chat ID
  * @param text - HTML-mode message text (max 4096 chars)
- * @returns true on success, false on any error (non-throwing)
+ * @returns message_id as string on success, null on any error (non-throwing)
  */
-export async function sendMessage(chatId: string, text: string): Promise<boolean> {
-  return telegramPost('sendMessage', {
+export async function sendMessage(chatId: string, text: string): Promise<string | null> {
+  const resp = await telegramPostFull('sendMessage', {
     chat_id: chatId,
     text,
     parse_mode: 'HTML',
   });
+  if (resp?.ok && resp.result?.message_id) return String(resp.result.message_id);
+  return null;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -106,22 +147,26 @@ export async function sendMessage(chatId: string, text: string): Promise<boolean
  * Used for /settings main menu and currency group pages.
  * SEC-12: text and keyboard content NOT logged.
  *
+ * Phase 1.33: returns the sent message_id as string, or null on failure.
+ *
  * @param chatId   - string Telegram chat ID
  * @param text     - HTML-mode message text
  * @param keyboard - InlineKeyboardMarkup (buttons with callback_data ≤ 64 bytes each)
- * @returns true on success, false on any error (non-throwing)
+ * @returns message_id as string on success, null on any error (non-throwing)
  */
 export async function sendMessageWithKeyboard(
   chatId: string,
   text: string,
   keyboard: InlineKeyboardMarkup,
-): Promise<boolean> {
-  return telegramPost('sendMessage', {
+): Promise<string | null> {
+  const resp = await telegramPostFull('sendMessage', {
     chat_id: chatId,
     text,
     parse_mode: 'HTML',
     reply_markup: keyboard,
   });
+  if (resp?.ok && resp.result?.message_id) return String(resp.result.message_id);
+  return null;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -211,3 +256,33 @@ export async function answerCallbackQuery(
   });
 }
 
+// ─────────────────────────────────────────────────────────────
+// deleteMessage (Phase 1.33)
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Best-effort delete a message from a Telegram chat.
+ *
+ * Phase 1.33: Used to clean up user text messages after processing,
+ * keeping the chat history minimal (single active bot message pattern).
+ *
+ * Failures are expected and acceptable:
+ *   - Bot may lack delete permissions in group chats.
+ *   - Message may already be deleted.
+ *   - Message may be too old (48h+ in groups).
+ *
+ * SEC-12: Only chatId and messageId are used — no text content.
+ *
+ * @param chatId    - string Telegram chat ID
+ * @param messageId - string message ID to delete
+ * @returns true on success, false on any error (non-throwing)
+ */
+export async function deleteMessage(
+  chatId: string,
+  messageId: string,
+): Promise<boolean> {
+  return telegramPost('deleteMessage', {
+    chat_id: chatId,
+    message_id: parseInt(messageId, 10),
+  });
+}

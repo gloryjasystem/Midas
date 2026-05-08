@@ -253,6 +253,12 @@ async function processAiParse(job: Job<AiParseJobPayload>): Promise<void> {
   const { chatId } = job.data;
   const alertId = ulid();
 
+  // Phase 1.33: Read active message pointer for edit-first in notification worker
+  let amPointerValue: string | null = null;
+  try {
+    amPointerValue = await redisConnection.get(`midas:am:${telegramUserId}:${chatId}`);
+  } catch { /* non-fatal */ }
+
   // ── Step 6: Send response based on parse result ──────────
   if (status === 'pending_user') {
     // ── Phase 1.31 (Option A): Resolve account_hint BEFORE first keyboard ──
@@ -338,6 +344,8 @@ async function processAiParse(job: Job<AiParseJobPayload>): Promise<void> {
         message: previewMsg,
         draftId,
         inlineKeyboardJson: JSON.stringify(inlineKeyboard),
+        telegramUserId,       // Phase 1.33
+        activeMessageId: amPointerValue ?? undefined, // Phase 1.33
       },
       {
         jobId: IdempotencyKeyBuilder.notification(workspaceId, alertId),
@@ -408,6 +416,8 @@ async function processAiParse(job: Job<AiParseJobPayload>): Promise<void> {
         message: clarMsg,
         draftId,
         inlineKeyboardJson: JSON.stringify(clarKeyboard),
+        telegramUserId,       // Phase 1.33
+        activeMessageId: amPointerValue ?? undefined, // Phase 1.33
       },
       {
         jobId: IdempotencyKeyBuilder.notification(workspaceId, alertId),

@@ -96,6 +96,10 @@ export interface NotificationJobPayload {
   draftId?: string;
   /** Optional: inline keyboard JSON (serialized for type safety) */
   inlineKeyboardJson?: string;
+  /** Phase 1.33: Telegram user ID — needed for active-message Redis key */
+  telegramUserId?: string;
+  /** Phase 1.33: Current active bot message ID — try editMessageText before sendMessage */
+  activeMessageId?: string;
 }
 
 /**

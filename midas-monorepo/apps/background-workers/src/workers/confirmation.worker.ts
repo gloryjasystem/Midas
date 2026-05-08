@@ -164,6 +164,14 @@ async function processConfirmation(job: Job<CallbackConfirmJobPayload>): Promise
         })
       : undefined;
 
+  // Phase 1.33: read active message pointer for edit-first in notification worker
+  let activeMessageId: string | undefined;
+  try {
+    const amKey = `midas:am:${telegramUserId}:${chatId}`;
+    const amVal = await redisConnection.get(amKey);
+    if (amVal) activeMessageId = amVal;
+  } catch { /* non-fatal */ }
+
   await notificationsQueue.add(
     QUEUE_NAMES.NOTIFICATIONS,
     {
@@ -172,6 +180,8 @@ async function processConfirmation(job: Job<CallbackConfirmJobPayload>): Promise
       chatId,
       message: notificationMessage,
       inlineKeyboardJson,
+      telegramUserId,       // Phase 1.33
+      activeMessageId,      // Phase 1.33
       // No draftId in result notification (user already confirmed)
     },
     {
