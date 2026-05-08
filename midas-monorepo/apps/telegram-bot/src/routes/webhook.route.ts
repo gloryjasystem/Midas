@@ -161,6 +161,7 @@ import {
   patchDraftIntent,                  // Phase 1.32
   patchDraftCategory,                // Phase 1.32
   validateAmountString,              // Phase 1.32
+  getDraftFields,                    // Phase 1.35
 } from '../services/clarification.service.js';
 import {
   upsertBotMessage,                  // Phase 1.33
@@ -932,6 +933,178 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
             callbackId: cq.id,
             errorClass,
           });
+        }
+
+        await answerCallbackQuery(cq.id);
+        await reply.status(200).send({ ok: true });
+        return;
+      }
+
+      // ── Phase 1.35: draft edit sub-menu (prefix "draft:edit:" / "draft:back:") ──
+      // draft:edit:{draftId} — opens field picker for an unconfirmed draft.
+      // draft:back:{draftId} — restores confirmation card.
+      // Byte sizes: draft:edit:{26} = 37 ✓  draft:back:{26} = 37 ✓
+      if (callbackData.startsWith('draft:edit:') || callbackData.startsWith('draft:back:')) {
+        const isBack   = callbackData.startsWith('draft:back:');
+        const draftEditId = isBack
+          ? callbackData.slice('draft:back:'.length)
+          : callbackData.slice('draft:edit:'.length);
+
+        // Validate draftId format (ULID_RE)
+        if (!/^[0-9A-Z]{26}$/.test(draftEditId)) {
+          await answerCallbackQuery(cq.id);
+          await reply.status(200).send({ ok: true });
+          return;
+        }
+
+        try {
+          const deResolved = await resolveWorkspace(telegramUserId, chatId);
+          const draft = await getDraftFields(deResolved.workspaceId, deResolved.userId, draftEditId);
+
+          if (!draft) {
+            // Expired or not found
+            void upsertBotMessage(
+              telegramUserId, chatId,
+              '⏰ <b>Черновик истёк</b>\n\nОтправьте сообщение повторно.',
+            );
+            await answerCallbackQuery(cq.id);
+            await reply.status(200).send({ ok: true });
+            return;
+          }
+
+          if (isBack) {
+            // Restore confirmation card
+            const { buildPreviewScreen, buildConfirmKeyboard } = await import('../utils/screen-builder.js');
+            const previewMsg = buildPreviewScreen({
+              intent: draft.parsed_intent,
+              amount: draft.parsed_amount,
+              currency: draft.parsed_currency,
+              categoryHint: draft.parsed_category_hint,
+              accountHint: null,
+              itemName: draft.item_name,
+            });
+            void upsertBotMessage(
+              telegramUserId, chatId, previewMsg,
+              buildConfirmKeyboard(draftEditId),
+            );
+          } else {
+            // Show edit sub-menu
+            const { intentEmoji, intentLabel } = await import('../utils/screen-builder.js');
+            const iLabel = draft.parsed_intent
+              ? `${intentEmoji(draft.parsed_intent)} ${intentLabel(draft.parsed_intent)}`
+              : null;
+            const lines = ['✏️ <b>Что изменить?</b>', ''];
+            if (iLabel)                 lines.push(iLabel);
+            if (draft.parsed_amount)    lines.push(`Сумма: <b>${draft.parsed_amount} ${draft.parsed_currency ?? 'USDT'}</b>`);
+            if (draft.item_name)        lines.push(`Товар: ${draft.item_name}`);
+
+            const subKeyboard = {
+              inline_keyboard: [
+                [
+                  { text: '💰 Сумму',     callback_data: `draft:amt:${draftEditId}` },
+                  { text: '📁 Категорию', callback_data: `draft:cat:${draftEditId}` },
+                ],
+                [
+                  { text: '🔄 Тип',       callback_data: `draft:intent:${draftEditId}` },
+                ],
+                [
+                  { text: '◀️ Назад', callback_data: `draft:back:${draftEditId}` },
+                ],
+              ],
+            };
+            // Byte checks: draft:amt:{26}=35, draft:cat:{26}=35, draft:intent:{26}=39 ✓
+            void upsertBotMessage(telegramUserId, chatId, lines.join('\n'), subKeyboard);
+          }
+        } catch (err: unknown) {
+          const errorClass = err instanceof Error ? err.constructor.name : 'UnknownError';
+          request.log.error({ msg: '[midas:bot:webhook] draft:edit: failed', callbackId: cq.id, errorClass });
+        }
+
+        await answerCallbackQuery(cq.id);
+        await reply.status(200).send({ ok: true });
+        return;
+      }
+
+      // ── Phase 1.35: draft field-edit sub-actions ──
+      // draft:amt:{draftId}    — set Redis intercept for amount
+      // draft:cat:{draftId}    — show category picker
+      // draft:intent:{draftId} — show intent picker
+      // Byte checks: draft:amt:{26}=35, draft:cat:{26}=35, draft:intent:{26}=39 ✓
+      if (
+        callbackData.startsWith('draft:amt:') ||
+        callbackData.startsWith('draft:cat:') ||
+        callbackData.startsWith('draft:intent:')
+      ) {
+        const isAmt    = callbackData.startsWith('draft:amt:');
+        const isCat    = callbackData.startsWith('draft:cat:');
+        const draftSubId = isAmt
+          ? callbackData.slice('draft:amt:'.length)
+          : isCat
+            ? callbackData.slice('draft:cat:'.length)
+            : callbackData.slice('draft:intent:'.length);
+
+        if (!/^[0-9A-Z]{26}$/.test(draftSubId)) {
+          await answerCallbackQuery(cq.id);
+          await reply.status(200).send({ ok: true });
+          return;
+        }
+
+        try {
+          const dsResolved = await resolveWorkspace(telegramUserId, chatId);
+
+          if (isAmt) {
+            // Set Redis intercept key — same as clarification amount flow
+            const clarKey = `midas:clar:${telegramUserId}:${chatId}`;
+            await redisConnection.set(clarKey, `${draftSubId}:amt`, 'EX', 300);
+            void upsertBotMessage(
+              telegramUserId, chatId,
+              '💰 Напиши новую сумму:',
+            );
+          } else if (isCat) {
+            // Reuse existing category picker from clar:cat: flow
+            const { getWorkspaceCategories } = await import('../services/edit.service.js');
+            const categories = await getWorkspaceCategories(dsResolved.workspaceId, dsResolved.userId);
+            // Build a clar:cat: keyboard so existing handlers process the result
+            const rows: { text: string; callback_data: string }[][] = [];
+            const top6 = categories.slice(0, 6);
+            for (let i = 0; i < top6.length; i += 2) {
+              const row = [{ text: top6[i]?.name ?? '', callback_data: `clar:cat:${top6[i]?.id ?? ''}:${draftSubId}` }];
+              if (top6[i + 1]) row.push({ text: top6[i + 1]?.name ?? '', callback_data: `clar:cat:${top6[i + 1]?.id ?? ''}:${draftSubId}` });
+              rows.push(row);
+            }
+            rows.push([{ text: '📋 Без категории', callback_data: `clar:nocat:${draftSubId}` }]);
+            rows.push([{ text: '◀️ Назад', callback_data: `draft:back:${draftSubId}` }]);
+            void upsertBotMessage(
+              telegramUserId, chatId,
+              '📁 <b>Выбери категорию:</b>',
+              { inline_keyboard: rows },
+            );
+          } else {
+            // Intent picker — reuse clar:intent: keyboard
+            const intentKeyboard = {
+              inline_keyboard: [
+                [
+                  { text: '💸 Расход',   callback_data: `clar:intent:expense:${draftSubId}` },
+                  { text: '💰 Доход',    callback_data: `clar:intent:income:${draftSubId}` },
+                ],
+                [
+                  { text: '🤝 Долг (дал)', callback_data: `clar:intent:debt_given:${draftSubId}` },
+                  { text: '🤲 Долг (взял)', callback_data: `clar:intent:debt_received:${draftSubId}` },
+                ],
+                [
+                  { text: '◀️ Назад', callback_data: `draft:back:${draftSubId}` },
+                ],
+              ],
+            };
+            void upsertBotMessage(
+              telegramUserId, chatId,
+              '🔄 <b>Выбери тип операции:</b>',
+              intentKeyboard,
+            );
+          }
+        } catch (err: unknown) {
+          const errorClass = err instanceof Error ? err.constructor.name : 'UnknownError';
+          request.log.error({ msg: '[midas:bot:webhook] draft sub-action failed', callbackId: cq.id, errorClass });
         }
 
         await answerCallbackQuery(cq.id);

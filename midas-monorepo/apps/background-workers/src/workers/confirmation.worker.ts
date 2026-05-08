@@ -23,7 +23,7 @@ import { Worker, type Job } from 'bullmq';
 import { QUEUE_NAMES, type CallbackConfirmJobPayload, IdempotencyKeyBuilder } from '@midas/shared';
 import { redisConnection } from '../queues/redis.js';
 import { callbackConfirmQueue, notificationsQueue } from '../queues/queue-definitions.js';
-import { approveDraft, rejectDraft } from '../services/draft-confirmation.service.js';
+import { approveDraft, rejectDraft, fetchApprovedTransactionCard } from '../services/draft-confirmation.service.js';
 import { resolveUserId } from '../services/draft.service.js';
 import { ulid } from 'ulid';
 import {
@@ -159,6 +159,29 @@ async function processConfirmation(job: Job<CallbackConfirmJobPayload>): Promise
       inlineKeyboardJson = JSON.stringify(buildNavKeyboard());
       break;
     case 'already_processed':
+      if (result.existingStatus === 'approved') {
+        // Phase 1.35: fetch and show the confirmed transaction card
+        let approvedCard = result.approvedCard ?? null;
+        if (!approvedCard) {
+          // Fetch by draftId if not already populated (e.g. SKIP LOCKED path)
+          try {
+            approvedCard = await fetchApprovedTransactionCard(draftId, workspaceId, userId);
+          } catch { /* non-fatal: fall back to plain message */ }
+        }
+        if (approvedCard) {
+          notificationMessage = buildConfirmedScreen({
+            intent: approvedCard.intent,
+            amount: approvedCard.amount,
+            currency: approvedCard.currency,
+            categoryName: approvedCard.categoryName,
+            accountName: approvedCard.accountName,
+            itemName: approvedCard.itemName,
+          });
+          inlineKeyboardJson = JSON.stringify(buildPostConfirmKeyboard(approvedCard.transactionId));
+          break;
+        }
+      }
+      // For other statuses (rejected, expired, etc.) or if fetch failed:
       notificationMessage = buildAlreadyProcessedScreen(result.existingStatus);
       break;
     case 'not_found':

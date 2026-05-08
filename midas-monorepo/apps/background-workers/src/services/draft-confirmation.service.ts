@@ -46,7 +46,20 @@ export type ConfirmActionResult =
       transactionTime: string;  // ISO string
     }
   | { outcome: 'rejected' }
-  | { outcome: 'already_processed'; existingStatus: string }
+  | {
+      outcome: 'already_processed';
+      existingStatus: string;
+      // Present when existingStatus === 'approved' — for rich re-display
+      approvedCard?: {
+        transactionId: string;
+        amount: string;
+        currency: string;
+        categoryName: string;
+        accountName: string;
+        intent: string;
+        itemName: string | null;
+      };
+    }
   | { outcome: 'not_found' }
   | { outcome: 'expired' }
   | { outcome: 'intent_missing' }; // Phase 1.8-A: draft has NULL parsed_intent — cannot create Transaction
@@ -407,4 +420,72 @@ async function resolveDefaultAccount(
     [workspaceId],
   );
   return refetch.rows[0]?.id ?? newId;
+}
+
+// ─────────────────────────────────────────────────────────────
+// fetchApprovedTransactionCard — Phase 1.35 already_processed fix
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Fetch display data for an already-approved draft's transaction.
+ * Used when already_processed fires with existingStatus = 'approved'.
+ * Returns null if transaction is not found (race condition safety).
+ *
+ * SEC-03: withTenantTransaction enforces RLS isolation.
+ * SEC-12: No amounts logged.
+ */
+export async function fetchApprovedTransactionCard(
+  draftId: string,
+  workspaceId: string,
+  userId: string,
+): Promise<{
+  transactionId: string;
+  amount: string;
+  currency: string;
+  categoryName: string;
+  accountName: string;
+  intent: string;
+  itemName: string | null;
+} | null> {
+  return withTenantTransaction(workspaceId, userId, async (client) => {
+    const txResult = await client.query<{
+      id: string;
+      amount: string;
+      currency: string;
+      transaction_intent: string;
+      item_name: string | null;
+      category_id: string | null;
+      account_source_id: string | null;
+    }>(
+      `SELECT t.id, t.amount, t.currency, t.transaction_intent, t.item_name,
+              t.category_id, t.account_source_id
+       FROM transactions t
+       JOIN transaction_drafts d ON d.id = t.draft_id
+       WHERE t.draft_id = $1 AND d.workspace_id = $2
+       LIMIT 1`,
+      [draftId, workspaceId],
+    );
+
+    const tx = txResult.rows[0];
+    if (!tx) return null;
+
+    const catResult = await client.query<{ name: string }>(
+      `SELECT name FROM categories WHERE id = $1 AND workspace_id = $2`,
+      [tx.category_id, workspaceId],
+    );
+    const acctResult = await client.query<{ name: string }>(
+      `SELECT name FROM account_sources WHERE id = $1 AND workspace_id = $2`,
+      [tx.account_source_id, workspaceId],
+    );
+
+    return {
+      transactionId: tx.id,
+      amount: tx.amount,
+      currency: tx.currency,
+      categoryName: catResult.rows[0]?.name ?? 'Другое',
+      accountName: acctResult.rows[0]?.name ?? 'Счёт',
+      intent: tx.transaction_intent,
+      itemName: tx.item_name ?? null,
+    };
+  });
 }

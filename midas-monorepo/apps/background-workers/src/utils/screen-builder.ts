@@ -193,9 +193,14 @@ export function buildNavKeyboard(): InlineKeyboard {
 
 export function buildConfirmKeyboard(draftId: string): InlineKeyboard {
   return {
-    inline_keyboard: [[
-      { text: '✅ Подтвердить', callback_data: `approve:${draftId}` },
-      { text: '❌ Отмена',      callback_data: `reject:${draftId}` },
-    ]],
+    inline_keyboard: [
+      [
+        { text: '✅ Подтвердить', callback_data: `approve:${draftId}` },
+        { text: '❌ Отмена',      callback_data: `reject:${draftId}` },
+      ],
+      [
+        { text: '✏️ Изменить', callback_data: `draft:edit:${draftId}` },
+      ],
+    ],
   };
 }

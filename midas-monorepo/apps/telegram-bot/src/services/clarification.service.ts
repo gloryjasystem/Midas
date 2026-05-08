@@ -241,3 +241,44 @@ export async function patchDraftCategory(
     return { status: 'ready', draftId };
   });
 }
+
+// ─────────────────────────────────────────────────────────────
+// getDraftFields — Phase 1.35 draft edit sub-menu
+// ─────────────────────────────────────────────────────────────
+
+export type DraftFields = {
+  id: string;
+  status: 'pending_user' | 'needs_clarification';
+  parsed_intent: string | null;
+  parsed_amount: string | null;
+  parsed_currency: string | null;
+  item_name: string | null;
+  parsed_category_hint: string | null;
+  category_id: string | null;
+};
+
+/**
+ * Fetch lightweight draft fields for the edit sub-menu.
+ * Returns null if not found, expired, or in wrong state.
+ *
+ * SEC-03: withTenantTransaction enforces RLS.
+ */
+export async function getDraftFields(
+  workspaceId: string,
+  userId: string,
+  draftId: string,
+): Promise<DraftFields | null> {
+  return withTenantTransaction(workspaceId, userId, async (client) => {
+    const result = await client.query<DraftFields>(
+      `SELECT id, status, parsed_intent, parsed_amount, parsed_currency,
+              item_name, parsed_category_hint, category_id
+       FROM transaction_drafts
+       WHERE id = $1 AND workspace_id = $2
+         AND status IN ('pending_user','needs_clarification')
+         AND expires_at > NOW()`,
+      [draftId, workspaceId],
+    );
+    return result.rows[0] ?? null;
+  });
+}
+

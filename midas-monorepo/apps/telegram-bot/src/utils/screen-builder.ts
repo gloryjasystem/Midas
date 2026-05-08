@@ -298,7 +298,8 @@ export function buildNavKeyboard(): InlineKeyboard {
 
 /**
  * Build the standard approve/reject confirmation keyboard.
- * [✅ Подтвердить] [❌ Отмена]
+ * Row 1: [✅ Подтвердить] [❌ Отмена]
+ * Row 2: [✏️ Изменить]
  */
 export function buildConfirmKeyboard(draftId: string): InlineKeyboard {
   return {
@@ -306,6 +307,9 @@ export function buildConfirmKeyboard(draftId: string): InlineKeyboard {
       [
         { text: '✅ Подтвердить', callback_data: `approve:${draftId}` },
         { text: '❌ Отмена',      callback_data: `reject:${draftId}` },
+      ],
+      [
+        { text: '✏️ Изменить', callback_data: `draft:edit:${draftId}` },
       ],
     ],
   };
