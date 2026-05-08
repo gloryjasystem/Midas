@@ -42,30 +42,137 @@ INTENT VALUES (choose one):
 - "debt_received" \u2014 user borrowed money from someone
 - "transfer" \u2014 money moved between accounts
 
+RUSSIAN LANGUAGE RULES (critical — most users write in Russian):
+
+EXPENSE signals — if ANY of these appear, intent is "expense":
+  Spending verbs: потратил/а/и, потрачено, заплатил/а, оплатил/а, купил/а/и, покупка,
+    списалось, списали, сняли, обошлось, вышло (сумма), ушло (на), отдал/а (за),
+    заказал/а, арендовал/а, пополнил (проезд/метро), поел/а, сходил/а (в магазин/кафе),
+    заправился, взял/а (кофе/такси), выпил/а, съел/а, накупил/а, набрал (на N руб)
+  Preposition patterns: "за [что-то] [сумма]", "на [что-то] [сумма]"
+
+INCOME signals — if ANY of these appear, intent is "income":
+  Receiving verbs: получил/а, пришло/пришли, заработал/а, начислили, перечислили,
+    выплатили, поступило, зачислили, вернули (возврат), дали (зарплату/аванс), выдали
+  Selling: продал/а, продажа, выручка
+  Informal: прилетело, упало (на счёт), капнуло (кешбэк)
+  Income nouns alone: зарплата, получка, аванс, премия, стипендия, кешбэк, дивиденды,
+    пенсия, пособие, фриланс, гонорар, подработка
+
+DEBT_GIVEN signals: "дал в долг", "одолжил [кому]", "дал взаймы", "дал денег [имя]"
+DEBT_RECEIVED signals: "взял в долг", "занял у [кого]", "одолжил у [кого]", "взял взаймы"
+TRANSFER signals: перевёл/перевел, перекинул, перебросил, вывел (с биржи), завёл (на биржу), обменял, конвертнул
+
+CATEGORY → INTENT defaults (when no verb is present, category implies intent):
+  EXPENSE categories: кофе, обед, ужин, завтрак, еда, продукты, ресторан, кафе, доставка,
+    такси, метро, бензин, парковка, штраф, подписка, аптека, лекарства, коммуналка, аренда,
+    одежда, обувь, парикмахерская, косметика, фитнес, врач, ремонт, курсы, подарок, цветы,
+    страховка, связь, интернет, развлечения, кино, театр, игры, магазин
+  INCOME categories: зарплата, аванс, премия, бонус, фриланс, подработка, гонорар,
+    продажа, авито, кешбэк, дивиденды, процент, пенсия, стипендия, пособие, возврат, рефанд
+
+CRITICAL RULE: If a category from the expense list appears with a number but NO verb,
+set intent="expense" with confidence >= 0.85. Example: "кофе 250" → expense.
+Similarly, "зарплата 80000" or "премия 20000" → income with confidence >= 0.9.
+
 EXAMPLES:
-User: "\u041a\u043e\u0444\u0435 250\u0440"
-Output: {"intent":"expense","amount":"250","currency":"RUB","category_hint":"\u041a\u043e\u0444\u0435","confidence":0.95}
 
-User: "\u041f\u043e\u043b\u0443\u0447\u0438\u043b \u0437\u0430\u0440\u043f\u043b\u0430\u0442\u0443 80000"
-Output: {"intent":"income","amount":"80000","currency":"RUB","category_hint":"\u0417\u0430\u0440\u043f\u043b\u0430\u0442\u0430","confidence":0.95}
+-- Expense: spending verbs --
+User: "Кофе 250р"
+Output: {"intent":"expense","amount":"250","currency":"RUB","category_hint":"Кофе","confidence":0.95}
 
-User: "\u0414\u0430\u043b \u0412\u0430\u043d\u0435 \u0432 \u0434\u043e\u043b\u0433 5000"
-Output: {"intent":"debt_given","amount":"5000","currency":"RUB","person_hint":"\u0412\u0430\u043d\u044f","confidence":0.9}
+User: "потратил на офис 3000"
+Output: {"intent":"expense","amount":"3000","category_hint":"Офис","confidence":0.95}
 
-User: "\u041f\u043e\u043b\u0443\u0447\u0438\u043b 1000 USDT \u0441 Binance"
+User: "заплатил за интернет 800"
+Output: {"intent":"expense","amount":"800","category_hint":"Интернет","confidence":0.95}
+
+User: "купил продукты на 2500"
+Output: {"intent":"expense","amount":"2500","category_hint":"Продукты","confidence":0.95}
+
+User: "оплатил подписку Netflix 699"
+Output: {"intent":"expense","amount":"699","category_hint":"Подписка","confidence":0.95}
+
+User: "списалось 1500 за страховку"
+Output: {"intent":"expense","amount":"1500","category_hint":"Страховка","confidence":0.9}
+
+User: "сходил в парикмахерскую 1200"
+Output: {"intent":"expense","amount":"1200","category_hint":"Парикмахерская","confidence":0.9}
+
+User: "ушло 3000 на бензин"
+Output: {"intent":"expense","amount":"3000","category_hint":"Бензин","confidence":0.9}
+
+User: "заправился на 2000"
+Output: {"intent":"expense","amount":"2000","category_hint":"Бензин","confidence":0.9}
+
+User: "заказал доставку 450"
+Output: {"intent":"expense","amount":"450","category_hint":"Доставка","confidence":0.9}
+
+-- Expense: category without verb --
+User: "кофе 250"
+Output: {"intent":"expense","amount":"250","category_hint":"Кофе","confidence":0.9}
+
+User: "такси 350"
+Output: {"intent":"expense","amount":"350","category_hint":"Такси","confidence":0.9}
+
+User: "подписка Spotify 169"
+Output: {"intent":"expense","amount":"169","category_hint":"Подписка","confidence":0.9}
+
+User: "аптека 870"
+Output: {"intent":"expense","amount":"870","category_hint":"Аптека","confidence":0.9}
+
+User: "коммуналка 4200"
+Output: {"intent":"expense","amount":"4200","category_hint":"Коммуналка","confidence":0.9}
+
+-- Income --
+User: "Получил зарплату 80000"
+Output: {"intent":"income","amount":"80000","currency":"RUB","category_hint":"Зарплата","confidence":0.95}
+
+User: "пришла стипендия 5000"
+Output: {"intent":"income","amount":"5000","category_hint":"Стипендия","confidence":0.9}
+
+User: "кешбэк 340"
+Output: {"intent":"income","amount":"340","category_hint":"Кешбэк","confidence":0.9}
+
+User: "продал телефон на авито 15000"
+Output: {"intent":"income","amount":"15000","category_hint":"Продажа","confidence":0.9}
+
+User: "премия 20000"
+Output: {"intent":"income","amount":"20000","category_hint":"Премия","confidence":0.9}
+
+User: "вернули за товар 3200"
+Output: {"intent":"income","amount":"3200","category_hint":"Возврат","confidence":0.9}
+
+User: "Получил 1000 USDT с Binance"
 Output: {"intent":"income","amount":"1000","currency":"USDT","account_hint":"Binance","confidence":0.95}
 
-User: "\u041f\u043e\u0442\u0440\u0430\u0442\u0438\u043b 200 \u043d\u0430 \u043a\u0430\u0440\u0442\u0443 \u0422\u0438\u043d\u044c\u043a\u043e\u0444\u0444"
-Output: {"intent":"expense","amount":"200","category_hint":"\u041f\u043e\u043a\u0443\u043f\u043a\u0438","account_hint":"\u0422\u0438\u043d\u044c\u043a\u043e\u0444\u0444","confidence":0.9}
+-- Debt --
+User: "Дал Ване в долг 5000"
+Output: {"intent":"debt_given","amount":"5000","currency":"RUB","person_hint":"Ваня","confidence":0.9}
 
-User: "\u041a\u0443\u043f\u0438\u043b \u043f\u0440\u043e\u0434\u0443\u043a\u0442\u044b"
-Output: {"intent":"expense","category_hint":"\u041f\u0440\u043e\u0434\u0443\u043a\u0442\u044b","confidence":0.8}
+User: "занял у Миши 10000"
+Output: {"intent":"debt_received","amount":"10000","person_hint":"Миша","confidence":0.9}
 
-User: "\u043f\u043e\u0442\u0440\u0430\u0442\u0438\u043b 3000"
+-- Transfer --
+User: "перекинул 10000 на Binance"
+Output: {"intent":"transfer","amount":"10000","account_hint":"Binance","confidence":0.9}
+
+User: "вывел 500 USDT с Bybit"
+Output: {"intent":"transfer","amount":"500","currency":"USDT","account_hint":"Bybit","confidence":0.9}
+
+-- Partial (amount missing) --
+User: "купил продукты"
+Output: {"intent":"expense","category_hint":"Продукты","confidence":0.8}
+
+User: "потратил 3000"
 Output: {"intent":"expense","amount":"3000","confidence":0.85}
 
-User: "maybe something happened"
-Output: {"intent":"expense","amount":"0.01","confidence":0.05}`;
+-- Nonsense --
+User: "привет как дела"
+Output: {"confidence":0.05}
+
+User: "🤔"
+Output: {"confidence":0.1}`;
 
 // ─────────────────────────────────────────────────────────────
 // Build user message from raw_text

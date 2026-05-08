@@ -94,6 +94,108 @@ function computeMissingFields(data: AiOutput): MissingField[] {
 }
 
 // ─────────────────────────────────────────────────────────────
+// Post-processing: intent recovery + confidence boost
+// Runs AFTER Claude returns — never before (no pre-processing).
+// Uses word-boundary regex to avoid false positives.
+// ─────────────────────────────────────────────────────────────
+
+const EXPENSE_PATTERNS: RegExp[] = [
+  /\b(потратил\w*|потрачен\w*)\b/i,
+  /\b(заплатил\w*|оплатил\w*)\b/i,
+  /\b(на)?купил\w*/i,
+  /\b(списал\w*|списан\w*)\b/i,
+  /\b(обошл\w+|вышл[оа]\s|ушл[оа]\s)/i,
+  /\b(поел\w*|сходил\w*|заправил\w*|заказал\w*|арендовал\w*)\b/i,
+  /\b(слил\w*|угробил\w*|накупил\w*)\b/i,
+  /\bвзял\w*\s+(кофе|такси|обед|пиво|чай|воду|сок|билет)/i,
+];
+
+const EXPENSE_CATEGORY_PATTERNS: RegExp[] = [
+  /\b(кофе|обед|ужин|завтрак|еда|продукты|ресторан|кафе|доставк\w*)\b/i,
+  /\b(такси|метро|бензин|заправк\w*|парковк\w*|штраф\w*)\b/i,
+  /\b(подписк\w*|аптек\w*|лекарств\w*|коммуналк\w*|аренд\w*)\b/i,
+  /\b(одежд\w*|обувь|парикмахерск\w*|косметик\w*|фитнес\w*)\b/i,
+  /\b(врач\w*|стоматолог\w*|ремонт\w*|курс\w*|подарок|цвет\w*)\b/i,
+  /\b(страховк\w*|связь|интернет|развлечени\w*|кино|театр\w*|игр\w*|магазин\w*)\b/i,
+];
+
+const INCOME_PATTERNS: RegExp[] = [
+  /\b(получил\w*|пришл[оиа]\w*)\b/i,
+  /\b(заработал\w*)\b/i,
+  /\b(начислил\w*|зачислен\w*|поступил\w*|перечислил\w*|выплатил\w*|выдали)\b/i,
+  /\b(вернул\w*|возврат\w*)\b/i,
+  /\b(продал\w*|продаж\w*|выручк\w*)\b/i,
+  /\b(прилетел\w*|упал[оа]|капнул\w*|налетел\w*)\b/i,
+];
+
+const INCOME_CATEGORY_PATTERNS: RegExp[] = [
+  /\b(зарплат\w*|получк\w*|аванс\w*|преми[яю]\w*|стипенди\w*)\b/i,
+  /\b(кешбэк\w*|кэшбэк\w*|cashback|дивиденд\w*)\b/i,
+  /\b(пенси[яю]\w*|пособи[еяю]\w*|гонорар\w*|фриланс\w*|подработк\w*|халтур\w*)\b/i,
+];
+
+const DEBT_GIVEN_PATTERNS: RegExp[] = [
+  /\bдал\w*\s+(в\s+долг|взаймы)/i,
+  /\bодолжил\w*\s+(?!у\s)/i,
+];
+
+const DEBT_RECEIVED_PATTERNS: RegExp[] = [
+  /\bвзял\w*\s+(в\s+долг|взаймы)/i,
+  /\bзанял\w*\s+у\s/i,
+  /\bодолжил\w*\s+у\s/i,
+];
+
+const TRANSFER_PATTERNS: RegExp[] = [
+  /\b(перев[её]л\w*|перекинул\w*|перебросил\w*)\b/i,
+  /\b(вывел\w*|зав[её]л\w*)\b/i,
+  /\bобменял\w*\b/i,
+  /\bконвертнул\w*\b/i,
+];
+
+const NEGATION_WINDOW = 20; // chars before keyword to check for negation
+
+function hasNegationBefore(text: string, matchIndex: number): boolean {
+  const window = text.slice(Math.max(0, matchIndex - NEGATION_WINDOW), matchIndex).toLowerCase();
+  return /\b(не|ни|без|нет)\s*$/.test(window);
+}
+
+type IntentType = 'expense' | 'income' | 'debt_given' | 'debt_received' | 'transfer';
+
+/**
+ * Post-process: attempt to recover intent from rawText when Claude is uncertain.
+ * Returns detected intent + confidence boost value, or null.
+ */
+function postProcessIntentRecovery(
+  rawText: string,
+): { intent: IntentType; boost: number } | null {
+  const lower = rawText.toLowerCase();
+
+  const groups: Array<{ patterns: RegExp[]; intent: IntentType; boost: number }> = [
+    // Debt patterns checked FIRST (more specific than expense/income)
+    { patterns: DEBT_GIVEN_PATTERNS, intent: 'debt_given', boost: 0.25 },
+    { patterns: DEBT_RECEIVED_PATTERNS, intent: 'debt_received', boost: 0.25 },
+    { patterns: TRANSFER_PATTERNS, intent: 'transfer', boost: 0.25 },
+    // Verb patterns (strong signal)
+    { patterns: EXPENSE_PATTERNS, intent: 'expense', boost: 0.25 },
+    { patterns: INCOME_PATTERNS, intent: 'income', boost: 0.25 },
+    // Category patterns (weaker signal)
+    { patterns: EXPENSE_CATEGORY_PATTERNS, intent: 'expense', boost: 0.15 },
+    { patterns: INCOME_CATEGORY_PATTERNS, intent: 'income', boost: 0.15 },
+  ];
+
+  for (const group of groups) {
+    for (const pattern of group.patterns) {
+      const match = pattern.exec(lower);
+      if (match && !hasNegationBefore(lower, match.index)) {
+        return { intent: group.intent, boost: group.boost };
+      }
+    }
+  }
+
+  return null;
+}
+
+// ─────────────────────────────────────────────────────────────
 // parseTransaction
 // ─────────────────────────────────────────────────────────────
 
@@ -111,6 +213,7 @@ export async function parseTransaction(rawText: string): Promise<ParseResult> {
     response = await client.messages.create({
       model: 'claude-haiku-4-5',
       max_tokens: 256,
+      temperature: 0, // Deterministic extraction — no randomness for classification
       system: SYSTEM_PROMPT,
       messages: [
         {
@@ -191,17 +294,38 @@ export async function parseTransaction(rawText: string): Promise<ParseResult> {
   // ── Check for missing required fields ─────────────────────
   // If confidence is high enough (>= 0.5) but a field is missing, it's still partial.
   // If confidence is 0.3–0.49, always treat as partial regardless of fields.
-  const missingFields = computeMissingFields(aiData);
+  let missingFields = computeMissingFields(aiData);
 
   const isLowConfidence = aiData.confidence < MIN_CONFIDENCE_THRESHOLD;
   const hasMissingFields = missingFields.length > 0;
 
+  // ── Post-processing: intent recovery + confidence boost ───
+  // Runs AFTER Claude — fills missing intent or boosts low confidence
+  // when strong keyword evidence exists in the original text.
   if (isLowConfidence || hasMissingFields) {
-    // Partial parse: some data is present but clarification is needed.
+    const recovery = postProcessIntentRecovery(rawText);
+    if (recovery) {
+      // Fill missing intent if Claude omitted it
+      if (!aiData.intent) {
+        aiData.intent = recovery.intent;
+        missingFields = computeMissingFields(aiData);
+      }
+      // Boost confidence if keyword agrees with Claude's intent
+      if (aiData.intent === recovery.intent) {
+        aiData.confidence = Math.min(1.0, aiData.confidence + recovery.boost);
+      }
+    }
+  }
+
+  // Re-evaluate after post-processing
+  const stillLowConfidence = aiData.confidence < MIN_CONFIDENCE_THRESHOLD;
+  const stillMissingFields = computeMissingFields(aiData).length > 0;
+
+  if (stillLowConfidence || stillMissingFields) {
     return {
       status: 'partial',
       data: aiData,
-      missingFields,
+      missingFields: computeMissingFields(aiData),
       tokensUsed,
     };
   }
