@@ -162,6 +162,8 @@ import {
   patchDraftCategory,                // Phase 1.32
   validateAmountString,              // Phase 1.32
   getDraftFields,                    // Phase 1.35
+  patchDraftCurrency,                // Phase 1.35
+  validateCurrencyCode,              // Phase 1.35
 } from '../services/clarification.service.js';
 import {
   upsertBotMessage,                  // Phase 1.33
@@ -1006,13 +1008,14 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
                 ],
                 [
                   { text: '🔄 Тип',       callback_data: `draft:intent:${draftEditId}` },
+                  { text: '💱 Валюту',    callback_data: `draft:cur:${draftEditId}` },
                 ],
                 [
                   { text: '◀️ Назад', callback_data: `draft:back:${draftEditId}` },
                 ],
               ],
             };
-            // Byte checks: draft:amt:{26}=35, draft:cat:{26}=35, draft:intent:{26}=39 ✓
+            // Byte checks: draft:amt:{26}=35, draft:cat:{26}=35, draft:intent:{26}=39, draft:cur:{26}=35 ✓
             void upsertBotMessage(telegramUserId, chatId, lines.join('\n'), subKeyboard);
           }
         } catch (err: unknown) {
@@ -1105,6 +1108,103 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
         } catch (err: unknown) {
           const errorClass = err instanceof Error ? err.constructor.name : 'UnknownError';
           request.log.error({ msg: '[midas:bot:webhook] draft sub-action failed', callbackId: cq.id, errorClass });
+        }
+
+        await answerCallbackQuery(cq.id);
+        await reply.status(200).send({ ok: true });
+        return;
+      }
+
+      // ── Phase 1.35: currency picker (prefix "draft:cur:" / "draft:setcur:") ──
+      // draft:cur:{draftId}              — shows currency picker buttons
+      // draft:setcur:{currency}:{draftId} — patches parsed_currency
+      // Byte checks: draft:cur:{26}=35 ✓  draft:setcur:USDT:{26}=44 ✓
+      if (callbackData.startsWith('draft:cur:') || callbackData.startsWith('draft:setcur:')) {
+        const isSet = callbackData.startsWith('draft:setcur:');
+
+        let curDraftId: string;
+        let curValue: string | null = null;
+
+        if (isSet) {
+          // draft:setcur:{currency}:{draftId}
+          const afterPrefix = callbackData.slice('draft:setcur:'.length);
+          const colonIdx = afterPrefix.lastIndexOf(':');
+          curDraftId = afterPrefix.slice(colonIdx + 1);
+          curValue   = afterPrefix.slice(0, colonIdx);
+        } else {
+          curDraftId = callbackData.slice('draft:cur:'.length);
+        }
+
+        if (!/^[0-9A-Z]{26}$/.test(curDraftId)) {
+          await answerCallbackQuery(cq.id);
+          await reply.status(200).send({ ok: true });
+          return;
+        }
+
+        try {
+          const curResolved = await resolveWorkspace(telegramUserId, chatId);
+
+          if (isSet && curValue) {
+            // SEC-01: validate currency code
+            const validCur = validateCurrencyCode(curValue);
+            if (!validCur) {
+              await answerCallbackQuery(cq.id, '❌ Неверный код валюты');
+              await reply.status(200).send({ ok: true });
+              return;
+            }
+            const patchRes = await patchDraftCurrency(
+              curResolved.workspaceId, curResolved.userId, curDraftId, validCur,
+            );
+            if (patchRes.status === 'ready') {
+              // Refresh draft and restore confirm card
+              const refreshed = await getDraftFields(curResolved.workspaceId, curResolved.userId, curDraftId);
+              if (refreshed) {
+                const { buildPreviewScreen, buildConfirmKeyboard } = await import('../utils/screen-builder.js');
+                const previewMsg = buildPreviewScreen({
+                  intent: refreshed.parsed_intent,
+                  amount: refreshed.parsed_amount,
+                  currency: refreshed.parsed_currency,
+                  categoryHint: refreshed.parsed_category_hint,
+                  accountHint: null,
+                  itemName: refreshed.item_name,
+                });
+                void upsertBotMessage(telegramUserId, chatId, previewMsg, buildConfirmKeyboard(curDraftId));
+              }
+            } else {
+              void upsertBotMessage(telegramUserId, chatId, '⏰ <b>Черновик истёк</b>\n\nОтправьте сообщение повторно.');
+            }
+          } else {
+            // Show currency picker
+            // Top-8 currencies as inline buttons
+            const currencyKeyboard = {
+              inline_keyboard: [
+                [
+                  { text: 'USDT', callback_data: `draft:setcur:USDT:${curDraftId}` },
+                  { text: 'USD',  callback_data: `draft:setcur:USD:${curDraftId}` },
+                  { text: 'EUR',  callback_data: `draft:setcur:EUR:${curDraftId}` },
+                  { text: 'RUB',  callback_data: `draft:setcur:RUB:${curDraftId}` },
+                ],
+                [
+                  { text: 'BTC',  callback_data: `draft:setcur:BTC:${curDraftId}` },
+                  { text: 'ETH',  callback_data: `draft:setcur:ETH:${curDraftId}` },
+                  { text: 'GBP',  callback_data: `draft:setcur:GBP:${curDraftId}` },
+                  { text: 'CNY',  callback_data: `draft:setcur:CNY:${curDraftId}` },
+                ],
+                [
+                  { text: '◀️ Назад', callback_data: `draft:edit:${curDraftId}` },
+                ],
+              ],
+            };
+            // Byte: draft:setcur:USDT:{26} = 44 ✓
+            void upsertBotMessage(
+              telegramUserId, chatId,
+              '💱 <b>Выбери валюту:</b>',
+              currencyKeyboard,
+            );
+          }
+        } catch (err: unknown) {
+          const errorClass = err instanceof Error ? err.constructor.name : 'UnknownError';
+          request.log.error({ msg: '[midas:bot:webhook] draft:cur: failed', callbackId: cq.id, errorClass });
         }
 
         await answerCallbackQuery(cq.id);

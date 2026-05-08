@@ -282,3 +282,55 @@ export async function getDraftFields(
   });
 }
 
+// ─────────────────────────────────────────────────────────────
+// patchDraftCurrency — Phase 1.35 draft edit sub-menu
+// ─────────────────────────────────────────────────────────────
+
+// Currency code: 2-8 uppercase letters/digits (USD, USDT, BTC, EUR…)
+const CURRENCY_REGEX = /^[A-Z0-9]{2,8}$/;
+
+/** Validate a user-supplied currency code before DB write (SEC-01). */
+export function validateCurrencyCode(input: string): string | null {
+  const upper = input.trim().toUpperCase();
+  if (!CURRENCY_REGEX.test(upper)) return null;
+  return upper;
+}
+
+/**
+ * Patch parsed_currency on a pending_user or needs_clarification draft.
+ *
+ * SEC-01: currency validated against regex before DB write.
+ * SEC-03: withTenantTransaction enforces RLS.
+ */
+export async function patchDraftCurrency(
+  workspaceId: string,
+  userId: string,
+  draftId: string,
+  currency: string,
+): Promise<PatchDraftResult> {
+  return withTenantTransaction(workspaceId, userId, async (client) => {
+    const row = await client.query<{ id: string; status: string; expires_at: string }>(
+      `SELECT id, status, expires_at
+       FROM transaction_drafts
+       WHERE id = $1 AND workspace_id = $2
+       FOR UPDATE SKIP LOCKED`,
+      [draftId, workspaceId],
+    );
+
+    if (row.rows.length === 0) return { status: 'not_found' };
+    const draft = row.rows[0];
+    if (!draft) return { status: 'not_found' };
+    if (!['pending_user', 'needs_clarification'].includes(draft.status)) return { status: 'wrong_state' };
+    if (new Date(draft.expires_at) <= new Date()) return { status: 'not_found' };
+
+    await client.query(
+      `UPDATE transaction_drafts
+       SET parsed_currency = $1, updated_at = NOW()
+       WHERE id = $2 AND workspace_id = $3`,
+      [currency, draftId, workspaceId],
+    );
+
+    return { status: 'ready', draftId };
+  });
+}
+
