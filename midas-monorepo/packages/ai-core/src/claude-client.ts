@@ -281,6 +281,14 @@ export async function parseTransaction(rawText: string): Promise<ParseResult> {
 
   const aiData: AiOutput = result.data;
 
+  // DEBUG: temporary log to diagnose intent detection issues
+  console.log('[ai-core:debug] Claude parsed output', {
+    intent: aiData.intent ?? 'MISSING',
+    amount: aiData.amount ?? 'MISSING',
+    confidence: aiData.confidence,
+    category_hint: aiData.category_hint ?? 'MISSING',
+  });
+
   // ── Confidence check ──────────────────────────────────────
   // Below PARTIAL_CONFIDENCE_THRESHOLD (0.3) → nonsense → needs_clarification (no data)
   if (aiData.confidence < PARTIAL_CONFIDENCE_THRESHOLD) {
