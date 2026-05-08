@@ -286,7 +286,7 @@ export async function approveDraft(
     return {
       outcome: 'approved',
       transactionId,
-      amount: draft.parsed_amount ?? '0',
+      amount: String(draft.parsed_amount ?? '0'),
       currency,
       categoryName: catNameResult.rows[0]?.name ?? 'Другое',
       accountName: acctNameResult.rows[0]?.name ?? 'Счёт',
@@ -480,7 +480,7 @@ export async function fetchApprovedTransactionCard(
 
     return {
       transactionId: tx.id,
-      amount: tx.original_amount,
+      amount: String(tx.original_amount),
       currency: tx.currency,
       categoryName: catResult.rows[0]?.name ?? 'Другое',
       accountName: acctResult.rows[0]?.name ?? 'Счёт',

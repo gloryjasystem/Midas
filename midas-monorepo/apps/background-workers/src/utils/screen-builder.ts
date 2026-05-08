@@ -42,7 +42,8 @@ export function intentLabel(intent: string | null | undefined): string {
 // ─────────────────────────────────────────────────────────────
 
 export function escapeHtml(input: string): string {
-  return input
+  const s = typeof input === 'string' ? input : String(input);
+  return s
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
