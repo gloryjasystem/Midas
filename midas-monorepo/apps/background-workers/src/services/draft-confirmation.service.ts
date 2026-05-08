@@ -450,15 +450,15 @@ export async function fetchApprovedTransactionCard(
   return withTenantTransaction(workspaceId, userId, async (client) => {
     const txResult = await client.query<{
       id: string;
-      amount: string;
+      original_amount: string;
       currency: string;
       transaction_intent: string;
       item_name: string | null;
       category_id: string | null;
-      account_source_id: string | null;
+      account_id: string | null;
     }>(
-      `SELECT t.id, t.amount, t.currency, t.transaction_intent, t.item_name,
-              t.category_id, t.account_source_id
+      `SELECT t.id, t.original_amount, t.currency, t.transaction_intent, t.item_name,
+              t.category_id, t.account_id
        FROM transactions t
        JOIN transaction_drafts d ON d.id = t.draft_id
        WHERE t.draft_id = $1 AND d.workspace_id = $2
@@ -475,12 +475,12 @@ export async function fetchApprovedTransactionCard(
     );
     const acctResult = await client.query<{ name: string }>(
       `SELECT name FROM account_sources WHERE id = $1 AND workspace_id = $2`,
-      [tx.account_source_id, workspaceId],
+      [tx.account_id, workspaceId],
     );
 
     return {
       transactionId: tx.id,
-      amount: tx.amount,
+      amount: tx.original_amount,
       currency: tx.currency,
       categoryName: catResult.rows[0]?.name ?? 'Другое',
       accountName: acctResult.rows[0]?.name ?? 'Счёт',
