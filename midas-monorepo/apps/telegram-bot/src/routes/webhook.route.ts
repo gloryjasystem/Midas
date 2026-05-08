@@ -83,6 +83,7 @@ import {
   parseSettingsArgs,
   formatCurrencyUpdated,
   formatTimezoneUpdated,
+  setDefaultAccount,
 } from '../services/settings.service.js';
 import {
   // Phase 1.33: sendMessageWithKeyboard no longer imported — routed via upsertBotMessage.
@@ -820,13 +821,15 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
             if (messageId) {
               void editMessageText(chatId, messageId, '⚙️ Настройки закрыты.', EMPTY_KEYBOARD);
             }
-          } else if (cmd.cmd === 'menu' || cmd.cmd === 'grouppicker') {
-            if (cmd.cmd === 'menu') {
+          } else if (cmd.cmd === 'menu' || cmd.cmd === 'grouppicker' || cmd.cmd === 'back') {
+            if (cmd.cmd === 'menu' || cmd.cmd === 'back') {
               // Re-show main menu (refresh)
               const settings = await getSettings(stResolved.workspaceId, stResolved.userId);
               const text = formatSettingsMenuText(
                 settings?.default_currency ?? 'USDT',
                 settings?.timezone ?? 'UTC',
+                settings?.expense_account_name ?? null,
+                settings?.income_account_name ?? null,
               );
               if (messageId) {
                 void editMessageText(chatId, messageId, text, buildSettingsMainKeyboard());
@@ -858,11 +861,69 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
               workspaceId: stResolved.workspaceId,
               // code NOT logged (SEC-12 consistency)
             });
-          } else {
+          } else if (cmd.cmd === 'search') {
             // Set Redis TTL search mode key
             const rKey = searchModeKey(telegramUserId, chatId);
             await redisConnection.set(rKey, '1', 'EX', SEARCH_MODE_TTL_SEC);
             void upsertBotMessage(telegramUserId, chatId, '🔍 Напиши символ или название валюты:');
+          } else if (cmd.cmd === 'default_account_picker') {
+            // Phase 1.35: Show account picker keyboard
+            const accounts = await getWorkspaceAccounts(stResolved.workspaceId, stResolved.userId);
+            const settings = await getSettings(stResolved.workspaceId, stResolved.userId);
+            const currentId = cmd.kind === 'expense'
+              ? settings?.default_expense_account_id ?? null
+              : settings?.default_income_account_id ?? null;
+
+            const kindLabel = cmd.kind === 'expense' ? 'расходов' : 'доходов';
+            const text = `🏦 Выберите основной счёт для ${kindLabel}:`;
+
+            // Build picker keyboard inline
+            const prefix = cmd.kind === 'expense' ? 'st:da:se:' : 'st:da:si:';
+            const rows: { text: string; callback_data: string }[][] = [];
+            for (const acct of accounts) {
+              const mark = acct.id === currentId ? ' ✓' : '';
+              rows.push([{ text: `${acct.name}${mark}`, callback_data: `${prefix}${acct.id}` }]);
+            }
+            const clearCb = cmd.kind === 'expense' ? 'st:da:ce' : 'st:da:ci';
+            if (currentId) {
+              rows.push([{ text: '🚫 Убрать основной', callback_data: clearCb }]);
+            }
+            rows.push([{ text: '← Назад', callback_data: 'st:back' }]);
+            if (messageId) {
+              void editMessageText(chatId, messageId, text, { inline_keyboard: rows });
+            }
+          } else if (cmd.cmd === 'default_account_set') {
+            // Phase 1.35: Set default account
+            await setDefaultAccount(stResolved.workspaceId, stResolved.userId, cmd.kind, cmd.accountId);
+            // Return to main menu
+            const settings = await getSettings(stResolved.workspaceId, stResolved.userId);
+            const text = formatSettingsMenuText(
+              settings?.default_currency ?? 'USDT',
+              settings?.timezone ?? 'UTC',
+              settings?.expense_account_name ?? null,
+              settings?.income_account_name ?? null,
+            );
+            if (messageId) {
+              void editMessageText(chatId, messageId, text, buildSettingsMainKeyboard());
+            }
+            request.log.info({
+              msg: '[midas:bot:webhook] settings: default account set',
+              telegramUserId,
+              kind: cmd.kind,
+            });
+          } else if (cmd.cmd === 'default_account_clear') {
+            // Phase 1.35: Clear default account
+            await setDefaultAccount(stResolved.workspaceId, stResolved.userId, cmd.kind, null);
+            const settings = await getSettings(stResolved.workspaceId, stResolved.userId);
+            const text = formatSettingsMenuText(
+              settings?.default_currency ?? 'USDT',
+              settings?.timezone ?? 'UTC',
+              settings?.expense_account_name ?? null,
+              settings?.income_account_name ?? null,
+            );
+            if (messageId) {
+              void editMessageText(chatId, messageId, text, buildSettingsMainKeyboard());
+            }
           }
         } catch (err: unknown) {
           const errorClass = err instanceof Error ? err.constructor.name : 'UnknownError';
@@ -1564,6 +1625,8 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
             const menuText = formatSettingsMenuText(
               settings?.default_currency ?? 'USDT',
               settings?.timezone ?? 'UTC',
+              settings?.expense_account_name ?? null,
+              settings?.income_account_name ?? null,
             );
             void upsertBotMessage(telegramUserId, chatId, menuText, buildSettingsMainKeyboard());
             request.log.info({

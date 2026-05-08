@@ -1,5 +1,5 @@
 /**
- * Settings Keyboard Service — Phase 1.26
+ * Settings Keyboard Service — Phase 1.26 / Phase 1.35
  *
  * Builds Telegram InlineKeyboardMarkup objects for the /settings UI flow.
  *
@@ -52,6 +52,10 @@ export function buildSettingsMainKeyboard(): InlineKeyboardMarkup {
   return {
     inline_keyboard: [
       [{ text: '✏️ Изменить валюту', callback_data: 'st:g:pick' }],
+      [
+        { text: '🏦 Счёт расходов', callback_data: 'st:da:e' },
+        { text: '🏦 Счёт доходов', callback_data: 'st:da:i' },
+      ],
     ],
   };
 }
@@ -61,13 +65,25 @@ export function buildSettingsMainKeyboard(): InlineKeyboardMarkup {
  *
  * escapeHtml applied to all DB-sourced values.
  */
-export function formatSettingsMenuText(currency: string, timezone: string): string {
+export function formatSettingsMenuText(
+  currency: string,
+  timezone: string,
+  expenseAccountName?: string | null,
+  incomeAccountName?: string | null,
+): string {
+  const expAcct = expenseAccountName
+    ? escapeHtml(expenseAccountName)
+    : '<i>не задан</i>';
+  const incAcct = incomeAccountName
+    ? escapeHtml(incomeAccountName)
+    : '<i>не задан</i>';
+
   return (
     '⚙️ <b>Настройки Midas</b>\n\n' +
     `💵 Базовая валюта: <b>${escapeHtml(currency)}</b>\n` +
-    `🕐 Часовой пояс: <b>${escapeHtml(timezone)}</b>\n\n` +
-    'Нажмите кнопку, чтобы изменить валюту.\n' +
-    'Для смены часового пояса: /settings timezone Europe/Moscow'
+    `🕐 Часовой пояс: <b>${escapeHtml(timezone)}</b>\n` +
+    `🏦 Счёт расходов: ${expAcct}\n` +
+    `🏦 Счёт доходов: ${incAcct}`
   );
 }
 
@@ -254,7 +270,13 @@ export type SettingsCallbackCmd =
   | { cmd: 'page'; group: CurrencyGroup; page: number }
   | { cmd: 'pick'; code: string }
   | { cmd: 'search' }
-  | { cmd: 'cancel' };
+  | { cmd: 'cancel' }
+  // Phase 1.35: default account management
+  | { cmd: 'default_account_picker'; kind: 'expense' | 'income' }
+  | { cmd: 'default_account_set'; kind: 'expense' | 'income'; accountId: string }
+  | { cmd: 'default_account_clear'; kind: 'expense' | 'income' }
+  | { cmd: 'default_account_new'; kind: 'expense' | 'income' }
+  | { cmd: 'back' };
 
 const CURRENCY_CODE_RE = /^[A-Z]{3,5}$/;
 const GROUP_MAP: Record<string, CurrencyGroup> = { s: 'stable', c: 'crypto', f: 'fiat' };
@@ -262,18 +284,44 @@ const GROUP_MAP: Record<string, CurrencyGroup> = { s: 'stable', c: 'crypto', f: 
 export function parseSettingsCallback(data: string): SettingsCallbackCmd | null {
   if (!data.startsWith('st:')) return null;
   const parts = data.split(':');
-  // parts[0] = 'st'
 
   const sub = parts[1] ?? '';
 
   if (sub === 'm') return { cmd: 'menu' };
   if (sub === 'x') return { cmd: 'cancel' };
   if (sub === 'srch') return { cmd: 'search' };
+  if (sub === 'back') return { cmd: 'back' };
 
   if (sub === 'p') {
     const code = parts[2] ?? '';
     if (!CURRENCY_CODE_RE.test(code)) return null;
     return { cmd: 'pick', code };
+  }
+
+  // Phase 1.35: default account callbacks
+  if (sub === 'da') {
+    const action = parts[2] ?? '';
+    if (action === 'e') return { cmd: 'default_account_picker', kind: 'expense' };
+    if (action === 'i') return { cmd: 'default_account_picker', kind: 'income' };
+    if (action === 'ce') return { cmd: 'default_account_clear', kind: 'expense' };
+    if (action === 'ci') return { cmd: 'default_account_clear', kind: 'income' };
+    if (action === 'se') {
+      const accountId = parts[3] ?? '';
+      if (!accountId) return null;
+      return { cmd: 'default_account_set', kind: 'expense', accountId };
+    }
+    if (action === 'si') {
+      const accountId = parts[3] ?? '';
+      if (!accountId) return null;
+      return { cmd: 'default_account_set', kind: 'income', accountId };
+    }
+    if (action === 'new') {
+      const kindKey = parts[3] ?? '';
+      if (kindKey === 'e') return { cmd: 'default_account_new', kind: 'expense' };
+      if (kindKey === 'i') return { cmd: 'default_account_new', kind: 'income' };
+      return null;
+    }
+    return null;
   }
 
   if (sub === 'g') {

@@ -55,6 +55,7 @@ export interface PreviewScreenData {
   currency: string | null;
   categoryHint: string | null;   // pre-escaped
   accountHint: string | null;    // pre-escaped
+  itemName: string | null;       // Phase 1.35, pre-escaped
 }
 
 /**
@@ -83,11 +84,14 @@ export function buildPreviewScreen(data: PreviewScreenData): string {
   if (data.amount) {
     lines.push(`Сумма: <b>${data.amount} ${data.currency ?? 'USDT'}</b>`);
   }
+  if (data.itemName) {
+    lines.push(`📝 ${data.itemName}`);
+  }
   if (data.categoryHint) {
-    lines.push(`Категория: ${data.categoryHint}`);
+    lines.push(`📁 Категория: ${data.categoryHint}`);
   }
   if (data.accountHint) {
-    lines.push(`Счёт: ${data.accountHint}`);
+    lines.push(`🏦 Счёт: ${data.accountHint}`);
   }
 
   lines.push('');
@@ -106,6 +110,7 @@ export interface ConfirmedScreenData {
   currency: string;             // pre-escaped
   categoryName: string | null;  // pre-escaped
   accountName: string | null;   // pre-escaped
+  itemName: string | null;      // Phase 1.35, pre-escaped
 }
 
 /**
@@ -129,11 +134,14 @@ export function buildConfirmedScreen(data: ConfirmedScreenData): string {
     `${emoji} <b>${data.amount} ${data.currency}</b>`,
   ];
 
+  if (data.itemName) {
+    lines.push(`📝 ${data.itemName}`);
+  }
   if (data.categoryName) {
-    lines.push(`Категория: ${data.categoryName}`);
+    lines.push(`📁 ${data.categoryName}`);
   }
   if (data.accountName) {
-    lines.push(`Счёт: ${data.accountName}`);
+    lines.push(`🏦 ${data.accountName}`);
   }
 
   return lines.join('\n');

@@ -155,6 +155,10 @@ export async function createDraft(input: CreateDraftInput): Promise<CreatedDraft
   // Phase 1.31: extract account_hint from AI output.
   const parsedAccountHint: string | null = aiData?.account_hint ?? null;
 
+  // Phase 1.35: extract item_hint and category_hint from AI output.
+  const itemName: string | null = aiData?.item_hint ?? null;
+  const parsedCategoryHint: string | null = aiData?.category_hint ?? null;
+
   await withTenantTransaction(workspaceId, userId, async (client) => {
     // SEC-03: withTenantTransaction sets SET LOCAL app.workspace_id = $workspaceId
     // All RLS policies will see the correct tenant context.
@@ -168,6 +172,8 @@ export async function createDraft(input: CreateDraftInput): Promise<CreatedDraft
         parsed_currency,
         parsed_intent,
         parsed_account_hint,
+        parsed_category_hint,
+        item_name,
         clarification_field,
         category_id,
         person_id,
@@ -177,11 +183,11 @@ export async function createDraft(input: CreateDraftInput): Promise<CreatedDraft
         created_at,
         updated_at
       ) VALUES (
-        $1, $2, $3, $4, $5, $6, $7, $8, $9,
-        NULL,  -- category_id: not resolved at parse time
+        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11,
+        NULL,  -- category_id: resolved at approval time (Phase 1.35)
         NULL,  -- person_id: not resolved at parse time
         NULL,  -- account_id: resolved by ai-parse worker (Phase 1.31) or approveDraft
-        $10, $11,
+        $12, $13,
         NOW(), NOW()
       )`,
       [
@@ -193,6 +199,8 @@ export async function createDraft(input: CreateDraftInput): Promise<CreatedDraft
         aiData?.currency ?? null,                       // ISO 4217 or null
         parsedIntent,                                   // Phase 1.8-A: intent from AI (or null)
         parsedAccountHint,                              // Phase 1.31: account hint from AI (or null)
+        parsedCategoryHint,                             // Phase 1.35: category hint from AI (or null)
+        itemName,                                       // Phase 1.35: item/product/merchant name (or null)
         clarificationField,                             // Phase 1.32: which field to clarify (or null)
         status,
         expiresAt.toISOString(),

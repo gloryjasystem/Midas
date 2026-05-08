@@ -144,6 +144,7 @@ async function processConfirmation(job: Job<CallbackConfirmJobPayload>): Promise
         currency: result.currency,
         categoryName: result.categoryName,
         accountName: result.accountName,
+        itemName: result.itemName,
       });
       inlineKeyboardJson = JSON.stringify(
         buildPostConfirmKeyboard(result.transactionId),

@@ -1,5 +1,5 @@
 /**
- * Draft Confirmation Service — Phase 1.6-B / Phase 1.8-A / Phase 1.25
+ * Draft Confirmation Service — Phase 1.6-B / Phase 1.8-A / Phase 1.25 / Phase 1.35
  *
  * Implements atomic approve/reject for TransactionDraft records.
  *
@@ -26,6 +26,7 @@
 
 import { ulid } from 'ulid';
 import { withTenantTransaction } from '@midas/database';
+import { resolveCategory } from './category-resolver.service.js';
 
 // ─────────────────────────────────────────────────────────────
 // Types
@@ -41,6 +42,7 @@ export type ConfirmActionResult =
       categoryName: string;     // resolved name or fallback
       accountName: string;      // resolved name or fallback
       intent: string;           // transaction_intent
+      itemName: string | null;  // Phase 1.35: item/product/merchant name
       transactionTime: string;  // ISO string
     }
   | { outcome: 'rejected' }
@@ -87,11 +89,13 @@ export async function approveDraft(
       parsed_currency: string | null;
       parsed_intent: string | null;  // Phase 1.8-A: must be non-NULL for Transaction creation
       parsed_account_hint: string | null; // Phase 1.31
+      parsed_category_hint: string | null; // Phase 1.35
+      item_name: string | null;            // Phase 1.35
       account_id: string | null;          // Phase 1.31: set by ia: callback before approval
       expires_at: string;
     }>(
       `SELECT id, workspace_id, status, parsed_amount, parsed_currency, parsed_intent,
-              parsed_account_hint, account_id, expires_at
+              parsed_account_hint, parsed_category_hint, item_name, account_id, expires_at
        FROM transaction_drafts
        WHERE id = $1 AND workspace_id = $2
        FOR UPDATE SKIP LOCKED`,
@@ -175,39 +179,16 @@ export async function approveDraft(
     // Phase 1.25: fallback is baseCurrency (workspace default), not hardcoded 'USD'.
     const currency = draft.parsed_currency ?? baseCurrency;
 
-    // Determine category_id: use workspace first category or create a default one.
-    // Phase 1.6-B placeholder — fuzzy matching deferred to future phase.
-    // categories.group is an ENUM: 'Бизнес' | 'Жизнь'
-    const catResult = await client.query<{ id: string }>(
-      `SELECT id FROM categories WHERE workspace_id = $1 LIMIT 1`,
-      [workspaceId],
-    );
-    let categoryId: string;
-    if (catResult.rows.length === 0) {
-      categoryId = ulid();
-      await client.query(
-        `INSERT INTO categories (id, workspace_id, name, "group")
-         VALUES ($1, $2, 'Разное', 'Жизнь'::category_group)
-         ON CONFLICT (workspace_id, name) DO NOTHING`,
-        [categoryId, workspaceId],
-      );
-      // Refetch after possible conflict
-      const refetch = await client.query<{ id: string }>(
-        `SELECT id FROM categories WHERE workspace_id = $1 AND name = 'Разное' LIMIT 1`,
-        [workspaceId],
-      );
-      categoryId = refetch.rows[0]?.id ?? categoryId;
-    } else {
-      categoryId = catResult.rows[0]?.id ?? ulid();
-    }
+    // Determine category_id: Phase 1.35 — use resolver pipeline.
+    // Pipeline: exact match → alias map → auto-create → fallback "Другое".
+    const categoryId = await resolveCategory(client, workspaceId, draft.parsed_category_hint);
 
     // Determine account_id: Phase 1.31 — use draft.account_id if set by ia: handler.
+    // Phase 1.35: Fall back to workspace default account by intent.
     // Otherwise fall back to workspace first account source or create a Default.
-    // account_sources.type is an ENUM: 'manual' | 'crypto_read_only' | 'bank_sync'
     let accountId: string;
     if (draft.account_id) {
       // Phase 1.31: account was resolved inline by user via ia: callback.
-      // Validate it still belongs to this workspace (defense-in-depth).
       const acctCheck = await client.query<{ id: string }>(
         `SELECT id FROM account_sources WHERE id = $1 AND workspace_id = $2`,
         [draft.account_id, workspaceId],
@@ -216,40 +197,11 @@ export async function approveDraft(
         accountId = draft.account_id;
       } else {
         // IDOR guard: account not in workspace — fall back to default
-        accountId = ulid();
-        await client.query(
-          `INSERT INTO account_sources (id, workspace_id, name, type, currency)
-           VALUES ($1, $2, 'Default', 'manual'::account_source_type, $3)
-           ON CONFLICT DO NOTHING`,
-          [accountId, workspaceId, currency],
-        );
-        const refetch = await client.query<{ id: string }>(
-          `SELECT id FROM account_sources WHERE workspace_id = $1 AND name = 'Default' LIMIT 1`,
-          [workspaceId],
-        );
-        accountId = refetch.rows[0]?.id ?? accountId;
+        accountId = await resolveDefaultAccount(client, workspaceId, currency, draft.parsed_intent);
       }
     } else {
-      const acctResult = await client.query<{ id: string }>(
-        `SELECT id FROM account_sources WHERE workspace_id = $1 LIMIT 1`,
-        [workspaceId],
-      );
-      if (acctResult.rows.length === 0) {
-        accountId = ulid();
-        await client.query(
-          `INSERT INTO account_sources (id, workspace_id, name, type, currency)
-           VALUES ($1, $2, 'Default', 'manual'::account_source_type, $3)
-           ON CONFLICT DO NOTHING`,
-          [accountId, workspaceId, currency],
-        );
-        const refetch = await client.query<{ id: string }>(
-          `SELECT id FROM account_sources WHERE workspace_id = $1 AND name = 'Default' LIMIT 1`,
-          [workspaceId],
-        );
-        accountId = refetch.rows[0]?.id ?? accountId;
-      } else {
-        accountId = acctResult.rows[0]?.id ?? ulid();
-      }
+      // Phase 1.35: Use workspace default account by intent.
+      accountId = await resolveDefaultAccount(client, workspaceId, currency, draft.parsed_intent);
     }
 
     await client.query(
@@ -264,6 +216,7 @@ export async function approveDraft(
         category_id,
         account_id,
         draft_id,
+        item_name,
         transaction_time,
         transaction_intent,
         rate_source,
@@ -275,27 +228,26 @@ export async function approveDraft(
         1::NUMERIC,         -- exchange_rate = 1:1 (Phase 1.6-B; multi-currency Phase 2)
         $5,
         $3::NUMERIC,        -- base_amount = original_amount (same currency, Phase 1.6-B)
-        $6,                 -- category_id
+        $6,                 -- category_id (Phase 1.35: from resolver)
         $7,                 -- account_id
         $8,                 -- draft_id (UNIQUE FK)
+        $9,                 -- item_name (Phase 1.35)
         NOW(),
-        $9,                 -- transaction_intent (Phase 1.8-A: explicit, no default)
+        $10,                -- transaction_intent (Phase 1.8-A: explicit, no default)
         'none',             -- rate_source: Phase 1.6-B placeholder (ADR-009 Phase 2)
         NOW()
       )`,
       [
         transactionId,              // $1 — ULID (ADR-004, SEC-01: not from AI)
         workspaceId,                // $2 — SEC-03: from backend session
-        // SEC-02: parsed_amount is NUMERIC(19,4). The pg type parser (OID 1700 → Decimal)
-        // returns a Decimal object, not a plain string. Calling toString() produces a clean
-        // numeric string ("2000.0000") that PostgreSQL NUMERIC accepts without error.
         String(draft.parsed_amount ?? '0'), // $3 — safe NUMERIC string (SEC-02)
         currency,                   // $4
         baseCurrency,               // $5
-        categoryId,                 // $6
+        categoryId,                 // $6 — Phase 1.35: from resolver pipeline
         accountId,                  // $7
         draftId,                    // $8
-        draft.parsed_intent,        // $9 — Phase 1.8-A: non-NULL validated in Step 5
+        draft.item_name ?? null,    // $9 — Phase 1.35: item/product/merchant name
+        draft.parsed_intent,        // $10 — Phase 1.8-A: non-NULL validated in Step 5
       ],
     );
 
@@ -323,9 +275,10 @@ export async function approveDraft(
       transactionId,
       amount: draft.parsed_amount ?? '0',
       currency,
-      categoryName: catNameResult.rows[0]?.name ?? 'Разное',
+      categoryName: catNameResult.rows[0]?.name ?? 'Другое',
       accountName: acctNameResult.rows[0]?.name ?? 'Счёт',
       intent: draft.parsed_intent,  // Validated non-null at Step 5
+      itemName: draft.item_name ?? null,  // Phase 1.35
       transactionTime: new Date().toISOString(),
     };
   });
@@ -392,4 +345,66 @@ export async function rejectDraft(
 
     return { outcome: 'rejected' };
   });
+}
+
+// ─────────────────────────────────────────────────────────────
+// resolveDefaultAccount — Phase 1.35
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Resolve the default account for a transaction based on intent.
+ * Pipeline:
+ *   1. Check workspace.default_expense_account_id / default_income_account_id
+ *   2. Fall back to LIMIT 1 from workspace accounts
+ *   3. Create "Default" account if none exist
+ */
+async function resolveDefaultAccount(
+  client: import('@midas/database').PoolClient,
+  workspaceId: string,
+  currency: string,
+  intent: string | null,
+): Promise<string> {
+  // Step 1: Try workspace default by intent
+  const defaultCol = (intent === 'income' || intent === 'debt_received')
+    ? 'default_income_account_id'
+    : 'default_expense_account_id';
+
+  const wsDefault = await client.query<{ default_id: string | null }>(
+    `SELECT ${defaultCol} AS default_id FROM workspaces WHERE id = $1`,
+    [workspaceId],
+  );
+  const defaultId = wsDefault.rows[0]?.default_id;
+  if (defaultId) {
+    // Validate it still exists
+    const check = await client.query<{ id: string }>(
+      `SELECT id FROM account_sources WHERE id = $1 AND workspace_id = $2`,
+      [defaultId, workspaceId],
+    );
+    if (check.rows.length > 0) {
+      return defaultId;
+    }
+  }
+
+  // Step 2: Fall back to LIMIT 1
+  const fallback = await client.query<{ id: string }>(
+    `SELECT id FROM account_sources WHERE workspace_id = $1 LIMIT 1`,
+    [workspaceId],
+  );
+  if (fallback.rows.length > 0 && fallback.rows[0]) {
+    return fallback.rows[0].id;
+  }
+
+  // Step 3: Create "Default" account
+  const newId = ulid();
+  await client.query(
+    `INSERT INTO account_sources (id, workspace_id, name, type, currency)
+     VALUES ($1, $2, 'Default', 'manual'::account_source_type, $3)
+     ON CONFLICT DO NOTHING`,
+    [newId, workspaceId, currency],
+  );
+  const refetch = await client.query<{ id: string }>(
+    `SELECT id FROM account_sources WHERE workspace_id = $1 AND name = 'Default' LIMIT 1`,
+    [workspaceId],
+  );
+  return refetch.rows[0]?.id ?? newId;
 }

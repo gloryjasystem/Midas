@@ -282,6 +282,7 @@ async function processAiParse(job: Job<AiParseJobPayload>): Promise<void> {
       currency: aiData?.currency ?? null,
       categoryHint: aiData?.category_hint ?? null,
       accountHint: accountHint,
+      itemName: aiData?.item_hint ?? null,
     });
 
     if (accountHint) {

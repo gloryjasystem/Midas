@@ -11,3 +11,4 @@
 
 export * from './db.js';
 export * from './transaction.js';
+export type { PoolClient } from 'pg';

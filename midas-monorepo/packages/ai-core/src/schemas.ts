@@ -99,8 +99,18 @@ export const AiOutputSchema = z
       .optional(),
 
     /**
+     * Item/product/merchant description extracted from user text (Phase 1.35).
+     * Examples: "кофе Starbucks", "Netflix", "бензин", "Facebook Ads".
+     * Stored as item_name on draft and transaction. NOT a category.
+     * SEC-01: free text hint — never an ID or system field.
+     * SEC-12: treated as PII — never logged.
+     */
+    item_hint: z.string().trim().min(1).max(200).optional(),
+
+    /**
      * Category name hint from AI (free text, NOT a category_id — SEC-01).
-     * Backend maps to actual category by name lookup or leaves null.
+     * Must be a BROAD budget group (e.g. "Кафе и рестораны"), not an item name.
+     * Backend maps to actual category via resolution pipeline or fallback.
      * Max 100 chars to prevent prompt injection via category field.
      */
     category_hint: z.string().trim().min(1).max(100).optional(),
