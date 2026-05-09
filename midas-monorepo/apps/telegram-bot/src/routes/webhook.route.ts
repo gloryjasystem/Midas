@@ -2575,8 +2575,10 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
           // Clean up await key
           await redisConnection.del(awaitKey);
 
-          // Set cur_set flag — user has now explicitly chosen a currency
-          await redisConnection.set(`midas:cur_set:${awaitWsId}`, '1');
+          // NOTE: cur_set is NOT set here intentionally.
+          // Answering the currency prompt for one transaction ≠ setting a default.
+          // Default currency is only saved when the user explicitly goes to
+          // ⚙️ Настройки → Валюта → picks one. (Phase 1.38 UX fix)
 
           // Phase 1.38 fix: delete the old clarification card before showing confirm card
           const clarMsgCacheKey = `midas:clar:msg:${telegramUserId}:${chatId}`;
