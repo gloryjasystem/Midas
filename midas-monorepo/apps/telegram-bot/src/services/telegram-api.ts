@@ -51,6 +51,18 @@ export interface InlineKeyboardMarkup {
   inline_keyboard: InlineKeyboardButton[][];
 }
 
+/**
+ * Telegram ReplyKeyboardMarkup.
+ * keyboard is a 2D array: outer = rows, inner = button texts per row.
+ * Phase 1.36-UX: persistent bottom navigation keyboard.
+ */
+export interface ReplyKeyboardMarkup {
+  keyboard: string[][];
+  resize_keyboard?: boolean;
+  is_persistent?: boolean;
+  input_field_placeholder?: string;
+}
+
 // ─────────────────────────────────────────────────────────────
 // Internal fetch helper
 // ─────────────────────────────────────────────────────────────
@@ -158,6 +170,39 @@ export async function sendMessageWithKeyboard(
   chatId: string,
   text: string,
   keyboard: InlineKeyboardMarkup,
+): Promise<string | null> {
+  const resp = await telegramPostFull('sendMessage', {
+    chat_id: chatId,
+    text,
+    parse_mode: 'HTML',
+    reply_markup: keyboard,
+  });
+  if (resp?.ok && resp.result?.message_id) return String(resp.result.message_id);
+  return null;
+}
+
+// ───────────────────────────────────────────────────────────────
+// sendMessageWithReplyKeyboard (Phase 1.36-UX)
+// ───────────────────────────────────────────────────────────────
+
+/**
+ * Send a message with a persistent ReplyKeyboardMarkup (bottom navigation).
+ *
+ * Phase 1.36-UX: Used exclusively to activate the persistent bottom navigation
+ * keyboard on /start. Reply Keyboards cannot be added via editMessageText —
+ * they require a fresh sendMessage call.
+ *
+ * SEC-12: text NOT logged. Only chatId is metadata.
+ *
+ * @param chatId   - string Telegram chat ID
+ * @param text     - HTML-mode message text (greeting / re-greeting)
+ * @param keyboard - ReplyKeyboardMarkup to attach
+ * @returns message_id as string on success, null on any error (non-throwing)
+ */
+export async function sendMessageWithReplyKeyboard(
+  chatId: string,
+  text: string,
+  keyboard: ReplyKeyboardMarkup,
 ): Promise<string | null> {
   const resp = await telegramPostFull('sendMessage', {
     chat_id: chatId,

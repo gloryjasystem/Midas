@@ -145,6 +145,7 @@ async function processConfirmation(job: Job<CallbackConfirmJobPayload>): Promise
         categoryName: result.categoryName,
         accountName: result.accountName,
         itemName: result.itemName,
+        transactionTime: result.transactionTime, // Phase 1.36-UX: timestamp on card
       });
       inlineKeyboardJson = JSON.stringify(
         buildPostConfirmKeyboard(result.transactionId),

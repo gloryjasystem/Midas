@@ -298,7 +298,7 @@ export async function parseTransaction(rawText: string): Promise<ParseResult> {
   // ── Check for missing required fields ─────────────────────
   // If confidence is high enough (>= 0.5) but a field is missing, it's still partial.
   // If confidence is 0.3–0.49, always treat as partial regardless of fields.
-  let missingFields = computeMissingFields(aiData);
+  const missingFields = computeMissingFields(aiData);
 
   const isLowConfidence = aiData.confidence < MIN_CONFIDENCE_THRESHOLD;
   const hasMissingFields = missingFields.length > 0;
@@ -312,7 +312,7 @@ export async function parseTransaction(rawText: string): Promise<ParseResult> {
       // Fill missing intent if Claude omitted it
       if (!aiData.intent) {
         aiData.intent = recovery.intent;
-        missingFields = computeMissingFields(aiData);
+        // NOTE: re-evaluation of missingFields happens below via computeMissingFields(aiData)
       }
       // Boost confidence if keyword agrees with Claude's intent
       if (aiData.intent === recovery.intent) {

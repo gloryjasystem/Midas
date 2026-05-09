@@ -69,20 +69,31 @@ export function buildPreviewScreen(data: PreviewScreenData): string {
   const label = intentLabel(data.intent);
   const lines: string[] = [`${emoji} <b>${label}</b>`, ''];
 
+  // ── Blockquote: amount + item name ───────────────────────────
+  // <blockquote> — нативный UI-элемент Telegram (полоска слева).
+  // Никогда не переносится, одинаково выглядит на всех экранах.
   if (data.amount) {
-    lines.push(`Сумма: <b>${escapeHtml(data.amount)} ${escapeHtml(data.currency ?? 'USDT')}</b>`);
+    const amountLine = `<b>${escapeHtml(data.amount)} ${escapeHtml(data.currency ?? 'USDT')}</b>`;
+    const blockContent = data.itemName
+      ? `${amountLine}\n${escapeHtml(data.itemName)}`
+      : amountLine;
+    lines.push(`<blockquote>${blockContent}</blockquote>`);
+    lines.push('');
+  } else if (data.itemName) {
+    lines.push(`<blockquote>${escapeHtml(data.itemName)}</blockquote>`);
+    lines.push('');
   }
-  if (data.itemName) {
-    lines.push(`📝 ${escapeHtml(data.itemName)}`);
+
+  // ── Details: category · account (middle dot — U+00B7) ────────
+  const details: string[] = [];
+  if (data.categoryHint) details.push(`📁 ${escapeHtml(data.categoryHint)}`);
+  if (data.accountHint)  details.push(`🏦 ${escapeHtml(data.accountHint)}`);
+  if (details.length > 0) {
+    lines.push(details.join('   ·   '));
+    lines.push('');
   }
-  if (data.categoryHint) {
-    lines.push(`📁 Категория: ${escapeHtml(data.categoryHint)}`);
-  }
-  if (data.accountHint) {
-    lines.push(`🏦 Счёт: ${escapeHtml(data.accountHint)}`);
-  }
-  lines.push('');
-  lines.push('Всё верно?');
+
+  lines.push('<i>Всё верно?</i>');
   return lines.join('\n');
 }
 
@@ -97,18 +108,57 @@ export interface ConfirmedScreenData {
   categoryName: string | null;
   accountName: string | null;
   itemName: string | null;  // Phase 1.35
+  transactionTime?: string | null; // ISO string — опционально для обратной совместимости
+}
+
+// ─────────────────────────────────────────────────────────────
+// Time formatter (private)
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Format ISO timestamp to Russian short form: "09:13, 9 мая"
+ * Purely local — no timezone conversion (uses server time from DB NOW()).
+ */
+function formatTransactionTime(iso: string): string {
+  try {
+    const d = new Date(iso);
+    const hh = d.getHours().toString().padStart(2, '0');
+    const mm = d.getMinutes().toString().padStart(2, '0');
+    const months = ['янв', 'фев', 'мар', 'апр', 'мая', 'июн',
+                    'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
+    const month = months[d.getMonth()] ?? '';
+    return `${hh}:${mm}, ${d.getDate().toString()} ${month}`;
+  } catch {
+    return '';
+  }
 }
 
 export function buildConfirmedScreen(data: ConfirmedScreenData): string {
   const emoji = intentEmoji(data.intent);
-  const lines: string[] = [
-    '✅ <b>Записано</b>',
-    '',
-    `${emoji} <b>${escapeHtml(data.amount)} ${escapeHtml(data.currency)}</b>`,
-  ];
-  if (data.itemName) lines.push(`📝 ${escapeHtml(data.itemName)}`);
-  if (data.categoryName) lines.push(`📁 ${escapeHtml(data.categoryName)}`);
-  if (data.accountName) lines.push(`🏦 ${escapeHtml(data.accountName)}`);
+  const lines: string[] = ['✅ <b>Записано</b>', ''];
+
+  // ── Blockquote: amount + item name ───────────────────────────
+  const amountLine = `${emoji} <b>${escapeHtml(data.amount)} ${escapeHtml(data.currency)}</b>`;
+  const blockContent = data.itemName
+    ? `${amountLine}\n${escapeHtml(data.itemName)}`
+    : amountLine;
+  lines.push(`<blockquote>${blockContent}</blockquote>`);
+  lines.push('');
+
+  // ── Details: category · account ──────────────────────────────
+  const details: string[] = [];
+  if (data.categoryName) details.push(`📁 ${escapeHtml(data.categoryName)}`);
+  if (data.accountName)  details.push(`🏦 ${escapeHtml(data.accountName)}`);
+  if (details.length > 0) {
+    lines.push(details.join('   ·   '));
+  }
+
+  // ── Timestamp ─────────────────────────────────────────────────
+  if (data.transactionTime) {
+    const ts = formatTransactionTime(data.transactionTime);
+    if (ts) lines.push(`🕐 <i>${ts}</i>`);
+  }
+
   return lines.join('\n');
 }
 
@@ -175,11 +225,15 @@ type InlineKeyboard = { inline_keyboard: InlineButton[][] };
 
 export function buildPostConfirmKeyboard(transactionId: string): InlineKeyboard {
   return {
-    inline_keyboard: [[
-      { text: '✏️ Изменить', callback_data: `ed:v:${transactionId}` },
-      { text: '📊 Баланс',   callback_data: 'nav:balance' },
-      { text: '📋 Отчёт',    callback_data: 'nav:report' },
-    ]],
+    inline_keyboard: [
+      [
+        { text: '✏️ Изменить запись', callback_data: `ed:v:${transactionId}` },
+      ],
+      [
+        { text: '📊 Баланс', callback_data: 'nav:balance' },
+        { text: '📋 Отчёт',  callback_data: 'nav:report' },
+      ],
+    ],
   };
 }
 
@@ -196,11 +250,11 @@ export function buildConfirmKeyboard(draftId: string): InlineKeyboard {
   return {
     inline_keyboard: [
       [
-        { text: '✅ Подтвердить', callback_data: `approve:${draftId}` },
-        { text: '❌ Отмена',      callback_data: `reject:${draftId}` },
+        { text: '✅  Подтвердить', callback_data: `approve:${draftId}` },
       ],
       [
         { text: '✏️ Изменить', callback_data: `draft:edit:${draftId}` },
+        { text: '✕  Отмена',   callback_data: `reject:${draftId}` },
       ],
     ],
   };

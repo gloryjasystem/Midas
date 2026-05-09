@@ -253,7 +253,7 @@ export async function approveDraft(
       [
         transactionId,              // $1 — ULID (ADR-004, SEC-01: not from AI)
         workspaceId,                // $2 — SEC-03: from backend session
-        String(draft.parsed_amount ?? '0'), // $3 — safe NUMERIC string (SEC-02)
+        draft.parsed_amount ?? '0', // $3 — safe NUMERIC string (SEC-02); pg OID-1700 parser guarantees string
         currency,                   // $4
         baseCurrency,               // $5
         categoryId,                 // $6 — Phase 1.35: from resolver pipeline
@@ -286,7 +286,7 @@ export async function approveDraft(
     return {
       outcome: 'approved',
       transactionId,
-      amount: String(draft.parsed_amount ?? '0'),
+      amount: draft.parsed_amount ?? '0',  // pg OID-1700 parser guarantees string (SEC-02)
       currency,
       categoryName: catNameResult.rows[0]?.name ?? 'Другое',
       accountName: acctNameResult.rows[0]?.name ?? 'Счёт',
@@ -480,7 +480,7 @@ export async function fetchApprovedTransactionCard(
 
     return {
       transactionId: tx.id,
-      amount: String(tx.original_amount),
+      amount: tx.original_amount,  // pg OID-1700 parser guarantees NUMERIC → string (SEC-02)
       currency: tx.currency,
       categoryName: catResult.rows[0]?.name ?? 'Другое',
       accountName: acctResult.rows[0]?.name ?? 'Счёт',

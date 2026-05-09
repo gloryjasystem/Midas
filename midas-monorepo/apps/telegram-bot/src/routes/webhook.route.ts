@@ -89,6 +89,7 @@ import {
   // Phase 1.33: sendMessageWithKeyboard no longer imported — routed via upsertBotMessage.
   editMessageText,
   answerCallbackQuery,
+  sendMessageWithReplyKeyboard,  // Phase 1.36-UX: persistent bottom nav keyboard
 } from '../services/telegram-api.js';
 import { redisConnection } from '../queues/redis.js';
 import { searchCurrencies } from '../services/currencies.js';
@@ -173,7 +174,13 @@ import {
 } from '../services/active-message.service.js';
 
 import { callbackConfirmQueue } from '../queues/callback-confirm-queue.js';
-import { buildPreviewScreen } from '../utils/screen-builder.js'; // Phase 1.35
+import {
+  buildPreviewScreen,
+  buildMainMenuKeyboard,   // Phase 1.36-UX: persistent bottom nav keyboard
+  NAV_BTN_BALANCE,         // Phase 1.36-UX: button text intercept constants
+  NAV_BTN_REPORT,          // Phase 1.36-UX
+  NAV_BTN_SETTINGS,        // Phase 1.36-UX
+} from '../utils/screen-builder.js'; // Phase 1.35
 
 // ─────────────────────────────────────────────────────────────
 // Zod schema — validates raw incoming Telegram Update shape
@@ -1555,6 +1562,62 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
     // Runs for ALL text messages (commands and free-text) before any processing.
     tryDeleteUserMessage(chatId, messageId);
 
+    // ── Phase 1.36-UX: Reply Keyboard button shortcuts ──────────────────
+    // Reply Keyboard buttons send their label text as a plain message.
+    // Intercept here — before AI parse — and route to the correct handler.
+    const navText = message.text.trim();
+
+    if (navText === NAV_BTN_BALANCE) {
+      try {
+        const resolved = await resolveWorkspace(telegramUserId, chatId);
+        const balanceText = await getAccountBalances(resolved.workspaceId, resolved.userId);
+        void upsertBotMessage(telegramUserId, chatId, balanceText);
+        request.log.info({ msg: '[midas:bot:webhook] nav:balance shortcut', telegramUserId, workspaceId: resolved.workspaceId });
+      } catch (err: unknown) {
+        const errorClass = err instanceof Error ? err.constructor.name : 'UnknownError';
+        request.log.error({ msg: '[midas:bot:webhook] nav:balance shortcut failed', telegramUserId, errorClass });
+        void upsertBotMessage(telegramUserId, chatId, '⚠️ Не удалось получить баланс. Попробуйте позже.');
+      }
+      await reply.status(200).send({ ok: true });
+      return;
+    }
+
+    if (navText === NAV_BTN_REPORT) {
+      try {
+        const resolved = await resolveWorkspace(telegramUserId, chatId);
+        const reportText = await getMonthlyReport(resolved.workspaceId, resolved.userId);
+        void upsertBotMessage(telegramUserId, chatId, reportText);
+        request.log.info({ msg: '[midas:bot:webhook] nav:report shortcut', telegramUserId, workspaceId: resolved.workspaceId });
+      } catch (err: unknown) {
+        const errorClass = err instanceof Error ? err.constructor.name : 'UnknownError';
+        request.log.error({ msg: '[midas:bot:webhook] nav:report shortcut failed', telegramUserId, errorClass });
+        void upsertBotMessage(telegramUserId, chatId, '⚠️ Не удалось сформировать отчёт. Попробуйте позже.');
+      }
+      await reply.status(200).send({ ok: true });
+      return;
+    }
+
+    if (navText === NAV_BTN_SETTINGS) {
+      try {
+        const resolved = await resolveWorkspace(telegramUserId, chatId);
+        const settings = await getSettings(resolved.workspaceId, resolved.userId);
+        const menuText = formatSettingsMenuText(
+          settings?.default_currency ?? 'USDT',
+          settings?.timezone ?? 'UTC',
+          settings?.expense_account_name ?? null,
+          settings?.income_account_name ?? null,
+        );
+        void upsertBotMessage(telegramUserId, chatId, menuText, buildSettingsMainKeyboard());
+        request.log.info({ msg: '[midas:bot:webhook] nav:settings shortcut', telegramUserId, workspaceId: resolved.workspaceId });
+      } catch (err: unknown) {
+        const errorClass = err instanceof Error ? err.constructor.name : 'UnknownError';
+        request.log.error({ msg: '[midas:bot:webhook] nav:settings shortcut failed', telegramUserId, errorClass });
+        void upsertBotMessage(telegramUserId, chatId, '⚠️ Ошибка настроек. Попробуйте позже.');
+      }
+      await reply.status(200).send({ ok: true });
+      return;
+    }
+
     if (commandToken !== null) {
       // ── 5b: /start ───────────────────────────────────────────
       if (commandToken === '/start') {
@@ -1585,12 +1648,19 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
 
           // If existing user, send a re-greeting (resolveWorkspace only sends for isNewUser)
           if (!resolved.isNewUser) {
-            void upsertBotMessage(
-              telegramUserId,
+            // Phase 1.36-UX: Re-greeting WITH Reply Keyboard to (re-)activate the
+            // persistent bottom nav. Reply Keyboards cannot be set via editMessageText
+            // — they require a fresh sendMessage call.
+            void sendMessageWithReplyKeyboard(
               chatId,
               '✅ Вы уже зарегистрированы. Просто отправьте сообщение о расходе или доходе.',
+              buildMainMenuKeyboard(),
             );
           } else {
+            // Phase 1.36-UX: Activate persistent bottom nav keyboard for new users.
+            // Sent as a separate message so the onboarding inline keyboard
+            // can appear independently on the next upsertBotMessage call.
+            void sendMessageWithReplyKeyboard(chatId, '👋 Добро пожаловать в Midas!', buildMainMenuKeyboard());
             // Phase 1.30: new user — show guided account onboarding keyboard (Scenario Е).
             // The default account was already created by system_find_or_create_user.
             // This keyboard allows the user to add NAMED accounts on top of the default.

@@ -1,5 +1,5 @@
 /**
- * Screen Builder Utility — Phase 1.34
+ * Screen Builder Utility — Phase 1.34 / Phase 1.36-UX
  *
  * Pure functions for building structured "app screen" card messages
  * for the Telegram bot. All messages use parse_mode:'HTML'.
@@ -61,13 +61,14 @@ export interface PreviewScreenData {
 /**
  * Build the transaction preview card shown before user confirms.
  *
- * Example:
+ * Layout:
  * ```
  * 💸 Расход
  *
- * Сумма: 100 USDT
- * Категория: Кофе
- * Счёт: Binance
+ * ┃ 100 USDT        ← <blockquote> — нативный элемент Telegram, не переносится
+ * ┃ ручка
+ *
+ * 📁 Кофе   ·   🏦 Binance
  *
  * Всё верно?
  * ```
@@ -81,21 +82,31 @@ export function buildPreviewScreen(data: PreviewScreenData): string {
     '',
   ];
 
+  // ── Blockquote: amount + item name ───────────────────────────
+  // <blockquote> — нативный UI-элемент Telegram (полоска слева).
+  // Никогда не переносится, одинаково выглядит на всех экранах.
   if (data.amount) {
-    lines.push(`Сумма: <b>${data.amount} ${data.currency ?? 'USDT'}</b>`);
-  }
-  if (data.itemName) {
-    lines.push(`📝 ${data.itemName}`);
-  }
-  if (data.categoryHint) {
-    lines.push(`📁 Категория: ${data.categoryHint}`);
-  }
-  if (data.accountHint) {
-    lines.push(`🏦 Счёт: ${data.accountHint}`);
+    const amountLine = `<b>${data.amount} ${data.currency ?? 'USDT'}</b>`;
+    const blockContent = data.itemName
+      ? `${amountLine}\n${data.itemName}`
+      : amountLine;
+    lines.push(`<blockquote>${blockContent}</blockquote>`);
+    lines.push('');
+  } else if (data.itemName) {
+    lines.push(`<blockquote>${data.itemName}</blockquote>`);
+    lines.push('');
   }
 
-  lines.push('');
-  lines.push('Всё верно?');
+  // ── Details: category · account (middle dot — U+00B7) ────────
+  const details: string[] = [];
+  if (data.categoryHint) details.push(`📁 ${data.categoryHint}`);
+  if (data.accountHint)  details.push(`🏦 ${data.accountHint}`);
+  if (details.length > 0) {
+    lines.push(details.join('   ·   '));
+    lines.push('');
+  }
+
+  lines.push('<i>Всё верно?</i>');
 
   return lines.join('\n');
 }
@@ -111,37 +122,70 @@ export interface ConfirmedScreenData {
   categoryName: string | null;  // pre-escaped
   accountName: string | null;   // pre-escaped
   itemName: string | null;      // Phase 1.35, pre-escaped
+  transactionTime?: string | null; // ISO string — опционально для обратной совместимости
+}
+
+// ─────────────────────────────────────────────────────────────
+// Time formatter (private)
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Format ISO timestamp to Russian short form: "09:13, 9 мая"
+ * Purely local — no timezone conversion (uses server time from DB NOW()).
+ */
+function formatTransactionTime(iso: string): string {
+  try {
+    const d = new Date(iso);
+    const hh = d.getHours().toString().padStart(2, '0');
+    const mm = d.getMinutes().toString().padStart(2, '0');
+    const months = ['янв', 'фев', 'мар', 'апр', 'мая', 'июн',
+                    'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
+    const month = months[d.getMonth()] ?? '';
+    return `${hh}:${mm}, ${d.getDate().toString()} ${month}`;
+  } catch {
+    return '';
+  }
 }
 
 /**
  * Build the post-confirmation "Записано" card.
  *
- * Example:
+ * Layout:
  * ```
  * ✅ Записано
  *
- * 💸 100 USDT
- * Категория: Кофе
- * Счёт: Binance
+ * ┃ 💸 100 USDT     ← <blockquote>
+ * ┃ ручка
+ *
+ * 📁 Кофе   ·   🏦 Binance
+ * 🕐 09:13, 9 мая
  * ```
  */
 export function buildConfirmedScreen(data: ConfirmedScreenData): string {
   const emoji = intentEmoji(data.intent);
 
-  const lines: string[] = [
-    '✅ <b>Записано</b>',
-    '',
-    `${emoji} <b>${data.amount} ${data.currency}</b>`,
-  ];
+  const lines: string[] = ['✅ <b>Записано</b>', ''];
 
-  if (data.itemName) {
-    lines.push(`📝 ${data.itemName}`);
+  // ── Blockquote: amount + item name ───────────────────────────
+  const amountLine = `${emoji} <b>${data.amount} ${data.currency}</b>`;
+  const blockContent = data.itemName
+    ? `${amountLine}\n${data.itemName}`
+    : amountLine;
+  lines.push(`<blockquote>${blockContent}</blockquote>`);
+  lines.push('');
+
+  // ── Details: category · account ──────────────────────────────
+  const details: string[] = [];
+  if (data.categoryName) details.push(`📁 ${data.categoryName}`);
+  if (data.accountName)  details.push(`🏦 ${data.accountName}`);
+  if (details.length > 0) {
+    lines.push(details.join('   ·   '));
   }
-  if (data.categoryName) {
-    lines.push(`📁 ${data.categoryName}`);
-  }
-  if (data.accountName) {
-    lines.push(`🏦 ${data.accountName}`);
+
+  // ── Timestamp ─────────────────────────────────────────────────
+  if (data.transactionTime) {
+    const ts = formatTransactionTime(data.transactionTime);
+    if (ts) lines.push(`🕐 <i>${ts}</i>`);
   }
 
   return lines.join('\n');
@@ -267,15 +311,21 @@ type InlineKeyboard = { inline_keyboard: InlineButton[][] };
 
 /**
  * Build the post-confirmation navigation keyboard.
- * [✏️ Изменить] [📊 Баланс] [📋 Отчёт]
+ *
+ * Row 1: [✏️ Изменить запись]         ← отдельная строка — редактирование
+ * Row 2: [📊 Баланс] [📋 Отчёт]      ← навигация
+ *
+ * 3 кнопки в ряд слишком тесно на мобиле — текст обрезается.
  */
 export function buildPostConfirmKeyboard(transactionId: string): InlineKeyboard {
   return {
     inline_keyboard: [
       [
-        { text: '✏️ Изменить', callback_data: `ed:v:${transactionId}` },
-        { text: '📊 Баланс',   callback_data: 'nav:balance' },
-        { text: '📋 Отчёт',    callback_data: 'nav:report' },
+        { text: '✏️ Изменить запись', callback_data: `ed:v:${transactionId}` },
+      ],
+      [
+        { text: '📊 Баланс', callback_data: 'nav:balance' },
+        { text: '📋 Отчёт',  callback_data: 'nav:report' },
       ],
     ],
   };
@@ -298,19 +348,70 @@ export function buildNavKeyboard(): InlineKeyboard {
 
 /**
  * Build the standard approve/reject confirmation keyboard.
- * Row 1: [✅ Подтвердить] [❌ Отмена]
- * Row 2: [✏️ Изменить]
+ *
+ * Row 1: [✅  Подтвердить]             ← Primary — полная ширина
+ * Row 2: [✏️ Изменить] [✕  Отмена]   ← Secondary + Destructive
+ *
+ * Подтверждение и отмена никогда не стоят рядом (anti-pattern).
  */
 export function buildConfirmKeyboard(draftId: string): InlineKeyboard {
   return {
     inline_keyboard: [
       [
-        { text: '✅ Подтвердить', callback_data: `approve:${draftId}` },
-        { text: '❌ Отмена',      callback_data: `reject:${draftId}` },
+        { text: '✅  Подтвердить', callback_data: `approve:${draftId}` },
       ],
       [
         { text: '✏️ Изменить', callback_data: `draft:edit:${draftId}` },
+        { text: '✕  Отмена',   callback_data: `reject:${draftId}` },
       ],
     ],
+  };
+}
+
+// ─────────────────────────────────────────────────────────────
+// Main Menu Reply Keyboard — Phase 1.36-UX
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Telegram ReplyKeyboardMarkup.
+ * keyboard is a 2D array: outer = rows, inner = button texts per row.
+ */
+export interface ReplyKeyboardMarkup {
+  keyboard: string[][];
+  resize_keyboard?: boolean;
+  is_persistent?: boolean;
+  input_field_placeholder?: string;
+}
+
+/**
+ * Button texts for the persistent bottom navigation keyboard.
+ * Exported so webhook.route.ts can intercept incoming button-press messages
+ * (Reply Keyboard buttons send their label as a plain text message).
+ */
+export const NAV_BTN_BALANCE  = '📊 Баланс';
+export const NAV_BTN_REPORT   = '📋 Отчёт';
+export const NAV_BTN_SETTINGS = '⚙️ Настройки';
+
+/**
+ * Build the persistent bottom navigation keyboard (ReplyKeyboardMarkup).
+ *
+ * Layout:
+ *   Row 1: [📊 Баланс]  [📋 Отчёт]
+ *   Row 2:      [⚙️ Настройки]
+ *
+ * Flags:
+ *   resize_keyboard: true  — minimal vertical height
+ *   is_persistent:   true  — stays visible even when inline keyboards appear
+ *
+ * Send once on /start — persists for the lifetime of the chat.
+ */
+export function buildMainMenuKeyboard(): ReplyKeyboardMarkup {
+  return {
+    keyboard: [
+      [NAV_BTN_BALANCE, NAV_BTN_REPORT, NAV_BTN_SETTINGS],
+    ],
+    resize_keyboard: true,
+    is_persistent: true,
+    input_field_placeholder: 'Напишите о расходе или доходе...',
   };
 }

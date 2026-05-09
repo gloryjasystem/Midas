@@ -1,7 +1,7 @@
 # WORKFLOW_STATE.MD — Диспетчер задач ИИ-агента Midas
 
 > **Тип:** MUTABLE — кратковременная память агента. Обновляется на каждом шаге работы.
-> **Обновлён:** 2026-05-08 19:30 (UTC+3)
+> **Обновлён:** 2026-05-09 09:46 (UTC+3)
 
 ---
 
@@ -10,12 +10,12 @@
 | Параметр | Значение |
 |---|---|
 | **PHASE** | `1 — MVP Implementation` |
-| **STEP** | `Phase 1.35 — Intelligent Transaction Understanding` |
+| **STEP** | `Phase 1.36-UX — Persistent Navigation Keyboard` |
 | **AGENT STATUS** | `READY_FOR_OWNER_ACCEPTANCE` |
 | **DEPLOYMENT** | `Railway (spirited-happiness project)` — `Midas` bot service + `background-workers` service + `Postgres` + `Redis` |
-| **LAST COMPLETED** | `Phase 1.35: Intelligent Transaction Understanding. AI item_hint + category_hint extraction. CategoryResolverService (3-stage pipeline: exact → alias → fallback Другое). 28-category taxonomy with category_group enum (Жизнь/Бизнес). Migration 1779000000000. Default expense/income account settings. Rich preview cards (confirmPreview + confirmKb) across all 8 confirmation entry points. Post-confirm card with [✏️ Изменить] [📊 Баланс] [📋 Отчёт]. Defensive String() coercion for Postgres NUMERIC → escapeHtml. SQL column name fixes (original_amount, account_id). Deployed to Railway production.` |
+| **LAST COMPLETED** | `Phase 1.36-UX: Persistent Bottom Navigation Keyboard. ReplyKeyboardMarkup with 3 buttons in one row [📊 Баланс][📋 Отчёт][⚙️ Настройки] (is_persistent: true, resize_keyboard: true). Sent on /start for both new and existing users via sendMessageWithReplyKeyboard(). Button presses intercepted as plain text before AI parse → routed to balance/report/settings handlers. Collateral pre-existing lint fixes in ai-core and background-workers. 13/13 typecheck+lint PASS. Traceability ✅ Adversarial Security ✅ Scope Guard ✅.` |
 | **BLOCKER** | None — awaiting owner acceptance. |
-| **NEXT ACTION** | Owner review and acceptance of Phase 1.35. |
+| **NEXT ACTION** | Owner review and acceptance of Phase 1.36-UX. |
 
 ---
 
@@ -63,7 +63,8 @@
 | 1.32 Smart Text Input / Clarification Engine | ✅ ACCEPTED | `migrations/1778900000000_draft-clarification-state.js` (NEW), `schemas.ts` (amount/intent optional, PARTIAL_CONFIDENCE_THRESHOLD=0.3, MissingField), `claude-client.ts` ('partial' ParseResult, computeMissingFields), `prompts.ts` (partial examples), `draft.service.ts` (patchDraftAmount/Intent/Category), `ai-parse.worker.ts` (targeted clarification messages), `clarification.service.ts` (NEW, telegram-bot), `webhook.route.ts` (clar: callbacks, midas:clar: intercept), `smoke-test-phase132.mjs` (57/57 PASS). 0 lint/typecheck errors. Traceability ✅ Adversarial Security ✅ Scope Guard ✅. Implementation commit e00f37e. Tag `phase-1.32-accepted` pushed. |
 | 1.33 Clean Chat / Single Active Message UX | ✅ ACCEPTED | UX-only phase. `active-message.service.ts` (NEW), `telegram-api.ts` (MODIFY), `shared/index.ts` (MODIFY), `webhook.route.ts` (MODIFY), `notifications.worker.ts` (MODIFY), `confirmation.worker.ts` (MODIFY), `ai-parse.worker.ts` (MODIFY). No migrations, no DB schema changes, no new deps. Redis pointer midas:am:{userId}:{chatId} (TTL 24h). upsertBotMessage() edit-first strategy. 0 typecheck errors. Batch-accepted by owner decision. Commit `36cacd7`. Tag `phase-1.33-accepted` pushed. |
 | 1.34 Rich Screen Cards — Single-Screen App UX | ✅ ACCEPTED | UX-only phase. `screen-builder.ts` (NEW — both apps), confirmation/preview card formatting. No migrations, no DB schema changes, no new deps. 0 typecheck errors. Batch-accepted by owner decision. Commit `6e899f0`. Tag `phase-1.34-accepted` pushed. |
-| 1.35 Intelligent Transaction Understanding | ⏳ READY_FOR_OWNER_ACCEPTANCE | `migrations/1779000000000_intelligent-transactions.js` (NEW — item_name, parsed_category_hint cols; default_expense/income_account_id FKs; category_group enum; 28-category taxonomy backfill; SECDEF 28-seed onboarding), `category-resolver.service.ts` (NEW — 3-stage pipeline: exact→alias→fallback Другое; ulid() IDs), `draft.service.ts` (MODIFY — item_name, parsed_category_hint), `draft-confirmation.service.ts` (MODIFY — category resolve, default accounts, **String() coercion for NUMERIC amounts**, SQL column name fix: `amount`→`original_amount`, `account_source_id`→`account_id`), `ai-parse.worker.ts` (MODIFY — preview, item_hint pass-through), `confirmation.worker.ts` (MODIFY — item/category in cards), `settings.service.ts`+`settings-keyboard.service.ts` (MODIFY — st:da: default account UI), `webhook.route.ts` (MODIFY — st:da: callbacks, **confirmKb()/confirmPreview() centralized helpers**, **8 confirmation entry points updated to rich preview cards**), `screen-builder.ts` (MODIFY — itemName, **defensive escapeHtml with String() coercion**), `prompts.ts`+`schemas.ts` (MODIFY — item_hint, category_hint). `smoke-test-phase135.mjs` — 55 tests. 5/5 typecheck PASS. **Hotfixes deployed:** rich preview cards replacing generic text (commit d037f75), NUMERIC String coercion (commit 6db3d69). Deployed to Railway production. |
+| 1.35 Intelligent Transaction Understanding | ✅ ACCEPTED | `migrations/1779000000000_intelligent-transactions.js` (NEW), `category-resolver.service.ts` (NEW), `draft.service.ts` (MODIFY), `draft-confirmation.service.ts` (MODIFY), `ai-parse.worker.ts` (MODIFY), `confirmation.worker.ts` (MODIFY), `settings.service.ts`+`settings-keyboard.service.ts` (MODIFY), `webhook.route.ts` (MODIFY), `screen-builder.ts` (MODIFY), `prompts.ts`+`schemas.ts` (MODIFY). smoke-test-phase135.mjs — 55 tests. Deployed to Railway production. |
+| 1.36-UX Persistent Navigation Keyboard | ⏳ READY_FOR_OWNER_ACCEPTANCE | `telegram-api.ts` (MODIFY — `ReplyKeyboardMarkup` + `sendMessageWithReplyKeyboard()`), `screen-builder.ts` telegram-bot (MODIFY — `buildMainMenuKeyboard()`, `NAV_BTN_*` constants), `webhook.route.ts` (MODIFY — nav shortcuts, /start keyboard activation). Collateral: `ai-core/claude-client.ts` lint fix (no-useless-assignment), `background-workers/draft-confirmation.service.ts` lint fix (no-unnecessary-type-conversion ×3), both `screen-builder.ts` lint fix (restrict-template-expressions). No migrations, no new deps, no AI changes. 13/13 typecheck+lint PASS. |
 
 ---
 
@@ -90,11 +91,12 @@
   - Результат: `ok` | `partial` (missing fields) | `needs_clarification` (nonsense) | `rejected`
   - **Phase 1.35:** `item_hint` (extracted product/merchant name), `category_hint` (AI category suggestion) → `CategoryResolverService` (3-stage: exact → 200+ alias map → fallback «Другое»)
 - **Deployment:** Railway (spirited-happiness) — Midas bot + background-workers + Postgres + Redis. Auto-deploy from GitHub main.
-- **UX Architecture (Phase 1.33–1.34):**
+- **UX Architecture (Phase 1.33–1.36-UX):**
   - Clean Chat: Redis `midas:am:{userId}:{chatId}` → edit-first strategy (editMessageText → sendMessage fallback)
   - Rich Screen Cards: `screen-builder.ts` pure functions → buildPreviewScreen, buildConfirmedScreen, buildClarificationScreen
   - Centralized confirmKb/confirmPreview helpers (DRY, 8 entry points)
   - Post-confirm card: `[✏️ Изменить] [📊 Баланс] [📋 Отчёт]`
+  - **Persistent Navigation (Phase 1.36-UX):** `ReplyKeyboardMarkup` (`is_persistent: true`, `resize_keyboard: true`) — single row `[📊 Баланс][📋 Отчёт][⚙️ Настройки]`. Sent via `sendMessageWithReplyKeyboard()` on `/start`. Button texts intercepted in webhook before AI parse via `NAV_BTN_*` constants.
 
 ---
 
@@ -297,6 +299,7 @@ apps/background-workers/src/services/draft.service.ts  ← createDraft logic
 | 2026-05-08 11:00 | Phase 1.35 Intelligent Transaction Understanding — core implementation complete. Migration `1779000000000_intelligent-transactions.js`: `item_name TEXT` + `parsed_category_hint TEXT` columns on transaction_drafts; `item_name TEXT` on transactions; `default_expense_account_id` + `default_income_account_id` FK columns on workspaces; `category_group` ENUM; 28-category taxonomy backfill; SECDEF onboarding function updated. `category-resolver.service.ts` (NEW): 3-stage pipeline — exact DB match → 200+ alias map → fallback «Другое». `prompts.ts` + `schemas.ts`: `item_hint` + `category_hint` added to AI schema with examples. `draft.service.ts`: propagates item_name, parsed_category_hint. `draft-confirmation.service.ts`: CategoryResolver integration, resolveDefaultAccount() with workspace defaults → LIMIT 1 → auto-create. `confirmation.worker.ts`: rich post-confirm cards with item/category. smoke-test-phase135.mjs: 55 tests PASS. 5/5 typecheck PASS. Deployed to Railway. |
 | 2026-05-08 16:20 | Phase 1.35 hotfix #1: Rich preview cards across all confirmation entry points. Problem: after clarification (amount/intent/category selection), generic text like «📝 Готово. Подтвердите или отклоните:» was shown instead of the rich transaction card. Fix: introduced `confirmKb(draftId)` centralized keyboard helper (DRY pattern replacing 8 hardcoded keyboards) and `confirmPreview(workspaceId, userId, draftId)` helper (fetches draft data via `getDraftFields` → builds rich card via `buildPreviewScreen`). All 8 confirmation entry points updated: ia:skip, ia:create (new account), ia:use (select account), clar:intent, clar:category, clar:nocat, clarification amount text intercept, ia rename text intercept. Typecheck 5/5 PASS. Commit d037f75. Deployed to Railway. |
 | 2026-05-08 16:29 | Phase 1.35 hotfix #2: Defensive String() coercion for Postgres NUMERIC amounts. Problem: `fetchApprovedTransactionCard` and `approveDraft` returned `amount` as raw Postgres NUMERIC (JavaScript `number`), but `buildConfirmedScreen` passed it to `escapeHtml()` which calls `.replace()` — crashed with `TypeError: input.replace is not a function`. Root cause: pg driver returns NUMERIC as `number`, not `string`. Fix: (1) `approveDraft`: `amount: String(draft.parsed_amount ?? '0')`, (2) `fetchApprovedTransactionCard`: `amount: String(tx.original_amount)`, (3) `escapeHtml`: defensive `typeof input === 'string' ? input : String(input)`. Also fixed incorrect SQL column names in `fetchApprovedTransactionCard`: `amount` → `original_amount`, `account_source_id` → `account_id`. Typecheck 5/5 PASS. Commit 6db3d69. Deployed to Railway. |
+| 2026-05-09 09:46 | Phase 1.36-UX Persistent Navigation Keyboard implemented. UX-only phase: no migrations, no DB changes, no new deps, no AI changes. `telegram-api.ts` (MODIFY — `ReplyKeyboardMarkup` interface + `sendMessageWithReplyKeyboard()`). `screen-builder.ts` telegram-bot (MODIFY — `buildMainMenuKeyboard()`, `NAV_BTN_BALANCE/REPORT/SETTINGS` constants). `webhook.route.ts` (MODIFY — imports, Reply Keyboard sent on `/start` for new+existing users, 3 text intercepts before AI parse). Collateral lint fixes: `ai-core/claude-client.ts` (no-useless-assignment: `missingFields` reassignment removed, `let`→`const`), `background-workers/draft-confirmation.service.ts` (no-unnecessary-type-conversion: redundant `String()` removed ×3), both `screen-builder.ts` (restrict-template-expressions: `d.getDate().toString()`). 13/13 typecheck+lint PASS. Traceability ✅ Adversarial Security ✅ Scope Guard ✅. Status: READY_FOR_OWNER_ACCEPTANCE. |
 
 ---
 
