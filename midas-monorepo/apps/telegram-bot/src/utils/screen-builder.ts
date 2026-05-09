@@ -253,6 +253,7 @@ export interface ClarificationScreenData {
   amount: string | null;
   currency: string | null;
   categoryHint: string | null;  // pre-escaped
+  askAmountWithCurrency?: boolean; // Phase 1.38: ask both in one step
 }
 
 /**
@@ -277,7 +278,15 @@ export function buildClarificationScreen(data: ClarificationScreenData): string 
   // Ask for the missing field
   switch (data.field) {
     case 'amount':
-      lines.push('Сколько потратил? Отправь сумму:');
+      if (data.askAmountWithCurrency) {
+        // Phase 1.38: combined prompt — no default currency set yet
+        lines.push('Напиши сумму и валюту:');
+        lines.push('  <code>1000 USD</code>   <code>500 руб</code>   <code>200 USDT</code>');
+        lines.push('');
+        lines.push('<i>💡 Чтобы не указывать валюту каждый раз — установи её в ⚙️ Настройках</i>');
+      } else {
+        lines.push('Сколько потратил? Отправь сумму:');
+      }
       break;
     case 'intent':
       lines.push('Что произошло? Выбери тип:');

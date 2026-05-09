@@ -2245,6 +2245,90 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
         const clarDraftId = colonPos === -1 ? clarIntState : clarIntState.slice(0, colonPos);
         const clarField   = colonPos === -1 ? '' : clarIntState.slice(colonPos + 1);
 
+        // ── Phase 1.38: amt+cur — combined amount + currency answer ───────
+        if (clarField === 'amt+cur' && /^[0-9A-Z]{26}$/.test(clarDraftId)) {
+          // Parse amount from input (first number found)
+          const amtCurText = message.text ?? '';
+          const validAmountAC = validateAmountString(amtCurText);
+          if (!validAmountAC) {
+            void upsertBotMessage(telegramUserId, chatId,
+              '⚠️ Не нашёл сумму. Напиши, например: <code>1000 USD</code> или <code>500 руб</code>',
+            );
+            await reply.status(200).send({ ok: true });
+            return;
+          }
+
+          // Try to extract currency from the same message (anything non-numeric after/before number)
+          const currencyMatchAC = amtCurText
+            .replace(/[\d\s.,]/g, ' ')   // strip numbers + punctuation
+            .trim()
+            .split(/\s+/)
+            .find((t) => /^[a-zA-Zа-яА-ЯёЁ₴$€£¥₿]{1,8}$/.test(t)) ?? null;
+          const validCurrencyAC = currencyMatchAC
+            ? validateCurrencyCode(currencyMatchAC)
+            : null;
+
+          // Delete intercept key and clar card
+          await redisConnection.del(clarIntKey);
+          const clarMsgCacheKeyAC = `midas:clar:msg:${telegramUserId}:${chatId}`;
+          try {
+            const prevId = await redisConnection.get(clarMsgCacheKeyAC);
+            if (prevId) {
+              await redisConnection.del(clarMsgCacheKeyAC);
+              void deleteMessage(chatId, prevId);
+            }
+          } catch { /* non-fatal */ }
+
+          let acResolved: { workspaceId: string; userId: string };
+          try {
+            acResolved = await resolveWorkspace(telegramUserId, chatId);
+          } catch {
+            void upsertBotMessage(telegramUserId, chatId, '⚠️ Не удалось обработать. Попробуйте позже.');
+            await reply.status(200).send({ ok: true });
+            return;
+          }
+
+          // Patch amount
+          const amtPatchAC = await patchDraftAmount(
+            acResolved.workspaceId, acResolved.userId, clarDraftId, validAmountAC,
+          );
+
+          if (amtPatchAC.status !== 'ready' && amtPatchAC.status !== 'wrong_state') {
+            void upsertBotMessage(telegramUserId, chatId, '⚠️ Транзакция не найдена или уже обработана.');
+            await reply.status(200).send({ ok: true });
+            return;
+          }
+
+          if (validCurrencyAC) {
+            // Both amount and currency extracted — patch currency and show confirm card
+            await patchDraftCurrency(
+              acResolved.workspaceId, acResolved.userId, clarDraftId, validCurrencyAC,
+            );
+            const previewAC = await confirmPreview(acResolved.workspaceId, acResolved.userId, clarDraftId);
+            void upsertBotMessage(telegramUserId, chatId, previewAC, confirmKb(clarDraftId));
+          } else {
+            // Amount extracted but no currency — ask for currency separately
+            const awaitCurKeyAC = `midas:awaiting_cur:${chatId}`;
+            await redisConnection.setex(
+              awaitCurKeyAC,
+              300,
+              `${clarDraftId}:${acResolved.workspaceId}:${acResolved.userId}`,
+            );
+            const curClarMsg = await upsertBotMessage(
+              telegramUserId,
+              chatId,
+              '💱 <b>В какой валюте записать?</b>\n\nНапиши одним словом:\n  <code>руб</code>  <code>USD</code>  <code>USDT</code>  <code>EUR</code>  <code>₴</code>  <code>BTC</code>\n\n💡 <i>Чтобы не спрашивало каждый раз — установи валюту по умолчанию:</i>\n<i>⚙️ Настройки → Валюта</i>',
+            );
+            if (curClarMsg) {
+              await redisConnection.setex(`midas:clar:msg:${telegramUserId}:${chatId}`, 300, curClarMsg);
+            }
+          }
+
+          request.log.info({ msg: '[midas:bot:webhook] clar: amt+cur patched', workspaceId: acResolved.workspaceId, hadCurrency: !!validCurrencyAC });
+          await reply.status(200).send({ ok: true });
+          return;
+        }
+
         if (clarField === 'amt' && /^[0-9A-Z]{26}$/.test(clarDraftId)) {
           // Validate amount (SEC-02: NUMERIC regex)
           const validAmount = validateAmountString(message.text);

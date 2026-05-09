@@ -429,19 +429,33 @@ async function processAiParse(job: Job<AiParseJobPayload>): Promise<void> {
     let clarKeyboard: object;
 
     if (clarificationField === 'amount') {
-      // Missing amount — ask text question; set Redis intercept key
-      // The Redis key is set here so the next text message is intercepted.
-      // Key: midas:clar:{telegramUserId}:{chatId} → "{draftId}:amt"
+      // Missing amount — check if we also need currency (cur_set not yet set).
+      // If so, ask for both in one message to reduce round-trips.
       const clarKey = `midas:clar:${telegramUserId}:${chatId}`;
-      await redisConnection.set(clarKey, `${draftId}:amt`, 'EX', 300);
+      const curSetForAmt = await redisConnection.exists(`midas:cur_set:${workspaceId}`);
 
-      clarMsg = buildClarificationScreen({
-        field: 'amount',
-        intent: partialData?.intent ?? null,
-        amount: null,
-        currency: partialData?.currency ?? null,
-        categoryHint: partialData?.category_hint ?? null,
-      });
+      if (curSetForAmt === 0) {
+        // No default currency — ask for amount + currency together
+        await redisConnection.set(clarKey, `${draftId}:amt+cur`, 'EX', 300);
+        clarMsg = buildClarificationScreen({
+          field: 'amount',
+          intent: partialData?.intent ?? null,
+          amount: null,
+          currency: null, // will be prompted together
+          categoryHint: partialData?.category_hint ?? null,
+          askAmountWithCurrency: true, // Phase 1.38: combined prompt
+        });
+      } else {
+        // Currency already set — ask for amount only
+        await redisConnection.set(clarKey, `${draftId}:amt`, 'EX', 300);
+        clarMsg = buildClarificationScreen({
+          field: 'amount',
+          intent: partialData?.intent ?? null,
+          amount: null,
+          currency: partialData?.currency ?? null,
+          categoryHint: partialData?.category_hint ?? null,
+        });
+      }
       // No keyboard for amount — user types a number
       clarKeyboard = { inline_keyboard: [] };
 

@@ -196,6 +196,7 @@ export interface ClarificationScreenData {
   amount: string | null;
   currency: string | null;
   categoryHint: string | null;
+  askAmountWithCurrency?: boolean; // Phase 1.38: ask both in one step
 }
 
 export function buildClarificationScreen(data: ClarificationScreenData): string {
@@ -205,7 +206,17 @@ export function buildClarificationScreen(data: ClarificationScreenData): string 
   if (data.categoryHint) lines.push(`Категория: ${escapeHtml(data.categoryHint)}`);
   lines.push('');
   switch (data.field) {
-    case 'amount': lines.push('Сколько потратил? Отправь сумму:'); break;
+    case 'amount':
+      if (data.askAmountWithCurrency) {
+        // Phase 1.38: combined prompt — no default currency set
+        lines.push('Напиши сумму и валюту:');
+        lines.push('  <code>1000 USD</code>   <code>500 руб</code>   <code>200 USDT</code>');
+        lines.push('');
+        lines.push('<i>💡 Чтобы не указывать валюту каждый раз — установи её в ⚙️ Настройках</i>');
+      } else {
+        lines.push('Сколько потратил? Отправь сумму:');
+      }
+      break;
     case 'intent': lines.push('Что произошло? Выбери тип:'); break;
     case 'category': lines.push('Выбери категорию:'); break;
   }
