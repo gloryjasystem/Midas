@@ -34,7 +34,6 @@ import {
   buildNotFoundScreen,
   buildIntentMissingScreen,
   buildPostConfirmKeyboard,
-  buildMainMenuReplyKeyboard,  // Phase 1.36-UX: replaces buildNavKeyboard for rejection/expiry
 } from '../utils/screen-builder.js';
 
 // ─────────────────────────────────────────────────────────────
@@ -135,7 +134,8 @@ async function processConfirmation(job: Job<CallbackConfirmJobPayload>): Promise
   // ── Step 4: Send result notification — Phase 1.34 rich cards ──
   let notificationMessage: string;
   let inlineKeyboardJson: string | undefined;  // inline keyboard (for editMessageText path)
-  let replyKeyboardJson: string | undefined;   // Reply Keyboard (for sendMessage path only)
+  // Phase 1.38: replyKeyboardJson removed — ReplyKeyboard sent once on /start only.
+  // Workers no longer re-send it, preserving the user's collapse preference.
 
   switch (result.outcome) {
     case 'approved':
@@ -154,13 +154,12 @@ async function processConfirmation(job: Job<CallbackConfirmJobPayload>): Promise
       break;
     case 'rejected':
       notificationMessage = buildRejectedScreen();
-      // Phase 1.36-UX: inline nav removed — Reply Keyboard handles navigation.
-      // replyKeyboardJson activates the persistent bottom keyboard on sendMessage path.
-      replyKeyboardJson = JSON.stringify(buildMainMenuReplyKeyboard());
+      // Phase 1.38: ReplyKeyboard lives in chat from /start — not re-sent here.
+      // Re-sending would force it open and override the user's collapse preference.
       break;
     case 'expired':
       notificationMessage = buildExpiredScreen();
-      replyKeyboardJson = JSON.stringify(buildMainMenuReplyKeyboard());
+      // Phase 1.38: ReplyKeyboard not re-sent — user's collapse preference preserved.
       break;
     case 'already_processed':
       if (result.existingStatus === 'approved') {
@@ -193,7 +192,7 @@ async function processConfirmation(job: Job<CallbackConfirmJobPayload>): Promise
       break;
     case 'intent_missing':
       notificationMessage = buildIntentMissingScreen();
-      replyKeyboardJson = JSON.stringify(buildMainMenuReplyKeyboard());
+      // Phase 1.38: ReplyKeyboard not re-sent — user's collapse preference preserved.
       break;
     default:
       notificationMessage = 'ℹ️ Обработка завершена.';
@@ -225,7 +224,7 @@ async function processConfirmation(job: Job<CallbackConfirmJobPayload>): Promise
       chatId,
       message: notificationMessage,
       inlineKeyboardJson,
-      replyKeyboardJson,   // Phase 1.36-UX: activates Reply Keyboard on sendMessage path
+      // Phase 1.38: replyKeyboardJson omitted — keyboard lives in chat from /start.
       telegramUserId,
       // For approve: edit the preview card in-place (preview → confirmed)
       // For reject/other: no activeMessageId → sends new message

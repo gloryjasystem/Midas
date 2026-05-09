@@ -248,7 +248,7 @@ export function buildPostConfirmKeyboard(transactionId: string): InlineKeyboard 
 export function buildMainMenuReplyKeyboard(): object {
   return {
     keyboard: [['📊 Баланс', '📋 Отчёт', '⚙️ Настройки']],
-    is_persistent: true,   // Phase 1.36-UX: always visible, user can collapse manually
+    is_persistent: false,  // Phase 1.38: native ⏄ collapse icon — user controls visibility
     resize_keyboard: true,
   };
 }
