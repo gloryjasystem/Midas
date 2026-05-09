@@ -345,7 +345,57 @@ function greetingMsgKey(telegramUserId: string, chatId: string): string {
   return `midas:greet:${telegramUserId}:${chatId}`;
 }
 
-// Phase 1.35: Standard confirmation keyboard with [Изменить] row.
+// ── Phase 1.38: Currency normalization ─────────────────────────
+// Maps colloquial/partial/symbol currency names to ISO codes.
+// SEC-01: output is always uppercase 2-8 char code.
+// SEC-12: raw input is not logged.
+
+const CURRENCY_MAP: Record<string, string> = {
+  // RUB
+  'руб': 'RUB', 'рубл': 'RUB', 'рублей': 'RUB', 'рубль': 'RUB',
+  'рубли': 'RUB', 'rub': 'RUB', '₽': 'RUB',
+  // USD
+  'долл': 'USD', 'доллар': 'USD', 'долларов': 'USD', 'долларів': 'USD',
+  'dollar': 'USD', 'dollars': 'USD', 'бакс': 'USD', 'баксов': 'USD',
+  'usd': 'USD', '$': 'USD',
+  // EUR
+  'евр': 'EUR', 'евро': 'EUR', 'euro': 'EUR', 'euros': 'EUR',
+  'eur': 'EUR', '€': 'EUR',
+  // UAH
+  'грн': 'UAH', 'гривн': 'UAH', 'гривень': 'UAH', 'гривні': 'UAH',
+  'hryvnia': 'UAH', 'uah': 'UAH', '₴': 'UAH',
+  // GBP
+  'фунт': 'GBP', 'фунтов': 'GBP', 'pound': 'GBP', 'gbp': 'GBP', '£': 'GBP',
+  // Crypto
+  'usdt': 'USDT', 'тезер': 'USDT', 'tether': 'USDT',
+  'btc': 'BTC', 'биткоин': 'BTC', 'bitcoin': 'BTC',
+  'eth': 'ETH', 'эфир': 'ETH', 'ethereum': 'ETH',
+  'sol': 'SOL', 'солана': 'SOL', 'solana': 'SOL',
+  'ton': 'TON', 'тон': 'TON',
+  'usdc': 'USDC',
+  // CNY
+  'юань': 'CNY', 'yuan': 'CNY', 'cny': 'CNY', '¥': 'CNY',
+};
+
+function normalizeCurrencyInput(raw: string): string | null {
+  const key = raw.toLowerCase().replace(/[\s.]/g, '');
+  if (key.length === 0) return null;
+
+  // 1. Exact match
+  if (CURRENCY_MAP[key]) return CURRENCY_MAP[key];
+
+  // 2. Prefix match: user typed partial word (e.g. "дол" → "долл" → USD)
+  for (const [k, v] of Object.entries(CURRENCY_MAP)) {
+    if (k.startsWith(key) || key.startsWith(k)) return v;
+  }
+
+  // 3. ISO code passthrough: 2-6 uppercase letters
+  const iso = raw.toUpperCase().trim();
+  if (/^[A-Z]{2,6}$/.test(iso)) return iso;
+
+  return null;
+}
+
 // Centralised so all confirm screens include the edit button.
 // Phase 1.36-UX: Layout aligned with screen-builder.ts buildConfirmKeyboard:
 //   Row 1: [✅ Подтвердить] — full-width primary action
@@ -923,6 +973,8 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
             const before = await getSettings(stResolved.workspaceId, stResolved.userId);
             const oldCode = before?.default_currency ?? '?';
             await updateCurrency(stResolved.workspaceId, stResolved.userId, cmd.code);
+            // Phase 1.38: Mark that user explicitly set a currency
+            await redisConnection.set(`midas:cur_set:${stResolved.workspaceId}`, '1');
             const confirmText = formatPickConfirmText(cmd.code, oldCode);
             if (messageId) {
               void editMessageText(chatId, messageId, confirmText, EMPTY_KEYBOARD);
@@ -2068,6 +2120,10 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
             const oldCode = before?.default_currency ?? '?';
 
             const result = await updateCurrency(resolved.workspaceId, resolved.userId, parsed.code);
+            // Phase 1.38: Mark that user explicitly set a currency
+            if (result !== 'not_found') {
+              await redisConnection.set(`midas:cur_set:${resolved.workspaceId}`, '1');
+            }
             if (result === 'not_found') {
               void upsertBotMessage(telegramUserId, chatId, '⚠️ Не удалось обновить валюту. Попробуйте позже.');
             } else {
@@ -2472,6 +2528,98 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
           telegramUserId,
           resultCount: results.length,
           // query NOT logged (SEC-12)
+        });
+        await reply.status(200).send({ ok: true });
+        return;
+      }
+    }
+
+    // ── Step 5h-cur: Phase 1.38 — Currency await intercept ───────────
+    // If user is answering "В какой валюте?", intercept before AI parse.
+    // Redis key set by ai-parse.worker when currency is missing.
+    if (!commandToken) {
+      const awaitKey = `midas:awaiting_cur:${chatId}`;
+      const awaitRaw = await redisConnection.get(awaitKey);
+      if (awaitRaw && message.text) {
+        // Format: "{draftId}:{workspaceId}:{userId}"
+        const sepIdx1 = awaitRaw.indexOf(':');
+        const sepIdx2 = awaitRaw.indexOf(':', sepIdx1 + 1);
+        if (sepIdx1 > 0 && sepIdx2 > sepIdx1) {
+          const awaitDraftId = awaitRaw.slice(0, sepIdx1);
+          const awaitWsId    = awaitRaw.slice(sepIdx1 + 1, sepIdx2);
+          const awaitUserId  = awaitRaw.slice(sepIdx2 + 1);
+
+          const validCur = normalizeCurrencyInput(message.text.trim());
+          if (!validCur) {
+            void upsertBotMessage(
+              telegramUserId, chatId,
+              '❌ Не понял валюту. Попробуй: руб, USD, €, USDT',
+            );
+            await reply.status(200).send({ ok: true });
+            return;
+          }
+
+          // Clean up await key
+          await redisConnection.del(awaitKey);
+
+          // Set cur_set flag — user has now explicitly chosen a currency
+          await redisConnection.set(`midas:cur_set:${awaitWsId}`, '1');
+
+          // Patch draft currency
+          const patchRes = await patchDraftCurrency(
+            awaitWsId, awaitUserId, awaitDraftId, validCur,
+          );
+
+          if (patchRes.status === 'ready') {
+            const refreshed = await getDraftFields(awaitWsId, awaitUserId, awaitDraftId);
+            if (refreshed) {
+              const previewMsg = buildPreviewScreen({
+                intent: refreshed.parsed_intent,
+                amount: refreshed.parsed_amount,
+                currency: refreshed.parsed_currency,
+                categoryHint: refreshed.parsed_category_hint,
+                accountHint: null,
+                itemName: refreshed.item_name,
+              });
+              void upsertBotMessage(telegramUserId, chatId, previewMsg, confirmKb(awaitDraftId));
+            }
+          } else {
+            void upsertBotMessage(
+              telegramUserId, chatId,
+              '⏰ Транзакция уже обработана или истекла.\nОтправьте новое сообщение для записи.',
+            );
+          }
+
+          request.log.info({
+            msg: '[midas:bot:webhook] Phase 1.38: currency await intercepted',
+            telegramUserId,
+            // currency NOT logged (SEC-12)
+          });
+          await reply.status(200).send({ ok: true });
+          return;
+        }
+        // Malformed state — clear and fall through
+        await redisConnection.del(awaitKey);
+      }
+    }
+
+    // ── Step 5i: Phase 1.38 — Bare number guard ──────────────────────
+    // Pure digits (with optional spaces/commas/dots) → not a transaction.
+    // Instant response (<50ms) without AI call or draft creation.
+    if (!commandToken) {
+      const BARE_NUMBER_RE = /^\d[\d\s.,]*$/;
+      if (BARE_NUMBER_RE.test(message.text.trim())) {
+        const num = message.text.trim().replace(/\s+/g, '');
+        const hint = [
+          '💡 <b>Укажи сумму с валютой</b>',
+          '',
+          `${escapeHtml(num)} доллар  ·  ${escapeHtml(num)} евр  ·  ${escapeHtml(num)} грн`,
+          `или кофе ${escapeHtml(num)} руб  ·  зарплата ${escapeHtml(num)} USDT`,
+        ].join('\n');
+        void upsertBotMessage(telegramUserId, chatId, hint);
+        request.log.info({
+          msg: '[midas:bot:webhook] Phase 1.38: bare number intercepted',
+          telegramUserId,
         });
         await reply.status(200).send({ ok: true });
         return;

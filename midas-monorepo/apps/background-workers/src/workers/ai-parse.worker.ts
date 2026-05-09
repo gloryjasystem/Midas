@@ -42,6 +42,7 @@ import {
   buildClarificationScreen,
   buildNonsenseScreen,
   buildConfirmKeyboard,
+  buildCurrencyClarScreen,
   escapeHtml,
 } from '../utils/screen-builder.js';
 
@@ -250,6 +251,61 @@ async function processAiParse(job: Job<AiParseJobPayload>): Promise<void> {
 
   // ── Step 6: Send response based on parse result ──────────
   if (status === 'pending_user') {
+    // ── Phase 1.38: Currency clarification (text-based) ──────────
+    // If AI didn't extract a currency AND the user never explicitly set one
+    // in settings, ask via text prompt instead of silently defaulting to USDT.
+    const aiCurrency = partialData?.currency ?? null;
+    if (!aiCurrency) {
+      const curSetFlag = await redisConnection.exists(`midas:cur_set:${workspaceId}`);
+      if (curSetFlag === 0) {
+        // User never set currency → ask via text
+        const awaitKey = `midas:awaiting_cur:${chatId}`;
+        await redisConnection.set(
+          awaitKey,
+          `${draftId}:${workspaceId}:${userId}`,
+          'EX', 600, // 10 min TTL
+        );
+
+        const clarMsg = buildCurrencyClarScreen();
+
+        // Reuse existing clar msg caching for edit-in-place
+        const clarMsgCacheKey = `midas:clar:msg:${telegramUserId}:${chatId}`;
+        let prevClarMsgId: string | undefined;
+        try {
+          prevClarMsgId = (await redisConnection.get(clarMsgCacheKey)) ?? undefined;
+        } catch {
+          prevClarMsgId = undefined;
+        }
+
+        await notificationsQueue.add(
+          QUEUE_NAMES.NOTIFICATIONS,
+          {
+            alertId,
+            workspaceId,
+            chatId,
+            draftId,
+            telegramUserId,
+            message: clarMsg,
+            inlineKeyboardJson: JSON.stringify({ inline_keyboard: [] }),
+            activeMessageId: prevClarMsgId,
+            cacheStoreKey: clarMsgCacheKey,
+          },
+          {
+            jobId: IdempotencyKeyBuilder.notification(workspaceId, alertId),
+          },
+        );
+
+        console.log('[midas:ai-parse-worker] Phase 1.38: currency clarification sent', {
+          jobId: job.id,
+          draftId,
+          workspaceId,
+        });
+        return; // Exit early — don't show confirm card yet
+      }
+      // curSetFlag === 1 → fall through to normal confirm card
+      // (draft-confirmation.service.ts will apply default_currency)
+    }
+
     // ── Phase 1.31 (Option A): Resolve account_hint BEFORE first keyboard ──
     const accountHint = parseResult.status === 'ok' ? (parseResult.data.account_hint ?? null) : null;
 

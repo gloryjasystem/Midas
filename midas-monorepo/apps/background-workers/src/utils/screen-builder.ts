@@ -266,3 +266,17 @@ export function buildConfirmKeyboard(draftId: string): InlineKeyboard {
     ],
   };
 }
+
+// ── Phase 1.38: Currency clarification screen ────────────────
+
+/**
+ * Minimalist text-only currency clarification prompt.
+ * No inline buttons — user replies with a text message.
+ * SEC-12: No user data in output.
+ */
+export function buildCurrencyClarScreen(): string {
+  return [
+    '💱 <b>В какой валюте?</b>',
+    'например: руб · dollar · € · USDT',
+  ].join('\n');
+}
