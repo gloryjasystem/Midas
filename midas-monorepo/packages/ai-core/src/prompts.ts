@@ -36,7 +36,7 @@ ITEM_HINT vs CATEGORY_HINT (critical — Phase 1.35):
   Example: item "Netflix" → category "Подписки" (NOT "Netflix")
 
 ALLOWED CATEGORIES (use ONLY these names in category_hint):
-Personal: Продукты, Кафе и рестораны, Транспорт, Жильё, Здоровье, Одежда, Красота, Развлечения, Подписки, Связь, Образование, Спорт, Путешествия, Подарки, Дети, Другое
+Personal: Продукты, Кафе и рестораны, Транспорт, Жильё, Здоровье, Одежда, Красота, Развлечения, Подписки, Связь, Образование, Спорт, Путешествия, Подарки, Дети, Питомцы, Дом, Другое
 Business: Зарплаты и выплаты, Фриланс, Реклама, Софт и сервисы, Оборудование, Офис, Налоги, Комиссии, Крипто-комиссии, Подрядчики, Продажи, Инвестиции
 
 If no category fits, use "Другое". NEVER invent new category names.
@@ -123,6 +123,12 @@ Output: {"intent":"expense","amount":"870","item_hint":"аптека","category_
 
 User: "коммуналка 4200"
 Output: {"intent":"expense","amount":"4200","item_hint":"коммуналка","category_hint":"Жильё","confidence":0.9}
+
+User: "еда для кота 2000"
+Output: {"intent":"expense","amount":"2000","item_hint":"еда для кота","category_hint":"Питомцы","confidence":0.9}
+
+User: "стрижка собаки 1500"
+Output: {"intent":"expense","amount":"1500","item_hint":"стрижка собаки","category_hint":"Питомцы","confidence":0.9}
 
 User: "Facebook Ads 50"
 Output: {"intent":"expense","amount":"50","item_hint":"Facebook Ads","category_hint":"Реклама","confidence":0.9}
