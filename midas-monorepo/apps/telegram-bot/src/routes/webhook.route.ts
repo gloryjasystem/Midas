@@ -435,6 +435,38 @@ async function confirmPreview(
   });
 }
 
+/**
+ * Phase 1.38: Send the confirm preview card AND store message_id in Redis
+ * so the confirmation worker can EDIT the card in-place (preview → confirmed).
+ * Without this, approve sends a NEW message and the old preview card stays visible.
+ *
+ * Always awaited — stores the preview msg_id before returning.
+ */
+async function sendAndStorePreview(
+  telegramUserId: string,
+  chatId: string,
+  workspaceId: string,
+  userId: string,
+  draftId: string,
+  prefixText?: string, // optional prefix (e.g. account creation label)
+): Promise<void> {
+  const previewText = await confirmPreview(workspaceId, userId, draftId);
+  const fullText = prefixText ? `${prefixText}\n\n${previewText}` : previewText;
+  const msgId = await upsertBotMessage(
+    telegramUserId,
+    chatId,
+    fullText,
+    confirmKb(draftId),
+  );
+  // Store for confirmation worker to edit in-place (preview → confirmed)
+  if (msgId) {
+    try {
+      await redisConnection.set(`midas:preview:${draftId}`, msgId, 'EX', 600);
+    } catch { /* non-fatal */ }
+  }
+}
+
+
 const webhookRoute: FastifyPluginAsync = async (fastify) => {
   // Await a no-op: Fastify route plugins must be async; the actual async work
   // happens inside the route handler. Promise.resolve() satisfies require-await.
@@ -658,6 +690,7 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
               if (iaMsgId) {
                 const previewText = await confirmPreview(iaResolved.workspaceId, iaResolved.userId, iaCmd.draftId);
                 void editMessageText(chatId, iaMsgId, previewText, confirmKb(iaCmd.draftId));
+                try { await redisConnection.set(`midas:preview:${iaCmd.draftId}`, iaMsgId, 'EX', 600); } catch { /* non-fatal */ }
               }
 
             } else if (iaCmd.cmd === 'rename') {
@@ -700,6 +733,7 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
               if (iaMsgId) {
                 const previewText = await confirmPreview(iaResolved.workspaceId, iaResolved.userId, iaCmd.draftId);
                 void editMessageText(chatId, iaMsgId, `${label}\n\n${previewText}`, confirmKb(iaCmd.draftId));
+                try { await redisConnection.set(`midas:preview:${iaCmd.draftId}`, iaMsgId, 'EX', 600); } catch { /* non-fatal */ }
               }
               request.log.info({ msg: '[midas:bot:webhook] ia: account created inline', workspaceId: iaResolved.workspaceId });
 
@@ -724,6 +758,7 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
                     `✅ Счёт <b>${escapeHtml(acct.name)}</b> выбран.\n\n${previewText}`,
                     confirmKb(iaCmd.draftId),
                   );
+                  try { await redisConnection.set(`midas:preview:${iaCmd.draftId}`, iaMsgId, 'EX', 600); } catch { /* non-fatal */ }
                 }
                 request.log.info({ msg: '[midas:bot:webhook] ia: account selected', workspaceId: iaResolved.workspaceId });
               }
@@ -1399,6 +1434,7 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
               if (clarMsgId) {
                 const previewText = await confirmPreview(clarResolved.workspaceId, clarResolved.userId, intentDraftId);
                 void editMessageText(chatId, clarMsgId, previewText, confirmKb(intentDraftId));
+                try { await redisConnection.set(`midas:preview:${intentDraftId}`, clarMsgId, 'EX', 600); } catch { /* non-fatal */ }
               }
             } else if (intentResult.status === 'still_needs' && intentResult.field === 'amount') {
               // Set Redis intercept for amount
@@ -1426,6 +1462,7 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
               if (clarMsgId) {
                 const previewText = await confirmPreview(clarResolved.workspaceId, clarResolved.userId, catDraftId);
                 void editMessageText(chatId, clarMsgId, previewText, confirmKb(catDraftId));
+                try { await redisConnection.set(`midas:preview:${catDraftId}`, clarMsgId, 'EX', 600); } catch { /* non-fatal */ }
               }
             } else {
               if (clarMsgId) void editMessageText(chatId, clarMsgId, '⚠️ Категория не найдена или транзакция уже обработана.', { inline_keyboard: [] });
@@ -1447,6 +1484,7 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
               if (clarMsgId) {
                 const previewText = await confirmPreview(clarResolved.workspaceId, clarResolved.userId, nocatDraftId);
                 void editMessageText(chatId, clarMsgId, previewText, confirmKb(nocatDraftId));
+                try { await redisConnection.set(`midas:preview:${nocatDraftId}`, clarMsgId, 'EX', 600); } catch { /* non-fatal */ }
               }
             } else {
               if (clarMsgId) void editMessageText(chatId, clarMsgId, '⚠️ Транзакция не найдена или уже обработана.', { inline_keyboard: [] });
@@ -2304,8 +2342,7 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
             await patchDraftCurrency(
               acResolved.workspaceId, acResolved.userId, clarDraftId, validCurrencyAC,
             );
-            const previewAC = await confirmPreview(acResolved.workspaceId, acResolved.userId, clarDraftId);
-            void upsertBotMessage(telegramUserId, chatId, previewAC, confirmKb(clarDraftId));
+            await sendAndStorePreview(telegramUserId, chatId, acResolved.workspaceId, acResolved.userId, clarDraftId);
           } else {
             // Amount extracted but no currency — ask for currency separately
             const awaitCurKeyAC = `midas:awaiting_cur:${chatId}`;
@@ -2395,13 +2432,7 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
                 );
               }
             } else {
-              const previewText = await confirmPreview(clarIntResolved.workspaceId, clarIntResolved.userId, clarDraftId);
-              void upsertBotMessage(
-                telegramUserId,
-                chatId,
-                previewText,
-                confirmKb(clarDraftId),
-              );
+              await sendAndStorePreview(telegramUserId, chatId, clarIntResolved.workspaceId, clarIntResolved.userId, clarDraftId);
             }
           } else if (amtPatchResult.status === 'still_needs' && amtPatchResult.field === 'intent') {
             void upsertBotMessage(
@@ -2710,18 +2741,7 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
           );
 
           if (patchRes.status === 'ready') {
-            const refreshed = await getDraftFields(awaitWsId, awaitUserId, awaitDraftId);
-            if (refreshed) {
-              const previewMsg = buildPreviewScreen({
-                intent: refreshed.parsed_intent,
-                amount: refreshed.parsed_amount,
-                currency: refreshed.parsed_currency,
-                categoryHint: refreshed.parsed_category_hint,
-                accountHint: null,
-                itemName: refreshed.item_name,
-              });
-              void upsertBotMessage(telegramUserId, chatId, previewMsg, confirmKb(awaitDraftId));
-            }
+            await sendAndStorePreview(telegramUserId, chatId, awaitWsId, awaitUserId, awaitDraftId);
           } else {
             void upsertBotMessage(
               telegramUserId, chatId,
