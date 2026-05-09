@@ -181,46 +181,6 @@ async function processNotification(job: Job<NotificationJobPayload>): Promise<vo
     });
   }
 
-  // Phase 1.36-UX: Delete /start greeting when first transaction is approved.
-  // greetingMsgId is only set on approve notifications (confirmation.worker.ts).
-  // Non-fatal — if greeting was already deleted or expired, silently skip.
-  if (job.data.greetingMsgId) {
-    try {
-      const res = await fetch(`${TELEGRAM_API_BASE}/deleteMessage`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          chat_id: chatId,
-          message_id: parseInt(job.data.greetingMsgId, 10),
-        }),
-      });
-      if (!res.ok) {
-        console.warn('[midas:notifications-worker] deleteMessage (greeting) failed — non-fatal', {
-          chatId, greetingMsgId: job.data.greetingMsgId, status: res.status,
-        });
-      }
-    } catch { /* non-fatal */ }
-
-    // Phase 1.36-UX: Re-activate ReplyKeyboard after deleting the greeting carrier.
-    // is_persistent:true alone does NOT keep the keyboard after its carrier is deleted.
-    // Solution: send a minimal single-character "·" message as the permanent nav carrier.
-    // This is sent exactly ONCE per user session (only when greetingMsgId is present).
-    try {
-      await fetch(`${TELEGRAM_API_BASE}/sendMessage`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          chat_id: chatId,
-          text: '·',
-          reply_markup: {
-            keyboard: [['📊 Баланс', '📋 Отчёт', '⚙️ Настройки']],
-            is_persistent: false,   // user can collapse it while typing
-            resize_keyboard: true,
-          },
-        }),
-      });
-    } catch { /* non-fatal */ }
-  }
 
   // Phase 1.36-UX: If this is a preview notification (draftId present), store the
   // sent message_id so the confirmation worker can edit it (preview → confirmed).
@@ -237,7 +197,6 @@ async function processNotification(job: Job<NotificationJobPayload>): Promise<vo
     workspaceId,
     editFirst: !!job.data.activeMessageId,
     edited: sentMessageId === job.data.activeMessageId,
-    greetingDeleted: !!job.data.greetingMsgId,
   });
 }
 
