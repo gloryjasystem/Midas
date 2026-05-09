@@ -41,6 +41,22 @@ Business: Зарплаты и выплаты, Фриланс, Реклама, С
 
 TYPICAL ITEMS PER CATEGORY (use this to pick the right category_hint):
 
+MULTILINGUAL RECOGNITION (critical):
+- Users may write in Russian, English, Ukrainian, or mix languages. Recognize items in ANY language.
+- Map to the same category regardless of language: "milk 200" → Продукты, "молоко 200" → Продукты.
+- Brands are language-neutral: "Starbucks", "Netflix", "IKEA" work the same in any language.
+
+FUZZY MATCHING:
+- If the user writes something VERY similar to a known item, treat it as that item.
+- Typos: "кофэ" → кофе, "нетфликс" → Netflix, "спотифай" → Spotify, "ютуб" → YouTube.
+- Slang/abbreviations: "комуналка" → коммуналка, "коммуналка" → Жильё, "подписон" → Подписки.
+- Transliteration: "kafe" → кафе, "taksi" → такси, "benzin" → бензин.
+- Only match if the similarity is very strong. If unsure, use "Другое".
+
+KEY BILINGUAL PAIRS (non-obvious translations):
+RU → EN: шиномонтаж=tire service, коммуналка=utilities, коворкинг=coworking, каршеринг=car sharing, самокат=scooter rental, маршрутка=minibus, электричка=commuter train, подписка=subscription, репетитор=tutor, кружок=kids class, детский сад=daycare/kindergarten, подгузники=diapers, наполнитель=cat litter, бытовая химия=household chemicals, канцелярия=office supplies, эквайринг=acquiring/payment processing, подрядчик=contractor, единый налог=flat tax
+EN → RU: groceries=Продукты, takeaway/takeout=Кафе и рестораны, toll=Транспорт, mortgage=Жильё(ипотека), pharmacy=Здоровье(аптека), dry cleaning=Одежда(химчистка), skincare/makeup=Красота, streaming=Подписки, tuition=Образование, gym=Спорт, pet food=Питомцы, household=Дом, payroll=Зарплаты и выплаты, hosting=Софт и сервисы, hardware=Оборудование
+
 --- PERSONAL ---
 
 Продукты: молоко, хлеб, мясо, овощи, фрукты, крупы, яйца, масло, сахар, макароны, рис, сыр, колбаса, рыба, курица, снеки, чипсы, шоколад, вода, сок, чай, кофе (в магазине/зёрна), орехи, мёд, замороженные продукты, полуфабрикаты, консервы, специи, соусы, выпечка, торт (на праздник=Подарки), мука, дрожжи, groceries, Walmart, Costco, Aldi, Lidl, АТБ, Сільпо, Novus, Biedronka, Пятёрочка, Магнит, Перекрёсток
