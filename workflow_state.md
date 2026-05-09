@@ -1,7 +1,7 @@
 # WORKFLOW_STATE.MD — Диспетчер задач ИИ-агента Midas
 
 > **Тип:** MUTABLE — кратковременная память агента. Обновляется на каждом шаге работы.
-> **Обновлён:** 2026-05-09 15:38 (UTC+3)
+> **Обновлён:** 2026-05-09 22:33 (UTC+3)
 
 ---
 
@@ -225,9 +225,10 @@ apps/background-workers/src/services/draft.service.ts  ← createDraft logic
 > Midas is DEPLOYED to Railway (project: spirited-happiness, env: production).
 > MCP servers: Railway, GitHub, Postgres, Filesystem — all active.
 > Auto-deploy: push to `main` → GitHub → Railway builds both `Midas` and `background-workers`.
-> Phases 1.1–1.32 ACCEPTED. Production deployment and intent detection enhancement done.
+> Phases 1.1–1.38 DONE. Current stable state: currency normalization fixed, prompts stable.
 > Database: PostgreSQL on Railway, RLS enabled, permissive policies for `postgres` role added.
 > AI model: Claude Haiku 4.5 via Anthropic API, temperature: 0, post-processing intent recovery.
+> AI parsing rule (FINAL): any number = amount (price). No PRICE vs QUANTITY distinction.
 > Key production fixes applied: markdown fence stripping, Decimal→String for NUMERIC, RLS policies.
 > Do not modify project_config.md.
 
