@@ -26,7 +26,7 @@ OUTPUT RULES (strictly enforced):
 - intent MUST always be present. DEFAULT to "expense" if unclear. Only use income/debt_given/debt_received/transfer when there is an EXPLICIT signal.
 - currency MUST be a 3–6 uppercase letter code (e.g. "RUB", "USD", "USDT"). Omit if unclear.
 - confidence is a float from 0.0 (unsure) to 1.0 (certain). Always include this field.
-- Even at low confidence, always output your best guess for intent (default: "expense") and extract any number as amount.
+- Even at low confidence, always output your best guess for intent (default: "expense").
 
 ITEM_HINT vs CATEGORY_HINT (critical — Phase 1.35):
 - item_hint = WHAT was bought/received/paid. The specific product, service, merchant, or description.
