@@ -13,7 +13,7 @@
  * Flow:
  *   1. Call findOrCreateUser(telegramUserId)
  *   2. Returns { userId, workspaceId, isNewUser }
- *   3. If isNewUser → send welcome message via Telegram Bot API
+ *   3. If isNewUser → /start handler sends the welcome card (not here)
  *   4. Return { workspaceId, isNewUser }
  *
  * Note on /start vs regular messages:
@@ -24,7 +24,6 @@
  */
 
 import { findOrCreateUser } from './onboarding.service.js';
-import { sendMessage } from './telegram-api.js';
 
 export interface WorkspaceResolverResult {
   /** Internal user ULID */
@@ -45,18 +44,14 @@ export interface WorkspaceResolverResult {
  */
 export async function resolveWorkspace(
   telegramUserId: string,
-  chatId?: string,
+  // _chatId kept for API compatibility — welcome is sent by /start handler
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  _chatId?: string,
 ): Promise<WorkspaceResolverResult> {
   const result = await findOrCreateUser(telegramUserId);
 
-  // Send welcome message for new users (Phase 1.5)
-  // Non-blocking: failure does NOT throw — webhook must remain 200-resilient
-  if (result.isNewUser && chatId) {
-    void sendMessage(
-      chatId,
-      '👋 <b>Добро пожаловать в Midas!</b>\n\nВаш персональный финансовый помощник готов к работе.\n\nПросто отправьте сообщение о расходе или доходе, например:\n<i>«Кофе 250р»</i> или <i>«Получил зарплату 80000»</i>',
-    );
-  }
+  // Note: welcome message is sent by the /start command handler (webhook.route.ts).
+  // DO NOT send a welcome message here — it would duplicate the onboarding card. (Phase 1.38)
 
   return {
     userId: result.userId,
