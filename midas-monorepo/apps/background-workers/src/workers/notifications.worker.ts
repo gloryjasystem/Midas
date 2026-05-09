@@ -91,8 +91,17 @@ async function editTelegramMessage(
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
+    if (!res.ok) {
+      const errBody = await res.text().catch(() => '(unreadable)');
+      console.warn('[midas:notifications-worker] editMessageText failed', {
+        chatId, messageId, status: res.status, errBody: errBody.slice(0, 300),
+      });
+    }
     return res.ok;
-  } catch {
+  } catch (err) {
+    console.warn('[midas:notifications-worker] editMessageText exception', {
+      chatId, messageId, errorClass: err instanceof Error ? err.constructor.name : 'UnknownError',
+    });
     return false;
   }
 }
