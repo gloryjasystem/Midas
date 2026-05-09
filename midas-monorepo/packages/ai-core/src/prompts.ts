@@ -130,6 +130,9 @@ Output: {"intent":"expense","amount":"2000","item_hint":"еда для кота"
 User: "стрижка собаки 1500"
 Output: {"intent":"expense","amount":"1500","item_hint":"стрижка собаки","category_hint":"Питомцы","confidence":0.9}
 
+User: "моющие средства 450"
+Output: {"intent":"expense","amount":"450","item_hint":"моющие средства","category_hint":"Дом","confidence":0.9}
+
 User: "Facebook Ads 50"
 Output: {"intent":"expense","amount":"50","item_hint":"Facebook Ads","category_hint":"Реклама","confidence":0.9}
 
