@@ -239,13 +239,50 @@ export async function editMessageText(
   text: string,
   keyboard?: InlineKeyboardMarkup,
 ): Promise<boolean> {
-  return telegramPost('editMessageText', {
-    chat_id: chatId,
-    message_id: parseInt(messageId, 10),
-    text,
-    parse_mode: 'HTML',
-    ...(keyboard ? { reply_markup: keyboard } : {}),
-  });
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  if (!token) return false;
+
+  const url = `${TELEGRAM_API_BASE}/bot${token}/editMessageText`;
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => { controller.abort(); }, REQUEST_TIMEOUT_MS);
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: chatId,
+        message_id: parseInt(messageId, 10),
+        text,
+        parse_mode: 'HTML',
+        ...(keyboard ? { reply_markup: keyboard } : {}),
+      }),
+      signal: controller.signal,
+    });
+
+    clearTimeout(timeout);
+
+    if (response.ok) {
+      const data = (await response.json()) as { ok: boolean };
+      return data.ok;
+    }
+
+    // Phase 1.37-UX: "message is not modified" is NOT a real error —
+    // it means the message already shows the correct content.
+    // Treat as success so upsertBotMessage does NOT fall back to sendMessage,
+    // which would create a duplicate message (observed when the user taps
+    // the same ReplyKeyboard button — Balance / Report / Settings — more than once).
+    //
+    // All other 400 errors (message not found, bot blocked, etc.) are still false.
+    const errData = (await response.json()) as { ok: boolean; description?: string };
+    if (errData.description?.includes('message is not modified')) {
+      return true;
+    }
+
+    return false;
+  } catch {
+    return false;
+  }
 }
 
 // ─────────────────────────────────────────────────────────────
