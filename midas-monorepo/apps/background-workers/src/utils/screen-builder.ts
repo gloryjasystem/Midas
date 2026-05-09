@@ -287,13 +287,10 @@ export function buildConfirmKeyboard(draftId: string): InlineKeyboard {
  * SEC-12: No user data in output.
  */
 export function buildCurrencyClarScreen(): string {
-  return [
-    '💱 <b>В какой валюте записать?</b>',
-    '',
-    'Напиши одним словом:',
-    '  <code>руб</code>  <code>USD</code>  <code>USDT</code>  <code>EUR</code>  <code>₴</code>  <code>BTC</code>',
-    '',
-    '💡 <i>Чтобы не спрашивало каждый раз — установи валюту по умолчанию:</i>',
-    '<i>⚙️ Настройки → Валюта</i>',
-  ].join('\n');
+  return (
+    '💱 <b>В какой валюте записать?</b>' +
+    '\n\n<blockquote>руб · USD · USDT · EUR · $ · BTC · доллар · евро</blockquote>' +
+    '\n\n<blockquote>💡 Чтобы не спрашивало каждый раз — установи валюту по умолчанию:\n' +
+    '⚙️ Настройки → Базовая валюта</blockquote>'
+  );
 }

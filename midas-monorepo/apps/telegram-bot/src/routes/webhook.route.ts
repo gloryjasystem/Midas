@@ -416,6 +416,15 @@ function confirmKb(draftId: string) {
   };
 }
 
+
+// Phase 1.38: Unified currency clarification prompt — Variant Б
+// Blockquote #1: currency examples. Blockquote #2: settings hint with path.
+const CUR_PROMPT_MSG =
+  '💱 <b>В какой валюте записать?</b>' +
+  '\n\n<blockquote>руб · USD · USDT · EUR · $ · BTC · доллар · евро</blockquote>' +
+  '\n\n<blockquote>💡 Чтобы не спрашивало каждый раз — установи валюту по умолчанию:\n' +
+  '⚙️ Настройки → Базовая валюта</blockquote>';
+
 // Phase 1.35: Build preview card from draft data.
 // Returns preview text or fallback if draft is not found.
 async function confirmPreview(
@@ -2354,7 +2363,7 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
             const curClarMsg = await upsertBotMessage(
               telegramUserId,
               chatId,
-              '💱 <b>В какой валюте записать?</b>\n\nНапиши одним словом:\n  <code>руб</code>  <code>USD</code>  <code>USDT</code>  <code>EUR</code>  <code>₴</code>  <code>BTC</code>\n\n💡 <i>Чтобы не спрашивало каждый раз — установи валюту по умолчанию:</i>\n<i>⚙️ Настройки → Валюта</i>',
+              CUR_PROMPT_MSG,
             );
             if (curClarMsg) {
               await redisConnection.setex(`midas:clar:msg:${telegramUserId}:${chatId}`, 300, curClarMsg);
@@ -2422,7 +2431,7 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
               const clarMsg = await upsertBotMessage(
                 telegramUserId,
                 chatId,
-                '💱 <b>В какой валюте записать?</b>\n\nНапиши одним словом:\n  <code>руб</code>  <code>USD</code>  <code>USDT</code>  <code>EUR</code>  <code>₴</code>  <code>BTC</code>\n\n💡 <i>Чтобы не спрашивало каждый раз — установи валюту по умолчанию:</i>\n<i>⚙️ Настройки → Валюта</i>',
+                CUR_PROMPT_MSG,
               );
               if (clarMsg) {
                 await redisConnection.setex(
