@@ -134,12 +134,13 @@ import {
 import {
   parseAccountCallback,             // Phase 1.30
   buildAccountTypeKeyboard,          // Phase 1.30
-  buildStartOnboardKeyboard,         // Phase 1.30
+  buildStartSimpleKeyboard,          // Phase 1.37-UX: 2-button /start keyboard
   buildExchangePickerKeyboard,       // Phase 1.30
   buildOnboardCurrencyKeyboard,      // Phase 1.30
   buildAfterCreateKeyboard,          // Phase 1.30
   ACCOUNTS_EMPTY_TEXT,               // Phase 1.30
-  START_ONBOARD_TEXT,                // Phase 1.30
+  START_WELCOME_TEXT,                // Phase 1.37-UX: new user welcome
+  SETUP_COMPLETE_TEXT,               // Phase 1.37-UX: ReplyKeyboard activation message
   EXCHANGE_PICKER_TEXT,              // Phase 1.30
   CURRENCY_PICKER_TEXT,              // Phase 1.30
   nameInputPrompt,                   // Phase 1.30
@@ -445,16 +446,26 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
           const acMsgId = cq.message ? String(cq.message.message_id) : null;
 
           try {
-            if (acCmd.cmd === 'skip') {
-              // User skipped onboarding — clear state, confirm
+            if (acCmd.cmd === 'open') {
+              // Phase 1.37-UX: User tapped "Добавить счёт" from the 2-button /start keyboard.
+              // Replace the welcome message with the full account type picker in-place.
+              if (acMsgId) void editMessageText(chatId, acMsgId, ACCOUNTS_EMPTY_TEXT, buildAccountTypeKeyboard());
+
+            } else if (acCmd.cmd === 'skip') {
+              // User skipped onboarding — clear state, confirm.
+              // ReplyKeyboard is NOT activated here — it will appear naturally after
+              // the user's first confirmed transaction (workers include replyKeyboardJson).
               await redisConnection.del(acKey);
-              if (acMsgId) void editMessageText(chatId, acMsgId, '✅ Хорошо! Добавишь счёт позже через /add_account или /accounts.', { inline_keyboard: [] });
+              if (acMsgId) void editMessageText(chatId, acMsgId, '✅ Хорошо! Добавишь счёт позже через /accounts или /add_account.', { inline_keyboard: [] });
 
             } else if (acCmd.cmd === 'done') {
-              // User finished — clear state, show account list
+              // User finished — clear state, show account list, activate ReplyKeyboard.
+              // Phase 1.37-UX: User has set up accounts → send ReplyKeyboard as activation signal.
               await redisConnection.del(acKey);
               const accountText = await getAccountList(acResolved.workspaceId, acResolved.userId);
               if (acMsgId) void editMessageText(chatId, acMsgId, accountText, { inline_keyboard: [] });
+              // Activate navigation keyboard — user is now set up.
+              void sendMessageWithReplyKeyboard(chatId, SETUP_COMPLETE_TEXT, buildMainMenuKeyboard());
 
             } else if (acCmd.cmd === 'more') {
               // User wants to add another account — restart type picker
@@ -528,6 +539,10 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
                     `✅ Счёт <b>${escapeHtml(accountName)}</b> (${escapeHtml(acCmd.code)}) создан!`,
                     buildAfterCreateKeyboard(),
                   );
+                  // Phase 1.37-UX: First account created → activate ReplyKeyboard.
+                  // sendMessageWithReplyKeyboard sends a new message carrying the keyboard.
+                  // This is the "setup complete" activation signal for the user.
+                  void sendMessageWithReplyKeyboard(chatId, SETUP_COMPLETE_TEXT, buildMainMenuKeyboard());
                   request.log.info({ msg: '[midas:bot:webhook] ac: account created via onboarding', workspaceId: acResolved.workspaceId });
                 }
               }
@@ -1673,20 +1688,11 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
 
           // If existing user, send a re-greeting (resolveWorkspace only sends for isNewUser)
           if (!resolved.isNewUser) {
-            // Phase 1.36-UX: Re-greeting flow for existing users.
-            //
-            // Telegram API constraints:
-            //   - Messages with ReplyKeyboardMarkup CANNOT be edited (400 error).
-            //   - Deleting the carrier message removes the keyboard too.
-            //
-            // Strategy: send greeting WITH ReplyKeyboard (activates nav).
-            // Store its message_id in Redis (greetingMsgKey). When the user
-            // sends their first text message, the webhook deletes the greeting
-            // to keep the chat clean. The ReplyKeyboard was already visible
-            // and the transaction card replaces it as the active UI element.
+            // Phase 1.37-UX: Existing user re-greeting.
+            // ReplyKeyboard is already active — just refresh it and update copy.
             const greetMsgId = await sendMessageWithReplyKeyboard(
               chatId,
-              '✅ Вы уже зарегистрированы. Просто отправьте сообщение о расходе или доходе.',
+              '✅ С возвращением в Midas!\n\nОпишите операцию — бот распознает её автоматически.',
               buildMainMenuKeyboard(),
             );
             if (greetMsgId) {
@@ -1695,14 +1701,22 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
               );
             }
           } else {
-            // Phase 1.36-UX: Activate persistent bottom nav keyboard for new users.
-            // Sent as a separate message so the onboarding inline keyboard
-            // can appear independently on the next upsertBotMessage call.
-            void sendMessageWithReplyKeyboard(chatId, '👋 Добро пожаловать в Midas!', buildMainMenuKeyboard());
-            // Phase 1.30: new user — show guided account onboarding keyboard (Scenario Е).
-            // The default account was already created by system_find_or_create_user.
-            // This keyboard allows the user to add NAMED accounts on top of the default.
-            void upsertBotMessage(telegramUserId, chatId, START_ONBOARD_TEXT, buildStartOnboardKeyboard());
+            // Phase 1.37-UX: New user onboarding — ONE message, NO ReplyKeyboard.
+            //
+            // Design rationale:
+            //   - Showing ReplyKeyboard (Balance/Report/Settings) to a new user with no
+            //     data is noise. The keyboard activates after account creation or after
+            //     the first confirmed transaction (workers include replyKeyboardJson).
+            //   - Single message: welcome text + 2-button inline keyboard (Add / Skip).
+            //     Telegram API cannot combine ReplyKeyboard + InlineKeyboard in one message,
+            //     so we use the inline variant only here — clean, focused, zero overload.
+            //   - The default account ("Default") was already created by system_find_or_create_user,
+            //     so the user can transact immediately without setting up accounts.
+            void upsertBotMessage(
+              telegramUserId, chatId,
+              START_WELCOME_TEXT,
+              buildStartSimpleKeyboard(),
+            );
           }
         } catch (err: unknown) {
           const errorClass = err instanceof Error ? err.constructor.name : 'UnknownError';

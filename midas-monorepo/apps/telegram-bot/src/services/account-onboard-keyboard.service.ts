@@ -89,7 +89,8 @@ export type AccountOnboardCmd =
   | { cmd: 'currency_custom' }
   | { cmd: 'skip' }
   | { cmd: 'more' }
-  | { cmd: 'done' };
+  | { cmd: 'done' }
+  | { cmd: 'open' }; // Phase 1.37-UX: open full account type picker from start 2-button keyboard
 
 // ─────────────────────────────────────────────────────────────
 // Parser — SEC-01 allowlist
@@ -116,6 +117,7 @@ export function parseAccountCallback(data: string): AccountOnboardCmd | null {
   if (sub === 'skip') return { cmd: 'skip' };
   if (sub === 'more') return { cmd: 'more' };
   if (sub === 'done') return { cmd: 'done' };
+  if (sub === 'open') return { cmd: 'open' }; // Phase 1.37-UX: open type picker
 
   if (sub === 'type') {
     const t = parts[2] ?? '';
@@ -166,21 +168,43 @@ export function buildAccountTypeKeyboard(): InlineKeyboardMarkup {
 }
 
 /**
+ * Phase 1.37-UX: Minimal 2-button keyboard for /start new user flow.
+ * Replaces the 5-button keyboard to eliminate cognitive overload.
+ *
+ *   [➕ Добавить счёт]    → ac:open  → shows full account type picker (edit in-place)
+ *   [▶️ Начать без счёта] → ac:skip  → dismiss, default account is already created
+ *
+ * ReplyKeyboard is NOT sent here — it activates after account creation or first confirmed tx.
+ */
+export function buildStartSimpleKeyboard(): InlineKeyboardMarkup {
+  return {
+    inline_keyboard: [
+      [
+        { text: '➕ Добавить счёт',     callback_data: 'ac:open' },
+        { text: '▶️ Начать без счёта', callback_data: 'ac:skip' },
+      ],
+    ],
+  };
+}
+
+/**
  * Build the guided /start account type keyboard for new users.
  * Scenario Е from the roadmap — includes [⏩ Пропустить] button.
+ * Used when user taps "Добавить счёт" from the start simple keyboard (ac:open).
+ * Also used from /accounts empty-state (Scenario Д).
  */
 export function buildStartOnboardKeyboard(): InlineKeyboardMarkup {
   return {
     inline_keyboard: [
       [
-        { text: '💳 Добавить карту',  callback_data: 'ac:type:card' },
-        { text: '🔶 Добавить биржу',  callback_data: 'ac:type:exchange' },
-      ],
-      [
-        { text: '₿ Добавить кошелёк', callback_data: 'ac:type:wallet' },
+        { text: '💳 Банковская карта', callback_data: 'ac:type:card' },
         { text: '💵 Наличные',         callback_data: 'ac:type:cash' },
       ],
-      [{ text: '⏩ Пропустить — добавлю позже', callback_data: 'ac:skip' }],
+      [
+        { text: '🔶 Крипто-биржа',  callback_data: 'ac:type:exchange' },
+        { text: '₿ Крипто-кошелёк', callback_data: 'ac:type:wallet' },
+      ],
+      [{ text: '↩️ Назад',  callback_data: 'ac:skip' }],
     ],
   };
 }
@@ -253,10 +277,28 @@ export const ACCOUNTS_EMPTY_TEXT =
   'карта, кошелёк, биржа, наличные.\n\n' +
   'Создай первый счёт:';
 
+/**
+ * Phase 1.37-UX: Welcome text for new user /start — single message, no ReplyKeyboard.
+ * Professional, product-grade copy. No examples, no instructions.
+ */
+export const START_WELCOME_TEXT =
+  '👋 <b>Добро пожаловать в Midas!</b>\n\n' +
+  'Ваш финансовый ассистент на базе ИИ готов к работе.\n\n' +
+  '🏦 Укажите, где хранятся ваши деньги — это позволит вести\n' +
+  'точный учёт баланса по каждому счёту.';
+
 /** Text for /start new user guided prompt (Scenario Е). */
 export const START_ONBOARD_TEXT =
   '🏦 <b>Где хранишь деньги?</b>\n' +
   'Добавь свои счета (можно несколько):';
+
+/**
+ * Phase 1.37-UX: Activation message sent with ReplyKeyboard after account creation.
+ * Signals to user that setup is complete and navigation is now available.
+ */
+export const SETUP_COMPLETE_TEXT =
+  '✅ <b>Всё готово!</b>\n\n' +
+  'Опишите любую операцию — бот распознает сумму, категорию и тип автоматически.';
 
 /** Text for exchange picker step. */
 export const EXCHANGE_PICKER_TEXT = 'Какая биржа?';
