@@ -281,9 +281,9 @@ export function buildClarificationScreen(data: ClarificationScreenData): string 
       if (data.askAmountWithCurrency) {
         // Phase 1.38: combined prompt — no default currency set yet
         lines.push('Напиши сумму и валюту:');
-        lines.push('  <code>1000 USD</code>   <code>500 руб</code>   <code>200 USDT</code>');
+        lines.push('<blockquote>1000 USD · 500 руб · 200 USDT · 50 евро</blockquote>');
         lines.push('');
-        lines.push('<i>💡 Чтобы не указывать валюту каждый раз — установи её в ⚙️ Настройках</i>');
+        lines.push('<blockquote>💡 Чтобы не указывать каждый раз — установи её в ⚙️ Настройках</blockquote>');
       } else {
         lines.push('Сколько потратил? Отправь сумму:');
       }

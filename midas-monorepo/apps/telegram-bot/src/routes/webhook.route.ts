@@ -425,6 +425,21 @@ const CUR_PROMPT_MSG =
   '\n\n<blockquote>💡 Чтобы не спрашивало каждый раз — установи валюту по умолчанию:\n' +
   '⚙️ Настройки → Базовая валюта</blockquote>';
 
+/**
+ * Phase 1.38: Extract the first valid number from free-form text.
+ * Supports: "500", "500 рублей", "1 000.50 USD", "1000долларов"
+ * Returns the numeric string ready for DB write, or null if nothing found.
+ */
+function extractAmountFromText(input: string): string | null {
+  // Strip thousands-separator spaces: "1 000" → "1000"
+  const normalized = input.replace(/(\d)\s+(\d)/g, '$1$2');
+  // Find first decimal number
+  const match = normalized.match(/(?<!\d)(\d+(?:[.,]\d{1,4})?)(?!\d)/);
+  if (!match) return null;
+  const num = match[1]!.replace(',', '.');
+  return validateAmountString(num);
+}
+
 // Phase 1.35: Build preview card from draft data.
 // Returns preview text or fallback if draft is not found.
 async function confirmPreview(
@@ -2294,9 +2309,9 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
 
         // ── Phase 1.38: amt+cur — combined amount + currency answer ───────
         if (clarField === 'amt+cur' && /^[0-9A-Z]{26}$/.test(clarDraftId)) {
-          // Parse amount from input (first number found)
+          // Extract amount from free-form input: "500", "500 рублей", "1000 долларов" all work
           const amtCurText = message.text ?? '';
-          const validAmountAC = validateAmountString(amtCurText);
+          const validAmountAC = extractAmountFromText(amtCurText);
           if (!validAmountAC) {
             void upsertBotMessage(telegramUserId, chatId,
               '⚠️ Не нашёл сумму. Напиши, например: <code>1000 USD</code> или <code>500 руб</code>',
@@ -2377,7 +2392,7 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
 
         if (clarField === 'amt' && /^[0-9A-Z]{26}$/.test(clarDraftId)) {
           // Validate amount (SEC-02: NUMERIC regex)
-          const validAmount = validateAmountString(message.text);
+          const validAmount = extractAmountFromText(message.text);
           if (!validAmount) {
             void upsertBotMessage(telegramUserId, chatId, '⚠️ Неверная сумма. Напиши число, например: 380 или 1500.50');
             // Keep Redis key alive — user can try again within TTL
