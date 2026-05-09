@@ -206,7 +206,11 @@ async function processConfirmation(job: Job<CallbackConfirmJobPayload>): Promise
   let previewMsgId: string | undefined;
 
 
-  if (action === 'approve') {
+  // Phase 1.38: Read preview message_id for approve AND reject.
+  // For approve: preview card → "✅ Записано"
+  // For reject:  preview card → "❌ Отменено"
+  // Both edit in-place — no duplicate messages in chat.
+  if (action === 'approve' || action === 'reject') {
     try {
       const pVal = await redisConnection.get(`midas:preview:${draftId}`);
       if (pVal) {
@@ -226,8 +230,8 @@ async function processConfirmation(job: Job<CallbackConfirmJobPayload>): Promise
       inlineKeyboardJson,
       // Phase 1.38: replyKeyboardJson omitted — keyboard lives in chat from /start.
       telegramUserId,
-      // For approve: edit the preview card in-place (preview → confirmed)
-      // For reject/other: no activeMessageId → sends new message
+      // Phase 1.38: edit preview card in-place for approve AND reject
+      // approve → "✅ Записано"  |  reject → "❌ Отменено"
       activeMessageId: previewMsgId,
       // No draftId in result notification (user already confirmed)
     },
