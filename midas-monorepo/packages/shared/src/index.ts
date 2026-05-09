@@ -107,6 +107,13 @@ export interface NotificationJobPayload {
    * So this is only applied on the sendMessage path, never on editMessageText.
    */
   replyKeyboardJson?: string;
+  /**
+   * Phase 1.36-UX: /start greeting message_id to delete on first approve.
+   * The greeting is shown with ReplyKeyboard on /start; when the user confirms
+   * their first transaction, this message is deleted to clean up the chat.
+   * Only present on approve notifications (not preview, not reject).
+   */
+  greetingMsgId?: string;
 }
 
 /**

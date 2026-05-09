@@ -201,13 +201,32 @@ async function processConfirmation(job: Job<CallbackConfirmJobPayload>): Promise
 
   const alertId = ulid();
 
-  // Phase 1.33: read active message pointer for edit-first in notification worker
-  let activeMessageId: string | undefined;
-  try {
-    const amKey = `midas:am:${telegramUserId}:${chatId}`;
-    const amVal = await redisConnection.get(amKey);
-    if (amVal) activeMessageId = amVal;
-  } catch { /* non-fatal */ }
+  // Phase 1.36-UX: Read preview message_id for this specific draft.
+  // Stored by notifications.worker when preview card was sent (midas:preview:{draftId}).
+  // Only used for approve — to edit the preview card into confirmed card in-place.
+  let previewMsgId: string | undefined;
+  let greetingMsgId: string | undefined;
+
+  if (action === 'approve') {
+    try {
+      const pVal = await redisConnection.get(`midas:preview:${draftId}`);
+      if (pVal) {
+        previewMsgId = pVal;
+        // Clean up immediately — we're about to use it
+        void redisConnection.del(`midas:preview:${draftId}`);
+      }
+    } catch { /* non-fatal */ }
+
+    // Also read the /start greeting so notification worker can delete it
+    try {
+      const gVal = await redisConnection.get(`midas:greet:${telegramUserId}:${chatId}`);
+      if (gVal) {
+        greetingMsgId = gVal;
+        // Clean up immediately — one-time delete
+        void redisConnection.del(`midas:greet:${telegramUserId}:${chatId}`);
+      }
+    } catch { /* non-fatal */ }
+  }
 
   await notificationsQueue.add(
     QUEUE_NAMES.NOTIFICATIONS,
@@ -218,8 +237,12 @@ async function processConfirmation(job: Job<CallbackConfirmJobPayload>): Promise
       message: notificationMessage,
       inlineKeyboardJson,
       replyKeyboardJson,   // Phase 1.36-UX: activates Reply Keyboard on sendMessage path
-      telegramUserId,      // Phase 1.33
-      activeMessageId,      // Phase 1.33
+      telegramUserId,
+      // For approve: edit the preview card in-place (preview → confirmed)
+      // For reject/other: no activeMessageId → sends new message
+      activeMessageId: previewMsgId,
+      // For approve: delete the /start greeting (one-time cleanup)
+      greetingMsgId,
       // No draftId in result notification (user already confirmed)
     },
     {

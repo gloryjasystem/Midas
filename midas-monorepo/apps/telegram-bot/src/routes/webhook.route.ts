@@ -89,7 +89,6 @@ import {
   // Phase 1.33: sendMessageWithKeyboard no longer imported — routed via upsertBotMessage.
   editMessageText,
   answerCallbackQuery,
-  deleteMessage,               // Phase 1.36-UX: cleanup greeting on first text
   sendMessageWithReplyKeyboard,  // Phase 1.36-UX: persistent bottom nav keyboard
 } from '../services/telegram-api.js';
 import { redisConnection } from '../queues/redis.js';
@@ -2485,17 +2484,8 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
       jobId: idempotencyKey,
     });
 
-    // Phase 1.36-UX: Delete the /start greeting message to keep chat clean.
-    // The ReplyKeyboard was already visible; the transaction card will be
-    // the next thing the user sees.
-    try {
-      const gKey = greetingMsgKey(telegramUserId, chatId);
-      const greetId = await redisConnection.get(gKey);
-      if (greetId) {
-        void deleteMessage(chatId, greetId);
-        void redisConnection.del(gKey);
-      }
-    } catch { /* non-fatal */ }
+    // NOTE: greeting deletion moved to confirmation.worker (approve path).
+    // The greeting is shown until the first transaction is CONFIRMED, not just typed.
 
     // ── Step 8: SEC-04 — Return 200 immediately ──────────────
     // Log only safe metadata — no raw_text (SEC-12)

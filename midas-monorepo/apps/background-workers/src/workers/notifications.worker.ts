@@ -106,17 +106,7 @@ async function editTelegramMessage(
   }
 }
 
-// Phase 1.33: Redis active-message pointer helpers for background workers
-const AM_KEY_PREFIX = 'midas:am:';
-const AM_TTL_SEC = 86400; // 24h
 
-async function setActiveMessagePointer(
-  telegramUserId: string, chatId: string, messageId: string,
-): Promise<void> {
-  try {
-    await redisConnection.set(`${AM_KEY_PREFIX}${telegramUserId}:${chatId}`, messageId, 'EX', AM_TTL_SEC);
-  } catch { /* non-fatal */ }
-}
 
 // ─────────────────────────────────────────────────────────────
 // Worker processor
@@ -164,7 +154,9 @@ async function processNotification(job: Job<NotificationJobPayload>): Promise<vo
     freshReplyMarkup = inlineReplyMarkup; // no Reply Keyboard — use inline
   }
 
-  // Phase 1.33: Try edit-first if activeMessageId is available
+  // Phase 1.33: Try edit-first if activeMessageId is available.
+  // activeMessageId is only set for the approve notification (to edit preview → confirmed).
+  // For new preview cards, activeMessageId is NOT set → always sends new message.
   let sentMessageId: string | null = null;
 
   if (job.data.activeMessageId) {
@@ -189,9 +181,34 @@ async function processNotification(job: Job<NotificationJobPayload>): Promise<vo
     });
   }
 
-  // Phase 1.33: Update Redis active-message pointer
-  if (sentMessageId && job.data.telegramUserId) {
-    void setActiveMessagePointer(job.data.telegramUserId, chatId, sentMessageId);
+  // Phase 1.36-UX: Delete /start greeting when first transaction is approved.
+  // greetingMsgId is only set on approve notifications (confirmation.worker.ts).
+  // Non-fatal — if greeting was already deleted or expired, silently skip.
+  if (job.data.greetingMsgId) {
+    try {
+      const res = await fetch(`${TELEGRAM_API_BASE}/deleteMessage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chat_id: chatId,
+          message_id: parseInt(job.data.greetingMsgId, 10),
+        }),
+      });
+      if (!res.ok) {
+        console.warn('[midas:notifications-worker] deleteMessage (greeting) failed — non-fatal', {
+          chatId, greetingMsgId: job.data.greetingMsgId, status: res.status,
+        });
+      }
+    } catch { /* non-fatal */ }
+  }
+
+  // Phase 1.36-UX: If this is a preview notification (draftId present), store the
+  // sent message_id so the confirmation worker can edit it (preview → confirmed).
+  // Key: midas:preview:{draftId} → message_id  TTL: 600s (10 min)
+  if (draftId && sentMessageId) {
+    try {
+      await redisConnection.set(`midas:preview:${draftId}`, sentMessageId, 'EX', 600);
+    } catch { /* non-fatal */ }
   }
 
   console.log('[midas:notifications-worker] Notification sent', {
@@ -200,6 +217,7 @@ async function processNotification(job: Job<NotificationJobPayload>): Promise<vo
     workspaceId,
     editFirst: !!job.data.activeMessageId,
     edited: sentMessageId === job.data.activeMessageId,
+    greetingDeleted: !!job.data.greetingMsgId,
   });
 }
 
