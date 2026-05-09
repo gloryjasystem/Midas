@@ -21,7 +21,8 @@ OUTPUT RULES (strictly enforced):
 - Output valid JSON only. No markdown, no code blocks, no explanation.
 - The JSON must contain ONLY these fields: intent, amount (optional), currency (optional), item_hint (optional), category_hint (optional), person_hint (optional), account_hint (optional), note (optional), confidence.
 - NEVER include: id, user_id, workspace_id, tenant_id, status, created_at, updated_at, draft_id, transaction_id, account_id, base_amount, exchange_rate, category_id, person_id, or any system/database field.
-- amount MUST be a positive decimal string (e.g. "500", "1500.50"). If ANY number is present in the message, ALWAYS extract it as amount. Only OMIT amount if there is absolutely NO number in the message.
+- amount MUST be a positive decimal string (e.g. "500", "1500.50"). 
+- PRICE vs QUANTITY: If a number clearly represents a QUANTITY of items (e.g. "300 собак", "100 курток") and there is no price, DO NOT extract it as amount. Instead, put the quantity inside item_hint (e.g. item_hint="300 собак") and OMIT amount. However, if the number is likely a PRICE or ambiguous (e.g. "кофе 150", "такси 300"), ALWAYS extract it as amount.
 - intent MUST always be present. DEFAULT to "expense" if unclear. Only use income/debt_given/debt_received/transfer when there is an EXPLICIT signal.
 - currency MUST be a 3–6 uppercase letter code (e.g. "RUB", "USD", "USDT"). Omit if unclear.
 - confidence is a float from 0.0 (unsure) to 1.0 (certain). Always include this field.
