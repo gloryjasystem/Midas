@@ -242,12 +242,8 @@ export function buildPostConfirmKeyboard(transactionId: string): InlineKeyboard 
  */
 export function buildMainMenuReplyKeyboard(): object {
   return {
-    keyboard: [[
-      '📊 Баланс',
-      '📋 Отчёт',
-      '⚙️ Настройки',
-    ]],
-    is_persistent: false,  // Phase 1.36-UX: user can collapse the keyboard via Telegram UI
+    keyboard: [['📊 Баланс', '📋 Отчёт', '⚙️ Настройки']],
+    is_persistent: true,   // Phase 1.36-UX: always visible, user can collapse manually
     resize_keyboard: true,
   };
 }

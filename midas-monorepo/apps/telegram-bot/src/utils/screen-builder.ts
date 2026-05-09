@@ -411,7 +411,7 @@ export function buildMainMenuKeyboard(): ReplyKeyboardMarkup {
       [NAV_BTN_BALANCE, NAV_BTN_REPORT, NAV_BTN_SETTINGS],
     ],
     resize_keyboard: true,
-    is_persistent: false,  // Phase 1.36-UX: allows user to hide via Telegram collapse icon
+    is_persistent: true,   // Phase 1.36-UX: always visible, user can collapse manually
     input_field_placeholder: 'Напишите о расходе или доходе...',
   };
 }

@@ -200,6 +200,27 @@ async function processNotification(job: Job<NotificationJobPayload>): Promise<vo
         });
       }
     } catch { /* non-fatal */ }
+
+    // Phase 1.36-UX: Re-activate ReplyKeyboard after deleting the greeting carrier.
+    // Deleting a message that carried ReplyKeyboardMarkup removes the keyboard in
+    // Telegram clients. Send a minimal persistent nav message to restore it.
+    // This message stays in chat as the permanent keyboard carrier.
+    try {
+      await fetch(`${TELEGRAM_API_BASE}/sendMessage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chat_id: chatId,
+          text: '📊 <b>Баланс</b>  ·  📋 <b>Отчёт</b>  ·  ⚙️ <b>Настройки</b>',
+          parse_mode: 'HTML',
+          reply_markup: {
+            keyboard: [['📊 Баланс', '📋 Отчёт', '⚙️ Настройки']],
+            is_persistent: true,   // always visible, user can collapse it manually
+            resize_keyboard: true,
+          },
+        }),
+      });
+    } catch { /* non-fatal */ }
   }
 
   // Phase 1.36-UX: If this is a preview notification (draftId present), store the
