@@ -270,13 +270,20 @@ export function buildConfirmKeyboard(draftId: string): InlineKeyboard {
 // ── Phase 1.38: Currency clarification screen ────────────────
 
 /**
- * Minimalist text-only currency clarification prompt.
+ * Professional currency clarification prompt.
  * No inline buttons — user replies with a text message.
+ * Shows the bot can recognize partial words, symbols, and aliases.
  * SEC-12: No user data in output.
  */
 export function buildCurrencyClarScreen(): string {
   return [
-    '💱 <b>В какой валюте?</b>',
-    'например: руб · dollar · € · USDT',
+    '💱 <b>Не удалось определить валюту</b>',
+    '',
+    'Система автоматически распознаёт большинство форматов:',
+    '  · символ:  <code>$</code>  <code>€</code>  <code>₽</code>  <code>₴</code>',
+    '  · аббревиатура:  <code>USD</code>  <code>EUR</code>  <code>USDT</code>  <code>BTC</code>',
+    '  · слово:  <code>рубль</code>  <code>доллар</code>  <code>евро</code>  <code>гривна</code>',
+    '',
+    '✏️ <b>Напиши валюту одним словом:</b>',
   ].join('\n');
 }

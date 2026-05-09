@@ -2267,6 +2267,19 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
             return;
           }
 
+          // Phase 1.38 fix: delete the old clarification card before showing confirm card
+          const clarMsgCacheKey = `midas:clar:msg:${telegramUserId}:${chatId}`;
+          let prevClarMsgIdToDelete: string | null = null;
+          try {
+            prevClarMsgIdToDelete = await redisConnection.get(clarMsgCacheKey);
+            if (prevClarMsgIdToDelete) {
+              await redisConnection.del(clarMsgCacheKey);
+              void deleteMessage(chatId, prevClarMsgIdToDelete);
+            }
+          } catch {
+            // Non-fatal — proceed even if delete fails
+          }
+
           const amtPatchResult = await patchDraftAmount(
             clarIntResolved.workspaceId, clarIntResolved.userId, clarDraftId, validAmount,
           );
