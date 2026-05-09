@@ -22,7 +22,14 @@ OUTPUT RULES (strictly enforced):
 - The JSON must contain ONLY these fields: intent, amount (optional), currency (optional), item_hint (optional), category_hint (optional), person_hint (optional), account_hint (optional), note (optional), confidence.
 - NEVER include: id, user_id, workspace_id, tenant_id, status, created_at, updated_at, draft_id, transaction_id, account_id, base_amount, exchange_rate, category_id, person_id, or any system/database field.
 - amount MUST be a positive decimal string (e.g. "500", "1500.50"). 
-- PRICE vs QUANTITY: If a number clearly represents a QUANTITY of items (e.g. "300 собак", "100 курток") and there is no price, DO NOT extract it as amount. Instead, put the quantity inside item_hint (e.g. item_hint="300 собак") and OMIT amount. However, if the number is likely a PRICE or ambiguous (e.g. "кофе 150", "такси 300"), ALWAYS extract it as amount.
+- PRICE vs QUANTITY: Distinguish whether a number is a PRICE or a QUANTITY.
+  QUANTITY signals (DO NOT extract as amount, put full phrase in item_hint):
+    - Number precedes a noun in genitive plural: "300 собак", "150 курток", "5 яблок", "100 штук", "10 пар носков"
+    - Phrases like "N штук/единиц/шт/кг/литров/метров [item]"
+  PRICE signals (ALWAYS extract as amount):
+    - Number follows the item: "куртка 150", "кофе 300", "такси 500"
+    - Explicit price words: "стоит", "за", "цена", "по", "заплатил"
+    - Ambiguous (item + number, no unit): treat as PRICE → extract as amount.
 - intent MUST always be present. DEFAULT to "expense" if unclear. Only use income/debt_given/debt_received/transfer when there is an EXPLICIT signal.
 - currency MUST be a 3–6 uppercase letter code (e.g. "RUB", "USD", "USDT"). Omit if unclear.
 - confidence is a float from 0.0 (unsure) to 1.0 (certain). Always include this field.
@@ -85,11 +92,11 @@ COMPOUND EXPRESSIONS (how to parse multi-word messages):
 
 DEFAULT INTENT PRIORITY (CRITICAL — always output intent, never omit it):
 - DEFAULT: "expense". When in doubt, ALWAYS use "expense". 95% of user messages are expenses.
-- Unknown word + number (e.g. "Августи 200", "xyz 500") → intent="expense", item_hint=the unknown word.
+- Unknown word + number: apply PRICE vs QUANTITY rule above. If number looks like a price ("xyz 500", "Августи 200") → amount=number. If it looks like a count ("300 dog", "100 shirts") → OMIT amount, put count in item_hint.
 - Loan/debt: ONLY use debt_received/debt_given when "долг", "займ", "одолжил", "взял в долг" is EXPLICIT.
 - Income: ONLY when EXPLICIT signal: зарплата, получил, заработал, продал, фриланс, пришло, начислили.
 - Transfer: ONLY when EXPLICIT signal: перевёл, вывел, перекинул, конвертнул.
-- If you see item + number with NO other context → expense.
+- If you see PRICE + item with NO other context → expense.
 
 
 
