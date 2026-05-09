@@ -2578,6 +2578,19 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
           // Set cur_set flag — user has now explicitly chosen a currency
           await redisConnection.set(`midas:cur_set:${awaitWsId}`, '1');
 
+          // Phase 1.38 fix: delete the old clarification card before showing confirm card
+          const clarMsgCacheKey = `midas:clar:msg:${telegramUserId}:${chatId}`;
+          let prevClarMsgIdToDelete: string | null = null;
+          try {
+            prevClarMsgIdToDelete = await redisConnection.get(clarMsgCacheKey);
+            if (prevClarMsgIdToDelete) {
+              await redisConnection.del(clarMsgCacheKey);
+              void deleteMessage(chatId, prevClarMsgIdToDelete);
+            }
+          } catch {
+            // Non-fatal — proceed even if delete fails
+          }
+
           // Patch draft currency
           const patchRes = await patchDraftCurrency(
             awaitWsId, awaitUserId, awaitDraftId, validCur,
