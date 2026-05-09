@@ -87,8 +87,10 @@ import {
 } from '../services/settings.service.js';
 import {
   // Phase 1.33: sendMessageWithKeyboard no longer imported — routed via upsertBotMessage.
+  sendMessage,               // Phase 1.36-UX: plain editable greeting (no reply_markup)
   editMessageText,
   answerCallbackQuery,
+  deleteMessage,             // Phase 1.36-UX: remove nav-activation stub message
   sendMessageWithReplyKeyboard,  // Phase 1.36-UX: persistent bottom nav keyboard
 } from '../services/telegram-api.js';
 import { redisConnection } from '../queues/redis.js';
@@ -1665,19 +1667,30 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
 
           // If existing user, send a re-greeting (resolveWorkspace only sends for isNewUser)
           if (!resolved.isNewUser) {
-            // Phase 1.36-UX: Re-greeting WITH Reply Keyboard to (re-)activate the
-            // persistent bottom nav. Reply Keyboards cannot be set via editMessageText
-            // — they require a fresh sendMessage call.
+            // Phase 1.36-UX: Re-greeting flow for existing users.
             //
-            // Phase 1.36-UX Bug Fix: store the returned message_id as the new
-            // activeMessageId so the NEXT transaction card EDITS this message
-            // instead of appending a new one. Without this, clearActiveMessageId
-            // above leaves Redis pointer as null and the notification worker falls
-            // back to sendMessage — leaving the greeting permanently in chat.
-            const greetMsgId = await sendMessageWithReplyKeyboard(
+            // IMPORTANT: Telegram API does NOT allow editMessageText on
+            // messages that were sent with ReplyKeyboardMarkup (returns 400:
+            // "message can't be edited"). So we split into two messages:
+            //
+            // 1) A short nav-activation message WITH ReplyKeyboard — this
+            //    activates the persistent bottom nav but is NOT tracked.
+            //    We will delete it right after sending the editable greeting.
+            //
+            // 2) A plain greeting WITHOUT ReplyKeyboard — this becomes the
+            //    activeMessageId and CAN be edited by the next transaction card.
+            const navMsgId = await sendMessageWithReplyKeyboard(
+              chatId,
+              '⌨️',  // minimal text to activate reply keyboard
+              buildMainMenuKeyboard(),
+            );
+            // Delete the nav-activation message to keep chat clean
+            if (navMsgId) void deleteMessage(chatId, navMsgId);
+
+            // Send the actual greeting as a plain message (editable!)
+            const greetMsgId = await sendMessage(
               chatId,
               '✅ Вы уже зарегистрированы. Просто отправьте сообщение о расходе или доходе.',
-              buildMainMenuKeyboard(),
             );
             if (greetMsgId) void setActiveMessageId(telegramUserId, chatId, greetMsgId);
           } else {
