@@ -71,25 +71,25 @@ function getClient(): Anthropic {
 // ─────────────────────────────────────────────────────────────
 
 /**
- * Given a validated AiOutput, determine which fields are missing.
- * Priority order (one-question-at-a-time): amount → intent → category.
+ * Given a validated AiOutput, determine which fields are BLOCKING.
+ * Phase 1.38 professional UX — only amount (when truly absent) blocks the flow.
+ *   - intent: NEVER blocking. AI defaults to "expense"; backend hardcodes fallback.
+ *   - category: NEVER blocking. Defaults to "Другое" silently.
+ *   - amount: blocking ONLY when rawText contains NO number at all.
  *
  * SEC-01: only looks at data fields — never produces system field names.
  */
-function computeMissingFields(data: AiOutput): MissingField[] {
+function computeMissingFields(data: AiOutput, rawText?: string): MissingField[] {
   const missing: MissingField[] = [];
-  if (!data.amount) missing.push('amount');
-  if (!data.intent) missing.push('intent');
-  // category is not in AiOutput directly — category_hint is the hint.
-  // Missing category means category_hint is absent AND intent is not 'transfer'.
-  // We only flag category as missing when it's an expense/income/debt and no hint.
-  if (
-    !data.category_hint &&
-    data.intent &&
-    data.intent !== 'transfer'
-  ) {
-    missing.push('category');
+  if (!data.amount) {
+    // Only block if there's genuinely no number in the raw message.
+    // If user wrote "Августи 200", AI should have extracted it, but even if not —
+    // we don't ask again; the number is right there.
+    const hasNumber = rawText ? /\d/.test(rawText) : false;
+    if (!hasNumber) missing.push('amount');
   }
+  // intent: never added — AI is instructed to always return it.
+  // category: never added — defaults to 'Другое' silently.
   return missing;
 }
 
@@ -302,43 +302,51 @@ export async function parseTransaction(rawText: string): Promise<ParseResult> {
 
   const aiData: AiOutput = result.data;
 
-  // ── Category validation (Phase 1.37) ──────────────────────
-  // If Claude returned a category_hint not in our allowed set,
-  // replace with 'Другое' to prevent hallucinated categories.
-  if (aiData.category_hint && !ALLOWED_CATEGORIES.has(aiData.category_hint)) {
+  // ── Category validation + default (Phase 1.37/1.38) ────────
+  // Invalid or missing category_hint → silently default to 'Другое'.
+  // Never block or ask the user about category.
+  if (!aiData.category_hint || !ALLOWED_CATEGORIES.has(aiData.category_hint)) {
     aiData.category_hint = 'Другое';
   }
 
-  // ── Confidence check ──────────────────────────────────────
-  // Below PARTIAL_CONFIDENCE_THRESHOLD (0.3) → nonsense → needs_clarification (no data)
-  if (aiData.confidence < PARTIAL_CONFIDENCE_THRESHOLD) {
-    return {
-      status: 'needs_clarification',
-      reason: `Very low confidence: ${aiData.confidence.toFixed(2)}`,
-      tokensUsed,
-    };
+  // ── Hardcoded intent fallback (Phase 1.38) ──────────────────
+  // Even if Claude violated the prompt and omitted intent, apply 'expense'.
+  // This eliminates the intent clarification loop entirely.
+  if (!aiData.intent) {
+    aiData.intent = 'expense';
   }
 
-  // ── Check for missing required fields ─────────────────────
-  // If confidence is high enough (>= 0.5) but a field is missing, it's still partial.
-  // If confidence is 0.3–0.49, always treat as partial regardless of fields.
-  const missingFields = computeMissingFields(aiData);
+  // ── Confidence check ────────────────────────────────────────
+  // Below PARTIAL_CONFIDENCE_THRESHOLD (0.3) → nonsense by default.
+  // Exception: if we have amount + intent → show card optimistically (professional UX).
+  if (aiData.confidence < PARTIAL_CONFIDENCE_THRESHOLD) {
+    if (aiData.amount && aiData.intent) {
+      // Boost to just above partial threshold — we have enough data to show a card.
+      aiData.confidence = PARTIAL_CONFIDENCE_THRESHOLD;
+    } else {
+      return {
+        status: 'needs_clarification',
+        reason: `Very low confidence and no amount+intent: ${aiData.confidence.toFixed(2)}`,
+        tokensUsed,
+      };
+    }
+  }
 
+  // ── Check for missing required fields ───────────────────────
+  // After Phase 1.38: only 'amount' (when rawText has truly no number) can be missing.
+  const missingFields = computeMissingFields(aiData, rawText);
   const isLowConfidence = aiData.confidence < MIN_CONFIDENCE_THRESHOLD;
   const hasMissingFields = missingFields.length > 0;
 
-  // ── Post-processing: intent recovery + confidence boost ───
-  // Runs AFTER Claude — fills missing intent or boosts low confidence
-  // when strong keyword evidence exists in the original text.
+  // ── Post-processing: intent recovery + confidence boost ─────
+  // Boosts confidence or refines intent when strong keywords exist.
   if (isLowConfidence || hasMissingFields) {
     const recovery = postProcessIntentRecovery(rawText);
     if (recovery) {
-      // Fill missing intent if Claude omitted it
-      if (!aiData.intent) {
+      // Only override 'expense' default if recovery found something more specific.
+      if (!aiData.intent || (aiData.intent === 'expense' && recovery.intent !== 'expense')) {
         aiData.intent = recovery.intent;
-        // NOTE: re-evaluation of missingFields happens below via computeMissingFields(aiData)
       }
-      // Boost confidence if keyword agrees with Claude's intent
       if (aiData.intent === recovery.intent) {
         aiData.confidence = Math.min(1.0, aiData.confidence + recovery.boost);
       }
@@ -346,18 +354,19 @@ export async function parseTransaction(rawText: string): Promise<ParseResult> {
   }
 
   // Re-evaluate after post-processing
-  const stillLowConfidence = aiData.confidence < MIN_CONFIDENCE_THRESHOLD;
-  const stillMissingFields = computeMissingFields(aiData).length > 0;
+  const stillMissingFields = computeMissingFields(aiData, rawText);
 
-  if (stillLowConfidence || stillMissingFields) {
+  if (stillMissingFields.length > 0) {
+    // Only 'amount' can reach here (and only if rawText truly has no number).
     return {
       status: 'partial',
       data: aiData,
-      missingFields: computeMissingFields(aiData),
+      missingFields: stillMissingFields,
       tokensUsed,
     };
   }
 
-  // ── Full success ──────────────────────────────────────────
+  // Low confidence but all fields present → show card as 'ok'.
+  // Professional UX: show best guess, let user correct inline via ✏️ Изменить.
   return { status: 'ok', data: aiData, tokensUsed };
 }
