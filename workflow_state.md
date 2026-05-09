@@ -10,12 +10,12 @@
 | Параметр | Значение |
 |---|---|
 | **PHASE** | `1 — MVP Implementation` |
-| **STEP** | `Phase 1.37 — AI Taxonomy & Zero-Clutter UX (ACCEPTED)` |
-| **AGENT STATUS** | `ACCEPTED — verified, reviews passed, deployed` |
+| **STEP** | `Phase 1.38 — Currency Input UX Hardening (ACTIVE)` |
+| **AGENT STATUS** | `ACTIVE — bugs fixed, deployed, stable` |
 | **DEPLOYMENT** | `Railway (spirited-happiness project)` — `Midas` bot service + `background-workers` service + `Postgres` + `Redis` |
-| **LAST COMPLETED** | `Phase 1.37 VERIFIED & ACCEPTED: 13/13 typecheck+lint PASS (0 errors). Traceability Review PASS. Adversarial Security Review PASS. Scope Guard Review PASS. Lint fix: unused _draftId parameter. CategoryResolver updated: Питомцы/Дом aliases + group mapping added. Commits 06bccb0 → 641ad26 deployed.` |
+| **LAST COMPLETED** | `Phase 1.38: UX input parsing bugs fixed. Currency normalization, confirmation card deletion, blockquote design. See Section 10.` |
 | **BLOCKER** | None. |
-| **NEXT ACTION** | Owner decides next priority: Phase 2.0 (AI Intelligence Evolution) or any other Phase 2.x task. |
+| **NEXT ACTION** | Owner decides next priority: Phase 2.0 (AI Intelligence Evolution) or any Phase 2.x task. |
 
 ---
 
@@ -65,7 +65,8 @@
 | 1.34 Rich Screen Cards — Single-Screen App UX | ✅ ACCEPTED | UX-only phase. `screen-builder.ts` (NEW — both apps), confirmation/preview card formatting. No migrations, no DB schema changes, no new deps. 0 typecheck errors. Batch-accepted by owner decision. Commit `6e899f0`. Tag `phase-1.34-accepted` pushed. |
 | 1.35 Intelligent Transaction Understanding | ✅ ACCEPTED | `migrations/1779000000000_intelligent-transactions.js` (NEW), `category-resolver.service.ts` (NEW), `draft.service.ts` (MODIFY), `draft-confirmation.service.ts` (MODIFY), `ai-parse.worker.ts` (MODIFY), `confirmation.worker.ts` (MODIFY), `settings.service.ts`+`settings-keyboard.service.ts` (MODIFY), `webhook.route.ts` (MODIFY), `screen-builder.ts` (MODIFY), `prompts.ts`+`schemas.ts` (MODIFY). smoke-test-phase135.mjs — 55 tests. Deployed to Railway production. |
 | 1.36-UX Persistent Navigation Keyboard | ✅ ACCEPTED | **Sub-steps 1–4 (commits c2f012f → 062d40d):** Core nav keyboard + bug fixes + auto-activation + collapsibility. **FINAL state (commits e879dfc → 2a15f31):** Transaction history workflow fully reworked. |
-| 1.37 AI Taxonomy & Zero-Clutter UX | ✅ ACCEPTED | Zero-clutter UX: nonsense screen without inline buttons (Variant 5 text-only prompt), stale "Не понял" message deletion via `midas:clar:msg:{userId}:{chatId}` Redis key. 30-category taxonomy (18 personal + 12 business, incl. Питомцы, Дом). 500+ anchor items/brands (CIS/EU/US coverage). Multilingual recognition (RU/EN/UA). Fuzzy matching (typos, slang, transliteration). 15 disambiguation rules. Compound expression parsing. `ALLOWED_CATEGORIES` Set in `claude-client.ts` — code-level category validation (invalid → Другое). CategoryResolver: Питомцы/Дом aliases + groups. 13/13 typecheck+lint PASS. Traceability ✅ Security ✅ Scope Guard ✅. `project_config.md` v1.4. `product-roadmap.md` Phase 2.0 documented. Commits `5b02cf3` → `641ad26`. |
+| 1.37 AI Taxonomy & Zero-Clutter UX | ✅ ACCEPTED | Zero-clutter UX, 30-category taxonomy, 500+ anchors, multilingual, disambiguation, ALLOWED_CATEGORIES. Commits `5b02cf3` → `641ad26`. |
+| 1.38 Currency Input UX Hardening | ✅ DONE | `confirmation.worker.ts` (reject in-place edit), `screen-builder.ts` both apps (blockquote design), `webhook.route.ts` (`normalizeCurrencyInput` fix + `awaiting_cur` token extraction). Commits `94b7cac` → `<latest>`. |
 
 ---
 
@@ -101,13 +102,16 @@
   - **Persistent Navigation:** `ReplyKeyboardMarkup` (`is_persistent: false`, `resize_keyboard: true`) — single row `[📊 Баланс][📋 Отчёт][⚙️ Настройки]`. Sent on `/start`. NAV_BTN_* intercepted before AI parse.
   - **Keyboard Carrier:** Greeting message `✅ Вы уже зарегистрированы...` остаётся в чате **навсегда** — является постоянным носителем ReplyKeyboardMarkup. Не удаляется ни при каких условиях.
   - **Transaction History (FINAL):** Каждая preview-карточка — это **новое** сообщение (`sendMessage`), `activeMessageId` НЕ передаётся из `ai-parse.worker`. История транзакций накапливается в чате. Старый механизм `midas:am:{userId}:{chatId}` (active-message pointer) **удалён** из notifications.worker.
-  - **Preview→Confirmed Edit:** При approve `confirmation.worker` читает `midas:preview:{draftId}` (TTL 600s) — message_id preview-карточки, записанный `notifications.worker` при отправке. Approve → `editMessageText(previewMsgId, confirmedText, inlineKeyboard)`. Reject → `sendMessage` (новое сообщение).
+  - **Preview→Confirmed Edit:** При approve `confirmation.worker` читает `midas:preview:{draftId}` (TTL 600s) — message_id preview-карточки, записанный `notifications.worker` при отправке. Approve → `editMessageText(previewMsgId, confirmedText, inlineKeyboard)`. Reject → `editMessageText(previewMsgId, ❌ Отменено)` (Phase 1.38 fix).
   - **Redis Keys (актуальные):**
-    - `midas:preview:{draftId}` — message_id preview-карточки, TTL 600s. Записывает notifications.worker. Читает и удаляет confirmation.worker на approve.
+    - `midas:preview:{draftId}` — message_id preview-карточки, TTL 600s. Записывает notifications.worker. Читает и удаляет confirmation.worker на approve и reject.
     - `midas:greet:{userId}:{chatId}` — сохраняется в /start handler, но НИКОГДА не используется для удаления (код оставлен как артефакт, безвреден).
     - `midas:clar:{userId}:{chatId}` — intercept для ввода суммы при clarification. Удаляется на confirm/reject (race condition fix).
+    - `midas:clar:msg:{userId}:{chatId}` — message_id nonsense-сообщения. Удаляется при следующем успешном парсе.
     - `midas:ac:{userId}:{chatId}` — account onboarding state, TTL 300s.
     - `midas:edit:{userId}:{chatId}` — edit amount intercept, TTL 300s.
+    - `midas:awaiting_cur:{chatId}` — TTL 600s. Создаётся когда есть сумма но нет валюты и нет `cur_set`. Хранит `{draftId}:{workspaceId}:{userId}`. Webhook читает для intercept ввода валюты.
+    - `midas:cur_set:{workspaceId}` — флаг того, что пользователь установил базовую валюту в Настройках. Если есть — валюта не запрашивается.
   - **Auto-Activation:** `replyKeyboardJson` в `NotificationJobPayload`. rejection/expiry/intent_missing sends ReplyKeyboard на `sendMessage` path. `editMessageText` path — только inline keyboard (Telegram API limitation).
   - **Collapsibility:** `is_persistent: false` — Telegram показывает ⏄ иконку рядом с 🎤; пользователь может скрывать/восстанавливать клавиатуру.
   - **Race Condition Fix:** `redisConnection.del(clarKey)` на confirm/reject → stale `midas:clar:*` не перехватывает следующее сообщение.
@@ -326,7 +330,11 @@ apps/background-workers/src/services/draft.service.ts  ← createDraft logic
 | 2026-05-09 14:14 | Phase 1.37 Step 5: ALLOWED_CATEGORIES code validation. `claude-client.ts`: Added `ALLOWED_CATEGORIES` Set (30 categories — 18 personal + 12 business). Post-Zod validation step: if `aiData.category_hint` is not in the set, replace with `Другое`. Prevents hallucinated categories from reaching CategoryResolverService. Typecheck 8/8 PASS. |
 | 2026-05-09 14:16 | Phase 1.37 Step 6: Documentation updates. `product-roadmap.md`: Added Phase 2.0 — AI Intelligence Evolution (3 components: 2.0-A self-learning from user edits, 2.0-B custom category recognition, 2.0-C regional bias from currency). Phase 1.37 + 2.0 added to summary table. Block 4 renamed from "Голос и Vision" to "AI Intelligence и Voice". `project_config.md`: Updated to v1.4, changelog v1.4 added, Section 2.8 AI Pipeline updated with multilingual/disambiguation/validation info. Commit `06bccb0`. Deployed to Railway. |
 | 2026-05-09 15:18 | Phase 1.37 complete. `workflow_state.md` updated: Section 1 (status → COMPLETE), Section 2 (Phase 1.37 row added), Section 3 (AI Pipeline updated), Section 4 (project_config v1.4), Section 10 (7 history entries). All documents synchronized. |
-| 2026-05-09 15:38 | Phase 1.37 VERIFICATION & ACCEPTANCE. Full turbo typecheck+lint 13/13 PASS. Found & fixed: (1) lint error `_draftId` unused param in `buildNonsenseKeyboard()` → removed param from definition and 2 call sites. (2) `category-resolver.service.ts` missing Питомцы/Дом — added 15 aliases (корм для кота, ветеринар, наполнитель, моющие средства, бытовая химия, etc.) + `CATEGORY_GROUPS` entries (both → Жизнь). Comment updated 28→30 taxonomy. Production DB audit: 205 categories (121 Жизнь + 84 Бизнес), 57 transactions (1 soft-deleted), 102 drafts. Old «еда для кота» → Дети is pre-Phase 1.37 data; new transactions will correctly resolve to Питомцы. Traceability Review PASS. Adversarial Security Review PASS. Scope Guard Review PASS. Commit `641ad26`. Deployed to Railway. |
+| 2026-05-09 15:38 | Phase 1.37 VERIFICATION & ACCEPTANCE. 13/13 typecheck+lint PASS. CategoryResolver: Питомцы/Дом aliases added. Commit `641ad26`. Deployed to Railway. |
+| 2026-05-09 19:00 | **Phase 1.38 Fix #1:** Confirmation card not deleted on Cancel. `confirmation.worker.ts` reads `midas:preview:{draftId}` on both approve and reject paths — in-place edit to ❌ Отменено. |
+| 2026-05-09 19:04 | **Phase 1.38 Fix #2:** Unified blockquote currency prompt (Variant B). `screen-builder.ts` both apps: `<code>` tags replaced with blockquote text — no more green tap-able capsules. |
+| 2026-05-09 19:05 | **Phase 1.38 Fix #3:** `amt+cur` handler used `validateCurrencyCode()` (ISO-only) instead of `normalizeCurrencyInput()`. Fixed. `awaiting_cur` now extracts currency token from mixed input (e.g. «50 евро»). Commit `d59025f`. |
+| 2026-05-09 19:18 | **Phase 1.38 Rollback:** PRICE vs QUANTITY AI prompt rule reverted. Caused regressions («150 курток» not extracted as amount). Design decision: personal finance bots ALWAYS treat any number as a price. Original rule restored: «If ANY number present → ALWAYS extract as amount». Final commit `<latest>`. |
 
 ---
 

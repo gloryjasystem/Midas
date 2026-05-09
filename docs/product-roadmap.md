@@ -1,21 +1,25 @@
 # Дорожная карта Midas — полный план развития
 
 > **Документ:** Утверждённый владельцем план развития продукта
-> **Дата:** 2026-05-08
+> **Дата:** 2026-05-09
 > **Статус:** Все решения одобрены владельцем
 
 ---
 
-## Текущее состояние (Phase 1.35 завершена)
+## Текущее состояние (Phase 1.38 завершена)
 
 Что реализовано и работает:
 - Запись транзакций текстом через AI + подтверждение кнопками (HitL)
 - Intelligent Transaction Understanding — AI извлекает товар/место (`item_hint`), подсказку категории (`category_hint`), счёт (`account_hint`)
 - 3-этапный CategoryResolverService: exact → alias → fallback «Другое»
-- 28-категорийная таксономия с двумя группами (Жизнь / Бизнес)
+- **30-категорийная таксономия** (18 personal + 12 business) × 500+ якорных слов (СНГ/EU/US), мультиязычность RU/EN/UA, 15 правил дисамбигуации, фаззи-матчинг (Phase 1.37)
+- ALLOWED_CATEGORIES Set: невалидные AI-категории → «Другое» (Phase 1.37)
 - Rich preview cards: красивая карточка транзакции перед подтверждением (тип, сумма, валюта, товар, категория)
-- Post-confirm card: `✅ Записано` + данные + кнопки `[✏️ Изменить] [📊 Баланс] [📋 Отчёт]`
-- Clean Chat UX: edit-first strategy через Redis active-message pointer
+- Post-confirm card: `✅ Записано` + данные + `[✏️ Изменить запись]`
+- **Persistent Navigation Keyboard:** `[📊 Баланс][📋 Отчёт][⚙️ Настройки]` всегда видна (Phase 1.36-UX)
+- **Transaction history:** каждая карточка — новое сообщение; при approve карточка редактируется in-place (Phase 1.36-UX)
+- **Zero-clutter UX:** «Не понял» сообщения удаляются при успешном парсе (Phase 1.37)
+- **Colloquial currency input:** «евро», «баксы», «рубли» корректно парсятся (Phase 1.38)
 - Clarification engine: добор суммы, типа, категории через inline-кнопки
 - Inline account creation: создание счёта на лету при транзакции
 - Smart Account Onboarding: guided onboarding при первом /start
@@ -30,7 +34,7 @@
 - HTML-экранирование, RLS-изоляция, NUMERIC-арифметика в PostgreSQL
 - Slash-command guard — неизвестные команды не попадают в AI
 
-Базовая валюта: USDT (с Phase 1.24).
+Базовая валюта: USDT (с Phase 1.24). Деплой: Railway (spirited-happiness).
 
 ---
 
