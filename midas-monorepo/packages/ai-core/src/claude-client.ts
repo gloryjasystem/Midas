@@ -94,6 +94,23 @@ function computeMissingFields(data: AiOutput): MissingField[] {
 }
 
 // ─────────────────────────────────────────────────────────────
+// Allowed categories — strict validation set (Phase 1.37)
+// If Claude returns a category not in this set, it's replaced with 'Другое'.
+// ─────────────────────────────────────────────────────────────
+
+const ALLOWED_CATEGORIES = new Set([
+  // Personal
+  'Продукты', 'Кафе и рестораны', 'Транспорт', 'Жильё', 'Здоровье',
+  'Одежда', 'Красота', 'Развлечения', 'Подписки', 'Связь',
+  'Образование', 'Спорт', 'Путешествия', 'Подарки', 'Дети',
+  'Питомцы', 'Дом', 'Другое',
+  // Business
+  'Зарплаты и выплаты', 'Фриланс', 'Реклама', 'Софт и сервисы',
+  'Оборудование', 'Офис', 'Налоги', 'Комиссии', 'Крипто-комиссии',
+  'Подрядчики', 'Продажи', 'Инвестиции',
+]);
+
+// ─────────────────────────────────────────────────────────────
 // Post-processing: intent recovery + confidence boost
 // Runs AFTER Claude returns — never before (no pre-processing).
 // Uses word-boundary regex to avoid false positives.
@@ -284,6 +301,13 @@ export async function parseTransaction(rawText: string): Promise<ParseResult> {
   }
 
   const aiData: AiOutput = result.data;
+
+  // ── Category validation (Phase 1.37) ──────────────────────
+  // If Claude returned a category_hint not in our allowed set,
+  // replace with 'Другое' to prevent hallucinated categories.
+  if (aiData.category_hint && !ALLOWED_CATEGORIES.has(aiData.category_hint)) {
+    aiData.category_hint = 'Другое';
+  }
 
   // ── Confidence check ──────────────────────────────────────
   // Below PARTIAL_CONFIDENCE_THRESHOLD (0.3) → nonsense → needs_clarification (no data)

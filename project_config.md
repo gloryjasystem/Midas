@@ -1,8 +1,19 @@
 # PROJECT_CONFIG.MD — Конституция проекта Midas
 
 > **Статус документа:** IMMUTABLE — ИИ-агент НЕ ИМЕЕТ ПРАВА изменять этот файл без прямого приказа владельца проекта.
-> **Версия:** 1.3 | **Создан:** 2026-05-04 | **Обновлён:** 2026-05-08 (Phase 1.35 документация)
+> **Версия:** 1.4 | **Создан:** 2026-05-04 | **Обновлён:** 2026-05-09 (Phase 1.37 AI Taxonomy)
 > **Источники:** Midaz_TZ v1, Мастер-план Midas v2.0, User Decisions 2026-05-04
+
+### Changelog v1.4 (Phase 1.37 — AI Taxonomy & Zero-Clutter UX)
+- **30-категорийная таксономия:** 18 personal + 12 business (добавлены Питомцы, Дом)
+- **500+ якорных товаров/брендов** по всем категориям (СНГ/EU/US покрытие)
+- **Мультиязычность:** RU/EN/UA — распознавание на любом языке
+- **Фаззи-матчинг:** опечатки, сленг, транслитерация
+- **15 правил дисамбигуации** для двусмысленных товаров (торт, кофе, страховка, ремонт...)
+- **Составные выражения:** «корм для кота» → Питомцы, «билет в кино» → Развлечения
+- **Category validation:** `ALLOWED_CATEGORIES` Set в коде — невалидные категории → «Другое»
+- **Zero-clutter UX:** удаление «Не понял» карточек при успешном парсе, без inline-кнопок в nonsense-экране
+- **Phase 2.0** задокументирована в product-roadmap: самообучение, персональные категории, региональный bias
 
 ### Changelog v1.3 (Phase 1.35 Documentation Update)
 - **Phase 1.23–1.35 implemented:** Все фазы Блока 1–3 реализованы и приняты
@@ -118,12 +129,14 @@
 ### 2.8 AI Pipeline (claude-client.ts + prompts.ts)
 
 - Модель: `claude-haiku-4-5`, `temperature: 0` (детерминизм), `max_tokens: 256`
-- System prompt: OUTPUT RULES → RUSSIAN LANGUAGE RULES (50+ глаголов расхода/дохода) → CATEGORY→INTENT defaults (40+ expense, 15+ income категорий) → 25+ примеров (все 5 intent-типов + partial + nonsense)
+- System prompt: OUTPUT RULES → MULTILINGUAL RECOGNITION (RU/EN/UA) → FUZZY MATCHING (опечатки, сленг, транслитерация) → BILINGUAL PAIRS (неочевидные переводы) → DISAMBIGUATION RULES (15 правил для двусмысленных товаров) → COMPOUND EXPRESSIONS → DEFAULT INTENT PRIORITY → 30-категорийная таксономия (18 personal + 12 business) × 500+ якорных товаров/услуг/брендов (СНГ/EU/US) → RUSSIAN LANGUAGE RULES (50+ глаголов расхода/дохода) → CATEGORY→INTENT defaults → 25+ примеров (все 5 intent-типов + partial + nonsense)
 - Markdown fence strip: Claude иногда оборачивает JSON в ` ```json `, парсер это убирает перед `JSON.parse`
 - Zod validation: strict allowlist — только intent/amount/currency/category_hint/person_hint/account_hint/item_hint/note/confidence
+- **Category validation (Phase 1.37):** `ALLOWED_CATEGORIES` Set — если Claude вернул `category_hint` не из списка, заменяется на `Другое`
 - Post-processing (safety net, ПОСЛЕ Claude): 7 групп regex с word-boundary `\b` (debt→transfer→expense verbs→income verbs→expense cats→income cats), negation guard («не потратил» → skip), confidence boost (+0.15/+0.25), intent fallback для partial results
 - Результат: `ok` | `partial` (missing fields) | `needs_clarification` (nonsense) | `rejected`
 - **Phase 1.35:** `item_hint` (extracted product/merchant name), `category_hint` (AI category suggestion) → `CategoryResolverService` (3-stage: exact → 200+ alias map → fallback «Другое»)
+- **Phase 1.37:** Zero-clutter UX (удаление «Не понял» при успешном парсе), мультиязычная таксономия, дисамбигуация, строгая валидация категорий
 
 ---
 
