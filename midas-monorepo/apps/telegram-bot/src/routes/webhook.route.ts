@@ -89,6 +89,7 @@ import {
   // Phase 1.33: sendMessageWithKeyboard no longer imported — routed via upsertBotMessage.
   editMessageText,
   answerCallbackQuery,
+  deleteMessage,               // Phase 1.36-UX: cleanup greeting on first text
   sendMessageWithReplyKeyboard,  // Phase 1.36-UX: persistent bottom nav keyboard
 } from '../services/telegram-api.js';
 import { redisConnection } from '../queues/redis.js';
@@ -332,6 +333,14 @@ function inlineAccountKey(draftId: string): string {
 const CLARIFICATION_STATE_TTL_SEC = 300; // 5 minutes
 function clarStateKey(telegramUserId: string, chatId: string): string {
   return `midas:clar:${telegramUserId}:${chatId}`;
+}
+
+// Phase 1.36-UX: Redis key for /start greeting message_id.
+// Stored so we can delete the greeting when the user sends their first text.
+// TTL: 24h — same as active message pointer.
+const GREETING_MSG_TTL_SEC = 86400;
+function greetingMsgKey(telegramUserId: string, chatId: string): string {
+  return `midas:greet:${telegramUserId}:${chatId}`;
 }
 
 // Phase 1.35: Standard confirmation keyboard with [Изменить] row.
@@ -1669,21 +1678,23 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
             //
             // Telegram API constraints:
             //   - Messages with ReplyKeyboardMarkup CANNOT be edited (400 error).
-            //   - Deleting the ReplyKeyboard carrier message also removes the keyboard.
+            //   - Deleting the carrier message removes the keyboard too.
             //
-            // Strategy: send greeting WITH ReplyKeyboard to activate the
-            // persistent nav (Баланс/Отчёт/Настройки), but do NOT track it
-            // as activeMessageId. Leave activeMessageId = null (cleared above).
-            //
-            // When the first transaction card arrives, the notification worker
-            // finds no activeMessageId → sends a NEW message → tracks it.
-            // From that point on, subsequent cards edit that message in-place.
-            // The greeting stays as a one-time orientation — standard bot UX.
-            void sendMessageWithReplyKeyboard(
+            // Strategy: send greeting WITH ReplyKeyboard (activates nav).
+            // Store its message_id in Redis (greetingMsgKey). When the user
+            // sends their first text message, the webhook deletes the greeting
+            // to keep the chat clean. The ReplyKeyboard was already visible
+            // and the transaction card replaces it as the active UI element.
+            const greetMsgId = await sendMessageWithReplyKeyboard(
               chatId,
               '✅ Вы уже зарегистрированы. Просто отправьте сообщение о расходе или доходе.',
               buildMainMenuKeyboard(),
             );
+            if (greetMsgId) {
+              void redisConnection.set(
+                greetingMsgKey(telegramUserId, chatId), greetMsgId, 'EX', GREETING_MSG_TTL_SEC,
+              );
+            }
           } else {
             // Phase 1.36-UX: Activate persistent bottom nav keyboard for new users.
             // Sent as a separate message so the onboarding inline keyboard
@@ -2473,6 +2484,18 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
     await webhookIngestionQueue.add(QUEUE_NAMES.WEBHOOK_INGESTION, payload, {
       jobId: idempotencyKey,
     });
+
+    // Phase 1.36-UX: Delete the /start greeting message to keep chat clean.
+    // The ReplyKeyboard was already visible; the transaction card will be
+    // the next thing the user sees.
+    try {
+      const gKey = greetingMsgKey(telegramUserId, chatId);
+      const greetId = await redisConnection.get(gKey);
+      if (greetId) {
+        void deleteMessage(chatId, greetId);
+        void redisConnection.del(gKey);
+      }
+    } catch { /* non-fatal */ }
 
     // ── Step 8: SEC-04 — Return 200 immediately ──────────────
     // Log only safe metadata — no raw_text (SEC-12)
