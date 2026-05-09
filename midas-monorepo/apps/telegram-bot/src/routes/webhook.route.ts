@@ -2321,13 +2321,14 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
           }
 
           // Try to extract currency from the same message (anything non-numeric after/before number)
+          // Uses normalizeCurrencyInput so colloquial words work: "евро" → EUR, "доллар" → USD
           const currencyMatchAC = amtCurText
             .replace(/[\d\s.,]/g, ' ')   // strip numbers + punctuation
             .trim()
             .split(/\s+/)
-            .find((t) => /^[a-zA-Zа-яА-ЯёЁ₴$€£¥₿]{1,8}$/.test(t)) ?? null;
+            .find((t) => /^[a-zA-Zа-яА-ЯёЁ₴$€£¥₿]{1,10}$/.test(t)) ?? null;
           const validCurrencyAC = currencyMatchAC
-            ? validateCurrencyCode(currencyMatchAC)
+            ? normalizeCurrencyInput(currencyMatchAC)  // handles 'евро', 'руб', 'доллар' etc.
             : null;
 
           // Delete intercept key and clar card
@@ -2728,7 +2729,19 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
           const awaitWsId    = awaitRaw.slice(sepIdx1 + 1, sepIdx2);
           const awaitUserId  = awaitRaw.slice(sepIdx2 + 1);
 
-          const validCur = normalizeCurrencyInput(message.text.trim());
+          // Extract currency from message — handles: "евро", "50 евро", "EUR", "$"
+          // First try full text, then try to find the currency token inside (e.g. user typed "50 евро")
+          const rawCurText = message.text.trim();
+          let validCur = normalizeCurrencyInput(rawCurText);
+          if (!validCur) {
+            // Maybe they typed "50 евро" — extract the non-numeric token
+            const curToken = rawCurText
+              .replace(/[\d\s.,]/g, ' ')
+              .trim()
+              .split(/\s+/)
+              .find((t) => /^[a-zA-Zа-яА-ЯёЁ₴$€£¥₿]{1,10}$/.test(t)) ?? null;
+            if (curToken) validCur = normalizeCurrencyInput(curToken);
+          }
           if (!validCur) {
             void upsertBotMessage(
               telegramUserId, chatId,
