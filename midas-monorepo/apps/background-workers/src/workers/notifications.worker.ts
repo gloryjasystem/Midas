@@ -91,13 +91,19 @@ async function editTelegramMessage(
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
-    if (!res.ok) {
-      const errBody = await res.text().catch(() => '(unreadable)');
-      console.warn('[midas:notifications-worker] editMessageText failed', {
-        chatId, messageId, status: res.status, errBody: errBody.slice(0, 300),
-      });
+    if (res.ok) return true;
+
+    // Phase 1.37-UX: "message is not modified" means content is already correct.
+    // Treat as success — do NOT fall back to sendMessage (which creates duplicates).
+    const errBody = await res.text().catch(() => '(unreadable)');
+    if (errBody.includes('message is not modified')) {
+      return true;
     }
-    return res.ok;
+
+    console.warn('[midas:notifications-worker] editMessageText failed', {
+      chatId, messageId, status: res.status, errBody: errBody.slice(0, 300),
+    });
+    return false;
   } catch (err) {
     console.warn('[midas:notifications-worker] editMessageText exception', {
       chatId, messageId, errorClass: err instanceof Error ? err.constructor.name : 'UnknownError',
@@ -188,6 +194,15 @@ async function processNotification(job: Job<NotificationJobPayload>): Promise<vo
   if (draftId && sentMessageId) {
     try {
       await redisConnection.set(`midas:preview:${draftId}`, sentMessageId, 'EX', 600);
+    } catch { /* non-fatal */ }
+  }
+
+  // Phase 1.37-UX: If cacheStoreKey is set, write sentMessageId back to Redis.
+  // Used by clarification flow: next "not understood" message will edit this one
+  // instead of sending a new duplicate message.
+  if (job.data.cacheStoreKey && sentMessageId) {
+    try {
+      await redisConnection.set(job.data.cacheStoreKey, sentMessageId, 'EX', 600);
     } catch { /* non-fatal */ }
   }
 

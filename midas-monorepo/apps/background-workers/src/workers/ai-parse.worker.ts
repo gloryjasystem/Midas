@@ -130,21 +130,23 @@ function buildCategoryClarKeyboard(
 
 /**
  * Build the nonsense shortcut keyboard.
- * Buttons trigger slash commands — NOT draft patching.
- * callback_data: 'clar:cmd:balance' / 'clar:cmd:report' (no draftId needed)
- * Note: expense/income buttons DO carry draftId for recovery.
- * Max bytes: clar:intent:expense:{26} = 34 bytes ✅
+ * Phase 1.37-UX: Only intent buttons — no Баланс/Отчёт.
+ * User already has Balance/Report/Settings in the persistent bottom keyboard.
+ * Баланс/Отчёт here were causing confusion and did nothing meaningful
+ * in the context of a failed transaction parse.
+ * callback_data: clar:intent:{value}:{draftId} (same as buildIntentClarKeyboard)
+ * Max bytes: clar:intent:debt_received:{26} = 52 bytes ✅
  */
 function buildNonsenseKeyboard(draftId: string): object {
   return {
     inline_keyboard: [
       [
-        { text: '💸 Расход', callback_data: `clar:intent:expense:${draftId}` },
-        { text: '💰 Доход',  callback_data: `clar:intent:income:${draftId}` },
+        { text: '💸 Расход',       callback_data: `clar:intent:expense:${draftId}` },
+        { text: '💰 Доход',        callback_data: `clar:intent:income:${draftId}` },
       ],
       [
-        { text: '📊 Баланс',  callback_data: 'clar:cmd:balance' },
-        { text: '📋 Отчёт',   callback_data: 'clar:cmd:report' },
+        { text: '🤝 Долг (дал)',   callback_data: `clar:intent:debt_given:${draftId}` },
+        { text: '🤲 Долг (взял)', callback_data: `clar:intent:debt_received:${draftId}` },
       ],
     ],
   };
@@ -424,6 +426,18 @@ async function processAiParse(job: Job<AiParseJobPayload>): Promise<void> {
       clarKeyboard = buildNonsenseKeyboard(draftId);
     }
 
+    // Phase 1.37-UX: Read previous clarification message ID from Redis.
+    // If present, pass as activeMessageId so the notifications worker edits it
+    // instead of sending a duplicate "Не понял" message.
+    // Key is separate from midas:clar: (which is reserved for amount-intercept).
+    const clarMsgCacheKey = `midas:clar:msg:${telegramUserId}:${chatId}`;
+    let prevClarMsgId: string | undefined;
+    try {
+      prevClarMsgId = (await redisConnection.get(clarMsgCacheKey)) ?? undefined;
+    } catch {
+      prevClarMsgId = undefined; // non-fatal: will send fresh message
+    }
+
     await notificationsQueue.add(
       QUEUE_NAMES.NOTIFICATIONS,
       {
@@ -434,7 +448,8 @@ async function processAiParse(job: Job<AiParseJobPayload>): Promise<void> {
         draftId,
         inlineKeyboardJson: JSON.stringify(clarKeyboard),
         telegramUserId,
-        // NOTE: No activeMessageId — clarification cards are also fresh messages.
+        activeMessageId: prevClarMsgId,       // edit prev clarification msg if exists
+        cacheStoreKey: clarMsgCacheKey,       // worker writes sentMessageId here after send
       },
       {
         jobId: IdempotencyKeyBuilder.notification(workspaceId, alertId),

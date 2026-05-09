@@ -107,6 +107,13 @@ export interface NotificationJobPayload {
    * So this is only applied on the sendMessage path, never on editMessageText.
    */
   replyKeyboardJson?: string;
+  /**
+   * Phase 1.37-UX: Redis key to write sentMessageId into after sending.
+   * Used by clarification notifications to track the "current clarification message"
+   * so the NEXT clarification can edit it instead of sending a duplicate.
+   * Key format: midas:clar:msg:{telegramUserId}:{chatId}  TTL: 600s
+   */
+  cacheStoreKey?: string;
 }
 
 /**
