@@ -2285,13 +2285,40 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
           );
 
           if (amtPatchResult.status === 'ready') {
-            const previewText = await confirmPreview(clarIntResolved.workspaceId, clarIntResolved.userId, clarDraftId);
-            void upsertBotMessage(
-              telegramUserId,
-              chatId,
-              previewText,
-              confirmKb(clarDraftId),
+            // Phase 1.38: Check if currency is already set before showing confirm card.
+            // If user hasn't set a default currency in Settings, ask for it now.
+            const curSetFlag = await redisConnection.exists(
+              `midas:cur_set:${clarIntResolved.workspaceId}`,
             );
+            if (!curSetFlag) {
+              // Store currency await context so the next message is intercepted
+              const awaitCurKey = `midas:awaiting_cur:${chatId}`;
+              await redisConnection.setex(
+                awaitCurKey,
+                300, // 5-minute TTL
+                `${clarDraftId}:${clarIntResolved.workspaceId}:${clarIntResolved.userId}`,
+              );
+              const clarMsg = await upsertBotMessage(
+                telegramUserId,
+                chatId,
+                '💱 <b>В какой валюте записать?</b>\n\nНапиши одним словом:\n  <code>руб</code>  <code>USD</code>  <code>USDT</code>  <code>EUR</code>  <code>₴</code>  <code>BTC</code>\n\n💡 <i>Чтобы не спрашивало каждый раз — установи валюту по умолчанию:</i>\n<i>⚙️ Настройки → Валюта</i>',
+              );
+              if (clarMsg) {
+                await redisConnection.setex(
+                  `midas:clar:msg:${telegramUserId}:${chatId}`,
+                  300,
+                  clarMsg,
+                );
+              }
+            } else {
+              const previewText = await confirmPreview(clarIntResolved.workspaceId, clarIntResolved.userId, clarDraftId);
+              void upsertBotMessage(
+                telegramUserId,
+                chatId,
+                previewText,
+                confirmKb(clarDraftId),
+              );
+            }
           } else if (amtPatchResult.status === 'still_needs' && amtPatchResult.field === 'intent') {
             void upsertBotMessage(
               telegramUserId,
