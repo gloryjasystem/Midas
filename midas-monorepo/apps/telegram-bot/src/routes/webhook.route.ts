@@ -1480,6 +1480,14 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
         return;
       }
 
+      // Phase 1.36-UX Bug Fix: Answer callback_query IMMEDIATELY so Telegram
+      // removes the loading spinner at once. All other callback handlers do this;
+      // approve/reject were the only ones missing it — causing the "button stuck"
+      // UX where the spinner timed out after 10 s with no visible feedback.
+      // The worker (confirmation.worker.ts) may still attempt to answer again;
+      // that second call will be silently rejected by Telegram (already answered).
+      await answerCallbackQuery(cq.id);
+
       // Enqueue to callback-confirm queue (SEC-06: idempotency key)
       const idempotencyKey = IdempotencyKeyBuilder.callbackConfirm(
         telegramUserId,
@@ -1660,11 +1668,18 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
             // Phase 1.36-UX: Re-greeting WITH Reply Keyboard to (re-)activate the
             // persistent bottom nav. Reply Keyboards cannot be set via editMessageText
             // — they require a fresh sendMessage call.
-            void sendMessageWithReplyKeyboard(
+            //
+            // Phase 1.36-UX Bug Fix: store the returned message_id as the new
+            // activeMessageId so the NEXT transaction card EDITS this message
+            // instead of appending a new one. Without this, clearActiveMessageId
+            // above leaves Redis pointer as null and the notification worker falls
+            // back to sendMessage — leaving the greeting permanently in chat.
+            const greetMsgId = await sendMessageWithReplyKeyboard(
               chatId,
               '✅ Вы уже зарегистрированы. Просто отправьте сообщение о расходе или доходе.',
               buildMainMenuKeyboard(),
             );
+            if (greetMsgId) void setActiveMessageId(telegramUserId, chatId, greetMsgId);
           } else {
             // Phase 1.36-UX: Activate persistent bottom nav keyboard for new users.
             // Sent as a separate message so the onboarding inline keyboard
