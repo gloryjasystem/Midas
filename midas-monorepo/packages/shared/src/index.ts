@@ -114,6 +114,12 @@ export interface NotificationJobPayload {
    * Key format: midas:clar:msg:{telegramUserId}:{chatId}  TTL: 600s
    */
   cacheStoreKey?: string;
+  /**
+   * Phase 1.37-UX: Telegram message ID to delete before sending the new message.
+   * Used when AI successfully parses a new message after a "Не понял" card was shown —
+   * deletes the old clarification card so only the preview card remains in chat.
+   */
+  deleteMessageId?: string;
 }
 
 /**

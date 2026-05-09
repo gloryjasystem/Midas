@@ -129,27 +129,13 @@ function buildCategoryClarKeyboard(
 }
 
 /**
- * Build the nonsense shortcut keyboard.
- * Phase 1.37-UX: Only intent buttons — no Баланс/Отчёт.
- * User already has Balance/Report/Settings in the persistent bottom keyboard.
- * Баланс/Отчёт here were causing confusion and did nothing meaningful
- * in the context of a failed transaction parse.
- * callback_data: clar:intent:{value}:{draftId} (same as buildIntentClarKeyboard)
- * Max bytes: clar:intent:debt_received:{26} = 52 bytes ✅
+ * Build the nonsense keyboard.
+ * Phase 1.37-UX: No inline buttons — AI should determine intent from context.
+ * Returns an empty keyboard which clears any previously displayed buttons
+ * when the message is edited (e.g., 2nd unrecognised message edits the 1st).
  */
-function buildNonsenseKeyboard(draftId: string): object {
-  return {
-    inline_keyboard: [
-      [
-        { text: '💸 Расход',       callback_data: `clar:intent:expense:${draftId}` },
-        { text: '💰 Доход',        callback_data: `clar:intent:income:${draftId}` },
-      ],
-      [
-        { text: '🤝 Долг (дал)',   callback_data: `clar:intent:debt_given:${draftId}` },
-        { text: '🤲 Долг (взял)', callback_data: `clar:intent:debt_received:${draftId}` },
-      ],
-    ],
-  };
+function buildNonsenseKeyboard(_draftId: string): object {
+  return { inline_keyboard: [] };
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -337,6 +323,22 @@ async function processAiParse(job: Job<AiParseJobPayload>): Promise<void> {
       previewMsg = richPreview;
     }
 
+    // Phase 1.37-UX: Check if a previous "Не понял" card exists and should be deleted.
+    // When AI successfully understands a new message, we delete the old clarification
+    // card so only the new preview card remains in chat (clean, single-message UX).
+    const clarMsgCacheKey = `midas:clar:msg:${telegramUserId}:${chatId}`;
+    let prevClarMsgIdForDelete: string | undefined;
+    try {
+      const stored = await redisConnection.get(clarMsgCacheKey);
+      if (stored) {
+        prevClarMsgIdForDelete = stored;
+        // Clear immediately — next clarification will start fresh
+        void redisConnection.del(clarMsgCacheKey);
+      }
+    } catch {
+      prevClarMsgIdForDelete = undefined; // non-fatal
+    }
+
     await notificationsQueue.add(
       QUEUE_NAMES.NOTIFICATIONS,
       {
@@ -347,6 +349,7 @@ async function processAiParse(job: Job<AiParseJobPayload>): Promise<void> {
         draftId,
         inlineKeyboardJson: JSON.stringify(inlineKeyboard),
         telegramUserId,
+        deleteMessageId: prevClarMsgIdForDelete, // delete old "Не понял" before sending
         // NOTE: No activeMessageId — each preview card is a fresh message.
         // History of transaction cards accumulates in chat. (Phase 1.36-UX)
       },

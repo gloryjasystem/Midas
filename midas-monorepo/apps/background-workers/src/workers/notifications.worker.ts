@@ -113,10 +113,26 @@ async function editTelegramMessage(
 }
 
 
+/**
+ * Phase 1.37-UX: Delete a Telegram message. Best-effort — never throws.
+ * Used to remove the old "Не понял" card before sending a new preview card.
+ */
+async function deleteTelegramMessage(chatId: string, messageId: string): Promise<void> {
+  try {
+    await fetch(`${TELEGRAM_API_BASE}/deleteMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: chatId,
+        message_id: parseInt(messageId, 10),
+      }),
+    });
+    // Response not checked — delete is best-effort (message may already be gone)
+  } catch {
+    // Non-fatal: user may have deleted it manually, or message too old
+  }
+}
 
-// ─────────────────────────────────────────────────────────────
-// Worker processor
-// ─────────────────────────────────────────────────────────────
 
 async function processNotification(job: Job<NotificationJobPayload>): Promise<void> {
   const { alertId, workspaceId, chatId, draftId, inlineKeyboardJson } = job.data;
@@ -158,6 +174,13 @@ async function processNotification(job: Job<NotificationJobPayload>): Promise<vo
     }
   } else {
     freshReplyMarkup = inlineReplyMarkup; // no Reply Keyboard — use inline
+  }
+
+  // Phase 1.37-UX: Delete previous "Не понял" card if requested.
+  // This happens when AI successfully parses a new message after a failed one.
+  // Deleting BEFORE sending the new card keeps chat clean (no leftover clarification card).
+  if (job.data.deleteMessageId) {
+    await deleteTelegramMessage(chatId, job.data.deleteMessageId);
   }
 
   // Phase 1.33: Try edit-first if activeMessageId is available.

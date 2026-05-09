@@ -213,7 +213,12 @@ export function buildClarificationScreen(data: ClarificationScreenData): string 
 }
 
 export function buildNonsenseScreen(): string {
-  return '🤔 <b>Не понял</b>\n\nЧто хотел записать?';
+  return [
+    '🤔 <b>Не понял</b>',
+    '',
+    'Укажи сумму и валюту:',
+    'кофе 150 UAH · займ 2000 USDT · зарплата 800 USD',
+  ].join('\n');
 }
 
 // ─────────────────────────────────────────────────────────────
