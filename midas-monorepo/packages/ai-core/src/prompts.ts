@@ -57,6 +57,40 @@ KEY BILINGUAL PAIRS (non-obvious translations):
 RU → EN: шиномонтаж=tire service, коммуналка=utilities, коворкинг=coworking, каршеринг=car sharing, самокат=scooter rental, маршрутка=minibus, электричка=commuter train, подписка=subscription, репетитор=tutor, кружок=kids class, детский сад=daycare/kindergarten, подгузники=diapers, наполнитель=cat litter, бытовая химия=household chemicals, канцелярия=office supplies, эквайринг=acquiring/payment processing, подрядчик=contractor, единый налог=flat tax
 EN → RU: groceries=Продукты, takeaway/takeout=Кафе и рестораны, toll=Транспорт, mortgage=Жильё(ипотека), pharmacy=Здоровье(аптека), dry cleaning=Одежда(химчистка), skincare/makeup=Красота, streaming=Подписки, tuition=Образование, gym=Спорт, pet food=Питомцы, household=Дом, payroll=Зарплаты и выплаты, hosting=Софт и сервисы, hardware=Оборудование
 
+DISAMBIGUATION RULES (when an item could fit multiple categories, use context):
+- торт/cake: "торт на день рождения/в подарок" → Подарки; "торт в магазине/домой" → Продукты; "торт в кафе" → Кафе и рестораны
+- кроссовки/shoes: "кроссовки для зала/тренировок/бега" → Спорт; otherwise → Одежда
+- массаж/massage: "массаж спины/шеи/лечебный/мануальный" → Здоровье; "SPA/расслабляющий" → Красота
+- вода/water: "вода в магазине/бутылка" → Продукты; "вода коммунальная/счёт за воду" → Жильё; "вода в офис/кулер" → Офис
+- кофе/coffee: "кофе в кафе/Starbucks/на вынос/латте/капучино" → Кафе и рестораны; "кофе зёрна/пачка/для дома" → Продукты; "кофемашина офис" → Офис
+- страховка/insurance: "ОСАГО/КАСКО/авто" → Транспорт; "медицинская/health" → Здоровье; "туристическая/travel" → Путешествия; "pet insurance" → Питомцы
+- ремонт/repair: "ремонт квартиры/дома/крыши" → Жильё; "ремонт авто/машины" → Транспорт; "ремонт телефона/ноутбука" → Оборудование
+- подписка/subscription: always → Подписки (even if the service could fit another category — Netflix→Подписки, NOT Развлечения)
+- канцелярия/stationery: "для учёбы/школы/ребёнка" → Образование; "для офиса/работы" → Офис
+- телефон/phone: "оплата связи/тариф" → Связь; "купил телефон/iPhone" → Оборудование; "ремонт телефона" → Оборудование
+- такси/taxi: always → Транспорт (even "такси в аэропорт" → Транспорт, NOT Путешествия)
+- цветы/flowers: by default → Подарки (unless explicitly "для дома/декор" → Дом)
+- книга/book: "для учёбы/учебник" → Образование; "художественная/роман/для себя" → Развлечения
+- витамины/vitamins: "для себя/людей" → Здоровье; "для кота/собаки/животных" → Питомцы
+
+COMPOUND EXPRESSIONS (how to parse multi-word messages):
+- "подарок жене/мужу/маме/другу" → item_hint="подарок жене", category=Подарки
+- "обед с клиентом/бизнес-ланч" → item_hint="обед с клиентом", category=Кафе и рестораны
+- "одежда для ребёнка/детская куртка" → item_hint as written, category=Дети
+- "корм для кота/собаки" → category=Питомцы (NOT Продукты — "для кота/собаки/животного" overrides)
+- "билет на поезд/самолёт" → category=Путешествия
+- "билет в кино/театр/музей" → category=Развлечения
+- If "для [person]" is present → extract as person_hint
+- If "на/с/в [account/place]" matches a known exchange/bank → extract as account_hint
+
+DEFAULT INTENT PRIORITY (when no verb or context clue):
+- Most messages are expenses. If only an item + amount with no verb: default to expense.
+- Loan/debt: "займ/долг" alone → debt_received (user borrowed). "долг отдал/вернул долг" → debt_given.
+- Income requires an explicit signal: зарплата, получил, заработал, продал, фриланс, etc.
+- Transfer requires explicit signal: перевёл, вывел, перекинул, конвертнул.
+
+
+
 --- PERSONAL ---
 
 Продукты: молоко, хлеб, мясо, овощи, фрукты, крупы, яйца, масло, сахар, макароны, рис, сыр, колбаса, рыба, курица, снеки, чипсы, шоколад, вода, сок, чай, кофе (в магазине/зёрна), орехи, мёд, замороженные продукты, полуфабрикаты, консервы, специи, соусы, выпечка, торт (на праздник=Подарки), мука, дрожжи, groceries, Walmart, Costco, Aldi, Lidl, АТБ, Сільпо, Novus, Biedronka, Пятёрочка, Магнит, Перекрёсток
