@@ -134,7 +134,7 @@ function buildCategoryClarKeyboard(
  * Returns an empty keyboard which clears any previously displayed buttons
  * when the message is edited (e.g., 2nd unrecognised message edits the 1st).
  */
-function buildNonsenseKeyboard(_draftId: string): object {
+function buildNonsenseKeyboard(): object {
   return { inline_keyboard: [] };
 }
 
@@ -411,7 +411,7 @@ async function processAiParse(job: Job<AiParseJobPayload>): Promise<void> {
       if (categories.length === 0) {
         // No categories — fall back to nonsense keyboard (category clarification impossible)
         clarMsg = buildNonsenseScreen();
-        clarKeyboard = buildNonsenseKeyboard(draftId);
+        clarKeyboard = buildNonsenseKeyboard();
       } else {
         clarMsg = buildClarificationScreen({
           field: 'category',
@@ -426,7 +426,7 @@ async function processAiParse(job: Job<AiParseJobPayload>): Promise<void> {
     } else {
       // No clarificationField — nonsense (confidence < 0.3)
       clarMsg = buildNonsenseScreen();
-      clarKeyboard = buildNonsenseKeyboard(draftId);
+      clarKeyboard = buildNonsenseKeyboard();
     }
 
     // Phase 1.37-UX: Read previous clarification message ID from Redis.
