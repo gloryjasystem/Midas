@@ -336,15 +336,20 @@ function clarStateKey(telegramUserId: string, chatId: string): string {
 
 // Phase 1.35: Standard confirmation keyboard with [Изменить] row.
 // Centralised so all confirm screens include the edit button.
+// Phase 1.36-UX: Layout aligned with screen-builder.ts buildConfirmKeyboard:
+//   Row 1: [✅ Подтвердить] — full-width primary action
+//   Row 2: [✏️ Изменить] [✖️ Отмена] — secondary actions, consistent emoji weight
 function confirmKb(draftId: string) {
   return {
     inline_keyboard: [
       [
-        { text: '✅ Подтвердить', callback_data: `approve:${draftId}` },
-        { text: '❌ Отмена',      callback_data: `reject:${draftId}` },
+        // Primary action — full width, maximum tap surface
+        { text: '✅  Подтвердить', callback_data: `approve:${draftId}` },
       ],
       [
-        { text: '✏️ Изменить', callback_data: `draft:edit:${draftId}` },
+        // Secondary: pencil + neutral X (not red ❌ — avoids alarming UX)
+        { text: '✏️ Изменить',  callback_data: `draft:edit:${draftId}` },
+        { text: '✖️ Отмена',    callback_data: `reject:${draftId}` },
       ],
     ],
   };
@@ -1495,6 +1500,10 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
         jobId: idempotencyKey, // SEC-06: idempotent — duplicate taps are deduped
       });
 
+      // Phase 1.36-UX fix: Clear stale clarification state so the next user
+      // message is not silently consumed by the clar: intercept. The clar:
+      // state may survive up to TTL=300s after the draft was approved/rejected.
+      void redisConnection.del(clarStateKey(telegramUserId, chatId));
       request.log.info({
         msg: '[midas:bot:webhook] callback_query enqueued',
         callbackId: cq.id,

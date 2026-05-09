@@ -350,7 +350,7 @@ export function buildNavKeyboard(): InlineKeyboard {
  * Build the standard approve/reject confirmation keyboard.
  *
  * Row 1: [✅  Подтвердить]             ← Primary — полная ширина
- * Row 2: [✏️ Изменить] [✕  Отмена]   ← Secondary + Destructive
+ * Row 2: [✏️ Изменить] [✖️ Отмена]   ← Secondary (neutral emoji, not red ❌)
  *
  * Подтверждение и отмена никогда не стоят рядом (anti-pattern).
  */
@@ -362,7 +362,7 @@ export function buildConfirmKeyboard(draftId: string): InlineKeyboard {
       ],
       [
         { text: '✏️ Изменить', callback_data: `draft:edit:${draftId}` },
-        { text: '✕  Отмена',   callback_data: `reject:${draftId}` },
+        { text: '✖️ Отмена',   callback_data: `reject:${draftId}` },
       ],
     ],
   };

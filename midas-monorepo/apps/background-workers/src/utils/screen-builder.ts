@@ -254,7 +254,7 @@ export function buildConfirmKeyboard(draftId: string): InlineKeyboard {
       ],
       [
         { text: '✏️ Изменить', callback_data: `draft:edit:${draftId}` },
-        { text: '✕  Отмена',   callback_data: `reject:${draftId}` },
+        { text: '✖️ Отмена',   callback_data: `reject:${draftId}` },
       ],
     ],
   };
