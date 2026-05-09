@@ -1,7 +1,7 @@
 # WORKFLOW_STATE.MD — Диспетчер задач ИИ-агента Midas
 
 > **Тип:** MUTABLE — кратковременная память агента. Обновляется на каждом шаге работы.
-> **Обновлён:** 2026-05-09 10:22 (UTC+3)
+> **Обновлён:** 2026-05-09 12:57 (UTC+3)
 
 ---
 
@@ -10,10 +10,10 @@
 | Параметр | Значение |
 |---|---|
 | **PHASE** | `1 — MVP Implementation` |
-| **STEP** | `Phase 1.36-UX — UX Bug Fixes & Keyboard Hardening (all sub-steps complete)` |
+| **STEP** | `Phase 1.36-UX — Transaction History Workflow + Persistent Keyboard (FINAL)` |
 | **AGENT STATUS** | `READY_FOR_OWNER_ACCEPTANCE` |
 | **DEPLOYMENT** | `Railway (spirited-happiness project)` — `Midas` bot service + `background-workers` service + `Postgres` + `Redis` |
-| **LAST COMPLETED** | `Phase 1.36-UX Sub-step 4 complete: is_persistent:false — collapsible keyboard. All 4 sub-steps done: (1) core nav keyboard on /start, (2) bug fixes (race condition + emoji + keyboard layout), (3) auto-activation on rejection/expiry via replyKeyboardJson in NotificationJobPayload, (4) collapsibility. 13/13 PASS.` |
+| **LAST COMPLETED** | `Phase 1.36-UX finalised: greeting stays permanently as keyboard carrier; each transaction card is a NEW message (history accumulates); approve edits preview→confirmed in-place using per-draft Redis key midas:preview:{draftId}; no active-message pointer tracking between transactions. Typecheck 0 errors. Commits e879dfc → 2a15f31 deployed.` |
 | **BLOCKER** | None — awaiting owner acceptance. |
 | **NEXT ACTION** | Owner review and acceptance of Phase 1.36-UX. |
 
@@ -64,7 +64,7 @@
 | 1.33 Clean Chat / Single Active Message UX | ✅ ACCEPTED | UX-only phase. `active-message.service.ts` (NEW), `telegram-api.ts` (MODIFY), `shared/index.ts` (MODIFY), `webhook.route.ts` (MODIFY), `notifications.worker.ts` (MODIFY), `confirmation.worker.ts` (MODIFY), `ai-parse.worker.ts` (MODIFY). No migrations, no DB schema changes, no new deps. Redis pointer midas:am:{userId}:{chatId} (TTL 24h). upsertBotMessage() edit-first strategy. 0 typecheck errors. Batch-accepted by owner decision. Commit `36cacd7`. Tag `phase-1.33-accepted` pushed. |
 | 1.34 Rich Screen Cards — Single-Screen App UX | ✅ ACCEPTED | UX-only phase. `screen-builder.ts` (NEW — both apps), confirmation/preview card formatting. No migrations, no DB schema changes, no new deps. 0 typecheck errors. Batch-accepted by owner decision. Commit `6e899f0`. Tag `phase-1.34-accepted` pushed. |
 | 1.35 Intelligent Transaction Understanding | ✅ ACCEPTED | `migrations/1779000000000_intelligent-transactions.js` (NEW), `category-resolver.service.ts` (NEW), `draft.service.ts` (MODIFY), `draft-confirmation.service.ts` (MODIFY), `ai-parse.worker.ts` (MODIFY), `confirmation.worker.ts` (MODIFY), `settings.service.ts`+`settings-keyboard.service.ts` (MODIFY), `webhook.route.ts` (MODIFY), `screen-builder.ts` (MODIFY), `prompts.ts`+`schemas.ts` (MODIFY). smoke-test-phase135.mjs — 55 tests. Deployed to Railway production. |
-| 1.36-UX Persistent Navigation Keyboard | ✅ READY_FOR_OWNER_ACCEPTANCE | **Sub-step 1 — Core Navigation (commit c2f012f prev):** `telegram-api.ts` (`ReplyKeyboardMarkup` + `sendMessageWithReplyKeyboard()`); `screen-builder.ts` telegram-bot (`buildMainMenuKeyboard()`, `NAV_BTN_*` constants, `input_field_placeholder`); `webhook.route.ts` (Reply Keyboard on `/start` for new+existing, 3 nav text intercepts before AI parse → balance/report/settings). Collateral lint: `claude-client.ts`, `draft-confirmation.service.ts` (×3), both `screen-builder.ts`. **Sub-step 2 — Bug Fixes:** `webhook.route.ts` confirmKb unified to ✅ full-width + [✏️ Изменить|✖️ Отмена] split row; `redisConnection.del(clarKey)` on confirm/reject (race condition: stale `midas:clar:*` no longer intercepts next message); emoji ✕→✖️ both screen-builders. **Sub-step 3 — Auto-Activation (commit f10aa22):** `shared/index.ts` `replyKeyboardJson?` in `NotificationJobPayload`; `background-workers/screen-builder.ts` `buildNavKeyboard()` → `buildMainMenuReplyKeyboard()`, `buildPostConfirmKeyboard()` nav row removed; `confirmation.worker.ts` rejected/expired/intent_missing → `replyKeyboardJson`; `notifications.worker.ts` split routing: editMessageText → inline, sendMessage → ReplyKeyboard. **Sub-step 4 — Collapsibility (commit 062d40d):** `is_persistent: false` both screen-builders — Telegram shows ⏄ icon near 🎤. 13/13 typecheck+lint PASS all sub-steps. |
+| 1.36-UX Persistent Navigation Keyboard | ✅ READY_FOR_OWNER_ACCEPTANCE | **Sub-steps 1–4 (commits c2f012f → 062d40d):** Core nav keyboard + bug fixes + auto-activation + collapsibility — see history entries 2026-05-09. **FINAL state (commits e879dfc → 2a15f31):** Transaction history workflow fully reworked — see Section 3 UX Architecture and history entry 2026-05-09 12:57. |
 
 ---
 
@@ -91,16 +91,24 @@
   - Результат: `ok` | `partial` (missing fields) | `needs_clarification` (nonsense) | `rejected`
   - **Phase 1.35:** `item_hint` (extracted product/merchant name), `category_hint` (AI category suggestion) → `CategoryResolverService` (3-stage: exact → 200+ alias map → fallback «Другое»)
 - **Deployment:** Railway (spirited-happiness) — Midas bot + background-workers + Postgres + Redis. Auto-deploy from GitHub main.
-- **UX Architecture (Phase 1.33–1.36-UX):**
-  - Clean Chat: Redis `midas:am:{userId}:{chatId}` → edit-first strategy (editMessageText → sendMessage fallback)
+- **UX Architecture (Phase 1.33–1.36-UX) — ФИНАЛЬНОЕ РАБОЧЕЕ СОСТОЯНИЕ:**
   - Rich Screen Cards: `screen-builder.ts` pure functions → buildPreviewScreen, buildConfirmedScreen, buildClarificationScreen
   - Centralized confirmKb/confirmPreview helpers (DRY, 8 entry points)
   - Post-confirm card: `[✏️ Изменить запись]` only — nav buttons removed (handled by Reply Keyboard)
-  - **Persistent Navigation (Phase 1.36-UX):** `ReplyKeyboardMarkup` (`is_persistent: false`, `resize_keyboard: true`) — single row `[📊 Баланс][📋 Отчёт][⚙️ Настройки]`. Sent on `/start`. NAV_BTN_* intercepted before AI parse.
-  - **Auto-Activation (Phase 1.36-UX Sub-step 3):** `replyKeyboardJson` in `NotificationJobPayload`. rejection/expiry/intent_missing sends ReplyKeyboard on `sendMessage` path — keyboard auto-activates without `/start`. `editMessageText` path keeps inline keyboard (Telegram API limitation).
-  - **Collapsibility:** `is_persistent: false` — Telegram shows native ⏄ icon near microphone; user can hide/restore freely.
-  - **Race Condition Fix:** `redisConnection.del(clarKey)` on confirm/reject → stale `midas:clar:*` no longer intercepts next message.
-  - **Keyboard Consistency:** Both screen-builders use ✖️ (visual weight parity with ✅/✏️). confirmKb: ✅ full-width row + [✏️|✖️] split row — matches workers.
+  - **Persistent Navigation:** `ReplyKeyboardMarkup` (`is_persistent: false`, `resize_keyboard: true`) — single row `[📊 Баланс][📋 Отчёт][⚙️ Настройки]`. Sent on `/start`. NAV_BTN_* intercepted before AI parse.
+  - **Keyboard Carrier:** Greeting message `✅ Вы уже зарегистрированы...` остаётся в чате **навсегда** — является постоянным носителем ReplyKeyboardMarkup. Не удаляется ни при каких условиях.
+  - **Transaction History (FINAL):** Каждая preview-карточка — это **новое** сообщение (`sendMessage`), `activeMessageId` НЕ передаётся из `ai-parse.worker`. История транзакций накапливается в чате. Старый механизм `midas:am:{userId}:{chatId}` (active-message pointer) **удалён** из notifications.worker.
+  - **Preview→Confirmed Edit:** При approve `confirmation.worker` читает `midas:preview:{draftId}` (TTL 600s) — message_id preview-карточки, записанный `notifications.worker` при отправке. Approve → `editMessageText(previewMsgId, confirmedText, inlineKeyboard)`. Reject → `sendMessage` (новое сообщение).
+  - **Redis Keys (актуальные):**
+    - `midas:preview:{draftId}` — message_id preview-карточки, TTL 600s. Записывает notifications.worker. Читает и удаляет confirmation.worker на approve.
+    - `midas:greet:{userId}:{chatId}` — сохраняется в /start handler, но НИКОГДА не используется для удаления (код оставлен как артефакт, безвреден).
+    - `midas:clar:{userId}:{chatId}` — intercept для ввода суммы при clarification. Удаляется на confirm/reject (race condition fix).
+    - `midas:ac:{userId}:{chatId}` — account onboarding state, TTL 300s.
+    - `midas:edit:{userId}:{chatId}` — edit amount intercept, TTL 300s.
+  - **Auto-Activation:** `replyKeyboardJson` в `NotificationJobPayload`. rejection/expiry/intent_missing sends ReplyKeyboard на `sendMessage` path. `editMessageText` path — только inline keyboard (Telegram API limitation).
+  - **Collapsibility:** `is_persistent: false` — Telegram показывает ⏄ иконку рядом с 🎤; пользователь может скрывать/восстанавливать клавиатуру.
+  - **Race Condition Fix:** `redisConnection.del(clarKey)` на confirm/reject → stale `midas:clar:*` не перехватывает следующее сообщение.
+  - **Keyboard Consistency:** Both screen-builders use ✖️. confirmKb: ✅ full-width row + [✏️|✖️] split row.
 
 ---
 
@@ -307,6 +315,7 @@ apps/background-workers/src/services/draft.service.ts  ← createDraft logic
 | 2026-05-09 10:00 | Phase 1.36-UX Sub-step 2: UX Bug Fixes & Consistency. (1) `webhook.route.ts` confirmKb layout standardized: ✅ full-width top row + [✏️ Изменить|✖️ Отмена] split row — matches workers layout. (2) `redisConnection.del(clarKey)` added on approve/reject in `webhook.route.ts` — prevents stale `midas:clar:*` key intercepting next user message after confirmation (silent message discard race condition fixed). (3) `screen-builder.ts` both apps — emoji ✕→✖️ for visual weight parity with ✅ and ✏️. 13/13 PASS. Commit `c2f012f`. |
 | 2026-05-09 10:12 | Phase 1.36-UX Sub-step 3: Reply Keyboard auto-activation. `shared/index.ts` — `replyKeyboardJson?` added to `NotificationJobPayload` (documented: only valid on sendMessage, not editMessageText). `background-workers/screen-builder.ts` — `buildNavKeyboard()` replaced by `buildMainMenuReplyKeyboard()` (returns plain JS object with `keyboard` array, not InlineKeyboard); `buildPostConfirmKeyboard()` nav row [📊 Баланс][📋 Отчёт] removed — only [✏️ Изменить запись] remains. `confirmation.worker.ts` — import updated (buildNavKeyboard→buildMainMenuReplyKeyboard); rejected/expired/intent_missing now pass `replyKeyboardJson` (not `inlineKeyboardJson`). `notifications.worker.ts` — keyboard routing split: `inlineReplyMarkup` for editMessageText path, `freshReplyMarkup` (prefers replyKeyboardJson) for sendMessage path. Reply Keyboard auto-activates on first new message without /start. 13/13 PASS. Commit `f10aa22`. |
 | 2026-05-09 10:20 | Phase 1.36-UX Sub-step 4: Keyboard collapsibility. `screen-builder.ts` both apps — `is_persistent: true` → `is_persistent: false`. Result: Telegram displays standard ⏄ collapse icon next to 🎤 microphone button; user can hide/restore keyboard at will; keyboard re-appears on next bot sendMessage. 13/13 PASS. Commit `062d40d`. Deployed to Railway. |
+| 2026-05-09 12:57 | Phase 1.36-UX FINAL: Transaction history workflow + permanent keyboard. **Проблема:** edit-first стратегия через `midas:am:` pointer перезаписывала предыдущую карточку вместо создания новой — история транзакций не накапливалась. **Решение:** (1) `ai-parse.worker.ts` — убран `activeMessageId` из preview notifications; каждая preview-карточка всегда отправляется как новое сообщение. (2) `notifications.worker.ts` — при отправке preview (draftId присутствует) записывает `sentMessageId` в Redis `midas:preview:{draftId}` TTL 600s; удалён `setActiveMessagePointer` и весь AM-pointer механизм. (3) `confirmation.worker.ts` — на approve читает `midas:preview:{draftId}` → передаёт как `activeMessageId` в notifications (edit preview→confirmed in-place); на reject — `activeMessageId` не передаётся → новое сообщение. (4) Greeting: НЕ удаляется — остаётся постоянным носителем ReplyKeyboard; весь код удаления (deleteMessage + nav carrier) убран. `greetingMsgId` удалён из `NotificationJobPayload`. `shared` пересобран. Typecheck 0 errors (оба приложения). Commits `e879dfc` → `2cb86c4` → `8941c6d` → `2a15f31`. Deployed to Railway. Протестировано: 4 транзакции записаны, история накапливается, клавиатура [📊 Баланс][📋 Отчёт][⚙️ Настройки] постоянно видна. |
 
 ---
 
