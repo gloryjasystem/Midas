@@ -100,6 +100,13 @@ export interface NotificationJobPayload {
   telegramUserId?: string;
   /** Phase 1.33: Current active bot message ID — try editMessageText before sendMessage */
   activeMessageId?: string;
+  /**
+   * Phase 1.36-UX: Reply Keyboard JSON to attach on fresh sendMessage calls.
+   * Used when rejection/expiry sends a new message — activates the persistent nav keyboard.
+   * NOTE: editMessageText does NOT support ReplyKeyboardMarkup; only sendMessage does.
+   * So this is only applied on the sendMessage path, never on editMessageText.
+   */
+  replyKeyboardJson?: string;
 }
 
 /**

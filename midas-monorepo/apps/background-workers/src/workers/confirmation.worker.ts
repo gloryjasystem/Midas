@@ -34,7 +34,7 @@ import {
   buildNotFoundScreen,
   buildIntentMissingScreen,
   buildPostConfirmKeyboard,
-  buildNavKeyboard,
+  buildMainMenuReplyKeyboard,  // Phase 1.36-UX: replaces buildNavKeyboard for rejection/expiry
 } from '../utils/screen-builder.js';
 
 // ─────────────────────────────────────────────────────────────
@@ -134,7 +134,8 @@ async function processConfirmation(job: Job<CallbackConfirmJobPayload>): Promise
 
   // ── Step 4: Send result notification — Phase 1.34 rich cards ──
   let notificationMessage: string;
-  let inlineKeyboardJson: string | undefined;
+  let inlineKeyboardJson: string | undefined;  // inline keyboard (for editMessageText path)
+  let replyKeyboardJson: string | undefined;   // Reply Keyboard (for sendMessage path only)
 
   switch (result.outcome) {
     case 'approved':
@@ -153,11 +154,13 @@ async function processConfirmation(job: Job<CallbackConfirmJobPayload>): Promise
       break;
     case 'rejected':
       notificationMessage = buildRejectedScreen();
-      inlineKeyboardJson = JSON.stringify(buildNavKeyboard());
+      // Phase 1.36-UX: inline nav removed — Reply Keyboard handles navigation.
+      // replyKeyboardJson activates the persistent bottom keyboard on sendMessage path.
+      replyKeyboardJson = JSON.stringify(buildMainMenuReplyKeyboard());
       break;
     case 'expired':
       notificationMessage = buildExpiredScreen();
-      inlineKeyboardJson = JSON.stringify(buildNavKeyboard());
+      replyKeyboardJson = JSON.stringify(buildMainMenuReplyKeyboard());
       break;
     case 'already_processed':
       if (result.existingStatus === 'approved') {
@@ -190,7 +193,7 @@ async function processConfirmation(job: Job<CallbackConfirmJobPayload>): Promise
       break;
     case 'intent_missing':
       notificationMessage = buildIntentMissingScreen();
-      inlineKeyboardJson = JSON.stringify(buildNavKeyboard());
+      replyKeyboardJson = JSON.stringify(buildMainMenuReplyKeyboard());
       break;
     default:
       notificationMessage = 'ℹ️ Обработка завершена.';
@@ -214,7 +217,8 @@ async function processConfirmation(job: Job<CallbackConfirmJobPayload>): Promise
       chatId,
       message: notificationMessage,
       inlineKeyboardJson,
-      telegramUserId,       // Phase 1.33
+      replyKeyboardJson,   // Phase 1.36-UX: activates Reply Keyboard on sendMessage path
+      telegramUserId,      // Phase 1.33
       activeMessageId,      // Phase 1.33
       // No draftId in result notification (user already confirmed)
     },

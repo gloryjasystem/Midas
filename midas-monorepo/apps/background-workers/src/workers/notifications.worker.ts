@@ -115,6 +115,7 @@ async function setActiveMessagePointer(
 
 async function processNotification(job: Job<NotificationJobPayload>): Promise<void> {
   const { alertId, workspaceId, chatId, draftId, inlineKeyboardJson } = job.data;
+  const { replyKeyboardJson } = job.data;  // Phase 1.36-UX
   // job.data.message is system-generated — safe to log length (SEC-12)
 
   console.log('[midas:notifications-worker] Processing notification', {
@@ -127,19 +128,31 @@ async function processNotification(job: Job<NotificationJobPayload>): Promise<vo
     hasInlineKeyboard: !!inlineKeyboardJson,
   });
 
-  // Parse inline keyboard if provided
-  let replyMarkup: object | undefined;
+  // Parse keyboards:
+  // inlineKeyboardJson → used on editMessageText path (inline keyboard, Telegram supports this)
+  // replyKeyboardJson  → used on sendMessage path ONLY (ReplyKeyboard, edit does NOT support it)
+  let inlineReplyMarkup: object | undefined;
   if (inlineKeyboardJson) {
     try {
-      replyMarkup = JSON.parse(inlineKeyboardJson) as object;
+      inlineReplyMarkup = JSON.parse(inlineKeyboardJson) as object;
     } catch (err: unknown) {
       console.warn('[midas:notifications-worker] Failed to parse inlineKeyboardJson', {
         jobId: job.id,
         alertId,
         errorClass: err instanceof Error ? err.constructor.name : 'ParseError',
       });
-      // Send without keyboard rather than failing the job
     }
+  }
+
+  let freshReplyMarkup: object | undefined;
+  if (replyKeyboardJson) {
+    try {
+      freshReplyMarkup = JSON.parse(replyKeyboardJson) as object;
+    } catch {
+      freshReplyMarkup = inlineReplyMarkup; // fallback to inline if parse fails
+    }
+  } else {
+    freshReplyMarkup = inlineReplyMarkup; // no Reply Keyboard — use inline
   }
 
   // Phase 1.33: Try edit-first if activeMessageId is available
@@ -150,19 +163,20 @@ async function processNotification(job: Job<NotificationJobPayload>): Promise<vo
       chatId,
       job.data.activeMessageId,
       job.data.message,
-      replyMarkup,
+      inlineReplyMarkup,  // editMessageText: only InlineKeyboard supported by Telegram API
     );
     if (editOk) {
       sentMessageId = job.data.activeMessageId;
     }
   }
 
-  // If edit failed or no activeMessageId, send new message
+  // If edit failed or no activeMessageId, send new message.
+  // Use freshReplyMarkup (Reply Keyboard if provided, else inline keyboard).
   if (!sentMessageId) {
     sentMessageId = await sendTelegramMessage({
       chatId,
       text: job.data.message,
-      replyMarkup,
+      replyMarkup: freshReplyMarkup,  // Phase 1.36-UX: Reply Keyboard activates here
     });
   }
 

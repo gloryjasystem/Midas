@@ -227,22 +227,28 @@ export function buildPostConfirmKeyboard(transactionId: string): InlineKeyboard 
   return {
     inline_keyboard: [
       [
+        // Phase 1.36-UX: [Баланс][Отчёт] nav removed — handled by persistent Reply Keyboard.
+        // Only contextual action: edit the specific transaction that was just recorded.
         { text: '✏️ Изменить запись', callback_data: `ed:v:${transactionId}` },
-      ],
-      [
-        { text: '📊 Баланс', callback_data: 'nav:balance' },
-        { text: '📋 Отчёт',  callback_data: 'nav:report' },
       ],
     ],
   };
 }
 
-export function buildNavKeyboard(): InlineKeyboard {
+/**
+ * Phase 1.36-UX: Reply Keyboard to re-activate the persistent bottom navigation.
+ * Used in the sendMessage path (reject/expire) where editMessageText cannot carry
+ * a ReplyKeyboardMarkup. Labels MUST match NAV_BTN_* constants in webhook.route.ts.
+ */
+export function buildMainMenuReplyKeyboard(): object {
   return {
-    inline_keyboard: [[
-      { text: '📊 Баланс', callback_data: 'nav:balance' },
-      { text: '📋 Отчёт',  callback_data: 'nav:report' },
+    keyboard: [[
+      '📊 Баланс',
+      '📋 Отчёт',
+      '⚙️ Настройки',
     ]],
+    is_persistent: true,
+    resize_keyboard: true,
   };
 }
 
