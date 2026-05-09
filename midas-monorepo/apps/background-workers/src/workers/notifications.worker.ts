@@ -200,8 +200,26 @@ async function processNotification(job: Job<NotificationJobPayload>): Promise<vo
         });
       }
     } catch { /* non-fatal */ }
-    // Note: is_persistent:true on the ReplyKeyboard keeps it visible
-    // even after the carrier message is deleted — no re-activation needed.
+
+    // Phase 1.36-UX: Re-activate ReplyKeyboard after deleting the greeting carrier.
+    // is_persistent:true alone does NOT keep the keyboard after its carrier is deleted.
+    // Solution: send a minimal single-character "·" message as the permanent nav carrier.
+    // This is sent exactly ONCE per user session (only when greetingMsgId is present).
+    try {
+      await fetch(`${TELEGRAM_API_BASE}/sendMessage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chat_id: chatId,
+          text: '·',
+          reply_markup: {
+            keyboard: [['📊 Баланс', '📋 Отчёт', '⚙️ Настройки']],
+            is_persistent: false,   // user can collapse it while typing
+            resize_keyboard: true,
+          },
+        }),
+      });
+    } catch { /* non-fatal */ }
   }
 
   // Phase 1.36-UX: If this is a preview notification (draftId present), store the
