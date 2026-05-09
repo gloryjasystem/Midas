@@ -401,7 +401,7 @@ export const NAV_BTN_SETTINGS = '⚙️ Настройки';
  *
  * Flags:
  *   resize_keyboard: true  — minimal vertical height
- *   is_persistent:   true  — stays visible even when inline keyboards appear
+ *   is_persistent:   false — user can collapse/restore with Telegram's native UI icon
  *
  * Send once on /start — persists for the lifetime of the chat.
  */
@@ -411,7 +411,7 @@ export function buildMainMenuKeyboard(): ReplyKeyboardMarkup {
       [NAV_BTN_BALANCE, NAV_BTN_REPORT, NAV_BTN_SETTINGS],
     ],
     resize_keyboard: true,
-    is_persistent: true,
+    is_persistent: false,  // Phase 1.36-UX: allows user to hide via Telegram collapse icon
     input_field_placeholder: 'Напишите о расходе или доходе...',
   };
 }

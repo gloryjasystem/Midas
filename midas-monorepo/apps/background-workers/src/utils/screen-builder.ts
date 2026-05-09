@@ -247,7 +247,7 @@ export function buildMainMenuReplyKeyboard(): object {
       '📋 Отчёт',
       '⚙️ Настройки',
     ]],
-    is_persistent: true,
+    is_persistent: false,  // Phase 1.36-UX: user can collapse the keyboard via Telegram UI
     resize_keyboard: true,
   };
 }
