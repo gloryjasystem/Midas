@@ -1,7 +1,7 @@
 # WORKFLOW_STATE.MD — Диспетчер задач ИИ-агента Midas
 
 > **Тип:** MUTABLE — кратковременная память агента. Обновляется на каждом шаге работы.
-> **Обновлён:** 2026-05-09 15:18 (UTC+3)
+> **Обновлён:** 2026-05-09 15:38 (UTC+3)
 
 ---
 
@@ -10,10 +10,10 @@
 | Параметр | Значение |
 |---|---|
 | **PHASE** | `1 — MVP Implementation` |
-| **STEP** | `Phase 1.37 — AI Taxonomy & Zero-Clutter UX (COMPLETE)` |
-| **AGENT STATUS** | `COMPLETE — waiting for next task` |
+| **STEP** | `Phase 1.37 — AI Taxonomy & Zero-Clutter UX (ACCEPTED)` |
+| **AGENT STATUS** | `ACCEPTED — verified, reviews passed, deployed` |
 | **DEPLOYMENT** | `Railway (spirited-happiness project)` — `Midas` bot service + `background-workers` service + `Postgres` + `Redis` |
-| **LAST COMPLETED** | `Phase 1.37: 30-category taxonomy (18 personal + 12 business), 500+ anchor items (CIS/EU/US brands), multilingual RU/EN/UA, fuzzy matching (typos/slang/transliteration), 15 disambiguation rules, compound expressions, ALLOWED_CATEGORIES code validation, zero-clutter UX (nonsense screen without buttons, stale message deletion), Phase 2.0 documented in roadmap. Commits 5b02cf3 → 06bccb0 deployed. project_config.md → v1.4.` |
+| **LAST COMPLETED** | `Phase 1.37 VERIFIED & ACCEPTED: 13/13 typecheck+lint PASS (0 errors). Traceability Review PASS. Adversarial Security Review PASS. Scope Guard Review PASS. Lint fix: unused _draftId parameter. CategoryResolver updated: Питомцы/Дом aliases + group mapping added. Commits 06bccb0 → 641ad26 deployed.` |
 | **BLOCKER** | None. |
 | **NEXT ACTION** | Owner decides next priority: Phase 2.0 (AI Intelligence Evolution) or any other Phase 2.x task. |
 
@@ -65,7 +65,7 @@
 | 1.34 Rich Screen Cards — Single-Screen App UX | ✅ ACCEPTED | UX-only phase. `screen-builder.ts` (NEW — both apps), confirmation/preview card formatting. No migrations, no DB schema changes, no new deps. 0 typecheck errors. Batch-accepted by owner decision. Commit `6e899f0`. Tag `phase-1.34-accepted` pushed. |
 | 1.35 Intelligent Transaction Understanding | ✅ ACCEPTED | `migrations/1779000000000_intelligent-transactions.js` (NEW), `category-resolver.service.ts` (NEW), `draft.service.ts` (MODIFY), `draft-confirmation.service.ts` (MODIFY), `ai-parse.worker.ts` (MODIFY), `confirmation.worker.ts` (MODIFY), `settings.service.ts`+`settings-keyboard.service.ts` (MODIFY), `webhook.route.ts` (MODIFY), `screen-builder.ts` (MODIFY), `prompts.ts`+`schemas.ts` (MODIFY). smoke-test-phase135.mjs — 55 tests. Deployed to Railway production. |
 | 1.36-UX Persistent Navigation Keyboard | ✅ ACCEPTED | **Sub-steps 1–4 (commits c2f012f → 062d40d):** Core nav keyboard + bug fixes + auto-activation + collapsibility. **FINAL state (commits e879dfc → 2a15f31):** Transaction history workflow fully reworked. |
-| 1.37 AI Taxonomy & Zero-Clutter UX | ✅ COMPLETE | Zero-clutter UX: nonsense screen without inline buttons (Variant 5 text-only prompt), stale "Не понял" message deletion via `midas:clar:msg:{userId}:{chatId}` Redis key. 30-category taxonomy (18 personal + 12 business, incl. Питомцы, Дом). 500+ anchor items/brands (CIS/EU/US coverage). Multilingual recognition (RU/EN/UA). Fuzzy matching (typos, slang, transliteration). 15 disambiguation rules. Compound expression parsing. `ALLOWED_CATEGORIES` Set in `claude-client.ts` — code-level category validation (invalid → Другое). `project_config.md` v1.4. `product-roadmap.md` Phase 2.0 documented. Commits `5b02cf3` → `06bccb0`. |
+| 1.37 AI Taxonomy & Zero-Clutter UX | ✅ ACCEPTED | Zero-clutter UX: nonsense screen without inline buttons (Variant 5 text-only prompt), stale "Не понял" message deletion via `midas:clar:msg:{userId}:{chatId}` Redis key. 30-category taxonomy (18 personal + 12 business, incl. Питомцы, Дом). 500+ anchor items/brands (CIS/EU/US coverage). Multilingual recognition (RU/EN/UA). Fuzzy matching (typos, slang, transliteration). 15 disambiguation rules. Compound expression parsing. `ALLOWED_CATEGORIES` Set in `claude-client.ts` — code-level category validation (invalid → Другое). CategoryResolver: Питомцы/Дом aliases + groups. 13/13 typecheck+lint PASS. Traceability ✅ Security ✅ Scope Guard ✅. `project_config.md` v1.4. `product-roadmap.md` Phase 2.0 documented. Commits `5b02cf3` → `641ad26`. |
 
 ---
 
@@ -326,6 +326,7 @@ apps/background-workers/src/services/draft.service.ts  ← createDraft logic
 | 2026-05-09 14:14 | Phase 1.37 Step 5: ALLOWED_CATEGORIES code validation. `claude-client.ts`: Added `ALLOWED_CATEGORIES` Set (30 categories — 18 personal + 12 business). Post-Zod validation step: if `aiData.category_hint` is not in the set, replace with `Другое`. Prevents hallucinated categories from reaching CategoryResolverService. Typecheck 8/8 PASS. |
 | 2026-05-09 14:16 | Phase 1.37 Step 6: Documentation updates. `product-roadmap.md`: Added Phase 2.0 — AI Intelligence Evolution (3 components: 2.0-A self-learning from user edits, 2.0-B custom category recognition, 2.0-C regional bias from currency). Phase 1.37 + 2.0 added to summary table. Block 4 renamed from "Голос и Vision" to "AI Intelligence и Voice". `project_config.md`: Updated to v1.4, changelog v1.4 added, Section 2.8 AI Pipeline updated with multilingual/disambiguation/validation info. Commit `06bccb0`. Deployed to Railway. |
 | 2026-05-09 15:18 | Phase 1.37 complete. `workflow_state.md` updated: Section 1 (status → COMPLETE), Section 2 (Phase 1.37 row added), Section 3 (AI Pipeline updated), Section 4 (project_config v1.4), Section 10 (7 history entries). All documents synchronized. |
+| 2026-05-09 15:38 | Phase 1.37 VERIFICATION & ACCEPTANCE. Full turbo typecheck+lint 13/13 PASS. Found & fixed: (1) lint error `_draftId` unused param in `buildNonsenseKeyboard()` → removed param from definition and 2 call sites. (2) `category-resolver.service.ts` missing Питомцы/Дом — added 15 aliases (корм для кота, ветеринар, наполнитель, моющие средства, бытовая химия, etc.) + `CATEGORY_GROUPS` entries (both → Жизнь). Comment updated 28→30 taxonomy. Production DB audit: 205 categories (121 Жизнь + 84 Бизнес), 57 transactions (1 soft-deleted), 102 drafts. Old «еда для кота» → Дети is pre-Phase 1.37 data; new transactions will correctly resolve to Питомцы. Traceability Review PASS. Adversarial Security Review PASS. Scope Guard Review PASS. Commit `641ad26`. Deployed to Railway. |
 
 ---
 
