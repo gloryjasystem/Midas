@@ -459,20 +459,36 @@ async function processAiParse(job: Job<AiParseJobPayload>): Promise<void> {
     }
 
     // Phase 1.37-UX: Check if a previous "Не понял" card exists and should be deleted.
-    // When AI successfully understands a new message, we delete the old clarification
-    // card so only the new preview card remains in chat (clean, single-message UX).
     const clarMsgCacheKey = `midas:clar:msg:${telegramUserId}:${chatId}`;
     let prevClarMsgIdForDelete: string | undefined;
     try {
       const stored = await redisConnection.get(clarMsgCacheKey);
       if (stored) {
         prevClarMsgIdForDelete = stored;
-        // Clear immediately — next clarification will start fresh
         void redisConnection.del(clarMsgCacheKey);
       }
     } catch {
-      prevClarMsgIdForDelete = undefined; // non-fatal
+      prevClarMsgIdForDelete = undefined;
     }
+
+    // Phase 1.40: Check if a stale "❌ Отменено" / "⏰ Черновик истёк" card
+    // is still in chat. Delete it when the new preview card appears — so only
+    // active (pending/confirmed) cards remain visible.
+    const deadCardKey = `midas:dead_card:${chatId}`;
+    let deadCardMsgId: string | undefined;
+    try {
+      const stored = await redisConnection.get(deadCardKey);
+      if (stored) {
+        deadCardMsgId = stored;
+        void redisConnection.del(deadCardKey);
+      }
+    } catch {
+      deadCardMsgId = undefined;
+    }
+
+    // Prefer dead_card over clarification card — both can coexist,
+    // but only one deleteMessageId is supported per notification job.
+    const msgToDelete = deadCardMsgId ?? prevClarMsgIdForDelete;
 
     await notificationsQueue.add(
       QUEUE_NAMES.NOTIFICATIONS,
@@ -484,9 +500,8 @@ async function processAiParse(job: Job<AiParseJobPayload>): Promise<void> {
         draftId,
         inlineKeyboardJson: JSON.stringify(inlineKeyboard),
         telegramUserId,
-        deleteMessageId: prevClarMsgIdForDelete, // delete old "Не понял" before sending
+        deleteMessageId: msgToDelete,
         // NOTE: No activeMessageId — each preview card is a fresh message.
-        // History of transaction cards accumulates in chat. (Phase 1.36-UX)
       },
       {
         jobId: IdempotencyKeyBuilder.notification(workspaceId, alertId),

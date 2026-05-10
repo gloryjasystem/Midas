@@ -86,6 +86,14 @@ async function processExpiration(job: Job): Promise<void> {
         const existing = await redisConnection.get(expiredKey);
         const ids = existing ? `${existing},${draft.previewMessageId}` : draft.previewMessageId;
         await redisConnection.set(expiredKey, ids, 'EX', 86400);
+
+        // Phase 1.40: Mark as dead_card so next preview auto-deletes it
+        await redisConnection.set(
+          `midas:dead_card:${draft.previewChatId}`,
+          draft.previewMessageId!,
+          'EX',
+          86400,
+        );
       } catch { /* non-fatal */ }
     }
 

@@ -253,6 +253,14 @@ async function processConfirmation(job: Job<CallbackConfirmJobPayload>): Promise
     void redisConnection.del(`midas:gate_sent:${telegramUserId}:${chatId}`);
     void redisConnection.del(`midas:preview:${draftId}`);
 
+    // Phase 1.40: After reject/expired, mark card as "dead" so the next
+    // new preview auto-deletes it. Approved cards stay visible ("✅ Записано").
+    // Key uses chatId only (== telegramUserId in private chats) so
+    // draft-expiration CRON can also write this without telegramUserId.
+    if ((result.outcome === 'rejected' || result.outcome === 'expired') && previewMsgId) {
+      void redisConnection.set(`midas:dead_card:${chatId}`, previewMsgId, 'EX', 86400);
+    }
+
     // I-1: Delete gate card message from chat
     const gateCardKey = `midas:gate_card:${telegramUserId}:${chatId}`;
     const gateCardMsgId = await redisConnection.get(gateCardKey);
