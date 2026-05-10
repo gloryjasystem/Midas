@@ -170,7 +170,27 @@ export function buildSearchMenuKeyboard(): InlineKeyboardMarkup {
       [{ text: '📝 По названию', callback_data: 'tx:s:n' }],
       [{ text: '💲 По сумме',    callback_data: 'tx:s:amt' }],
       [{ text: '📁 По категории', callback_data: 'tx:s:c' }],
+      [{ text: '📅 По дате',     callback_data: 'tx:s:dt' }],
       [{ text: '◀️ Назад',       callback_data: 'tx:l:0:a' }],
+    ],
+  };
+}
+
+/**
+ * Build the date period picker keyboard.
+ * Shown when user taps 📅 По дате.
+ *
+ * Preset buttons cover 95% of use-cases; custom input is always available.
+ */
+export function buildDatePickerKeyboard(): InlineKeyboardMarkup {
+  return {
+    inline_keyboard: [
+      [{ text: '📆 Сегодня',        callback_data: 'tx:s:dt:today' }],
+      [{ text: '📅 Вчера',          callback_data: 'tx:s:dt:yday'  }],
+      [{ text: '🗓 Эта неделя',     callback_data: 'tx:s:dt:week'  }],
+      [{ text: '📊 Этот месяц',     callback_data: 'tx:s:dt:month' }],
+      [{ text: '✏️ Ввести дату',    callback_data: 'tx:s:dt:custom'}],
+      [{ text: '◀️ Назад',          callback_data: 'tx:s'          }],
     ],
   };
 }
@@ -281,6 +301,10 @@ export type TxCallbackCmd =
   | { cmd: 'search_amount' }
   | { cmd: 'search_category' }
   | { cmd: 'search_cat_result'; catId: string }
+  | { cmd: 'search_date_menu' }
+  | { cmd: 'search_date_preset'; preset: 'today' | 'yday' | 'week' | 'month' }
+  | { cmd: 'search_date_custom' }
+  | { cmd: 'search_date_cancel' }
   | { cmd: 'field_amount'; txId: string }
   | { cmd: 'field_cat'; txId: string; page: number }
   | { cmd: 'field_acc'; txId: string }
@@ -340,6 +364,18 @@ export function parseTxCallback(data: string): TxCallbackCmd | null {
       const catId = parts[3] ?? '';
       if (!ULID_RE.test(catId)) return null;
       return { cmd: 'search_cat_result', catId };
+    }
+    // tx:s:dt[:{sub}] — date search
+    if (searchSub === 'dt') {
+      if (parts.length === 3) return { cmd: 'search_date_menu' };
+      const dtSub = parts[3] ?? '';
+      if (dtSub === 'today')  return { cmd: 'search_date_preset', preset: 'today' };
+      if (dtSub === 'yday')   return { cmd: 'search_date_preset', preset: 'yday' };
+      if (dtSub === 'week')   return { cmd: 'search_date_preset', preset: 'week' };
+      if (dtSub === 'month')  return { cmd: 'search_date_preset', preset: 'month' };
+      if (dtSub === 'custom') return { cmd: 'search_date_custom' };
+      if (dtSub === 'cancel') return { cmd: 'search_date_cancel' };
+      return null;
     }
     return null;
   }

@@ -1011,11 +1011,89 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
             const items = await searchByCat(txResolved.workspaceId, txResolved.userId, txCmd.catId);
             const { buildSearchResultsKeyboard: buildSRK } = await import('../services/transaction-keyboard.service.js');
             if (items.length === 0) {
-              if (txMsgId) void editMessageText(chatId, txMsgId, '\u{1F50D} \u041D\u0438\u0447\u0435\u0433\u043E \u043D\u0435 \u043D\u0430\u0439\u0434\u0435\u043D\u043E.', { inline_keyboard: [[{ text: '\u{1F50D} \u041D\u043E\u0432\u044B\u0439 \u043F\u043E\u0438\u0441\u043A', callback_data: 'tx:s' }, { text: '\u25C0\uFE0F \u041A \u0441\u043F\u0438\u0441\u043A\u0443', callback_data: 'tx:l:0:a' }]] });
+              if (txMsgId) void editMessageText(chatId, txMsgId, '🔍 Ничего не найдено.', { inline_keyboard: [[{ text: '🔍 Новый поиск', callback_data: 'tx:s' }, { text: '◀️ К списку', callback_data: 'tx:l:0:a' }]] });
             } else {
-              if (txMsgId) void editMessageText(chatId, txMsgId, `\u{1F50D} <b>\u0420\u0435\u0437\u0443\u043B\u044C\u0442\u0430\u0442\u044B</b> (${String(items.length)}):`, buildSRK(items));
+              if (txMsgId) void editMessageText(chatId, txMsgId, `🔍 <b>Результаты</b> (${String(items.length)}):`, buildSRK(items));
             }
+
+          // ── tx:s:dt → date picker menu ──────────────────────
+          } else if (txCmd.cmd === 'search_date_menu') {
+            const { buildDatePickerKeyboard: buildDPK } = await import('../services/transaction-keyboard.service.js');
+            if (txMsgId) void editMessageText(chatId, txMsgId, '📅 <b>Поиск по дате</b>\n\nВыбери период:', buildDPK());
+
+          // ── tx:s:dt:{today|yday|week|month} → preset date range ──
+          } else if (txCmd.cmd === 'search_date_preset') {
+            const now = new Date();
+            let from: Date, to: Date, label: string;
+
+            if (txCmd.preset === 'today') {
+              from  = new Date(now); from.setHours(0, 0, 0, 0);
+              to    = new Date(now); to.setHours(23, 59, 59, 999);
+              const dd = String(now.getDate()).padStart(2, '0');
+              const mm = String(now.getMonth() + 1).padStart(2, '0');
+              label = `${dd}.${mm}.${String(now.getFullYear())}`;
+            } else if (txCmd.preset === 'yday') {
+              const y = new Date(now); y.setDate(now.getDate() - 1);
+              from  = new Date(y); from.setHours(0, 0, 0, 0);
+              to    = new Date(y); to.setHours(23, 59, 59, 999);
+              const dd = String(y.getDate()).padStart(2, '0');
+              const mm = String(y.getMonth() + 1).padStart(2, '0');
+              label = `${dd}.${mm}.${String(y.getFullYear())}`;
+            } else if (txCmd.preset === 'week') {
+              from  = new Date(now); from.setDate(now.getDate() - 6); from.setHours(0, 0, 0, 0);
+              to    = new Date(now); to.setHours(23, 59, 59, 999);
+              const dd0 = String(from.getDate()).padStart(2, '0');
+              const mm0 = String(from.getMonth() + 1).padStart(2, '0');
+              const dd1 = String(now.getDate()).padStart(2, '0');
+              const mm1 = String(now.getMonth() + 1).padStart(2, '0');
+              label = `${dd0}.${mm0} – ${dd1}.${mm1}`;
+            } else {
+              // month
+              from  = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
+              to    = new Date(now); to.setHours(23, 59, 59, 999);
+              const mm = String(now.getMonth() + 1).padStart(2, '0');
+              label = `${mm}.${String(now.getFullYear())}`;
+            }
+
+            const { searchByDateRange } = await import('../services/transaction-hub.service.js');
+            const { buildSearchResultsKeyboard: buildSRK2, buildDatePickerKeyboard: buildDPK2 } = await import('../services/transaction-keyboard.service.js');
+            const dateItems = await searchByDateRange(txResolved.workspaceId, txResolved.userId, from.toISOString(), to.toISOString());
+
+            if (dateItems.length === 0) {
+              if (txMsgId) void editMessageText(chatId, txMsgId,
+                `📅 За <b>${escapeHtml(label)}</b>\n\nТранзакций не найдено.`,
+                { inline_keyboard: [
+                  [{ text: '◀️ К выбору периода', callback_data: 'tx:s:dt' }],
+                  [{ text: '◀️ К транзакциям',    callback_data: 'tx:l:0:a' }],
+                ] });
+            } else {
+              if (txMsgId) void editMessageText(chatId, txMsgId,
+                `📅 <b>За ${escapeHtml(label)}</b> (${String(dateItems.length)} тр.):`,
+                buildSRK2(dateItems));
+            }
+            void buildDPK2; // suppress unused import
+
+          // ── tx:s:dt:custom → prompt free-text date input ──────
+          } else if (txCmd.cmd === 'search_date_custom') {
+            const searchKey = `midas:tx:search:${telegramUserId}:${chatId}`;
+            try { await redisConnection.set(searchKey, 'date', 'EX', 180); } catch { /* non-fatal */ }
+            if (txMsgId) void editMessageText(chatId, txMsgId,
+              '📅 <b>Введи дату</b>\n\n' +
+              'Форматы:\n' +
+              '  <code>10.05</code>  — конкретный день\n' +
+              '  <code>10.05.2026</code>  — с годом\n' +
+              '  <code>01.05 - 10.05</code>  — диапазон',
+              { inline_keyboard: [[{ text: '✖️ Отменить', callback_data: 'tx:s:dt:cancel' }]] },
+            );
+
+          // ── tx:s:dt:cancel → abort custom date, back to picker ─
+          } else if (txCmd.cmd === 'search_date_cancel') {
+            const searchKey = `midas:tx:search:${telegramUserId}:${chatId}`;
+            try { await redisConnection.del(searchKey); } catch { /* non-fatal */ }
+            const { buildDatePickerKeyboard: buildDPK3 } = await import('../services/transaction-keyboard.service.js');
+            if (txMsgId) void editMessageText(chatId, txMsgId, '📅 <b>Поиск по дате</b>\n\nВыбери период:', buildDPK3());
           }
+
         } catch (err: unknown) {
           const errorClass = err instanceof Error ? err.constructor.name : 'UnknownError';
           request.log.error({ msg: '[midas:bot:webhook] tx callback failed', callbackId: cq.id, errorClass });
@@ -3561,6 +3639,37 @@ Midas создан, чтобы сделать учет денег максима
           let items: import('../services/transaction-hub.service.js').TxListItem[];
           if (txSearchMode === 'name') {
             items = await searchByName(resolved.workspaceId, resolved.userId, queryText);
+          } else if (txSearchMode === 'date') {
+            // ── date: parse user input → date range → search ──
+            const { parseDateInput, searchByDateRange } = await import('../services/transaction-hub.service.js');
+            const parsed = parseDateInput(queryText);
+            if (!parsed) {
+              void upsertBotMessage(telegramUserId, chatId,
+                '⚠️ Не удалось распознать дату.\n\n' +
+                'Попробуй:\n' +
+                '  <code>10.05</code>  — конкретный день\n' +
+                '  <code>10.05.2026</code>  — с годом\n' +
+                '  <code>01.05 - 10.05</code>  — диапазон',
+                { inline_keyboard: [[{ text: '📅 Назад к выбору', callback_data: 'tx:s:dt' }]] },
+              );
+              await reply.status(200).send({ ok: true });
+              return;
+            }
+            items = await searchByDateRange(resolved.workspaceId, resolved.userId, parsed.from, parsed.to);
+            const { buildSearchResultsKeyboard: buildSRKd } = await import('../services/transaction-keyboard.service.js');
+            if (items.length === 0) {
+              void upsertBotMessage(telegramUserId, chatId,
+                `📅 За <b>${parsed.label}</b>\n\nТранзакций не найдено.`,
+                { inline_keyboard: [[{ text: '◀️ К выбору периода', callback_data: 'tx:s:dt' }, { text: '◀️ К списку', callback_data: 'tx:l:0:a' }]] },
+              );
+            } else {
+              void upsertBotMessage(telegramUserId, chatId,
+                `📅 <b>За ${parsed.label}</b> (${String(items.length)} тр.):`,
+                buildSRKd(items),
+              );
+            }
+            await reply.status(200).send({ ok: true });
+            return;
           } else {
             // amount mode — validate numeric input
             const amountMatch = queryText.replace(/[^\d.,]/g, '').replace(',', '.');

@@ -279,3 +279,95 @@ export async function searchByCategory(
   return result;
 }
 
+/**
+ * Search transactions within a date range.
+ * SEC-03: withTenantTransaction. SEC-02: NUMERIC strings.
+ *
+ * @param from  ISO 8601 string — start of range (inclusive), e.g. "2026-05-10T00:00:00.000Z"
+ * @param to    ISO 8601 string — end of range (inclusive),   e.g. "2026-05-10T23:59:59.999Z"
+ */
+export async function searchByDateRange(
+  workspaceId: string,
+  userId: string,
+  from: string,
+  to: string,
+): Promise<TxListItem[]> {
+  const result = await withTenantTransaction(workspaceId, userId, async (client) => {
+    const r = await client.query<TxListItem>(
+      `SELECT
+         t.id,
+         ROUND(t.base_amount, 2)::text AS base_amount,
+         t.base_currency,
+         t.transaction_intent,
+         t.transaction_time::text,
+         COALESCE(c.name, '—') AS category_name,
+         t.item_name
+       FROM transactions t
+       LEFT JOIN categories c ON c.id = t.category_id
+       WHERE t.workspace_id = $1
+         AND t.deleted_at IS NULL
+         AND t.transaction_time >= $2::timestamptz
+         AND t.transaction_time <= $3::timestamptz
+       ORDER BY t.transaction_time DESC
+       LIMIT $4`,
+      [workspaceId, from, to, SEARCH_LIMIT],
+    );
+    return r.rows;
+  });
+  return result;
+}
+
+/**
+ * Parse a user-typed date string into [from, to] ISO range.
+ *
+ * Supported formats:
+ *   "10.05"          → full day 10 May (current year)
+ *   "10.05.2026"     → full day 10 May 2026
+ *   "01.05 - 10.05"  → range 1–10 May (current year)
+ *   "01.05.2026 - 10.05.2026" → range with explicit years
+ *
+ * Returns null if the input cannot be parsed.
+ */
+export function parseDateInput(input: string): { from: string; to: string; label: string } | null {
+  const cleaned = input.trim().replace(/\s*[-–—]\s*/g, ' - ');
+
+  // Helper: parse "DD.MM" or "DD.MM.YYYY"
+  function parseSingle(s: string): Date | null {
+    const parts = s.trim().split('.');
+    if (parts.length < 2 || parts.length > 3) return null;
+    const day   = parseInt(parts[0] ?? '', 10);
+    const month = parseInt(parts[1] ?? '', 10);
+    const year  = parts.length === 3 ? parseInt(parts[2] ?? '', 10) : new Date().getFullYear();
+    if (isNaN(day) || isNaN(month) || isNaN(year)) return null;
+    if (day < 1 || day > 31 || month < 1 || month > 12) return null;
+    const d = new Date(year, month - 1, day);
+    if (isNaN(d.getTime())) return null;
+    return d;
+  }
+
+  function startOfDay(d: Date): string {
+    const r = new Date(d); r.setHours(0, 0, 0, 0); return r.toISOString();
+  }
+  function endOfDay(d: Date): string {
+    const r = new Date(d); r.setHours(23, 59, 59, 999); return r.toISOString();
+  }
+  function fmt(d: Date): string {
+    const dd = String(d.getDate()).padStart(2, '0');
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    return `${dd}.${mm}.${String(d.getFullYear())}`;
+  }
+
+  // Range: "DD.MM - DD.MM" or "DD.MM.YYYY - DD.MM.YYYY"
+  if (cleaned.includes(' - ')) {
+    const [leftRaw, rightRaw] = cleaned.split(' - ');
+    const from = parseSingle(leftRaw ?? '');
+    const to   = parseSingle(rightRaw ?? '');
+    if (!from || !to) return null;
+    return { from: startOfDay(from), to: endOfDay(to), label: `${fmt(from)} – ${fmt(to)}` };
+  }
+
+  // Single day
+  const d = parseSingle(cleaned);
+  if (!d) return null;
+  return { from: startOfDay(d), to: endOfDay(d), label: fmt(d) };
+}
