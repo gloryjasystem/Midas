@@ -63,6 +63,9 @@ export function buildSettingsMainKeyboard(): InlineKeyboardMarkup {
         { text: '💬 Поддержка', url: 'https://t.me/midas_support' },
         { text: 'ℹ️ О боте', callback_data: 'st:info' },
       ],
+      [
+        { text: '✖️ Закрыть', callback_data: 'st:cancel' },
+      ],
     ],
   };
 }
@@ -306,7 +309,7 @@ export function parseSettingsCallback(data: string): SettingsCallbackCmd | null 
   const sub = parts[1] ?? '';
 
   if (sub === 'm') return { cmd: 'menu' };
-  if (sub === 'x') return { cmd: 'cancel' };
+  if (sub === 'x' || sub === 'cancel') return { cmd: 'cancel' };
   if (sub === 'srch') return { cmd: 'search' };
   if (sub === 'back') return { cmd: 'back' };
 
