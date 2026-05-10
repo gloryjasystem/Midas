@@ -21,7 +21,7 @@ import { withTenantTransaction } from '@midas/database';
 // Constants
 // ─────────────────────────────────────────────────────────────
 
-export const TX_PAGE_SIZE = 8;
+export const TX_PAGE_SIZE = 6;
 
 // ─────────────────────────────────────────────────────────────
 // Types

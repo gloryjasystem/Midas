@@ -54,7 +54,9 @@ function formatAmountStr(numStr: string): string {
   if (dotIdx === -1) return `${numStr}.00`;
   const integer = numStr.slice(0, dotIdx);
   const frac = numStr.slice(dotIdx + 1).padEnd(2, '0').slice(0, 2);
-  return `${integer}.${frac}`;
+  // Add thousands separator for readability
+  const intWithSep = integer.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  return `${intWithSep}.${frac}`;
 }
 
 /** Intent → emoji mapping */
@@ -108,7 +110,7 @@ export function buildTxListKeyboard(
 ): InlineKeyboardMarkup {
   const rows: InlineKeyboardButton[][] = [];
 
-  // Filter row
+  // Filter row — 3 buttons: Expense / Income / All
   const filterRow: InlineKeyboardButton[] = (
     ['e', 'i', 'a'] as IntentFilter[]
   ).map((f) => ({
@@ -118,33 +120,42 @@ export function buildTxListKeyboard(
   rows.push(filterRow);
 
   // Search button
-  rows.push([{ text: '🔍 Поиск', callback_data: 'tx:s' }]);
+  rows.push([{ text: '\uD83D\uDD0D Поиск', callback_data: 'tx:s' }]);
 
-  // Transaction rows
+  // Transaction rows — max 6 per page
   for (const tx of items) {
     const emoji = intentEmoji(tx.transaction_intent);
-    const cat   = escapeHtml(tx.category_name);
     const amt   = formatAmountStr(tx.base_amount);
     const cur   = escapeHtml(tx.base_currency);
     const date  = shortDate(tx.transaction_time);
+
+    // Show item_name if exists, else fall back to category
+    const label = tx.item_name
+      ? escapeHtml(tx.item_name)
+      : escapeHtml(tx.category_name);
+
+    // Format: emoji · name/category  amt CUR  dd.mm
     rows.push([{
-      text: `${emoji} ${cat} — ${amt} ${cur}  ${date}`,
+      text: `${emoji} ${label}  ${amt} ${cur}  ${date}`,
       callback_data: `tx:v:${tx.id}`,
     }]);
   }
 
-  // Pagination row
+  // Pagination row (only when multiple pages)
   if (totalPages > 1) {
     const navRow: InlineKeyboardButton[] = [];
     if (page > 0) {
-      navRow.push({ text: '◀️', callback_data: `tx:l:${String(page - 1)}:${activeFilter}` });
+      navRow.push({ text: '\u25C0\uFE0F', callback_data: `tx:l:${String(page - 1)}:${activeFilter}` });
     }
     navRow.push({ text: `${String(page + 1)}/${String(totalPages)}`, callback_data: 'tx:x' });
     if (page < totalPages - 1) {
-      navRow.push({ text: '▶️', callback_data: `tx:l:${String(page + 1)}:${activeFilter}` });
+      navRow.push({ text: '\u25B6\uFE0F', callback_data: `tx:l:${String(page + 1)}:${activeFilter}` });
     }
     rows.push(navRow);
   }
+
+  // Close button — always at the bottom
+  rows.push([{ text: '\u2716\uFE0F Закрыть', callback_data: 'tx:close' }]);
 
   return { inline_keyboard: rows };
 }
@@ -279,7 +290,8 @@ export type TxCallbackCmd =
   | { cmd: 'confirm_cat'; txId: string; catId: string }
   | { cmd: 'confirm_acc'; txId: string; accId: string }
   | { cmd: 'confirm_int'; txId: string; intent: string }
-  | { cmd: 'cancel' };
+  | { cmd: 'cancel' }
+  | { cmd: 'close' };
 
 const VALID_FILTERS: readonly string[] = ['a', 'e', 'i', 'd'];
 
@@ -297,6 +309,9 @@ export function parseTxCallback(data: string): TxCallbackCmd | null {
 
   // tx:x → cancel
   if (sub === 'x') return { cmd: 'cancel' };
+
+  // tx:close → close (remove keyboard)
+  if (sub === 'close') return { cmd: 'close' };
 
   // tx:l:<page>:<filter?> → list (filter defaults to 'a' for ed: compat)
   if (sub === 'l') {

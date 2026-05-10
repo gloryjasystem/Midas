@@ -899,7 +899,10 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
 
         try {
           if (txCmd.cmd === 'cancel') {
-            if (txMsgId) void editMessageText(chatId, txMsgId, '\u{1F4CB} \u0417\u0430\u043A\u0440\u044B\u0442\u043E.', { inline_keyboard: [] });
+            if (txMsgId) void editMessageText(chatId, txMsgId, '📋 Закрыто.', { inline_keyboard: [] });
+          } else if (txCmd.cmd === 'close') {
+            // Remove keyboard — clean close of transaction panel
+            if (txMsgId) void editMessageText(chatId, txMsgId, '📋 <b>Транзакции</b>\n\nЗакрыто. Нажмите кнопку ниже, чтобы открыть снова.', { inline_keyboard: [] });
           } else if (txCmd.cmd === 'list') {
             const [items, total, stats] = await Promise.all([
               getTransactionList(txResolved.workspaceId, txResolved.userId, txCmd.page, txCmd.filter),
