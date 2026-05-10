@@ -554,8 +554,9 @@ export interface PendingDraftInfo {
 }
 
 /**
- * Find an active draft (pending_user or needs_clarification) for a user.
- * C-10: Checks both statuses — needs_clarification is also an active state.
+ * Find an active pending_user draft for a user (gate check).
+ * Only pending_user triggers the gate — needs_clarification is an active
+ * dialog where user input is expected and must NOT be blocked.
  * C-12: Uses pool.query with explicit workspace_id filter (no RLS overhead).
  * SEC-12: Returns only parsed fields, never raw_text.
  */
@@ -580,7 +581,7 @@ export async function getPendingDraftForUser(
             td.parsed_currency, td.item_name, td.parsed_category_hint
      FROM transaction_drafts td
      WHERE td.workspace_id = $1
-       AND td.status IN ('pending_user', 'needs_clarification')
+        AND td.status = 'pending_user'
        AND td.expires_at > NOW()
      ORDER BY td.created_at DESC
      LIMIT 1`,

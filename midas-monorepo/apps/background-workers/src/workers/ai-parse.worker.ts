@@ -237,7 +237,8 @@ async function processAiParse(job: Job<AiParseJobPayload>): Promise<void> {
   } catch { /* non-fatal expired cleanup */ }
 
   // ── Step 2.5: Phase 1.39 — Active draft gate check ──────────
-  // C-10: Check BOTH pending_user AND needs_clarification
+  // Gate only blocks when a pending_user draft exists (full preview shown).
+  // needs_clarification drafts are NOT gated — user input is expected.
   const pendingDraft = await getPendingDraftForUser(workspaceId, userId);
   if (pendingDraft) {
     const gateSentKey = `midas:gate_sent:${telegramUserId}:${chatId}`;
