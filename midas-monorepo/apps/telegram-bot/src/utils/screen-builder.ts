@@ -214,7 +214,8 @@ export function buildExpiredScreen(): string {
   return [
     '⏰ <b>Черновик истёк</b>',
     '',
-    'Прошло более 24 часов. Отправьте сообщение повторно.',
+    'Транзакция не была подтверждена в течение 1 часа.',
+    'Отправьте сообщение повторно.',
   ].join('\n');
 }
 
@@ -308,6 +309,93 @@ export function buildNonsenseScreen(): string {
     '🤔 <b>Не понял</b>',
     '',
     'Что хотел записать?',
+  ].join('\n');
+}
+
+// ─────────────────────────────────────────────────────────────
+// Phase 1.39: Gate, Reminder, Expired screens
+// ─────────────────────────────────────────────────────────────
+
+export interface GateDraftData {
+  parsedIntent: string | null;
+  parsedAmount: string | null;
+  parsedCurrency: string | null;
+  parsedCategoryHint: string | null;
+  itemName: string | null;
+}
+
+/** Build a compact draft summary block (reused across gate/reminder/expired). */
+function buildDraftSummaryBlock(data: GateDraftData): string {
+  const emoji = intentEmoji(data.parsedIntent);
+  const label = intentLabel(data.parsedIntent);
+  const lines: string[] = [`${emoji} <b>${label}</b>`];
+
+  if (data.parsedAmount) {
+    const amountLine = `<b>${data.parsedAmount} ${data.parsedCurrency ?? 'USDT'}</b>`;
+    const blockContent = data.itemName
+      ? `${amountLine}\n${data.itemName}`
+      : amountLine;
+    lines.push(`<blockquote>${blockContent}</blockquote>`);
+  } else if (data.itemName) {
+    lines.push(`<blockquote>${data.itemName}</blockquote>`);
+  }
+
+  if (data.parsedCategoryHint) {
+    lines.push(`\n📁 ${data.parsedCategoryHint}`);
+  }
+
+  return lines.join('\n');
+}
+
+export function buildPendingGateScreen(data: GateDraftData): string {
+  const summary = buildDraftSummaryBlock(data);
+  return [
+    '⚠️ <b>Незаписанная транзакция</b>',
+    '',
+    summary,
+    '',
+    '<i>Подтвердите или отмените черновик,</i>',
+    '<i>прежде чем записать новую транзакцию.</i>',
+  ].join('\n');
+}
+
+export function buildGatePausedPreview(data: GateDraftData): string {
+  const summary = buildDraftSummaryBlock(data);
+  return [
+    summary,
+    '',
+    '⏸ <i>Ожидает вашего ответа ↓</i>',
+  ].join('\n');
+}
+
+export function buildReminderScreen(data: GateDraftData): string {
+  const summary = buildDraftSummaryBlock(data);
+  return [
+    '⏰ <b>Не забудьте подтвердить!</b>',
+    '',
+    summary,
+    '',
+    '<i>Черновик будет автоматически отменён</i>',
+    '<i>через 10 минут.</i>',
+  ].join('\n');
+}
+
+export function buildExpiredDraftScreen(data: GateDraftData): string {
+  const emoji = intentEmoji(data.parsedIntent);
+  const label = intentLabel(data.parsedIntent);
+  const amountPart = data.parsedAmount
+    ? ` · ${data.parsedAmount} ${data.parsedCurrency ?? 'USDT'}`
+    : '';
+
+  return [
+    '⏰ <b>Черновик истёк</b>',
+    '',
+    `${emoji} ${label}${amountPart}`,
+    '',
+    '<i>Транзакция не была подтверждена</i>',
+    '<i>и автоматически отменена.</i>',
+    '',
+    'Отправьте новое сообщение для записи.',
   ].join('\n');
 }
 

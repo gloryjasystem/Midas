@@ -22,6 +22,7 @@
 import { Worker, type Job } from 'bullmq';
 import { QUEUE_NAMES, type NotificationJobPayload } from '@midas/shared';
 import { redisConnection } from '../queues/redis.js';
+import { savePreviewMessageId, saveReminderMessageId } from '../services/draft.service.js';
 
 const TELEGRAM_API_BASE = `https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN ?? ''}`;
 
@@ -211,21 +212,27 @@ async function processNotification(job: Job<NotificationJobPayload>): Promise<vo
   }
 
 
-  // Phase 1.36-UX: If this is a preview notification (draftId present), store the
-  // sent message_id so the confirmation worker can edit it (preview → confirmed).
-  // Key: midas:preview:{draftId} → message_id  TTL: 600s (10 min)
+  // Phase 1.39: Store preview message_id in Redis (fast cache, 1h TTL)
+  // AND in PostgreSQL (durable fallback for confirmation worker).
   if (draftId && sentMessageId) {
     try {
-      await redisConnection.set(`midas:preview:${draftId}`, sentMessageId, 'EX', 600);
+      await redisConnection.set(`midas:preview:${draftId}`, sentMessageId, 'EX', 3600);
+      // Phase 1.39: DB persistence (survives Redis TTL)
+      if (workspaceId) {
+        void savePreviewMessageId(draftId, workspaceId, sentMessageId, chatId).catch(() => {/* non-fatal */});
+      }
     } catch { /* non-fatal */ }
   }
 
   // Phase 1.37-UX: If cacheStoreKey is set, write sentMessageId back to Redis.
-  // Used by clarification flow: next "not understood" message will edit this one
-  // instead of sending a new duplicate message.
+  // Used by clarification flow and Phase 1.39 reminder/gate tracking.
   if (job.data.cacheStoreKey && sentMessageId) {
     try {
-      await redisConnection.set(job.data.cacheStoreKey, sentMessageId, 'EX', 600);
+      await redisConnection.set(job.data.cacheStoreKey, sentMessageId, 'EX', 3600);
+      // Phase 1.39: Persist reminder message_id to DB if this is a reminder
+      if (job.data.cacheStoreKey.startsWith('midas:reminder:') && draftId && workspaceId) {
+        void saveReminderMessageId(draftId, workspaceId, sentMessageId).catch(() => {/* non-fatal */});
+      }
     } catch { /* non-fatal */ }
   }
 

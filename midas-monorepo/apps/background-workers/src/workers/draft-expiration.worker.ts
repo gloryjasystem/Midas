@@ -1,51 +1,41 @@
 /**
- * Draft Expiration Worker — Phase 1.7
+ * Draft Expiration Worker — Phase 1.7 / Phase 1.39
  *
  * Processes jobs from the `draft-expiration` queue.
  * This is a scheduled/repeatable system CRON worker.
  *
- * Architecture:
- *   - BullMQ repeatable job (every 5 minutes) triggers this worker.
- *   - Worker calls expirePendingDrafts() which invokes the
- *     system_expire_pending_drafts() SECURITY DEFINER DB function.
- *   - The DB function atomically updates all eligible drafts in one SQL statement.
- *   - Idempotent: running multiple times has no side effect — already-expired
- *     and terminal drafts are excluded by the DB WHERE clause.
+ * Phase 1.39 additions:
+ *   - Dual pipeline: expire FIRST → reminders SECOND (I-2)
+ *   - Expire: edits preview + reminder cards → expired screen (in-place)
+ *   - Expire: saves expired msg_ids to Redis for auto-cleanup
+ *   - Reminders: sends reminder cards 10 min before expiry
  *
  * CRON deduplication:
  *   - Repeatable jobs are registered with a fixed jobId pattern by BullMQ.
- *   - If the worker is restarted, BullMQ does NOT create duplicate repeatable
- *     job definitions — it upserts by (name, repeat key).
- *   - Concurrency is set to 1 to prevent overlapping runs within the same worker
- *     process (DB function itself is safe if overlapping, but single concurrency
- *     avoids redundant DB calls).
+ *   - Concurrency = 1 to prevent overlapping runs.
  *
  * SEC-12: No raw_text or user PII in any log output.
- * SEC-03: No tenant context needed — system_expire_pending_drafts is SECURITY DEFINER.
+ * SEC-03: No tenant context needed — SECURITY DEFINER functions.
  */
 
 import { Worker, type Job } from 'bullmq';
-import { QUEUE_NAMES } from '@midas/shared';
+import { QUEUE_NAMES, IdempotencyKeyBuilder } from '@midas/shared';
 import { redisConnection } from '../queues/redis.js';
-import { expirePendingDrafts } from '../services/draft-expiration.service.js';
+import { notificationsQueue } from '../queues/queue-definitions.js';
+import { expirePendingDrafts, findDraftsNeedingReminder } from '../services/draft-expiration.service.js';
+import { markReminderSent } from '../services/draft.service.js';
+import {
+  buildExpiredDraftScreen,
+  buildReminderScreen,
+  buildConfirmKeyboard,
+} from '../utils/screen-builder.js';
+import { ulid } from 'ulid';
 
 // ─────────────────────────────────────────────────────────────
 // CRON schedule
 // ─────────────────────────────────────────────────────────────
 
-/**
- * Expiration CRON interval.
- * Every 5 minutes — balances responsiveness with DB load.
- * drafts.expires_at is indexed (idx_transaction_drafts_expires_at),
- * so this UPDATE is efficient even at scale.
- */
 export const EXPIRATION_CRON_PATTERN = '*/5 * * * *'; // every 5 minutes
-
-/**
- * Fixed jobId for the repeatable CRON trigger.
- * BullMQ uses this as the stable identifier for the repeatable job definition.
- * Using a fixed ID prevents duplicate CRON registrations on worker restart.
- */
 export const EXPIRATION_CRON_JOB_ID = 'system|draft-expiration|cron';
 
 // ─────────────────────────────────────────────────────────────
@@ -55,15 +45,118 @@ export const EXPIRATION_CRON_JOB_ID = 'system|draft-expiration|cron';
 async function processExpiration(job: Job): Promise<void> {
   console.log('[midas:draft-expiration-worker] Expiration run started', {
     jobId: job.id,
-    // No workspace, no user, no payload data to log
   });
 
-  const { expiredCount } = await expirePendingDrafts();
+  // ══════════════════════════════════════════════════════════
+  // I-2: Pipeline 1 — Expire FIRST (before reminders)
+  // This prevents sending reminders for drafts that expire in the same tick.
+  // ══════════════════════════════════════════════════════════
+
+  const { expiredCount, expiredDrafts } = await expirePendingDrafts();
+
+  for (const draft of expiredDrafts) {
+    // Build the expired screen text with draft details
+    const expiredText = buildExpiredDraftScreen({
+      parsedIntent: draft.parsedIntent,
+      parsedAmount: draft.parsedAmount,
+      parsedCurrency: draft.parsedCurrency,
+      parsedCategoryHint: draft.parsedCategoryHint,
+      itemName: draft.itemName,
+    });
+
+    // Edit preview card → expired screen (in-place, no buttons)
+    if (draft.previewMessageId && draft.previewChatId) {
+      const alertP = ulid();
+      await notificationsQueue.add(
+        QUEUE_NAMES.NOTIFICATIONS,
+        {
+          alertId: alertP,
+          workspaceId: draft.workspaceId,
+          chatId: draft.previewChatId,
+          message: expiredText,
+          activeMessageId: draft.previewMessageId,
+          // No inline keyboard → buttons removed
+        },
+        { jobId: IdempotencyKeyBuilder.notification(draft.workspaceId, alertP) },
+      );
+
+      // Save expired msg_id for auto-cleanup (C-13: APPEND logic)
+      try {
+        const expiredKey = `midas:expired_msgs:${draft.previewChatId}`;
+        const existing = await redisConnection.get(expiredKey);
+        const ids = existing ? `${existing},${draft.previewMessageId}` : draft.previewMessageId;
+        await redisConnection.set(expiredKey, ids, 'EX', 86400);
+      } catch { /* non-fatal */ }
+    }
+
+    // Edit reminder card → expired screen (in-place, no buttons)
+    if (draft.reminderMessageId && draft.previewChatId) {
+      const alertR = ulid();
+      await notificationsQueue.add(
+        QUEUE_NAMES.NOTIFICATIONS,
+        {
+          alertId: alertR,
+          workspaceId: draft.workspaceId,
+          chatId: draft.previewChatId,
+          message: expiredText,
+          activeMessageId: draft.reminderMessageId,
+          // No inline keyboard → buttons removed
+        },
+        { jobId: IdempotencyKeyBuilder.notification(draft.workspaceId, alertR) },
+      );
+
+      // Save reminder msg_id too for auto-cleanup
+      try {
+        const expiredKey = `midas:expired_msgs:${draft.previewChatId}`;
+        const existing = await redisConnection.get(expiredKey);
+        const ids = existing ? `${existing},${draft.reminderMessageId}` : draft.reminderMessageId;
+        await redisConnection.set(expiredKey, ids, 'EX', 86400);
+      } catch { /* non-fatal */ }
+    }
+  }
+
+  // ══════════════════════════════════════════════════════════
+  // Pipeline 2 — Reminders (AFTER expire, so already-expired
+  // drafts won't appear in the reminder query)
+  // ══════════════════════════════════════════════════════════
+
+  const reminders = await findDraftsNeedingReminder(600); // 10 min lead
+
+  for (const draft of reminders) {
+    if (!draft.previewChatId) continue; // can't send reminder without chatId
+
+    const alertId = ulid();
+    const reminderText = buildReminderScreen({
+      parsedIntent: draft.parsedIntent,
+      parsedAmount: draft.parsedAmount,
+      parsedCurrency: draft.parsedCurrency,
+      parsedCategoryHint: draft.parsedCategoryHint,
+      itemName: draft.itemName,
+    });
+
+    await notificationsQueue.add(
+      QUEUE_NAMES.NOTIFICATIONS,
+      {
+        alertId,
+        workspaceId: draft.workspaceId,
+        chatId: draft.previewChatId,
+        draftId: draft.draftId,
+        message: reminderText,
+        inlineKeyboardJson: JSON.stringify(buildConfirmKeyboard(draft.draftId)),
+        cacheStoreKey: `midas:reminder:${draft.draftId}`,
+      },
+      { jobId: IdempotencyKeyBuilder.notification(draft.workspaceId, alertId) },
+    );
+  }
+
+  if (reminders.length > 0) {
+    await markReminderSent(reminders.map(d => d.draftId));
+  }
 
   console.log('[midas:draft-expiration-worker] Expiration run complete', {
     jobId: job.id,
     expiredCount,
-    // SEC-12: count only, no draft IDs or raw_text
+    remindersCount: reminders.length,
   });
 }
 
@@ -88,7 +181,6 @@ export function createDraftExpirationWorker(): Worker {
     console.error('[midas:draft-expiration-worker] Job failed', {
       jobId: job?.id ?? 'unknown',
       errorClass: err.constructor.name,
-      // No payload data (SEC-12)
     });
   });
 

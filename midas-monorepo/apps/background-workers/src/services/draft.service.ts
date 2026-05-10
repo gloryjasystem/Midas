@@ -90,10 +90,10 @@ export type PatchDraftResult =
 
 // ─────────────────────────────────────────────────────────────
 // Draft TTL
-// From ADR-013: 24-hour draft expiry
+// Phase 1.39: Reduced from 24h to 1h for better UX
 // ─────────────────────────────────────────────────────────────
 
-const DRAFT_TTL_HOURS = 24;
+const DRAFT_TTL_SECONDS = 3600; // 1 hour (Phase 1.39)
 
 // ─────────────────────────────────────────────────────────────
 // createDraft
@@ -141,8 +141,8 @@ export async function createDraft(input: CreateDraftInput): Promise<CreatedDraft
   // Generate system-controlled IDs (ADR-004)
   const draftId = ulid();
 
-  // Calculate expiry (ADR-013: 24h TTL)
-  const expiresAt = new Date(Date.now() + DRAFT_TTL_HOURS * 60 * 60 * 1000);
+  // Calculate expiry (Phase 1.39: 1h TTL)
+  const expiresAt = new Date(Date.now() + DRAFT_TTL_SECONDS * 1000);
 
   // Extract AI data for column values
   const aiData: AiOutput | null = partialData;
@@ -490,4 +490,150 @@ export async function patchDraftCategory(
 
     return { status: 'ready', draftId };
   });
+}
+
+// ─────────────────────────────────────────────────────────────
+// Phase 1.39: Persistent preview message tracking
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Save the Telegram message ID of the preview card to PostgreSQL.
+ * This provides durable storage that survives Redis TTL expiration.
+ * SEC-12: Only system IDs stored — no user financial data.
+ */
+export async function savePreviewMessageId(
+  draftId: string,
+  workspaceId: string,
+  messageId: string,
+  chatId: string,
+): Promise<void> {
+  await pool.query(
+    `UPDATE transaction_drafts
+     SET preview_message_id = $1,
+         preview_chat_id = $2,
+         updated_at = NOW()
+     WHERE id = $3 AND workspace_id = $4`,
+    [messageId, chatId, draftId, workspaceId],
+  );
+}
+
+/**
+ * Read preview message info from PostgreSQL (durable fallback after Redis TTL).
+ * SEC-12: Returns only system IDs.
+ */
+export async function getPreviewMessageInfo(
+  draftId: string,
+  workspaceId: string,
+): Promise<{ messageId: string; chatId: string } | null> {
+  const result = await pool.query<{ preview_message_id: string; preview_chat_id: string }>(
+    `SELECT preview_message_id, preview_chat_id
+     FROM transaction_drafts
+     WHERE id = $1 AND workspace_id = $2
+       AND preview_message_id IS NOT NULL`,
+    [draftId, workspaceId],
+  );
+  const row = result.rows[0];
+  if (!row) return null;
+  return { messageId: row.preview_message_id, chatId: row.preview_chat_id };
+}
+
+// ─────────────────────────────────────────────────────────────
+// Phase 1.39: Pending draft gate check
+// ─────────────────────────────────────────────────────────────
+
+export interface PendingDraftInfo {
+  draftId: string;
+  status: string;
+  previewMessageId: string | null;
+  previewChatId: string | null;
+  parsedIntent: string | null;
+  parsedAmount: string | null;
+  parsedCurrency: string | null;
+  itemName: string | null;
+  parsedCategoryHint: string | null;
+}
+
+/**
+ * Find an active draft (pending_user or needs_clarification) for a user.
+ * C-10: Checks both statuses — needs_clarification is also an active state.
+ * C-12: Uses pool.query with explicit workspace_id filter (no RLS overhead).
+ * SEC-12: Returns only parsed fields, never raw_text.
+ */
+export async function getPendingDraftForUser(
+  workspaceId: string,
+  _userId: string,
+): Promise<PendingDraftInfo | null> {
+  const result = await pool.query<{
+    id: string;
+    status: string;
+    preview_message_id: string | null;
+    preview_chat_id: string | null;
+    parsed_intent: string | null;
+    parsed_amount: string | null;
+    parsed_currency: string | null;
+    item_name: string | null;
+    parsed_category_hint: string | null;
+  }>(
+    `SELECT td.id, td.status,
+            td.preview_message_id, td.preview_chat_id,
+            td.parsed_intent, td.parsed_amount::TEXT AS parsed_amount,
+            td.parsed_currency, td.item_name, td.parsed_category_hint
+     FROM transaction_drafts td
+     WHERE td.workspace_id = $1
+       AND td.status IN ('pending_user', 'needs_clarification')
+       AND td.expires_at > NOW()
+     ORDER BY td.created_at DESC
+     LIMIT 1`,
+    [workspaceId],
+  );
+  const row = result.rows[0];
+  if (!row) return null;
+  return {
+    draftId: row.id,
+    status: row.status,
+    previewMessageId: row.preview_message_id,
+    previewChatId: row.preview_chat_id,
+    parsedIntent: row.parsed_intent,
+    parsedAmount: row.parsed_amount,
+    parsedCurrency: row.parsed_currency,
+    itemName: row.item_name,
+    parsedCategoryHint: row.parsed_category_hint,
+  };
+}
+
+// ─────────────────────────────────────────────────────────────
+// Phase 1.39: Reminder message tracking
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Save the reminder message ID to PostgreSQL.
+ * SEC-12: Only system ID stored.
+ */
+export async function saveReminderMessageId(
+  draftId: string,
+  workspaceId: string,
+  messageId: string,
+): Promise<void> {
+  await pool.query(
+    `UPDATE transaction_drafts
+     SET reminder_message_id = $1,
+         updated_at = NOW()
+     WHERE id = $2 AND workspace_id = $3`,
+    [messageId, draftId, workspaceId],
+  );
+}
+
+/**
+ * Mark reminder as sent for a batch of drafts.
+ * Called after the expiration worker sends reminder notifications.
+ */
+export async function markReminderSent(draftIds: string[]): Promise<void> {
+  if (draftIds.length === 0) return;
+  await pool.query(
+    `UPDATE transaction_drafts
+     SET reminder_sent_at = NOW(),
+         updated_at = NOW()
+     WHERE id = ANY($1::text[])`,
+    [draftIds],
+  );
 }

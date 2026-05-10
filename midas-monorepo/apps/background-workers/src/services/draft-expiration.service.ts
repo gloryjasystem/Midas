@@ -1,57 +1,141 @@
 /**
- * Draft Expiration Service — Phase 1.7
+ * Draft Expiration Service — Phase 1.7 / Phase 1.39
  *
- * Calls the system_expire_pending_drafts() SECURITY DEFINER DB function
- * to atomically expire all pending_user drafts whose expires_at <= NOW().
+ * Phase 1.7: Calls system_expire_pending_drafts() to expire stale drafts.
+ * Phase 1.39: Returns full draft data (TABLE) for in-place card editing.
+ *             Adds findDraftsNeedingReminder() for the reminder pipeline.
  *
  * Design:
  *   - Uses pool.query() directly (not withTenantTransaction) because:
- *     a) system_expire_pending_drafts runs as midas_migrator (SECURITY DEFINER)
- *        and does not depend on app.workspace_id / app.user_id session settings.
+ *     a) SECURITY DEFINER functions run as midas_migrator.
  *     b) This is a system maintenance operation, not a tenant-scoped user action.
- *   - No parameters to the DB function → no injection surface.
- *   - Returns only the count of expired drafts (no raw_text, no PII — SEC-12).
+ *   - No parameters to the expire function → no injection surface.
  *
- * SEC-03: No tenant context injection needed — SECURITY DEFINER function handles RLS bypass.
- * SEC-12: Return value contains only expired_count (integer). No raw_text logged.
+ * SEC-03: No tenant context injection needed — SECURITY DEFINER functions handle RLS bypass.
+ * SEC-12: Return values contain only system IDs and parsed fields. No raw_text logged.
  */
 
 import { pool } from '@midas/database';
 
 // ─────────────────────────────────────────────────────────────
-// Result type
+// Types
 // ─────────────────────────────────────────────────────────────
 
+export interface ExpiredDraft {
+  draftId: string;
+  workspaceId: string;
+  previewMessageId: string | null;
+  previewChatId: string | null;
+  reminderMessageId: string | null;
+  parsedIntent: string | null;
+  parsedAmount: string | null;
+  parsedCurrency: string | null;
+  itemName: string | null;
+  parsedCategoryHint: string | null;
+}
+
 export interface ExpireResult {
-  /** Number of drafts that were expired in this run. */
   expiredCount: number;
+  expiredDrafts: ExpiredDraft[];
+}
+
+export interface ReminderDraft {
+  draftId: string;
+  workspaceId: string;
+  previewMessageId: string | null;
+  previewChatId: string | null;
+  parsedIntent: string | null;
+  parsedAmount: string | null;
+  parsedCurrency: string | null;
+  itemName: string | null;
+  parsedCategoryHint: string | null;
 }
 
 // ─────────────────────────────────────────────────────────────
-// expirePendingDrafts
+// expirePendingDrafts — Phase 1.39: returns TABLE with draft data
 // ─────────────────────────────────────────────────────────────
 
 /**
  * Expire all pending_user drafts whose expires_at has passed.
+ * Phase 1.39: Now returns full draft data for in-place card editing.
  *
- * Calls system_expire_pending_drafts() SECURITY DEFINER function.
- * Safe to call multiple times (idempotent): already-expired or terminal
- * drafts are not matched by the WHERE clause.
- *
- * @returns ExpireResult with the count of newly expired drafts.
+ * @returns ExpireResult with count and draft details for UI updates.
  */
 export async function expirePendingDrafts(): Promise<ExpireResult> {
-  const result = await pool.query<{ expired_count: number }>(
-    `SELECT system_expire_pending_drafts() AS expired_count`,
+  const result = await pool.query<{
+    draft_id: string;
+    workspace_id: string;
+    preview_message_id: string | null;
+    preview_chat_id: string | null;
+    reminder_message_id: string | null;
+    parsed_intent: string | null;
+    parsed_amount: string | null;
+    parsed_currency: string | null;
+    item_name: string | null;
+    parsed_category_hint: string | null;
+  }>(
+    `SELECT * FROM system_expire_pending_drafts()`,
   );
 
-  const expiredCount = result.rows[0]?.expired_count ?? 0;
+  const expiredDrafts: ExpiredDraft[] = result.rows.map(r => ({
+    draftId: r.draft_id,
+    workspaceId: r.workspace_id,
+    previewMessageId: r.preview_message_id,
+    previewChatId: r.preview_chat_id,
+    reminderMessageId: r.reminder_message_id,
+    parsedIntent: r.parsed_intent,
+    parsedAmount: r.parsed_amount,
+    parsedCurrency: r.parsed_currency,
+    itemName: r.item_name,
+    parsedCategoryHint: r.parsed_category_hint,
+  }));
 
-  // SEC-12: Log only the count, not any draft contents.
   console.log('[midas:draft-expiration] Expiration run complete', {
-    expiredCount,
-    // No workspace IDs, no raw_text, no draft IDs (SEC-12)
+    expiredCount: expiredDrafts.length,
   });
 
-  return { expiredCount };
+  return { expiredCount: expiredDrafts.length, expiredDrafts };
+}
+
+// ─────────────────────────────────────────────────────────────
+// findDraftsNeedingReminder — Phase 1.39
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Find pending_user drafts that need a reminder notification.
+ * A draft needs a reminder if:
+ *   1. It's still pending_user
+ *   2. reminder_sent_at IS NULL (not yet reminded)
+ *   3. expires_at is within lead_seconds from now
+ *   4. expires_at > NOW() (not yet expired)
+ *
+ * @param leadSeconds — seconds before expiry to trigger reminder (default: 600 = 10 min)
+ */
+export async function findDraftsNeedingReminder(leadSeconds: number = 600): Promise<ReminderDraft[]> {
+  const result = await pool.query<{
+    draft_id: string;
+    workspace_id: string;
+    preview_message_id: string | null;
+    preview_chat_id: string | null;
+    parsed_intent: string | null;
+    parsed_amount: string | null;
+    parsed_currency: string | null;
+    item_name: string | null;
+    parsed_category_hint: string | null;
+  }>(
+    `SELECT * FROM system_find_drafts_needing_reminder($1)`,
+    [leadSeconds],
+  );
+
+  return result.rows.map(r => ({
+    draftId: r.draft_id,
+    workspaceId: r.workspace_id,
+    previewMessageId: r.preview_message_id,
+    previewChatId: r.preview_chat_id,
+    parsedIntent: r.parsed_intent,
+    parsedAmount: r.parsed_amount,
+    parsedCurrency: r.parsed_currency,
+    itemName: r.item_name,
+    parsedCategoryHint: r.parsed_category_hint,
+  }));
 }

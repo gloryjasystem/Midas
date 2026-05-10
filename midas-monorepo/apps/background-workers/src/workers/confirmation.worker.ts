@@ -24,7 +24,7 @@ import { QUEUE_NAMES, type CallbackConfirmJobPayload, IdempotencyKeyBuilder } fr
 import { redisConnection } from '../queues/redis.js';
 import { callbackConfirmQueue, notificationsQueue } from '../queues/queue-definitions.js';
 import { approveDraft, rejectDraft, fetchApprovedTransactionCard } from '../services/draft-confirmation.service.js';
-import { resolveUserId } from '../services/draft.service.js';
+import { resolveUserId, getPreviewMessageInfo } from '../services/draft.service.js';
 import { ulid } from 'ulid';
 import {
   buildConfirmedScreen,
@@ -206,16 +206,21 @@ async function processConfirmation(job: Job<CallbackConfirmJobPayload>): Promise
   let previewMsgId: string | undefined;
 
 
-  // Phase 1.38: Read preview message_id for approve AND reject.
+  // Phase 1.39: Read preview message_id for approve AND reject.
+  // Strategy: Redis (fast cache) → DB fallback (durable).
   // For approve: preview card → "✅ Записано"
   // For reject:  preview card → "❌ Отменено"
   // Both edit in-place — no duplicate messages in chat.
   if (action === 'approve' || action === 'reject') {
     try {
+      // 1. Redis (fast, may be expired after 1h)
       const pVal = await redisConnection.get(`midas:preview:${draftId}`);
       if (pVal) {
         previewMsgId = pVal;
-        void redisConnection.del(`midas:preview:${draftId}`);
+      } else {
+        // 2. DB fallback (durable, always available)
+        const dbInfo = await getPreviewMessageInfo(draftId, workspaceId);
+        if (dbInfo) previewMsgId = dbInfo.messageId;
       }
     } catch { /* non-fatal */ }
   }
@@ -239,6 +244,34 @@ async function processConfirmation(job: Job<CallbackConfirmJobPayload>): Promise
       jobId: IdempotencyKeyBuilder.notification(workspaceId, alertId),
     },
   );
+
+  // Phase 1.39: Cleanup gate state after approve/reject.
+  // 1. Delete gate_sent flag so next message isn't blocked
+  // 2. Delete gate card from chat (I-1)
+  // 3. Cleanup Redis preview cache (C-9: delete AFTER successful edit)
+  try {
+    void redisConnection.del(`midas:gate_sent:${telegramUserId}:${chatId}`);
+    void redisConnection.del(`midas:preview:${draftId}`);
+
+    // I-1: Delete gate card message from chat
+    const gateCardKey = `midas:gate_card:${telegramUserId}:${chatId}`;
+    const gateCardMsgId = await redisConnection.get(gateCardKey);
+    if (gateCardMsgId) {
+      const gateAlertId = ulid();
+      await notificationsQueue.add(
+        QUEUE_NAMES.NOTIFICATIONS,
+        {
+          alertId: gateAlertId,
+          workspaceId,
+          chatId,
+          message: '',
+          deleteMessageId: gateCardMsgId,
+        },
+        { jobId: IdempotencyKeyBuilder.notification(workspaceId, gateAlertId) },
+      );
+      void redisConnection.del(gateCardKey);
+    }
+  } catch { /* non-fatal gate cleanup */ }
 }
 
 // ─────────────────────────────────────────────────────────────

@@ -32,7 +32,7 @@ import { Worker, type Job } from 'bullmq';
 import { QUEUE_NAMES, type AiParseJobPayload, IdempotencyKeyBuilder } from '@midas/shared';
 import { parseTransaction } from '@midas/ai-core';
 import { redisConnection } from '../queues/redis.js';
-import { createDraft, resolveUserId, setDraftAccountId } from '../services/draft.service.js';
+import { createDraft, resolveUserId, setDraftAccountId, getPendingDraftForUser } from '../services/draft.service.js';
 import { resolveAccountFromHint } from '../services/account-resolver.service.js'; // Phase 1.31
 import { notificationsQueue } from '../queues/queue-definitions.js';
 import { ulid } from 'ulid';
@@ -43,6 +43,8 @@ import {
   buildNonsenseScreen,
   buildConfirmKeyboard,
   buildCurrencyClarScreen,
+  buildPendingGateScreen,
+  buildGatePausedPreview,
   escapeHtml,
 } from '../utils/screen-builder.js';
 
@@ -206,6 +208,98 @@ async function processAiParse(job: Job<AiParseJobPayload>): Promise<void> {
     throw err;
   }
 
+  const { chatId } = job.data;
+
+  // ── Step 2.4: Phase 1.39 — Auto-delete expired draft cards ────
+  // When user sends a new message, clean up any previously expired
+  // draft cards from the chat (kept in Redis for 24h).
+  try {
+    const expiredKey = `midas:expired_msgs:${chatId}`;
+    const expiredMsgIds = await redisConnection.get(expiredKey);
+    if (expiredMsgIds) {
+      const ids = expiredMsgIds.split(',').filter(Boolean);
+      for (const msgId of ids) {
+        const delAlertId = ulid();
+        await notificationsQueue.add(
+          QUEUE_NAMES.NOTIFICATIONS,
+          {
+            alertId: delAlertId,
+            workspaceId,
+            chatId,
+            message: '',
+            deleteMessageId: msgId,
+          },
+          { jobId: IdempotencyKeyBuilder.notification(workspaceId, delAlertId) },
+        );
+      }
+      void redisConnection.del(expiredKey);
+    }
+  } catch { /* non-fatal expired cleanup */ }
+
+  // ── Step 2.5: Phase 1.39 — Active draft gate check ──────────
+  // C-10: Check BOTH pending_user AND needs_clarification
+  const pendingDraft = await getPendingDraftForUser(workspaceId, userId);
+  if (pendingDraft) {
+    const gateSentKey = `midas:gate_sent:${telegramUserId}:${chatId}`;
+    const alreadySent = await redisConnection.get(gateSentKey);
+
+    if (!alreadySent) {
+      // First time — update preview to paused + send gate card
+      const gateData = {
+        parsedIntent: pendingDraft.parsedIntent,
+        parsedAmount: pendingDraft.parsedAmount,
+        parsedCurrency: pendingDraft.parsedCurrency,
+        parsedCategoryHint: pendingDraft.parsedCategoryHint,
+        itemName: pendingDraft.itemName,
+      };
+
+      // Edit preview card → paused state (remove buttons)
+      if (pendingDraft.previewMessageId && pendingDraft.previewChatId) {
+        const pauseAlertId = ulid();
+        await notificationsQueue.add(
+          QUEUE_NAMES.NOTIFICATIONS,
+          {
+            alertId: pauseAlertId,
+            workspaceId,
+            chatId: pendingDraft.previewChatId,
+            message: buildGatePausedPreview(gateData),
+            activeMessageId: pendingDraft.previewMessageId,
+            // No keyboard → removes buttons
+          },
+          { jobId: IdempotencyKeyBuilder.notification(workspaceId, pauseAlertId) },
+        );
+      }
+
+      // Send gate card with confirm/edit/cancel buttons
+      const gateAlertId = ulid();
+      await notificationsQueue.add(
+        QUEUE_NAMES.NOTIFICATIONS,
+        {
+          alertId: gateAlertId,
+          workspaceId,
+          chatId,
+          draftId: pendingDraft.draftId,
+          message: buildPendingGateScreen(gateData),
+          inlineKeyboardJson: JSON.stringify(buildConfirmKeyboard(pendingDraft.draftId)),
+          telegramUserId,
+          cacheStoreKey: `midas:gate_card:${telegramUserId}:${chatId}`,
+        },
+        { jobId: IdempotencyKeyBuilder.notification(workspaceId, gateAlertId) },
+      );
+
+      await redisConnection.set(gateSentKey, '1', 'EX', 3600);
+    }
+    // else: gate already sent — silently ignore
+
+    console.log('[midas:ai-parse-worker] Gate: blocked new input, active draft exists', {
+      jobId: job.id,
+      workspaceId,
+      activeDraftId: pendingDraft.draftId,
+      activeDraftStatus: pendingDraft.status,
+    });
+    return; // ← STOP — do not process new message
+  }
+
   // ── Step 3: Parse with Claude Haiku (SEC-01) ─────────────
   // raw_text passed to parseTransaction only — never logged inside
   const parseResult = await parseTransaction(job.data.raw_text);
@@ -246,7 +340,7 @@ async function processAiParse(job: Job<AiParseJobPayload>): Promise<void> {
     clarificationField,
   });
 
-  const { chatId } = job.data;
+
   const alertId = ulid();
 
   // ── Step 6: Send response based on parse result ──────────

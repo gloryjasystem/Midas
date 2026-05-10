@@ -171,7 +171,7 @@ export function buildRejectedScreen(): string {
 }
 
 export function buildExpiredScreen(): string {
-  return '⏰ <b>Черновик истёк</b>\n\nПрошло более 24 часов. Отправьте сообщение повторно.';
+  return '⏰ <b>Черновик истёк</b>\n\nТранзакция не была подтверждена в течение 1 часа.\nОтправьте сообщение повторно.';
 }
 
 export function buildAlreadyProcessedScreen(existingStatus: string): string {
@@ -229,6 +229,109 @@ export function buildNonsenseScreen(): string {
     '',
     'Укажи сумму и валюту:',
     'кофе 150 UAH · займ 2000 USDT · зарплата 800 USD',
+  ].join('\n');
+}
+
+// ─────────────────────────────────────────────────────────────
+// Phase 1.39: Gate, Reminder, Expired screens
+// ─────────────────────────────────────────────────────────────
+
+export interface GateDraftData {
+  parsedIntent: string | null;
+  parsedAmount: string | null;
+  parsedCurrency: string | null;
+  parsedCategoryHint: string | null;
+  itemName: string | null;
+}
+
+/** Build a compact draft summary block (reused across gate/reminder/expired). */
+function buildDraftSummaryBlock(data: GateDraftData): string {
+  const emoji = intentEmoji(data.parsedIntent);
+  const label = intentLabel(data.parsedIntent);
+  const lines: string[] = [`${emoji} <b>${label}</b>`];
+
+  if (data.parsedAmount) {
+    const amountLine = `<b>${escapeHtml(data.parsedAmount)} ${escapeHtml(data.parsedCurrency ?? 'USDT')}</b>`;
+    const blockContent = data.itemName
+      ? `${amountLine}\n${escapeHtml(data.itemName)}`
+      : amountLine;
+    lines.push(`<blockquote>${blockContent}</blockquote>`);
+  } else if (data.itemName) {
+    lines.push(`<blockquote>${escapeHtml(data.itemName)}</blockquote>`);
+  }
+
+  if (data.parsedCategoryHint) {
+    lines.push(`\n📁 ${escapeHtml(data.parsedCategoryHint)}`);
+  }
+
+  return lines.join('\n');
+}
+
+/**
+ * Gate card — shown when user tries to write a new transaction
+ * while a pending draft exists.
+ */
+export function buildPendingGateScreen(data: GateDraftData): string {
+  const summary = buildDraftSummaryBlock(data);
+  return [
+    '⚠️ <b>Незаписанная транзакция</b>',
+    '',
+    summary,
+    '',
+    '<i>Подтвердите или отмените черновик,</i>',
+    '<i>прежде чем записать новую транзакцию.</i>',
+  ].join('\n');
+}
+
+/**
+ * Paused preview — replaces the original preview when gate is triggered.
+ * Buttons removed, shows "waiting" indicator.
+ */
+export function buildGatePausedPreview(data: GateDraftData): string {
+  const summary = buildDraftSummaryBlock(data);
+  return [
+    summary,
+    '',
+    '⏸ <i>Ожидает вашего ответа ↓</i>',
+  ].join('\n');
+}
+
+/**
+ * Reminder card — sent 10 minutes before draft expires.
+ */
+export function buildReminderScreen(data: GateDraftData): string {
+  const summary = buildDraftSummaryBlock(data);
+  return [
+    '⏰ <b>Не забудьте подтвердить!</b>',
+    '',
+    summary,
+    '',
+    '<i>Черновик будет автоматически отменён</i>',
+    '<i>через 10 минут.</i>',
+  ].join('\n');
+}
+
+/**
+ * Expired draft card — replaces both preview and reminder after TTL expiry.
+ * Shows transaction data so user knows what expired.
+ */
+export function buildExpiredDraftScreen(data: GateDraftData): string {
+  const emoji = intentEmoji(data.parsedIntent);
+  const label = intentLabel(data.parsedIntent);
+
+  const amountPart = data.parsedAmount
+    ? ` · ${escapeHtml(data.parsedAmount)} ${escapeHtml(data.parsedCurrency ?? 'USDT')}`
+    : '';
+
+  return [
+    '⏰ <b>Черновик истёк</b>',
+    '',
+    `${emoji} ${label}${amountPart}`,
+    '',
+    '<i>Транзакция не была подтверждена</i>',
+    '<i>и автоматически отменена.</i>',
+    '',
+    'Отправьте новое сообщение для записи.',
   ].join('\n');
 }
 
