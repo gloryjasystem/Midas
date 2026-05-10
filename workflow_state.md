@@ -1,7 +1,7 @@
 # WORKFLOW_STATE.MD — Диспетчер задач ИИ-агента Midas
 
 > **Тип:** MUTABLE — кратковременная память агента. Обновляется на каждом шаге работы.
-> **Обновлён:** 2026-05-10 18:44 (UTC+3)
+> **Обновлён:** 2026-05-10 19:58 (UTC+3)
 
 ---
 
@@ -10,12 +10,12 @@
 | Параметр | Значение |
 |---|---|
 | **PHASE** | `2 — Advanced UX & Account Management` |
-| **STEP** | `Phase 2.1 — Account Management Dashboard (DEPLOYED, VERIFYING)` |
-| **AGENT STATUS** | `DEPLOYED — Phase 2.0 Transaction Hub + Phase 2.1 Account Management Dashboard deployed to Railway` |
+| **STEP** | `Phase 2.2 — Settings UI Overhaul (DEPLOYED)` |
+| **AGENT STATUS** | `DEPLOYED — Phase 2.2 Settings 6-button grid + currency search expansion deployed to Railway` |
 | **DEPLOYMENT** | `Railway (spirited-happiness project)` — `Midas` bot service + `background-workers` service + `Postgres` + `Redis` |
-| **LAST COMPLETED** | `Phase 2.1: Interactive Account Management Dashboard — balance-keyboard.service.ts (NEW), bank/wallet presets, fiat/crypto currency pickers, rename/currency change/soft-delete/sync balance flows, bl: callback handler, text intercepts, deleted_at migration applied.` |
-| **BLOCKER** | None. Smoke testing recommended. |
-| **NEXT ACTION** | Smoke test via Telegram: verify balance button → account list → account detail → rename/currency/sync/delete flows. |
+| **LAST COMPLETED** | `Phase 2.2: Settings UI Overhaul — 6-button 2x3 grid (💵 Валюта, 🏦 Основной счет, 🕒 Часовой пояс, 🔔 Уведомления, 💬 Поддержка, ℹ️ О боте). Unified Main Account picker. Currency search with Russian aliases. Soft-deleted accounts filtered. Back button after currency pick. Commit 3e650c1.` |
+| **BLOCKER** | None. |
+| **NEXT ACTION** | Run smoke tests (smoke-test-phase22.mjs). Verify currency search in Russian/English. Verify Main Account sets both income+expense defaults. |
 
 ---
 
@@ -71,6 +71,7 @@
 | 1.40 Dead Card Auto-Cleanup | ✅ DEPLOYED | `confirmation.worker.ts` (+dead_card write after reject/expired), `draft-expiration.worker.ts` (+dead_card write after CRON expire), `ai-parse.worker.ts` (+dead_card read+delete before new preview). Redis key `midas:dead_card:{chatId}` TTL 24h. Commit `51eaf10`. |
 | 2.0 Transaction Hub + Reports 2.0 + Settings 2.0 | ✅ DEPLOYED | `transaction-list.service.ts` (NEW), `transaction-keyboard.service.ts` (NEW), `report-keyboard.service.ts` (NEW), `settings-keyboard.service.ts` (MODIFY). Interactive paginated lists, period picker, filter tabs, /edit deprecation → tx: namespace. Deployed from GitHub `main`. |
 | 2.1 Account Management Dashboard | ✅ DEPLOYED | `balance-keyboard.service.ts` (NEW — 450+ lines), `account-onboard-keyboard.service.ts` (MODIFY — bank/wallet presets, fiat/crypto pickers), `account.service.ts` (MODIFY — renameAccount, changeAccountCurrency, softDeleteAccount, deleted_at filters), `balance.service.ts` (MODIFY — getBalanceData, getAccountDetail, setAccountBalanceById, getAccountTxCount), `webhook.route.ts` (MODIFY — bl: handler, text intercepts, balance navigation update). DB migration: `updated_at` + `deleted_at` columns on `account_sources`. |
+| 2.2 Settings UI Overhaul | ✅ DEPLOYED | `settings-keyboard.service.ts` (MODIFY — 6-button 2x3 grid, URL поддержки, инфо о боте), `currencies.ts` (MODIFY — Russian aliases, 5-pass search, FIAT 40+ / CRYPTO 48+), `settings.service.ts` (FIX — `deleted_at IS NULL` в `getWorkspaceAccounts`), `webhook.route.ts` (MODIFY — кнопка назад после выбора валюты, единый Main Account handler). Commit `3e650c1`. |
 
 ---
 
@@ -233,13 +234,14 @@ apps/background-workers/src/services/draft.service.ts  ← createDraft logic
 > Midas is DEPLOYED to Railway (project: spirited-happiness, env: production).
 > MCP servers: Railway, GitHub, Postgres, Filesystem — all active.
 > Auto-deploy: push to `main` → GitHub → Railway builds both `Midas` and `background-workers`.
-> Phases 1.1–1.40 DONE. Phase 2.0–2.1 DEPLOYED. Current: interactive account management dashboard.
-> Database: PostgreSQL on Railway, RLS enabled. account_sources has updated_at + deleted_at columns (Phase 2.1 migration).
+> Phases 1.1–1.40 DONE. Phase 2.0–2.2 DEPLOYED. Settings overhaul complete.
+> Database: PostgreSQL on Railway, RLS enabled. account_sources has updated_at + deleted_at columns.
 > AI model: Claude Haiku 4.5 via Anthropic API, temperature: 0, post-processing intent recovery.
 > AI parsing rule (FINAL): any number = amount (price). No PRICE vs QUANTITY distinction.
 > Key production fixes applied: markdown fence stripping, formatAmount() String() cast for NUMERIC, RLS policies.
 > Phase 2.1: Balance button → interactive account list (bl: namespace). Account detail → rename/currency/sync/delete.
-> Onboarding extended: bank presets (10 banks), wallet presets (9 wallets), fiat/crypto currency pickers.
+> Phase 2.2: Settings 6-button 2x3 grid. Main Account = unified income+expense default. Currency search supports Russian aliases (биткоин/доллар/евро/рубль etc.) + partial code match (5-pass algorithm).
+> AI fallback chain: AI parsed value → workspace.default_currency / default_expense_account_id (by intent).
 > Do not modify project_config.md.
 
 ## 10. ИСТОРИЯ ДЕЙСТВИЙ (СЖАТАЯ)
@@ -349,7 +351,8 @@ apps/background-workers/src/services/draft.service.ts  ← createDraft logic
 | 2026-05-10 10:08 | **Phase 1.39 — Gate UX Edit-In-Place (Variant B).** `formatAmount()` в обоих screen-builder.ts исправлен: `String()` cast для Postgres NUMERIC типа — устранён TypeError (`raw.includes is not a function`). `clarification.service.ts`: `::TEXT` cast на `parsed_amount` в 2 SQL-запросах. `buildGatePausedPreview()` обновлён: ⚠️ алерт-баннер + summary черновика (вместо старого текста без данных). Блок gate в `ai-parse.worker.ts` переработан: вместо 2 новых сообщений (paused edit + gate card) — **один** edit-in-place существующей preview-карточки с алертом и сохранением клавиатуры подтверждения. Commits `8fa8f91` → `089abf6`. Deployed to Railway — SUCCESS. |
 | 2026-05-10 10:30 | **Phase 1.40 — Dead Card Auto-Cleanup.** Логика: карточки «❌ Отменено» и «⏰ Черновик истёк» автоматически удаляются из чата когда появляется следующая preview-карточка. В чате остаются только: pending (ждёт подтверждения) + approved (✅ Записано). Реализация: `confirmation.worker.ts` — после reject/expired сохраняет `previewMsgId` в Redis `midas:dead_card:{chatId}` TTL 24h. `draft-expiration.worker.ts` — CRON expiry тоже пишет dead_card. `ai-parse.worker.ts` — перед отправкой новой preview читает dead_card, передаёт как `deleteMessageId`, удаляет ключ. Если одновременно есть dead_card и clar_msg — приоритет у dead_card. TypeScript: 0 ошибок. Commit `51eaf10`. Deployed to Railway — SUCCESS. |
 | 2026-05-10 15:30 | **Phase 2.0 — Transaction Hub + Reports 2.0 + Settings 2.0 deployed.** GitHub auto-deploy from `main`. |
-| 2026-05-10 18:44 | **Phase 2.1 — Account Management Dashboard.** Полная реализация интерактивного управления счетами через баланс. **Новые файлы:** `balance-keyboard.service.ts` (450+ строк — parseBalanceCallback, buildBalanceListKeyboard, buildAccountActionsKeyboard, buildDeleteConfirmKeyboard, buildCurrencyWarningKeyboard, buildBalanceFiatCurrencyKeyboard, formatAccountDetailText, BalanceAccountRow type). **Модифицированные файлы:** (1) `account-onboard-keyboard.service.ts` — расширен пресетами банков (10: Тинькофф, Сбербанк, Альфа, ВТБ, Моно, Приват, Каспи, N26, Revolut, Wise) и кошельков (9: Trust Wallet, MetaMask, Exodus, Ledger, Trezor, Phantom, Coinbase Wallet, SafePal, Tangem), добавлены раздельные фиатные (6+custom) и крипто (9+custom) клавиатуры валют, bank_preset/bank_custom/wallet_preset/wallet_custom команды. (2) `account.service.ts` — добавлены `deleted_at IS NULL` фильтры во все ключевые запросы, новые CRUD-функции: `renameAccount()`, `changeAccountCurrency()`, `softDeleteAccount()`. (3) `balance.service.ts` — новые функции: `getBalanceData()` (возвращает {text, accounts}), `getAccountDetail()`, `setAccountBalanceById()`, `getAccountTxCount()`. (4) `webhook.route.ts` — NAV_BTN_BALANCE и /balance переведены на интерактивную клавиатуру, добавлен bl: callback handler (350+ строк: account detail, rename, currency change, sync balance, soft-delete с подтверждением), bl: text intercepts для rename/set_balance/currency_input, ac: handlers расширены bank/wallet presets + fiat/crypto currency pickers, ac:done проверяет bl:source для возврата в баланс. **DB Migration:** `ALTER TABLE account_sources ADD COLUMN updated_at TIMESTAMPTZ DEFAULT NOW()` + `ADD COLUMN deleted_at TIMESTAMPTZ DEFAULT NULL`. Применена напрямую через pg Client (Railway public URL). **Build:** `npx turbo build --force` — 5/5 tasks, 0 errors. **Deploy:** Railway `railway up --ci` — оба сервиса (Midas + background-workers) — SUCCESS. |
+| 2026-05-10 18:44 | **Phase 2.1 — Account Management Dashboard.** Полная реализация интерактивного управления счетами через баланс. **Новые файлы:** `balance-keyboard.service.ts` (450+ строк — parseBalanceCallback, buildBalanceListKeyboard, buildAccountActionsKeyboard, buildDeleteConfirmKeyboard, buildCurrencyWarningKeyboard, buildBalanceFiatCurrencyKeyboard, formatAccountDetailText, BalanceAccountRow type). **Модифицированные файлы:** (1) `account-onboard-keyboard.service.ts` — расширен пресетами банков (10: Тинькофф, Сбербанк, Альфа, ВТБ, Моно, Приват, Каспи, N26, Revolut, Wise) и кошельков (9: Trust Wallet, MetaMask, Exodus, Ledger, Trezor, Phantom, Coinbase Wallet, SafePal, Tangem). (2) `account.service.ts` — `renameAccount()`, `changeAccountCurrency()`, `softDeleteAccount()`. (3) `balance.service.ts` — `getBalanceData()`, `getAccountDetail()`, `setAccountBalanceById()`, `getAccountTxCount()`. (4) `webhook.route.ts` — bl: callback handler, text intercepts, ac:done проверяет bl:source. **DB Migration:** updated_at + deleted_at на account_sources. Build+Deploy: 0 ошибок. |
+| 2026-05-10 19:58 | **Phase 2.2 — Settings UI Overhaul (DEPLOYED).** (1) `currencies.ts`: расширен список (FIAT 40+, CRYPTO 48+); `CURRENCY_RU_ALIASES` — 50+ русских алиасов (биткоин, доллар, евро, рубль, гривна, тенге, лира и др.); `searchCurrencies()` — 5-pass алгоритм (exact/startsWith/includes/EN-name/RU-alias), лимит 10. (2) `settings.service.ts`: `getWorkspaceAccounts()` + `deleted_at IS NULL` (soft-deleted счета не показываются); `setDefaultAccount()` атомарно обновляет оба поля (expense+income). (3) `settings-keyboard.service.ts`: `buildSettingsMainKeyboard()` — строгий 2x3 грид; выбор валюты с объявлением; новый текст выбора основной валюты. (4) `webhook.route.ts`: после выбора валюты кнопка `[⚙️ Назад в настройки]`; единый обработчик `st:da:sa:` — один Main Account для income+expense. Build: `tsc` 0 ошибок. Commit `3e650c1`. Deployed to Railway (auto-deploy). |
 
 ---
 
