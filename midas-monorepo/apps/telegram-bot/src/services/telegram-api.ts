@@ -39,7 +39,8 @@ const REQUEST_TIMEOUT_MS = 5_000;
 /** A single inline keyboard button with callback_data. */
 export interface InlineKeyboardButton {
   text: string;
-  callback_data: string;
+  callback_data?: string;
+  url?: string;
 }
 
 /**

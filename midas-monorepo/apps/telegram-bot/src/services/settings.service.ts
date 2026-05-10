@@ -14,6 +14,7 @@
 
 import { withTenantTransaction } from '@midas/database';
 import { escapeHtml } from '../utils/html-escape.js';
+import type { InlineKeyboardMarkup, InlineKeyboardButton } from './telegram-api.js';
 
 // ─────────────────────────────────────────────────────────────
 // IANA Timezone validation set (Node.js 18+ built-in)
@@ -121,8 +122,7 @@ interface WorkspaceSettings {
   timezone: string;
   default_expense_account_id: string | null;
   default_income_account_id: string | null;
-  expense_account_name: string | null;
-  income_account_name: string | null;
+  main_account_name: string | null;
 }
 
 export interface AccountRow {
@@ -148,11 +148,9 @@ export async function getSettings(
            w.timezone,
            w.default_expense_account_id,
            w.default_income_account_id,
-           ea.name AS expense_account_name,
-           ia.name AS income_account_name
+           ea.name AS main_account_name
          FROM workspaces w
          LEFT JOIN account_sources ea ON ea.id = w.default_expense_account_id
-         LEFT JOIN account_sources ia ON ia.id = w.default_income_account_id
          WHERE w.id = $1`,
         [workspaceId],
       );
@@ -174,7 +172,9 @@ export async function getWorkspaceAccounts(
     userId,
     async (client) => {
       const result = await client.query<AccountRow>(
-        `SELECT id, name FROM account_sources WHERE workspace_id = $1 ORDER BY name`,
+        `SELECT id, name FROM account_sources
+         WHERE workspace_id = $1 AND deleted_at IS NULL
+         ORDER BY name`,
         [workspaceId],
       );
       return result.rows;
@@ -189,10 +189,8 @@ export async function getWorkspaceAccounts(
 export async function setDefaultAccount(
   workspaceId: string,
   userId: string,
-  kind: 'expense' | 'income',
   accountId: string | null,
 ): Promise<'updated' | 'not_found'> {
-  const col = kind === 'expense' ? 'default_expense_account_id' : 'default_income_account_id';
   const rowsAffected = await withTenantTransaction<number>(
     workspaceId,
     userId,
@@ -205,7 +203,7 @@ export async function setDefaultAccount(
         if (check.rows.length === 0) return 0;
       }
       const result = await client.query(
-        `UPDATE workspaces SET ${col} = $1 WHERE id = $2`,
+        `UPDATE workspaces SET default_expense_account_id = $1, default_income_account_id = $1 WHERE id = $2`,
         [accountId, workspaceId],
       );
       return result.rowCount ?? 0;
@@ -285,19 +283,15 @@ export function searchTimezones(query: string): string[] {
 export function formatSettingsView(settings: WorkspaceSettings): string {
   const currency = escapeHtml(settings.default_currency);
   const timezone = escapeHtml(settings.timezone);
-  const expAcct = settings.expense_account_name
-    ? escapeHtml(settings.expense_account_name)
-    : '<i>не задан</i>';
-  const incAcct = settings.income_account_name
-    ? escapeHtml(settings.income_account_name)
+  const mainAcct = settings.main_account_name
+    ? escapeHtml(settings.main_account_name)
     : '<i>не задан</i>';
 
   return (
     '⚙️ <b>Настройки Midas</b>\n\n' +
-    `💵 Базовая валюта: <b>${currency}</b>\n` +
-    `🕐 Часовой пояс: <b>${timezone}</b>\n` +
-    `🏦 Счёт расходов: ${expAcct}\n` +
-    `🏦 Счёт доходов: ${incAcct}`
+    `💵 Основная валюта: <b>${currency}</b>\n` +
+    `🏦 Основной счет: ${mainAcct}\n` +
+    `🕒 Часовой пояс: <b>${timezone}</b>`
   );
 }
 
@@ -322,31 +316,13 @@ export function formatTimezoneUpdated(newZone: string, oldZone: string): string 
 // Settings Keyboards — Phase 1.35
 // ─────────────────────────────────────────────────────────────
 
-type InlineButton = { text: string; callback_data: string };
-type InlineKeyboard = { inline_keyboard: InlineButton[][] };
-
-export function buildSettingsMainKeyboard(): InlineKeyboard {
-  return {
-    inline_keyboard: [
-      [
-        { text: '💵 Валюта', callback_data: 'st:cur' },
-        { text: '🕐 Часовой пояс', callback_data: 'st:tz' },
-      ],
-      [
-        { text: '🏦 Счёт расходов', callback_data: 'st:da:e' },
-        { text: '🏦 Счёт доходов', callback_data: 'st:da:i' },
-      ],
-    ],
-  };
-}
 
 export function buildAccountPickerKeyboard(
   accounts: AccountRow[],
-  kind: 'expense' | 'income',
   currentDefaultId: string | null,
-): InlineKeyboard {
-  const prefix = kind === 'expense' ? 'st:da:se:' : 'st:da:si:';
-  const rows: InlineButton[][] = [];
+): InlineKeyboardMarkup {
+  const prefix = 'st:da:sa:';
+  const rows: InlineKeyboardButton[][] = [];
 
   for (const acct of accounts) {
     const mark = acct.id === currentDefaultId ? ' ✓' : '';
@@ -356,13 +332,12 @@ export function buildAccountPickerKeyboard(
     }]);
   }
 
-  const clearCallback = kind === 'expense' ? 'st:da:ce' : 'st:da:ci';
   rows.push([
-    { text: '➕ Создать новый счёт', callback_data: `st:da:new:${kind === 'expense' ? 'e' : 'i'}` },
+    { text: '➕ Создать новый счёт', callback_data: `st:da:new` },
   ]);
   if (currentDefaultId) {
     rows.push([
-      { text: '🚫 Убрать основной', callback_data: clearCallback },
+      { text: '🚫 Убрать основной', callback_data: 'st:da:ca' },
     ]);
   }
   rows.push([
@@ -372,8 +347,8 @@ export function buildAccountPickerKeyboard(
   return { inline_keyboard: rows };
 }
 
-export function buildTimezoneSearchResultKeyboard(zones: string[]): InlineKeyboard {
-  const rows: InlineButton[][] = zones.map(tz => [
+export function buildTimezoneSearchResultKeyboard(zones: string[]): InlineKeyboardMarkup {
+  const rows: InlineKeyboardButton[][] = zones.map(tz => [
     { text: tz, callback_data: `st:tz:p:${tz}` },
   ]);
   rows.push([{ text: '← Назад', callback_data: 'st:back' }]);

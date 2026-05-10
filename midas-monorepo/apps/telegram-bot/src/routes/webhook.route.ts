@@ -1361,8 +1361,7 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
               const text = formatSettingsMenuText(
                 settings?.default_currency ?? 'USDT',
                 settings?.timezone ?? 'UTC',
-                settings?.expense_account_name ?? null,
-                settings?.income_account_name ?? null,
+                settings?.main_account_name ?? null,
               );
               if (messageId) {
                 void editMessageText(chatId, messageId, text, buildSettingsMainKeyboard());
@@ -1387,8 +1386,13 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
             // Phase 1.38: Mark that user explicitly set a currency
             await redisConnection.set(`midas:cur_set:${stResolved.workspaceId}`, '1');
             const confirmText = formatPickConfirmText(cmd.code, oldCode);
+            const backToSettingsKb = {
+              inline_keyboard: [
+                [{ text: '⚙️ Назад в настройки', callback_data: 'st:back' }],
+              ],
+            };
             if (messageId) {
-              void editMessageText(chatId, messageId, confirmText, EMPTY_KEYBOARD);
+              void editMessageText(chatId, messageId, confirmText, backToSettingsKb);
             }
             request.log.info({
               msg: '[midas:bot:webhook] settings: currency updated via UI',
@@ -1405,38 +1409,25 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
             // Phase 1.35: Show account picker keyboard
             const accounts = await getWorkspaceAccounts(stResolved.workspaceId, stResolved.userId);
             const settings = await getSettings(stResolved.workspaceId, stResolved.userId);
-            const currentId = cmd.kind === 'expense'
-              ? settings?.default_expense_account_id ?? null
-              : settings?.default_income_account_id ?? null;
+            const currentId = settings?.default_expense_account_id ?? null;
 
-            const kindLabel = cmd.kind === 'expense' ? 'расходов' : 'доходов';
-            const text = `🏦 Выберите основной счёт для ${kindLabel}:`;
+            const text = '🏦 <b>Основной счет</b>\n\nВыберите счет по умолчанию. По нему будет вестись базовый Cashflow (списания и пополнения), если при создании транзакции вы не укажете конкретный счет.\n\nВыберите счет из списка ваших активных балансов:';
 
-            // Build picker keyboard inline
-            const prefix = cmd.kind === 'expense' ? 'st:da:se:' : 'st:da:si:';
-            const rows: { text: string; callback_data: string }[][] = [];
-            for (const acct of accounts) {
-              const mark = acct.id === currentId ? ' ✓' : '';
-              rows.push([{ text: `${acct.name}${mark}`, callback_data: `${prefix}${acct.id}` }]);
-            }
-            const clearCb = cmd.kind === 'expense' ? 'st:da:ce' : 'st:da:ci';
-            if (currentId) {
-              rows.push([{ text: '🚫 Убрать основной', callback_data: clearCb }]);
-            }
-            rows.push([{ text: '← Назад', callback_data: 'st:back' }]);
+            const { buildAccountPickerKeyboard } = await import('../services/settings.service.js');
+            const keyboard = buildAccountPickerKeyboard(accounts, currentId);
+            
             if (messageId) {
-              void editMessageText(chatId, messageId, text, { inline_keyboard: rows });
+              void editMessageText(chatId, messageId, text, keyboard);
             }
           } else if (cmd.cmd === 'default_account_set') {
             // Phase 1.35: Set default account
-            await setDefaultAccount(stResolved.workspaceId, stResolved.userId, cmd.kind, cmd.accountId);
+            await setDefaultAccount(stResolved.workspaceId, stResolved.userId, cmd.accountId);
             // Return to main menu
             const settings = await getSettings(stResolved.workspaceId, stResolved.userId);
             const text = formatSettingsMenuText(
               settings?.default_currency ?? 'USDT',
               settings?.timezone ?? 'UTC',
-              settings?.expense_account_name ?? null,
-              settings?.income_account_name ?? null,
+              settings?.main_account_name ?? null,
             );
             if (messageId) {
               void editMessageText(chatId, messageId, text, buildSettingsMainKeyboard());
@@ -1444,17 +1435,15 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
             request.log.info({
               msg: '[midas:bot:webhook] settings: default account set',
               telegramUserId,
-              kind: cmd.kind,
             });
           } else if (cmd.cmd === 'default_account_clear') {
             // Phase 1.35: Clear default account
-            await setDefaultAccount(stResolved.workspaceId, stResolved.userId, cmd.kind, null);
+            await setDefaultAccount(stResolved.workspaceId, stResolved.userId, null);
             const settings = await getSettings(stResolved.workspaceId, stResolved.userId);
             const text = formatSettingsMenuText(
               settings?.default_currency ?? 'USDT',
               settings?.timezone ?? 'UTC',
-              settings?.expense_account_name ?? null,
-              settings?.income_account_name ?? null,
+              settings?.main_account_name ?? null,
             );
             if (messageId) {
               void editMessageText(chatId, messageId, text, buildSettingsMainKeyboard());
@@ -1565,10 +1554,20 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
             }
           }
           else if (cmd.cmd === 'info') {
-            const { getWorkspaceStats } = await import('../services/settings-advanced.service.js');
-            const statsText = await getWorkspaceStats(stResolved.workspaceId, stResolved.userId);
+            const infoText = `✨ <b>Midas — ваш интеллектуальный финансовый ассистент.</b>
+
+Midas создан, чтобы сделать учет денег максимально простым, быстрым и профессиональным. Забудьте о скучных таблицах и ручном вводе — доверьте рутину Искусственному Интеллекту.
+
+<b>Ключевые возможности:</b>
+🎙 <b>Голосовой и текстовый ввод:</b> Просто скажите или напишите транзакцию, и ИИ сам поймет сумму, валюту и намерение.
+🧠 <b>Автоматическое определение категорий:</b> Нейросеть с высочайшей точностью распределяет ваши траты и доходы.
+📊 <b>Глубокий анализ и Кэшфлоу (Cashflow):</b> Полный контроль над вашим денежным потоком и статистикой.
+💳 <b>Создание и настройка счетов:</b> Легкое добавление карт, наличных или крипты, выбор основного счета для автоматических списаний.
+⚡️ <b>Легкое управление транзакциями:</b> Интерактивные карточки позволяют в один клик изменить категорию, счет или исправить ошибку.
+
+Мы используем передовые технологии безопасности и строго соблюдаем конфиденциальность ваших данных.`;
             const kb = { inline_keyboard: [[{ text: '← Назад', callback_data: 'st:back' }]] };
-            if (messageId) void editMessageText(chatId, messageId, statsText, kb);
+            if (messageId) void editMessageText(chatId, messageId, infoText, kb);
           }
         } catch (err: unknown) {
           const errorClass = err instanceof Error ? err.constructor.name : 'UnknownError';
@@ -2363,8 +2362,7 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
         const menuText = formatSettingsMenuText(
           settings?.default_currency ?? 'USDT',
           settings?.timezone ?? 'UTC',
-          settings?.expense_account_name ?? null,
-          settings?.income_account_name ?? null,
+          settings?.main_account_name ?? null,
         );
         void upsertBotMessage(telegramUserId, chatId, menuText, buildSettingsMainKeyboard());
         request.log.info({ msg: '[midas:bot:webhook] nav:settings shortcut', telegramUserId, workspaceId: resolved.workspaceId });
@@ -2882,8 +2880,7 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
             const menuText = formatSettingsMenuText(
               settings?.default_currency ?? 'USDT',
               settings?.timezone ?? 'UTC',
-              settings?.expense_account_name ?? null,
-              settings?.income_account_name ?? null,
+              settings?.main_account_name ?? null,
             );
             void upsertBotMessage(telegramUserId, chatId, menuText, buildSettingsMainKeyboard());
             request.log.info({

@@ -51,21 +51,16 @@ import { escapeHtml } from '../utils/html-escape.js';
 export function buildSettingsMainKeyboard(): InlineKeyboardMarkup {
   return {
     inline_keyboard: [
-      [{ text: '✏️ Изменить валюту', callback_data: 'st:g:pick' }],
       [
-        { text: '🏦 Счёт расходов', callback_data: 'st:da:e' },
-        { text: '🏦 Счёт доходов', callback_data: 'st:da:i' },
+        { text: '💵 Основная валюта', callback_data: 'st:g:pick' },
+        { text: '🏦 Основной счет', callback_data: 'st:da:all' },
       ],
       [
-        { text: '📁 Категории', callback_data: 'st:cat' },
+        { text: '🕒 Часовой пояс', callback_data: 'st:tz' },
         { text: '🔔 Уведомления', callback_data: 'st:ntf' },
       ],
       [
-        { text: '🔢 Формат чисел', callback_data: 'st:nf' },
-        { text: '🌍 Язык', callback_data: 'st:lang' },
-      ],
-      [
-        { text: '📤 Экспорт', callback_data: 'st:exp' },
+        { text: '💬 Поддержка', url: 'https://t.me/midas_support' },
         { text: 'ℹ️ О боте', callback_data: 'st:info' },
       ],
     ],
@@ -80,22 +75,17 @@ export function buildSettingsMainKeyboard(): InlineKeyboardMarkup {
 export function formatSettingsMenuText(
   currency: string,
   timezone: string,
-  expenseAccountName?: string | null,
-  incomeAccountName?: string | null,
+  mainAccountName?: string | null,
 ): string {
-  const expAcct = expenseAccountName
-    ? escapeHtml(expenseAccountName)
-    : '<i>не задан</i>';
-  const incAcct = incomeAccountName
-    ? escapeHtml(incomeAccountName)
+  const mainAcct = mainAccountName
+    ? escapeHtml(mainAccountName)
     : '<i>не задан</i>';
 
   return (
     '⚙️ <b>Настройки Midas</b>\n\n' +
-    `💵 Базовая валюта: <b>${escapeHtml(currency)}</b>\n` +
-    `🕐 Часовой пояс: <b>${escapeHtml(timezone)}</b>\n` +
-    `🏦 Счёт расходов: ${expAcct}\n` +
-    `🏦 Счёт доходов: ${incAcct}`
+    `💵 Основная валюта: <b>${escapeHtml(currency)}</b>\n` +
+    `🏦 Основной счет: ${mainAcct}\n` +
+    `🕒 Часовой пояс: <b>${escapeHtml(timezone)}</b>`
   );
 }
 
@@ -125,7 +115,7 @@ export function buildGroupPickerKeyboard(): InlineKeyboardMarkup {
   };
 }
 
-export const GROUP_PICKER_TEXT = 'Выберите группу валют:';
+export const GROUP_PICKER_TEXT = '💵 <b>Основная валюта</b>\n\nЭта валюта будет применяться автоматически ко всем вашим транзакциям, если вы не укажете иную при вводе (голосом или текстом).\n\nВыберите основную валюту для операций:';
 
 // ─────────────────────────────────────────────────────────────
 // Currency page builder
@@ -284,10 +274,10 @@ export type SettingsCallbackCmd =
   | { cmd: 'search' }
   | { cmd: 'cancel' }
   // Phase 1.35: default account management
-  | { cmd: 'default_account_picker'; kind: 'expense' | 'income' }
-  | { cmd: 'default_account_set'; kind: 'expense' | 'income'; accountId: string }
-  | { cmd: 'default_account_clear'; kind: 'expense' | 'income' }
-  | { cmd: 'default_account_new'; kind: 'expense' | 'income' }
+  | { cmd: 'default_account_picker' }
+  | { cmd: 'default_account_set'; accountId: string }
+  | { cmd: 'default_account_clear' }
+  | { cmd: 'default_account_new' }
   | { cmd: 'back' }
   // Phase 2.0: advanced settings
   | { cmd: 'categories' }
@@ -368,25 +358,15 @@ export function parseSettingsCallback(data: string): SettingsCallbackCmd | null 
   // Phase 1.35: default account callbacks
   if (sub === 'da') {
     const action = parts[2] ?? '';
-    if (action === 'e') return { cmd: 'default_account_picker', kind: 'expense' };
-    if (action === 'i') return { cmd: 'default_account_picker', kind: 'income' };
-    if (action === 'ce') return { cmd: 'default_account_clear', kind: 'expense' };
-    if (action === 'ci') return { cmd: 'default_account_clear', kind: 'income' };
-    if (action === 'se') {
+    if (action === 'all') return { cmd: 'default_account_picker' };
+    if (action === 'ca') return { cmd: 'default_account_clear' };
+    if (action === 'sa') {
       const accountId = parts[3] ?? '';
       if (!accountId) return null;
-      return { cmd: 'default_account_set', kind: 'expense', accountId };
-    }
-    if (action === 'si') {
-      const accountId = parts[3] ?? '';
-      if (!accountId) return null;
-      return { cmd: 'default_account_set', kind: 'income', accountId };
+      return { cmd: 'default_account_set', accountId };
     }
     if (action === 'new') {
-      const kindKey = parts[3] ?? '';
-      if (kindKey === 'e') return { cmd: 'default_account_new', kind: 'expense' };
-      if (kindKey === 'i') return { cmd: 'default_account_new', kind: 'income' };
-      return null;
+      return { cmd: 'default_account_new' };
     }
     return null;
   }
