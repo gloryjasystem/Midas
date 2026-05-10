@@ -52,13 +52,14 @@ export function escapeHtml(input: string): string {
 }
 
 /** Strip trailing zeros from amount: 1000.0000 → 1000, 100.50 → 100.5 */
-export function formatAmount(raw: string | null | undefined): string {
-  if (!raw) return '0';
+export function formatAmount(raw: string | number | null | undefined): string {
+  if (raw == null || raw === '') return '0';
+  const s = String(raw);
   // If contains a decimal point, strip trailing zeros and trailing dot
-  if (raw.includes('.')) {
-    return raw.replace(/\.?0+$/, '');
+  if (s.includes('.')) {
+    return s.replace(/\.?0+$/, '');
   }
-  return raw;
+  return s;
 }
 
 // ─────────────────────────────────────────────────────────────

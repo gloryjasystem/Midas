@@ -140,7 +140,7 @@ export async function patchDraftIntent(
       parsed_amount: string | null;
       expires_at: string;
     }>(
-      `SELECT id, status, parsed_amount, expires_at
+      `SELECT id, status, parsed_amount::TEXT AS parsed_amount, expires_at
        FROM transaction_drafts
        WHERE id = $1 AND workspace_id = $2
        FOR UPDATE SKIP LOCKED`,
@@ -270,7 +270,7 @@ export async function getDraftFields(
 ): Promise<DraftFields | null> {
   return withTenantTransaction(workspaceId, userId, async (client) => {
     const result = await client.query<DraftFields>(
-      `SELECT id, status, parsed_intent, parsed_amount, parsed_currency,
+      `SELECT id, status, parsed_intent, parsed_amount::TEXT AS parsed_amount, parsed_currency,
               item_name, parsed_category_hint, category_id
        FROM transaction_drafts
        WHERE id = $1 AND workspace_id = $2

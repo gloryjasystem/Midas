@@ -46,12 +46,13 @@ export function intentLabel(intent: string | null | undefined): string {
 }
 
 /** Strip trailing zeros from amount: 1000.0000 → 1000, 100.50 → 100.5 */
-export function formatAmount(raw: string | null | undefined): string {
-  if (!raw) return '0';
-  if (raw.includes('.')) {
-    return raw.replace(/\.?0+$/, '');
+export function formatAmount(raw: string | number | null | undefined): string {
+  if (raw == null || raw === '') return '0';
+  const s = String(raw);
+  if (s.includes('.')) {
+    return s.replace(/\.?0+$/, '');
   }
-  return raw;
+  return s;
 }
 
 // ─────────────────────────────────────────────────────────────
