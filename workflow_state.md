@@ -1,7 +1,7 @@
 # WORKFLOW_STATE.MD — Диспетчер задач ИИ-агента Midas
 
 > **Тип:** MUTABLE — кратковременная память агента. Обновляется на каждом шаге работы.
-> **Обновлён:** 2026-05-09 22:33 (UTC+3)
+> **Обновлён:** 2026-05-10 15:12 (UTC+3)
 
 ---
 
@@ -10,10 +10,10 @@
 | Параметр | Значение |
 |---|---|
 | **PHASE** | `1 — MVP Implementation` |
-| **STEP** | `Phase 1.38 — Currency Input UX Hardening (ACTIVE)` |
-| **AGENT STATUS** | `ACTIVE — bugs fixed, deployed, stable` |
+| **STEP** | `Phase 1.40 — Dead Card Auto-Cleanup (DEPLOYED, STABLE)` |
+| **AGENT STATUS** | `STABLE — 2 UX phases deployed, zero pending_user drafts, 47 confirmed transactions` |
 | **DEPLOYMENT** | `Railway (spirited-happiness project)` — `Midas` bot service + `background-workers` service + `Postgres` + `Redis` |
-| **LAST COMPLETED** | `Phase 1.38: UX input parsing bugs fixed. Currency normalization, confirmation card deletion, blockquote design. See Section 10.` |
+| **LAST COMPLETED** | `Phase 1.40: Auto-delete cancelled/expired cards when next preview appears (dead_card Redis key). Phase 1.39: Gate merged into single edit-in-place card (Variant B). formatAmount() hardened for NUMERIC type.` |
 | **BLOCKER** | None. |
 | **NEXT ACTION** | Owner decides next priority: Phase 2.0 (AI Intelligence Evolution) or any Phase 2.x task. |
 
@@ -66,7 +66,9 @@
 | 1.35 Intelligent Transaction Understanding | ✅ ACCEPTED | `migrations/1779000000000_intelligent-transactions.js` (NEW), `category-resolver.service.ts` (NEW), `draft.service.ts` (MODIFY), `draft-confirmation.service.ts` (MODIFY), `ai-parse.worker.ts` (MODIFY), `confirmation.worker.ts` (MODIFY), `settings.service.ts`+`settings-keyboard.service.ts` (MODIFY), `webhook.route.ts` (MODIFY), `screen-builder.ts` (MODIFY), `prompts.ts`+`schemas.ts` (MODIFY). smoke-test-phase135.mjs — 55 tests. Deployed to Railway production. |
 | 1.36-UX Persistent Navigation Keyboard | ✅ ACCEPTED | **Sub-steps 1–4 (commits c2f012f → 062d40d):** Core nav keyboard + bug fixes + auto-activation + collapsibility. **FINAL state (commits e879dfc → 2a15f31):** Transaction history workflow fully reworked. |
 | 1.37 AI Taxonomy & Zero-Clutter UX | ✅ ACCEPTED | Zero-clutter UX, 30-category taxonomy, 500+ anchors, multilingual, disambiguation, ALLOWED_CATEGORIES. Commits `5b02cf3` → `641ad26`. |
-| 1.38 Currency Input UX Hardening | ✅ DONE | `confirmation.worker.ts` (reject in-place edit), `screen-builder.ts` both apps (blockquote design), `webhook.route.ts` (`normalizeCurrencyInput` fix + `awaiting_cur` token extraction). Commits `94b7cac` → `<latest>`. |
+| 1.38 Currency Input UX Hardening | ✅ ACCEPTED | `confirmation.worker.ts` (reject in-place edit), `screen-builder.ts` both apps (blockquote design), `webhook.route.ts` (`normalizeCurrencyInput` fix + `awaiting_cur` token extraction). Commits `94b7cac` → `c59f2e1`. |
+| 1.39 Gate UX — Edit-In-Place (Variant B) | ✅ DEPLOYED | `ai-parse.worker.ts` (gate block: one edit-in-place instead of 2 new messages), `screen-builder.ts` both apps (`buildGatePausedPreview`: ⚠️ alert banner + draft summary + keyboard stays). `formatAmount()` hardened: `String()` cast для Postgres NUMERIC. `clarification.service.ts`: `::TEXT` cast на `parsed_amount`. Commits `8fa8f91` → `089abf6`. |
+| 1.40 Dead Card Auto-Cleanup | ✅ DEPLOYED | `confirmation.worker.ts` (+dead_card write after reject/expired), `draft-expiration.worker.ts` (+dead_card write after CRON expire), `ai-parse.worker.ts` (+dead_card read+delete before new preview). Redis key `midas:dead_card:{chatId}` TTL 24h. Commit `51eaf10`. |
 
 ---
 
@@ -112,6 +114,8 @@
     - `midas:edit:{userId}:{chatId}` — edit amount intercept, TTL 300s.
     - `midas:awaiting_cur:{chatId}` — TTL 600s. Создаётся когда есть сумма но нет валюты и нет `cur_set`. Хранит `{draftId}:{workspaceId}:{userId}`. Webhook читает для intercept ввода валюты.
     - `midas:cur_set:{workspaceId}` — флаг того, что пользователь установил базовую валюту в Настройках. Если есть — валюта не запрашивается.
+    - `midas:gate_sent:{telegramUserId}:{chatId}` — флаг что gate уже сработал (TTL 1h). Предотвращает повторный edit при каждом новом сообщении.
+    - `midas:dead_card:{chatId}` — message_id карточки "❌ Отменено" или "⏰ Черновик истёк", TTL 24h. Записывается confirmation.worker (reject/expired) и draft-expiration.worker (CRON expire). Читается и удаляется ai-parse.worker при отправке следующей preview — карточка автоматически удаляется из чата. (Phase 1.40)
   - **Auto-Activation:** `replyKeyboardJson` в `NotificationJobPayload`. rejection/expiry/intent_missing sends ReplyKeyboard на `sendMessage` path. `editMessageText` path — только inline keyboard (Telegram API limitation).
   - **Collapsibility:** `is_persistent: false` — Telegram показывает ⏄ иконку рядом с 🎤; пользователь может скрывать/восстанавливать клавиатуру.
   - **Race Condition Fix:** `redisConnection.del(clarKey)` на confirm/reject → stale `midas:clar:*` не перехватывает следующее сообщение.
@@ -225,11 +229,13 @@ apps/background-workers/src/services/draft.service.ts  ← createDraft logic
 > Midas is DEPLOYED to Railway (project: spirited-happiness, env: production).
 > MCP servers: Railway, GitHub, Postgres, Filesystem — all active.
 > Auto-deploy: push to `main` → GitHub → Railway builds both `Midas` and `background-workers`.
-> Phases 1.1–1.38 DONE. Current stable state: currency normalization fixed, prompts stable.
-> Database: PostgreSQL on Railway, RLS enabled, permissive policies for `postgres` role added.
+> Phases 1.1–1.40 DONE. Current stable state: gate UX edit-in-place (Variant B), dead_card auto-cleanup deployed.
+> Database: PostgreSQL on Railway, RLS enabled. 47 confirmed transactions, 0 stuck pending_user drafts.
 > AI model: Claude Haiku 4.5 via Anthropic API, temperature: 0, post-processing intent recovery.
 > AI parsing rule (FINAL): any number = amount (price). No PRICE vs QUANTITY distinction.
-> Key production fixes applied: markdown fence stripping, Decimal→String for NUMERIC, RLS policies.
+> Key production fixes applied: markdown fence stripping, formatAmount() String() cast for NUMERIC, RLS policies.
+> Gate UX: when user sends new tx while draft pending — existing card edited in-place with ⚠️ banner (no new messages).
+> Dead card UX: cancelled/expired cards auto-delete when next transaction preview is sent.
 > Do not modify project_config.md.
 
 ## 10. ИСТОРИЯ ДЕЙСТВИЙ (СЖАТАЯ)
@@ -335,7 +341,9 @@ apps/background-workers/src/services/draft.service.ts  ← createDraft logic
 | 2026-05-09 19:00 | **Phase 1.38 Fix #1:** Confirmation card not deleted on Cancel. `confirmation.worker.ts` reads `midas:preview:{draftId}` on both approve and reject paths — in-place edit to ❌ Отменено. |
 | 2026-05-09 19:04 | **Phase 1.38 Fix #2:** Unified blockquote currency prompt (Variant B). `screen-builder.ts` both apps: `<code>` tags replaced with blockquote text — no more green tap-able capsules. |
 | 2026-05-09 19:05 | **Phase 1.38 Fix #3:** `amt+cur` handler used `validateCurrencyCode()` (ISO-only) instead of `normalizeCurrencyInput()`. Fixed. `awaiting_cur` now extracts currency token from mixed input (e.g. «50 евро»). Commit `d59025f`. |
-| 2026-05-09 19:18 | **Phase 1.38 Rollback:** PRICE vs QUANTITY AI prompt rule reverted. Caused regressions («150 курток» not extracted as amount). Design decision: personal finance bots ALWAYS treat any number as a price. Original rule restored: «If ANY number present → ALWAYS extract as amount». Final commit `<latest>`. |
+| 2026-05-09 19:18 | **Phase 1.38 Rollback:** PRICE vs QUANTITY AI prompt rule reverted. Caused regressions («150 курток» not extracted as amount). Design decision: personal finance bots ALWAYS treat any number as a price. Original rule restored: «If ANY number present → ALWAYS extract as amount». Final commit `c59f2e1`. |
+| 2026-05-10 10:08 | **Phase 1.39 — Gate UX Edit-In-Place (Variant B).** `formatAmount()` в обоих screen-builder.ts исправлен: `String()` cast для Postgres NUMERIC типа — устранён TypeError (`raw.includes is not a function`). `clarification.service.ts`: `::TEXT` cast на `parsed_amount` в 2 SQL-запросах. `buildGatePausedPreview()` обновлён: ⚠️ алерт-баннер + summary черновика (вместо старого текста без данных). Блок gate в `ai-parse.worker.ts` переработан: вместо 2 новых сообщений (paused edit + gate card) — **один** edit-in-place существующей preview-карточки с алертом и сохранением клавиатуры подтверждения. Commits `8fa8f91` → `089abf6`. Deployed to Railway — SUCCESS. |
+| 2026-05-10 10:30 | **Phase 1.40 — Dead Card Auto-Cleanup.** Логика: карточки «❌ Отменено» и «⏰ Черновик истёк» автоматически удаляются из чата когда появляется следующая preview-карточка. В чате остаются только: pending (ждёт подтверждения) + approved (✅ Записано). Реализация: `confirmation.worker.ts` — после reject/expired сохраняет `previewMsgId` в Redis `midas:dead_card:{chatId}` TTL 24h. `draft-expiration.worker.ts` — CRON expiry тоже пишет dead_card. `ai-parse.worker.ts` — перед отправкой новой preview читает dead_card, передаёт как `deleteMessageId`, удаляет ключ. Если одновременно есть dead_card и clar_msg — приоритет у dead_card. TypeScript: 0 ошибок. Commit `51eaf10`. Deployed to Railway — SUCCESS. |
 
 ---
 
