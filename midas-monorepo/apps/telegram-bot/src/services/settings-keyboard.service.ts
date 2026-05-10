@@ -290,7 +290,11 @@ export type SettingsCallbackCmd =
   | { cmd: 'lang_set'; lang: string }
   | { cmd: 'export_menu' }
   | { cmd: 'export_csv' }
-  | { cmd: 'info' };
+  | { cmd: 'info' }
+  // Phase 2.2: timezone
+  | { cmd: 'timezone_menu' }
+  | { cmd: 'timezone_country'; countryIndex: number }
+  | { cmd: 'timezone_pick'; iana: string };
 
 const CURRENCY_CODE_RE = /^[A-Z]{3,5}$/;
 const GROUP_MAP: Record<string, CurrencyGroup> = { s: 'stable', c: 'crypto', f: 'fiat' };
@@ -348,6 +352,30 @@ export function parseSettingsCallback(data: string): SettingsCallbackCmd | null 
     return null;
   }
   if (sub === 'info') return { cmd: 'info' };
+
+  // Phase 2.2: timezone
+  if (sub === 'tz') {
+    const action = parts[2] ?? '';
+    if (!action) return { cmd: 'timezone_menu' };
+    // st:tz:srch — re-activate search mode (same as timezone_menu)
+    if (action === 'srch') return { cmd: 'timezone_menu' };
+    // st:tz:c:<idx>  — country disambiguation picker
+    if (action === 'c') {
+      const idx = parseInt(parts[3] ?? '', 10);
+      if (isNaN(idx) || idx < 0) return null;
+      return { cmd: 'timezone_country', countryIndex: idx };
+    }
+    // st:tz:p:<base64-encoded IANA>  — final pick
+    if (action === 'p') {
+      const encoded = parts[3] ?? '';
+      if (!encoded) return null;
+      const iana = Buffer.from(encoded, 'base64url').toString('utf8');
+      // Validate length and characters
+      if (iana.length < 3 || iana.length > 40) return null;
+      return { cmd: 'timezone_pick', iana };
+    }
+    return null;
+  }
 
   if (sub === 'p') {
     const code = parts[2] ?? '';

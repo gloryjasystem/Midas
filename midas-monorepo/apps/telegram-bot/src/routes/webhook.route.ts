@@ -1569,6 +1569,61 @@ Midas создан, чтобы сделать учет денег максима
             const kb = { inline_keyboard: [[{ text: '← Назад', callback_data: 'st:back' }]] };
             if (messageId) void editMessageText(chatId, messageId, infoText, kb);
           }
+          // ── Phase 2.2: Timezone ─────────────────────────────────
+          else if (cmd.cmd === 'timezone_menu') {
+            const settings = await getSettings(stResolved.workspaceId, stResolved.userId);
+            const current = settings?.timezone ?? 'UTC';
+            const { getTzOffset } = await import('../services/timezones.js');
+            const offset = getTzOffset(current);
+            const tzText =
+              `🕒 <b>Часовой пояс</b>\n\n` +
+              `Текущий: <b>${escapeHtml(current)}</b>${offset ? ` (${escapeHtml(offset)})` : ''}\n\n` +
+              `Часовой пояс используется для отображения времени транзакций, ежедневной сводки и напоминаний.\n\n` +
+              `Введите название вашего <b>города или страны</b> на русском или английском — и я найду нужный пояс:`;
+            const tzKb = {
+              inline_keyboard: [
+                [{ text: '← Назад', callback_data: 'st:back' }],
+              ],
+            };
+            // Activate tz search mode: next text from this user = timezone query
+            await redisConnection.set(`midas:tz_srch:${telegramUserId}:${chatId}`, messageId?.toString() ?? '0', 'EX', 300);
+            if (messageId) void editMessageText(chatId, messageId, tzText, tzKb);
+          }
+          else if (cmd.cmd === 'timezone_country') {
+            const { MULTI_TZ_COUNTRIES } = await import('../services/timezones.js');
+            const country = MULTI_TZ_COUNTRIES[cmd.countryIndex];
+            if (!country) {
+              if (messageId) void editMessageText(chatId, messageId, '⚠️ Страна не найдена.', { inline_keyboard: [[{ text: '← Назад', callback_data: 'st:tz' }]] });
+            } else {
+              const countryText = `${country.flag} <b>${escapeHtml(country.nameRu)}</b>\n\nВыберите ваш регион или город:`;
+              const zoneRows = country.zones.map((z) => {
+                const encoded = Buffer.from(z.iana).toString('base64url');
+                return [{ text: z.label, callback_data: `st:tz:p:${encoded}` }];
+              });
+              zoneRows.push([{ text: '← Назад', callback_data: 'st:tz' }]);
+              if (messageId) void editMessageText(chatId, messageId, countryText, { inline_keyboard: zoneRows });
+            }
+          }
+          else if (cmd.cmd === 'timezone_pick') {
+            const { ALL_TIMEZONES, getTzOffset } = await import('../services/timezones.js');
+            if (!ALL_TIMEZONES.has(cmd.iana)) {
+              if (messageId) void editMessageText(chatId, messageId, '⚠️ Недопустимый часовой пояс. Попробуйте снова.', { inline_keyboard: [[{ text: '← Назад', callback_data: 'st:tz' }]] });
+            } else {
+              const before = await getSettings(stResolved.workspaceId, stResolved.userId);
+              const oldZone = before?.timezone ?? 'UTC';
+              await updateTimezone(stResolved.workspaceId, stResolved.userId, cmd.iana);
+              await redisConnection.del(`midas:tz_srch:${telegramUserId}:${chatId}`);
+              const offset = getTzOffset(cmd.iana);
+              const tzConfirm =
+                `✅ <b>Часовой пояс обновлён</b>\n\n` +
+                `<b>${escapeHtml(cmd.iana)}</b>${offset ? ` (${escapeHtml(offset)})` : ''}\n` +
+                `Было: ${escapeHtml(oldZone)}\n\n` +
+                `Все временны́е метки теперь отображаются в вашем часовом поясе.`;
+              const tzConfirmKb = { inline_keyboard: [[{ text: '⚙️ Назад в настройки', callback_data: 'st:back' }]] };
+              if (messageId) void editMessageText(chatId, messageId, tzConfirm, tzConfirmKb);
+              request.log.info({ msg: '[midas:bot:webhook] settings: timezone updated', telegramUserId });
+            }
+          }
         } catch (err: unknown) {
           const errorClass = err instanceof Error ? err.constructor.name : 'UnknownError';
           request.log.error({
@@ -3005,11 +3060,99 @@ Midas создан, чтобы сделать учет денег максима
       }
     }
 
+    // ── Phase 2.2: Timezone search text intercept ──────────────
+    // If midas:tz_srch: key exists, user is in timezone search mode.
+    // Their next text is treated as a city/country query, NOT a transaction.
+    if (!commandToken) {
+      const tzSrchKey = `midas:tz_srch:${telegramUserId}:${chatId}`;
+      const tzSrchMsgId = await redisConnection.get(tzSrchKey);
+      if (tzSrchMsgId !== null) {
+        const rawQuery = message.text?.trim() ?? '';
+        if (rawQuery.length < 2) {
+          void upsertBotMessage(telegramUserId, chatId, '⚠️ Введите не менее 2 символов для поиска часового пояса.');
+          await reply.status(200).send({ ok: true });
+          return;
+        }
+
+        const { searchTimezone } = await import('../services/timezones.js');
+        const result = searchTimezone(rawQuery);
+
+        if (!result) {
+          // Not found — keep search mode active, prompt to try again
+          const notFoundKb = {
+            inline_keyboard: [
+              [{ text: '🔄 Попробовать снова', callback_data: 'st:tz' }],
+              [{ text: '← Назад в настройки', callback_data: 'st:back' }],
+            ],
+          };
+          void upsertBotMessage(
+            telegramUserId, chatId,
+            `🔍 По запросу «${escapeHtml(rawQuery)}» ничего не найдено.\n\nПопробуйте: <i>Москва, Dubai, Россия, New York, Украина</i>`,
+            notFoundKb,
+          );
+          await reply.status(200).send({ ok: true });
+          return;
+        }
+
+        // Clear search mode
+        await redisConnection.del(tzSrchKey);
+
+        if (result.type === 'single') {
+          // Direct match → show confirm button
+          const { getTzOffset } = await import('../services/timezones.js');
+          const offset = getTzOffset(result.iana);
+          const encoded = Buffer.from(result.iana).toString('base64url');
+          const singleKb = {
+            inline_keyboard: [
+              [{ text: `${result.flag} Выбрать: ${result.label}`, callback_data: `st:tz:p:${encoded}` }],
+              [{ text: '🔄 Поискать другой', callback_data: 'st:tz' }],
+              [{ text: '← Назад в настройки', callback_data: 'st:back' }],
+            ],
+          };
+          void upsertBotMessage(
+            telegramUserId, chatId,
+            `🕒 Найден часовой пояс:\n\n<b>${escapeHtml(result.iana)}</b>${offset ? ` (${escapeHtml(offset)})` : ''}\n${result.label}`,
+            singleKb,
+          );
+        } else if (result.type === 'multi_country') {
+          // Country with multiple TZ → show zone list
+          const country = result.country;
+          const zoneRows = country.zones.map((z) => {
+            const encoded = Buffer.from(z.iana).toString('base64url');
+            return [{ text: z.label, callback_data: `st:tz:p:${encoded}` }];
+          });
+          zoneRows.push([{ text: '← Назад', callback_data: 'st:tz' }]);
+          void upsertBotMessage(
+            telegramUserId, chatId,
+            `${country.flag} <b>${escapeHtml(country.nameRu)}</b>\n\nУ этой страны несколько часовых поясов — выберите ваш регион:`,
+            { inline_keyboard: zoneRows },
+          );
+        } else {
+          // IANA list
+          const zoneRows = result.zones.map((iana) => {
+            const encoded = Buffer.from(iana).toString('base64url');
+            return [{ text: iana, callback_data: `st:tz:p:${encoded}` }];
+          });
+          zoneRows.push([{ text: '🔄 Поискать другой', callback_data: 'st:tz' }]);
+          zoneRows.push([{ text: '← Назад в настройки', callback_data: 'st:back' }]);
+          void upsertBotMessage(
+            telegramUserId, chatId,
+            `🕒 Найдено несколько вариантов — выберите подходящий:`,
+            { inline_keyboard: zoneRows },
+          );
+        }
+
+        await reply.status(200).send({ ok: true });
+        return;
+      }
+    }
+
     // ── Step 5f-clar: Phase 1.32 — clarification amount text intercept ────
-    // If user is in the midas:clar: state (bot asked "Сколько?"), intercept
+    // If user is in the midas:clar: state (bot asked «Сколько?»), intercept
     // their next text message as the new amount.
     // Runs BEFORE ia: intercept, BEFORE ac: onboarding, BEFORE edit, BEFORE AI parse.
     if (!commandToken) {
+
       const clarIntKey = clarStateKey(telegramUserId, chatId);
       const clarIntState = await redisConnection.get(clarIntKey);
       if (clarIntState) {
