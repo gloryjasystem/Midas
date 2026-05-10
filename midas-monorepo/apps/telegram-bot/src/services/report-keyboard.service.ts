@@ -24,6 +24,7 @@
  *   rp:cmp        → comparison with previous period   [6 bytes]
  *   rp:acc        → account movements                 [6 bytes]
  *   rp:bk         → back to period picker             [5 bytes]
+ *   rp:cl         → close / dismiss keyboard           [5 bytes]
  *
  * All callback_data values ≤ 64 bytes (Telegram limit). ✅
  */
@@ -54,20 +55,23 @@ export function buildPeriodPickerKeyboard(): InlineKeyboardMarkup {
   return {
     inline_keyboard: [
       [
-        { text: '📅 Сегодня',     callback_data: 'rp:p:td' },
-        { text: '📅 Вчера',       callback_data: 'rp:p:yd' },
+        { text: '\uD83D\uDCC5 Сегодня',     callback_data: 'rp:p:td' },
+        { text: '\uD83D\uDCC5 Вчера',       callback_data: 'rp:p:yd' },
       ],
       [
-        { text: '📆 Эта неделя',  callback_data: 'rp:p:tw' },
-        { text: '📆 Прошлая',     callback_data: 'rp:p:lw' },
+        { text: '\uD83D\uDCC6 Эта неделя',  callback_data: 'rp:p:tw' },
+        { text: '\uD83D\uDCC6 Прошлая',     callback_data: 'rp:p:lw' },
       ],
       [
-        { text: '🗓 Этот месяц',  callback_data: 'rp:p:tm' },
-        { text: '🗓 Прошлый',     callback_data: 'rp:p:lm' },
+        { text: '\uD83D\uDDD3 Этот месяц',  callback_data: 'rp:p:tm' },
+        { text: '\uD83D\uDDD3 Прошлый',     callback_data: 'rp:p:lm' },
       ],
       [
-        { text: '📊 3 месяца',    callback_data: 'rp:p:3m' },
-        { text: '📊 Год',         callback_data: 'rp:p:yr' },
+        { text: '\uD83D\uDCCA 3 месяца',    callback_data: 'rp:p:3m' },
+        { text: '\uD83D\uDCCA Год',         callback_data: 'rp:p:yr' },
+      ],
+      [
+        { text: '\u2716\uFE0F Закрыть', callback_data: 'rp:cl' },
       ],
     ],
   };
@@ -87,19 +91,22 @@ export function buildReportSubMenuKeyboard(): InlineKeyboardMarkup {
   return {
     inline_keyboard: [
       [
-        { text: '📋 Сводка',      callback_data: 'rp:sum' },
-        { text: '📊 Категории',   callback_data: 'rp:cat' },
+        { text: '\uD83D\uDCCB Сводка',      callback_data: 'rp:sum' },
+        { text: '\uD83D\uDCCA Категории',   callback_data: 'rp:cat' },
       ],
       [
-        { text: '💸 Расходы',     callback_data: 'rp:exp' },
-        { text: '💰 Доходы',      callback_data: 'rp:inc' },
+        { text: '\uD83D\uDCB8 Расходы',     callback_data: 'rp:exp' },
+        { text: '\uD83D\uDCB0 Доходы',      callback_data: 'rp:inc' },
       ],
       [
-        { text: '📈 Сравнение',   callback_data: 'rp:cmp' },
-        { text: '🏦 По счетам',   callback_data: 'rp:acc' },
+        { text: '\uD83D\uDCC8 Сравнение',   callback_data: 'rp:cmp' },
+        { text: '\uD83C\uDFE6 По счетам',   callback_data: 'rp:acc' },
       ],
       [
-        { text: '◀️ Выбрать период', callback_data: 'rp:bk' },
+        { text: '\u25C0\uFE0F Выбрать период', callback_data: 'rp:bk' },
+      ],
+      [
+        { text: '\u2716\uFE0F Закрыть', callback_data: 'rp:cl' },
       ],
     ],
   };
@@ -112,8 +119,11 @@ export function buildReportBackKeyboard(): InlineKeyboardMarkup {
   return {
     inline_keyboard: [
       [
-        { text: '◀️ К отчётам',   callback_data: 'rp:p'  },
-        { text: '📅 Другой период', callback_data: 'rp:bk' },
+        { text: '\u25C0\uFE0F К отчётам',   callback_data: 'rp:p'  },
+        { text: '\uD83D\uDCC5 Другой период', callback_data: 'rp:bk' },
+      ],
+      [
+        { text: '\u2716\uFE0F Закрыть', callback_data: 'rp:cl' },
       ],
     ],
   };
@@ -135,7 +145,8 @@ export type RpCallbackCmd =
   | { cmd: 'income' }
   | { cmd: 'comparison' }
   | { cmd: 'accounts' }
-  | { cmd: 'back' };
+  | { cmd: 'back' }
+  | { cmd: 'close' };
 
 /**
  * Parse a rp: callback_data string into a typed command.
@@ -171,6 +182,8 @@ export function parseRpCallback(data: string): RpCallbackCmd | null {
   if (sub === 'acc') return { cmd: 'accounts' };
   // rp:bk → back to period picker
   if (sub === 'bk')  return { cmd: 'back' };
+  // rp:cl → close / dismiss keyboard
+  if (sub === 'cl')  return { cmd: 'close' };
 
   return null;
 }

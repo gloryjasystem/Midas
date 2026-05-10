@@ -1209,6 +1209,14 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
             if (rpMsgId) void editMessageText(chatId, rpMsgId, `📊 <b>Отчёты: ${escapeHtml(label)}</b>\n\nВыбери тип отчёта:`, buildReportSubMenuKeyboard());
           }
 
+          // close → delete the reports message from chat
+          else if (rpCmd.cmd === 'close') {
+            if (rpMsgId) {
+              const { deleteMessage } = await import('../services/telegram-api.js');
+              void deleteMessage(chatId, rpMsgId);
+            }
+          }
+
           // Report commands — read period from Redis, run query
           else {
             const rpKey = `midas:rp:period:${telegramUserId}:${chatId}`;
