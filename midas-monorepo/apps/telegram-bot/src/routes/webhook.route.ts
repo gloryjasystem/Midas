@@ -1180,13 +1180,13 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
             );
           } else {
             // Show edit sub-menu
-            const { intentEmoji, intentLabel } = await import('../utils/screen-builder.js');
+            const { intentEmoji, intentLabel, formatAmount } = await import('../utils/screen-builder.js');
             const iLabel = draft.parsed_intent
               ? `${intentEmoji(draft.parsed_intent)} ${intentLabel(draft.parsed_intent)}`
               : null;
             const lines = ['✏️ <b>Что изменить?</b>', ''];
             if (iLabel)                 lines.push(iLabel);
-            if (draft.parsed_amount)    lines.push(`Сумма: <b>${draft.parsed_amount} ${draft.parsed_currency ?? 'USDT'}</b>`);
+            if (draft.parsed_amount)    lines.push(`Сумма: <b>${formatAmount(draft.parsed_amount)} ${draft.parsed_currency ?? 'USDT'}</b>`);
             if (draft.item_name)        lines.push(`Товар: ${draft.item_name}`);
 
             const subKeyboard = {

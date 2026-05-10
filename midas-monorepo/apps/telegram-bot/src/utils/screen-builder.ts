@@ -45,6 +45,15 @@ export function intentLabel(intent: string | null | undefined): string {
   return INTENT_LABEL[intent ?? ''] ?? 'Транзакция';
 }
 
+/** Strip trailing zeros from amount: 1000.0000 → 1000, 100.50 → 100.5 */
+export function formatAmount(raw: string | null | undefined): string {
+  if (!raw) return '0';
+  if (raw.includes('.')) {
+    return raw.replace(/\.?0+$/, '');
+  }
+  return raw;
+}
+
 // ─────────────────────────────────────────────────────────────
 // Preview Screen (after AI parse, before confirmation)
 // ─────────────────────────────────────────────────────────────
@@ -86,7 +95,7 @@ export function buildPreviewScreen(data: PreviewScreenData): string {
   // <blockquote> — нативный UI-элемент Telegram (полоска слева).
   // Никогда не переносится, одинаково выглядит на всех экранах.
   if (data.amount) {
-    const amountLine = `<b>${data.amount} ${data.currency ?? 'USDT'}</b>`;
+    const amountLine = `<b>${formatAmount(data.amount)} ${data.currency ?? 'USDT'}</b>`;
     const blockContent = data.itemName
       ? `${amountLine}\n${data.itemName}`
       : amountLine;
@@ -331,7 +340,7 @@ function buildDraftSummaryBlock(data: GateDraftData): string {
   const lines: string[] = [`${emoji} <b>${label}</b>`];
 
   if (data.parsedAmount) {
-    const amountLine = `<b>${data.parsedAmount} ${data.parsedCurrency ?? 'USDT'}</b>`;
+    const amountLine = `<b>${formatAmount(data.parsedAmount)} ${data.parsedCurrency ?? 'USDT'}</b>`;
     const blockContent = data.itemName
       ? `${amountLine}\n${data.itemName}`
       : amountLine;
@@ -359,12 +368,16 @@ export function buildPendingGateScreen(data: GateDraftData): string {
   ].join('\n');
 }
 
-export function buildGatePausedPreview(data: GateDraftData): string {
-  const summary = buildDraftSummaryBlock(data);
+export function buildGatePausedPreview(_data: GateDraftData): string {
   return [
-    summary,
+    '❌ <b>Новая транзакция отменена</b>',
     '',
-    '⏸ <i>Ожидает вашего ответа ↓</i>',
+    'Нельзя записать новую транзакцию,',
+    'пока не завершена предыдущая.',
+    '',
+    'Подтвердите или отмените транзакцию ниже ↓',
+    '',
+    '🕐 <i>Ожидает вашего ответа</i>',
   ].join('\n');
 }
 
@@ -384,7 +397,7 @@ export function buildExpiredDraftScreen(data: GateDraftData): string {
   const emoji = intentEmoji(data.parsedIntent);
   const label = intentLabel(data.parsedIntent);
   const amountPart = data.parsedAmount
-    ? ` · ${data.parsedAmount} ${data.parsedCurrency ?? 'USDT'}`
+    ? ` · ${formatAmount(data.parsedAmount)} ${data.parsedCurrency ?? 'USDT'}`
     : '';
 
   return [
