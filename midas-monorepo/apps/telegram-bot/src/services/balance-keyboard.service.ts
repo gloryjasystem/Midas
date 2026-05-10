@@ -46,7 +46,8 @@ export type BalanceCallbackCmd =
   | { cmd: 'set_balance'; accountId: string }
   | { cmd: 'delete'; accountId: string }
   | { cmd: 'delete_confirm'; accountId: string }
-  | { cmd: 'back' };
+  | { cmd: 'back' }
+  | { cmd: 'close' };
 
 // ─────────────────────────────────────────────────────────────
 // Parser — SEC-01 allowlist
@@ -66,6 +67,7 @@ export function parseBalanceCallback(data: string): BalanceCallbackCmd | null {
 
   if (sub === 'add') return { cmd: 'add_account' };
   if (sub === 'back') return { cmd: 'back' };
+  if (sub === 'close') return { cmd: 'close' };
   if (sub === 'ci') return { cmd: 'currency_input' };
 
   // bl:cs:{code} — currency set
@@ -130,16 +132,24 @@ const TYPE_LABELS: Record<string, string> = {
  * One button per account (name + balance) + [➕ Добавить счёт].
  */
 export function buildBalanceListKeyboard(accounts: BalanceAccountRow[]): InlineKeyboardMarkup {
-  const rows = accounts.map((acc) => [
+  // Account rows (tappable to view detail)
+  const accountRows = accounts.map((acc) => [
     {
-      text: `${acc.name} • ${formatBalanceShort(acc.balance)} ${acc.currency}`,
+      text: `${acc.name} · ${formatBalanceShort(acc.balance)} ${acc.currency}`,
       callback_data: `bl:v:${acc.account_id}`,
     },
   ]);
 
-  rows.push([{ text: '➕ Добавить счёт', callback_data: 'bl:add' }]);
-
-  return { inline_keyboard: rows };
+  return {
+    inline_keyboard: [
+      // Add Account — top (intentional action, hard to hit accidentally)
+      [{ text: '➕ Добавить счёт', callback_data: 'bl:add' }],
+      // Account list
+      ...accountRows,
+      // Close — bottom (last action, safety)
+      [{ text: '✖️ Закрыть', callback_data: 'bl:close' }],
+    ],
+  };
 }
 
 /**

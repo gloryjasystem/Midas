@@ -71,15 +71,6 @@ interface CurrencyTotalRow {
 // Russian type labels (same mapping as account.service.ts)
 // ─────────────────────────────────────────────────────────────
 
-const TYPE_LABELS: Record<string, string> = {
-  manual: 'Ручной ввод',
-  crypto_read_only: 'Крипто',
-  bank_sync: 'Банк',
-};
-
-function resolveTypeLabel(type: string): string {
-  return TYPE_LABELS[type] ?? type;
-}
 
 // ─────────────────────────────────────────────────────────────
 // SQL — per-account balances (D1–D3, D4, D6: all-time)
@@ -287,41 +278,36 @@ export async function getBalanceData(
     };
   }
 
-  // ── Per-account lines ────────────────────────────────────
+  // ── Per-account lines (Variant 2: Clean List — no type label, no noise) ──
   const accountLines = accounts.map((row) => {
     const name = escapeHtml(row.name);
-    const typeLabel = escapeHtml(resolveTypeLabel(row.type));
     const currency = escapeHtml(row.currency);
-    const balanceStr = row.balance.toFixed(2);
-    const transferCount = parseInt(row.transfer_count, 10);
-    const mismatchCount = parseInt(row.mismatch_count, 10);
+    const num = parseFloat(row.balance.toFixed(2));
+    const balanceStr = isNaN(num)
+      ? row.balance.toFixed(2)
+      : num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-    let line = `• ${name} — ${typeLabel} (${currency})\n  └─ <b>${balanceStr}</b> ${currency}`;
-
-    if (transferCount > 0) {
-      const transferSumStr = row.transfer_sum.toFixed(2);
-      line += `\n  🔄 Переводы: ${String(transferCount)} шт. на ${transferSumStr} ${currency} (не учитываются в балансе)`;
-    }
-
-    if (mismatchCount > 0) {
-      line += `\n  ⚠️ Пропущено ${String(mismatchCount)} тр. с другой валютой (без конвертации)`;
-    }
-
-    return line;
+    return `<b>${name}</b>\n└ ${balanceStr} ${currency}`;
   });
 
-  // ── Currency totals ──────────────────
-  const totalLines = currencyTotals.map((row) => {
+  // ── Currency totals — compact single line ─────────────────
+  const totalParts = currencyTotals.map((row) => {
     const currency = escapeHtml(row.currency);
-    const totalStr = row.currency_total.toFixed(2);
-    return `${currency}: <b>${totalStr}</b>`;
+    const num = parseFloat(row.currency_total.toFixed(2));
+    const totalStr = isNaN(num)
+      ? row.currency_total.toFixed(2)
+      : num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    return `${currency} ${totalStr}`;
   });
+
+  const totalsLine = totalParts.length > 0
+    ? `\n\nИтого: ${totalParts.join('  ·  ')}`
+    : '';
 
   const text =
-    '💰 <b>Баланс по счетам:</b>\n\n' +
+    '💰 <b>Баланс счетов</b>\n\n' +
     accountLines.join('\n\n') +
-    '\n\n────────────────────\n📊 Итого по валютам:\n' +
-    totalLines.join('\n');
+    totalsLine;
 
   return { text, accounts: accountRows };
 }

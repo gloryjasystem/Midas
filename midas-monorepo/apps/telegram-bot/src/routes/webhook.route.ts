@@ -2213,6 +2213,13 @@ Midas создан, чтобы сделать учет денег максима
               '✅ Счёт удалён.\n\n' + text,
               buildBalanceListKeyboard(accounts as BalanceAccountRow[]),
             );
+
+          } else if (blCmd.cmd === 'close') {
+            // Remove inline keyboard — close balance screen
+            const msgId = cq.message ? String(cq.message.message_id) : null;
+            if (msgId) {
+              void editMessageText(chatId, msgId, '💰 <b>Баланс счетов</b>\n\nЗакрыто. Нажмите кнопку ниже, чтобы открыть снова.', EMPTY_KEYBOARD);
+            }
           }
         } catch (err: unknown) {
           const errorClass = err instanceof Error ? err.constructor.name : 'UnknownError';
