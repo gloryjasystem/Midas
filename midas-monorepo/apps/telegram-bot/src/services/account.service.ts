@@ -103,6 +103,7 @@ export async function getAccountList(
         `SELECT name, type, currency
          FROM account_sources
          WHERE workspace_id = $1
+           AND deleted_at IS NULL
          ORDER BY type, name`,
         [workspaceId],
       );
@@ -462,7 +463,7 @@ export async function hasAccounts(
     userId,
     async (client) => {
       const result = await client.query<{ cnt: string }>(
-        `SELECT COUNT(*)::text AS cnt FROM account_sources WHERE workspace_id = $1`,
+        `SELECT COUNT(*)::text AS cnt FROM account_sources WHERE workspace_id = $1 AND deleted_at IS NULL`,
         [workspaceId],
       );
       return parseInt(result.rows[0]?.cnt ?? '0', 10);
@@ -515,4 +516,123 @@ export async function addAccountWithCurrency(
   );
 
   return rowsInserted === 0 ? 'duplicate' : 'created';
+}
+
+// ─────────────────────────────────────────────────────────────
+// renameAccount — Phase 2.1
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Rename an account. Validates against duplicate names.
+ *
+ * SEC-03: withTenantTransaction + explicit workspace_id.
+ * SEC-12: Name NOT logged.
+ */
+export async function renameAccount(
+  workspaceId: string,
+  userId: string,
+  accountId: string,
+  newName: string,
+): Promise<'ok' | 'duplicate' | 'not_found'> {
+  return withTenantTransaction<'ok' | 'duplicate' | 'not_found'>(
+    workspaceId,
+    userId,
+    async (client) => {
+      // Check for duplicate name (case-insensitive)
+      const dupCheck = await client.query<{ id: string }>(
+        `SELECT id FROM account_sources
+         WHERE workspace_id = $1
+           AND LOWER(name) = LOWER($2)
+           AND id != $3
+           AND deleted_at IS NULL`,
+        [workspaceId, newName, accountId],
+      );
+      if (dupCheck.rows.length > 0) return 'duplicate';
+
+      const result = await client.query<{ id: string }>(
+        `UPDATE account_sources SET name = $1, updated_at = NOW()
+         WHERE id = $2 AND workspace_id = $3 AND deleted_at IS NULL
+         RETURNING id`,
+        [newName, accountId, workspaceId],
+      );
+      return result.rowCount === 0 ? 'not_found' : 'ok';
+    },
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// changeAccountCurrency — Phase 2.1
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Change account currency.
+ * WARNING: existing transactions with the old currency will no longer match.
+ * Caller should warn the user if tx_count > 0.
+ *
+ * SEC-03: withTenantTransaction + explicit workspace_id.
+ */
+export async function changeAccountCurrency(
+  workspaceId: string,
+  userId: string,
+  accountId: string,
+  newCurrency: string,
+): Promise<'ok' | 'not_found'> {
+  return withTenantTransaction<'ok' | 'not_found'>(
+    workspaceId,
+    userId,
+    async (client) => {
+      const result = await client.query<{ id: string }>(
+        `UPDATE account_sources SET currency = $1, updated_at = NOW()
+         WHERE id = $2 AND workspace_id = $3 AND deleted_at IS NULL
+         RETURNING id`,
+        [newCurrency, accountId, workspaceId],
+      );
+      return result.rowCount === 0 ? 'not_found' : 'ok';
+    },
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// softDeleteAccount — Phase 2.1
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Soft-delete an account (set deleted_at = NOW()).
+ * Transactions remain intact. Clears default account references in workspace.
+ *
+ * SEC-03: withTenantTransaction + explicit workspace_id.
+ */
+export async function softDeleteAccount(
+  workspaceId: string,
+  userId: string,
+  accountId: string,
+): Promise<'ok' | 'not_found'> {
+  return withTenantTransaction<'ok' | 'not_found'>(
+    workspaceId,
+    userId,
+    async (client) => {
+      // Soft-delete the account
+      const result = await client.query<{ id: string }>(
+        `UPDATE account_sources SET deleted_at = NOW()
+         WHERE id = $1 AND workspace_id = $2 AND deleted_at IS NULL
+         RETURNING id`,
+        [accountId, workspaceId],
+      );
+      if (result.rowCount === 0) return 'not_found';
+
+      // Clear default account references if this was the default
+      await client.query(
+        `UPDATE workspaces SET default_expense_account_id = NULL
+         WHERE id = $1 AND default_expense_account_id = $2`,
+        [workspaceId, accountId],
+      );
+      await client.query(
+        `UPDATE workspaces SET default_income_account_id = NULL
+         WHERE id = $1 AND default_income_account_id = $2`,
+        [workspaceId, accountId],
+      );
+
+      return 'ok';
+    },
+  );
 }

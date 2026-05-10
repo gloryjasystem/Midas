@@ -132,6 +132,7 @@ const PER_ACCOUNT_SQL = `
    AND t.workspace_id = $1   -- defense-in-depth alongside RLS (SEC-03)
    AND t.deleted_at IS NULL   -- Phase 1.29: exclude soft-deleted from balance sum
   WHERE a.workspace_id = $1  -- explicit workspace filter (SEC-03)
+    AND a.deleted_at IS NULL   -- Phase 2.1: hide soft-deleted accounts
   GROUP BY a.id, a.name, a.type, a.currency, a.initial_balance
   ORDER BY a.currency, a.name
 `;
@@ -170,6 +171,7 @@ const CURRENCY_TOTALS_SQL = `
      AND t.workspace_id = $1
      AND t.deleted_at IS NULL   -- Phase 1.29: exclude soft-deleted from currency totals
     WHERE a.workspace_id = $1
+      AND a.deleted_at IS NULL   -- Phase 2.1: hide soft-deleted accounts
     GROUP BY a.id, a.currency, a.initial_balance
   ) AS account_balances
   GROUP BY currency
@@ -215,6 +217,41 @@ export async function getAccountBalances(
   workspaceId: string,
   userId: string,
 ): Promise<string> {
+  const { text } = await getBalanceData(workspaceId, userId);
+  return text;
+}
+
+// ─────────────────────────────────────────────────────────────
+// getBalanceData — structured data + text (Phase 2.1)
+// ─────────────────────────────────────────────────────────────
+
+/** Structured balance row for keyboard building. */
+export interface BalanceDataRow {
+  account_id: string;
+  name: string;
+  type: string;
+  currency: string;
+  balance: string;
+}
+
+/** Structured result from getBalanceData(). */
+export interface BalanceData {
+  text: string;
+  accounts: BalanceDataRow[];
+}
+
+/**
+ * Get structured balance data: formatted text + per-account rows.
+ * Used by the Balance screen to build both message text and inline keyboard.
+ *
+ * @param workspaceId - Internal workspace ULID (SEC-03)
+ * @param userId      - Internal user ULID
+ * @returns { text, accounts[] }
+ */
+export async function getBalanceData(
+  workspaceId: string,
+  userId: string,
+): Promise<BalanceData> {
   const { accounts, currencyTotals } = await withTenantTransaction<{
     accounts: AccountBalanceRow[];
     currencyTotals: CurrencyTotalRow[];
@@ -233,32 +270,39 @@ export async function getAccountBalances(
     };
   });
 
+  // ── Build structured rows for keyboard ────────────────────────
+  const accountRows: BalanceDataRow[] = accounts.map((row) => ({
+    account_id: row.account_id,
+    name: row.name,
+    type: row.type,
+    currency: row.currency,
+    balance: row.balance.toFixed(2),
+  }));
+
   // ── Empty workspace ─────────────────────────────────────────
   if (accounts.length === 0) {
-    return '💰 <b>Баланс по счетам:</b>\n\nСчетов пока нет.';
+    return {
+      text: '💰 <b>Баланс по счетам:</b>\n\nСчетов пока нет.',
+      accounts: [],
+    };
   }
 
-  // ── Per-account lines (Phase 1.27 roadmap style) ────────────
+  // ── Per-account lines ────────────────────────────────────
   const accountLines = accounts.map((row) => {
-    // escapeHtml: DB-sourced strings rendered in parse_mode:'HTML' context (Phase 1.15 policy).
     const name = escapeHtml(row.name);
     const typeLabel = escapeHtml(resolveTypeLabel(row.type));
     const currency = escapeHtml(row.currency);
-    // SEC-02: balance is a Decimal object from pg NUMERIC parser. toFixed(2) = string output.
     const balanceStr = row.balance.toFixed(2);
     const transferCount = parseInt(row.transfer_count, 10);
     const mismatchCount = parseInt(row.mismatch_count, 10);
 
-    // Phase 1.27: roadmap-style "└─" format
     let line = `• ${name} — ${typeLabel} (${currency})\n  └─ <b>${balanceStr}</b> ${currency}`;
 
-    // D3: Transfer neutral — shown as informational footnote only.
     if (transferCount > 0) {
       const transferSumStr = row.transfer_sum.toFixed(2);
       line += `\n  🔄 Переводы: ${String(transferCount)} шт. на ${transferSumStr} ${currency} (не учитываются в балансе)`;
     }
 
-    // Phase 1.27: mismatch warning — transactions excluded to prevent silent mixing.
     if (mismatchCount > 0) {
       line += `\n  ⚠️ Пропущено ${String(mismatchCount)} тр. с другой валютой (без конвертации)`;
     }
@@ -266,18 +310,189 @@ export async function getAccountBalances(
     return line;
   });
 
-  // ── Currency totals (Phase 1.27 roadmap style) ──────────────
+  // ── Currency totals ──────────────────
   const totalLines = currencyTotals.map((row) => {
     const currency = escapeHtml(row.currency);
-    // SEC-02: currency_total is Decimal from NUMERIC subquery. toFixed(2) for display.
     const totalStr = row.currency_total.toFixed(2);
     return `${currency}: <b>${totalStr}</b>`;
   });
 
-  return (
+  const text =
     '💰 <b>Баланс по счетам:</b>\n\n' +
     accountLines.join('\n\n') +
     '\n\n────────────────────\n📊 Итого по валютам:\n' +
-    totalLines.join('\n')
+    totalLines.join('\n');
+
+  return { text, accounts: accountRows };
+}
+
+// ─────────────────────────────────────────────────────────────
+// getAccountDetail — single account card (Phase 2.1)
+// ─────────────────────────────────────────────────────────────
+
+/** SQL for single account detail card. */
+const ACCOUNT_DETAIL_SQL = `
+  SELECT
+    a.id,
+    a.name,
+    a.type,
+    a.currency,
+    a.created_at,
+    a.initial_balance
+      + COALESCE(SUM(CASE
+          WHEN t.transaction_intent = 'income'        AND t.base_currency = a.currency
+          THEN t.base_amount END), 0)
+      + COALESCE(SUM(CASE
+          WHEN t.transaction_intent = 'debt_received' AND t.base_currency = a.currency
+          THEN t.base_amount END), 0)
+      - COALESCE(SUM(CASE
+          WHEN t.transaction_intent = 'expense'       AND t.base_currency = a.currency
+          THEN t.base_amount END), 0)
+      - COALESCE(SUM(CASE
+          WHEN t.transaction_intent = 'debt_given'    AND t.base_currency = a.currency
+          THEN t.base_amount END), 0)
+      AS balance,
+    COUNT(t.id) AS tx_count
+  FROM account_sources a
+  LEFT JOIN transactions t
+    ON t.account_id = a.id
+   AND t.workspace_id = $1
+   AND t.deleted_at IS NULL
+  WHERE a.id = $2
+    AND a.workspace_id = $1
+    AND a.deleted_at IS NULL
+  GROUP BY a.id, a.name, a.type, a.currency, a.created_at, a.initial_balance
+`;
+
+/** Row from account detail query. */
+interface AccountDetailRow {
+  id: string;
+  name: string;
+  type: string;
+  currency: string;
+  created_at: string;
+  balance: { toFixed: (dp: number) => string };
+  tx_count: string;
+}
+
+/** Structured account detail. */
+export interface AccountDetailData {
+  id: string;
+  name: string;
+  type: string;
+  currency: string;
+  balance: string;
+  tx_count: string;
+  created_at: string;
+}
+
+/**
+ * Get detailed information for a single account.
+ * Returns null if account not found or deleted.
+ *
+ * SEC-03: All queries inside withTenantTransaction with explicit workspace_id.
+ */
+export async function getAccountDetail(
+  workspaceId: string,
+  userId: string,
+  accountId: string,
+): Promise<AccountDetailData | null> {
+  return withTenantTransaction<AccountDetailData | null>(
+    workspaceId,
+    userId,
+    async (client) => {
+      const result = await client.query<AccountDetailRow>(
+        ACCOUNT_DETAIL_SQL,
+        [workspaceId, accountId],
+      );
+      const row: AccountDetailRow | undefined = result.rows[0];
+      if (!row) return null;
+      return {
+        id: row.id,
+        name: row.name,
+        type: row.type,
+        currency: row.currency,
+        balance: row.balance.toFixed(2),
+        tx_count: row.tx_count,
+        created_at: String(row.created_at),
+      };
+    },
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// setAccountBalanceById — balance sync by ID (Phase 2.1)
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Synchronize account balance by recalculating initial_balance.
+ * Same formula as setAccountBalance() but uses account ID directly.
+ *
+ * Formula: new_initial_balance = target_balance − computed_from_transactions
+ * All arithmetic in PostgreSQL NUMERIC (SEC-02).
+ *
+ * @param workspaceId - Internal workspace ULID (SEC-03)
+ * @param userId      - Internal user ULID
+ * @param accountId   - Account ID (ULID)
+ * @param amountStr   - Target balance as NUMERIC-safe string
+ * @returns 'ok' | 'not_found'
+ */
+export async function setAccountBalanceById(
+  workspaceId: string,
+  userId: string,
+  accountId: string,
+  amountStr: string,
+): Promise<'ok' | 'not_found'> {
+  return withTenantTransaction<'ok' | 'not_found'>(
+    workspaceId,
+    userId,
+    async (client) => {
+      const updateResult = await client.query<{ id: string }>(
+        `UPDATE account_sources
+         SET initial_balance = (
+           $3::NUMERIC
+           - COALESCE((
+             SELECT SUM(CASE
+               WHEN t.transaction_intent = 'income'        THEN  t.base_amount
+               WHEN t.transaction_intent = 'debt_received' THEN  t.base_amount
+               WHEN t.transaction_intent = 'expense'       THEN -t.base_amount
+               WHEN t.transaction_intent = 'debt_given'    THEN -t.base_amount
+               ELSE 0 END)
+             FROM transactions t
+             WHERE t.account_id  = $2
+               AND t.workspace_id = $1
+               AND t.deleted_at IS NULL
+           ), 0)
+         )
+         WHERE id = $2
+           AND workspace_id = $1
+           AND deleted_at IS NULL
+         RETURNING id`,
+        [workspaceId, accountId, amountStr],
+      );
+      return updateResult.rowCount === 0 ? 'not_found' : 'ok';
+    },
+  );
+}
+
+/**
+ * Get transaction count for an account (for currency change warning).
+ */
+export async function getAccountTxCount(
+  workspaceId: string,
+  userId: string,
+  accountId: string,
+): Promise<number> {
+  return withTenantTransaction<number>(
+    workspaceId,
+    userId,
+    async (client) => {
+      const result = await client.query<{ cnt: string }>(
+        `SELECT COUNT(*) AS cnt FROM transactions
+         WHERE account_id = $1 AND workspace_id = $2 AND deleted_at IS NULL`,
+        [accountId, workspaceId],
+      );
+      return parseInt(result.rows[0]?.cnt ?? '0', 10);
+    },
   );
 }

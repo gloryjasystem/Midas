@@ -59,23 +59,72 @@ export interface AccountOnboardState {
 }
 
 // ─────────────────────────────────────────────────────────────
+// Bank preset allowlist (SEC-01)
+// key → { name, defaultCurrency }
+// ─────────────────────────────────────────────────────────────
+
+export interface PresetInfo {
+  name: string;
+  defaultCurrency: string;
+}
+
+export const BANK_PRESETS: ReadonlyMap<string, PresetInfo> = new Map([
+  ['tinkoff',    { name: 'Тинькофф',    defaultCurrency: 'RUB' }],
+  ['sber',       { name: 'Сбербанк',    defaultCurrency: 'RUB' }],
+  ['mono',       { name: 'Монобанк',    defaultCurrency: 'UAH' }],
+  ['privat',     { name: 'ПриватБанк',  defaultCurrency: 'UAH' }],
+  ['revolut',    { name: 'Revolut',     defaultCurrency: 'EUR' }],
+  ['wise',       { name: 'Wise',        defaultCurrency: 'EUR' }],
+  ['chase',      { name: 'Chase',       defaultCurrency: 'USD' }],
+  ['n26',        { name: 'N26',         defaultCurrency: 'EUR' }],
+  ['raiffeisen', { name: 'Raiffeisen',  defaultCurrency: 'EUR' }],
+]);
+
+// ─────────────────────────────────────────────────────────────
 // Exchange preset allowlist (SEC-01)
 // ─────────────────────────────────────────────────────────────
 
 export const EXCHANGE_PRESETS: ReadonlyMap<string, string> = new Map([
-  ['binance', 'Binance'],
-  ['bybit',   'Bybit'],
-  ['okx',     'OKX'],
-  ['kraken',  'Kraken'],
-  ['huobi',   'Huobi'],
+  ['binance',  'Binance'],
+  ['bybit',    'Bybit'],
+  ['okx',      'OKX'],
+  ['kraken',   'Kraken'],
+  ['coinbase', 'Coinbase'],
+  ['kucoin',   'KuCoin'],
+  ['huobi',    'Huobi'],
+  ['gateio',   'Gate.io'],
+  ['bitget',   'Bitget'],
 ]);
 
 // ─────────────────────────────────────────────────────────────
-// Currency shortcuts shown in onboarding flow
+// Wallet preset allowlist (SEC-01)
 // ─────────────────────────────────────────────────────────────
 
-/** Presets shown in currency picker during onboarding. */
-const ONBOARD_CURRENCY_PRESETS = ['USDT', 'BTC', 'ETH', 'USD', 'EUR', 'RUB'] as const;
+export const WALLET_PRESETS: ReadonlyMap<string, string> = new Map([
+  ['metamask',   'MetaMask'],
+  ['trust',      'Trust Wallet'],
+  ['phantom',    'Phantom'],
+  ['exodus',     'Exodus'],
+  ['ledger',     'Ledger'],
+  ['trezor',     'Trezor'],
+  ['atomic',     'Atomic Wallet'],
+  ['cbwallet',   'Coinbase Wallet'],
+]);
+
+// ─────────────────────────────────────────────────────────────
+// Currency presets — split by asset class
+// Banks/Cash → fiat only. Exchanges/Wallets → crypto only.
+// Custom → all common currencies.
+// ─────────────────────────────────────────────────────────────
+
+/** Fiat currencies for banks and cash accounts. */
+export const FIAT_CURRENCY_PRESETS = ['USD', 'EUR', 'RUB', 'UAH', 'GBP', 'PLN'] as const;
+
+/** Crypto currencies for exchanges and wallets. */
+export const CRYPTO_CURRENCY_PRESETS = ['USDT', 'BTC', 'ETH', 'BNB', 'SOL', 'USDC'] as const;
+
+/** Mixed currencies for custom account type. */
+const CUSTOM_CURRENCY_PRESETS = ['USD', 'EUR', 'RUB', 'USDT', 'BTC', 'ETH'] as const;
 
 // ─────────────────────────────────────────────────────────────
 // Callback_data parsed type
@@ -83,8 +132,12 @@ const ONBOARD_CURRENCY_PRESETS = ['USDT', 'BTC', 'ETH', 'USD', 'EUR', 'RUB'] as 
 
 export type AccountOnboardCmd =
   | { cmd: 'type'; accountType: 'card' | 'cash' | 'exchange' | 'wallet' | 'custom' }
+  | { cmd: 'bank_preset'; key: string; name: string; defaultCurrency: string }
+  | { cmd: 'bank_custom' }
   | { cmd: 'exchange_preset'; key: string; name: string }
   | { cmd: 'exchange_custom' }
+  | { cmd: 'wallet_preset'; key: string; name: string }
+  | { cmd: 'wallet_custom' }
   | { cmd: 'currency'; code: string }
   | { cmd: 'currency_custom' }
   | { cmd: 'skip' }
@@ -125,12 +178,31 @@ export function parseAccountCallback(data: string): AccountOnboardCmd | null {
     return { cmd: 'type', accountType: t as 'card' | 'cash' | 'exchange' | 'wallet' | 'custom' };
   }
 
+  // Bank presets: ac:bnk:{key}
+  if (sub === 'bnk') {
+    const key = parts[2] ?? '';
+    if (key === 'custom') return { cmd: 'bank_custom' };
+    const info = BANK_PRESETS.get(key);
+    if (!info) return null;
+    return { cmd: 'bank_preset', key, name: info.name, defaultCurrency: info.defaultCurrency };
+  }
+
+  // Exchange presets: ac:xch:{key}
   if (sub === 'xch') {
     const key = parts[2] ?? '';
     if (key === 'custom') return { cmd: 'exchange_custom' };
     const name = EXCHANGE_PRESETS.get(key);
     if (!name) return null;
     return { cmd: 'exchange_preset', key, name };
+  }
+
+  // Wallet presets: ac:wal:{key}
+  if (sub === 'wal') {
+    const key = parts[2] ?? '';
+    if (key === 'custom') return { cmd: 'wallet_custom' };
+    const name = WALLET_PRESETS.get(key);
+    if (!name) return null;
+    return { cmd: 'wallet_preset', key, name };
   }
 
   if (sub === 'cur') {
@@ -213,43 +285,148 @@ export function buildStartOnboardKeyboard(): InlineKeyboardMarkup {
  * Build the exchange preset picker.
  * Shown after user picks [🔶 Крипто-биржа].
  */
-export function buildExchangePickerKeyboard(): InlineKeyboardMarkup {
+/**
+ * Build the bank picker keyboard.
+ * 9 popular banks (EU/CIS/US) + [✏️ Другой банк] for free-text.
+ */
+export function buildBankPickerKeyboard(): InlineKeyboardMarkup {
   return {
     inline_keyboard: [
       [
-        { text: 'Binance', callback_data: 'ac:xch:binance' },
-        { text: 'Bybit',   callback_data: 'ac:xch:bybit' },
-        { text: 'OKX',     callback_data: 'ac:xch:okx' },
+        { text: 'Тинькофф',   callback_data: 'ac:bnk:tinkoff' },
+        { text: 'Сбербанк',   callback_data: 'ac:bnk:sber' },
+        { text: 'Монобанк',   callback_data: 'ac:bnk:mono' },
       ],
       [
-        { text: 'Kraken', callback_data: 'ac:xch:kraken' },
-        { text: 'Huobi',  callback_data: 'ac:xch:huobi' },
-        { text: '✏️ Другая', callback_data: 'ac:xch:custom' },
+        { text: 'ПриватБанк', callback_data: 'ac:bnk:privat' },
+        { text: 'Revolut',    callback_data: 'ac:bnk:revolut' },
+        { text: 'Wise',       callback_data: 'ac:bnk:wise' },
       ],
+      [
+        { text: 'Chase',      callback_data: 'ac:bnk:chase' },
+        { text: 'N26',        callback_data: 'ac:bnk:n26' },
+        { text: 'Raiffeisen', callback_data: 'ac:bnk:raiffeisen' },
+      ],
+      [{ text: '✏️ Другой банк', callback_data: 'ac:bnk:custom' }],
     ],
   };
 }
 
 /**
- * Build the currency picker for onboarding.
- * Shows 6 common presets + [✏️ Другая] for free-text input.
+ * Build the exchange picker keyboard.
+ * 9 popular crypto exchanges + [✏️ Другая] for free-text.
  */
-export function buildOnboardCurrencyKeyboard(): InlineKeyboardMarkup {
-  const rows = [];
+export function buildExchangePickerKeyboard(): InlineKeyboardMarkup {
+  return {
+    inline_keyboard: [
+      [
+        { text: 'Binance',  callback_data: 'ac:xch:binance' },
+        { text: 'Bybit',    callback_data: 'ac:xch:bybit' },
+        { text: 'OKX',      callback_data: 'ac:xch:okx' },
+      ],
+      [
+        { text: 'Kraken',   callback_data: 'ac:xch:kraken' },
+        { text: 'Coinbase', callback_data: 'ac:xch:coinbase' },
+        { text: 'KuCoin',   callback_data: 'ac:xch:kucoin' },
+      ],
+      [
+        { text: 'Huobi',    callback_data: 'ac:xch:huobi' },
+        { text: 'Gate.io',  callback_data: 'ac:xch:gateio' },
+        { text: 'Bitget',   callback_data: 'ac:xch:bitget' },
+      ],
+      [{ text: '✏️ Другая биржа', callback_data: 'ac:xch:custom' }],
+    ],
+  };
+}
 
-  // 3 per row for presets
-  for (let i = 0; i < ONBOARD_CURRENCY_PRESETS.length; i += 3) {
-    rows.push(
-      ONBOARD_CURRENCY_PRESETS.slice(i, i + 3).map((code) => ({
+/**
+ * Build the wallet picker keyboard.
+ * 8 popular crypto wallets + [✏️ Другой] for free-text.
+ */
+export function buildWalletPickerKeyboard(): InlineKeyboardMarkup {
+  return {
+    inline_keyboard: [
+      [
+        { text: 'MetaMask',      callback_data: 'ac:wal:metamask' },
+        { text: 'Trust Wallet',  callback_data: 'ac:wal:trust' },
+        { text: 'Phantom',       callback_data: 'ac:wal:phantom' },
+      ],
+      [
+        { text: 'Exodus',        callback_data: 'ac:wal:exodus' },
+        { text: 'Ledger',        callback_data: 'ac:wal:ledger' },
+        { text: 'Trezor',        callback_data: 'ac:wal:trezor' },
+      ],
+      [
+        { text: 'Atomic Wallet', callback_data: 'ac:wal:atomic' },
+        { text: 'CB Wallet',     callback_data: 'ac:wal:cbwallet' },
+      ],
+      [{ text: '✏️ Другой кошелёк', callback_data: 'ac:wal:custom' }],
+    ],
+  };
+}
+
+// ─────────────────────────────────────────────────────────────
+// Currency keyboards — split by asset class
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Fiat currency picker — for banks and cash accounts.
+ * No crypto here: a Тинькофф card cannot be in USDT.
+ */
+export function buildFiatCurrencyKeyboard(): InlineKeyboardMarkup {
+  return {
+    inline_keyboard: [
+      FIAT_CURRENCY_PRESETS.slice(0, 3).map((code) => ({
         text: code,
         callback_data: `ac:cur:${code}`,
       })),
-    );
-  }
+      FIAT_CURRENCY_PRESETS.slice(3, 6).map((code) => ({
+        text: code,
+        callback_data: `ac:cur:${code}`,
+      })),
+      [{ text: '✏️ Другая валюта', callback_data: 'ac:cur:custom' }],
+    ],
+  };
+}
 
-  rows.push([{ text: '✏️ Другая валюта', callback_data: 'ac:cur:custom' }]);
+/**
+ * Crypto currency picker — for exchanges and wallets.
+ * No fiat here: Binance account is not in RUB.
+ */
+export function buildCryptoCurrencyKeyboard(): InlineKeyboardMarkup {
+  return {
+    inline_keyboard: [
+      CRYPTO_CURRENCY_PRESETS.slice(0, 3).map((code) => ({
+        text: code,
+        callback_data: `ac:cur:${code}`,
+      })),
+      CRYPTO_CURRENCY_PRESETS.slice(3, 6).map((code) => ({
+        text: code,
+        callback_data: `ac:cur:${code}`,
+      })),
+      [{ text: '✏️ Другая валюта', callback_data: 'ac:cur:custom' }],
+    ],
+  };
+}
 
-  return { inline_keyboard: rows };
+/**
+ * Mixed currency picker — for custom account type.
+ * Shows both fiat and crypto presets.
+ */
+export function buildOnboardCurrencyKeyboard(): InlineKeyboardMarkup {
+  return {
+    inline_keyboard: [
+      CUSTOM_CURRENCY_PRESETS.slice(0, 3).map((code) => ({
+        text: code,
+        callback_data: `ac:cur:${code}`,
+      })),
+      CUSTOM_CURRENCY_PRESETS.slice(3, 6).map((code) => ({
+        text: code,
+        callback_data: `ac:cur:${code}`,
+      })),
+      [{ text: '✏️ Другая валюта', callback_data: 'ac:cur:custom' }],
+    ],
+  };
 }
 
 /**
@@ -309,12 +486,19 @@ export const CURRENCY_PICKER_TEXT = 'В какой валюте?';
 /** Prompt for free-text account name input. */
 export function nameInputPrompt(accountType: string): string {
   const labels: Record<string, string> = {
-    card:    '💳 Как называется карта или банк?\n(например: <i>Альфа-Банк</i>, <i>Сбербанк</i>)',
-    wallet:  '₿ Как называется кошелёк?\n(например: <i>Metamask</i>, <i>Trust Wallet</i>)',
-    custom:  '✏️ Введи название счёта:',
+    card:    '💳 Введите название банка:',
+    wallet:  '₿ Введите название кошелька:',
+    exchange: '🔶 Введите название биржи:',
+    custom:  '✏️ Введите название счёта:',
   };
-  return labels[accountType] ?? '✏️ Введи название счёта:';
+  return labels[accountType] ?? '✏️ Введите название счёта:';
 }
+
+/** Text for bank picker step. */
+export const BANK_PICKER_TEXT = '💳 Выберите банк:';
+
+/** Text for wallet picker step. */
+export const WALLET_PICKER_TEXT = '₿ Выберите кошелёк:';
 
 /** Prompt for free-text currency input. */
 export const CURRENCY_INPUT_PROMPT =

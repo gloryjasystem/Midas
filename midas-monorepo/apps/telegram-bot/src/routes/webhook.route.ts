@@ -58,7 +58,7 @@ import { resolveWorkspace } from '../services/workspace-resolver.js';
 import { checkOnboardingRateLimit } from '../services/rate-limiter.js';
 // Phase 1.33: sendMessage no longer imported directly — all sends go via upsertBotMessage.
 import { getMonthlyReport } from '../services/report.service.js';
-import { getAccountBalances } from '../services/balance.service.js';
+import { getBalanceData, getAccountDetail, setAccountBalanceById, getAccountTxCount } from '../services/balance.service.js';
 import {
   setAccountBalance,
   parseSetBalanceArgs,
@@ -75,6 +75,9 @@ import {
   hasAccounts,             // Phase 1.30
   addAccountWithCurrency,  // Phase 1.30
   parseAddAccountArgs,
+  renameAccount,           // Phase 2.1
+  changeAccountCurrency,   // Phase 2.1
+  softDeleteAccount,       // Phase 2.1
 } from '../services/account.service.js';
 import {
   getSettings,
@@ -139,17 +142,33 @@ import {
   buildAccountTypeKeyboard,          // Phase 1.30
   buildStartSimpleKeyboard,          // Phase 1.37-UX: 2-button /start keyboard
   buildExchangePickerKeyboard,       // Phase 1.30
+  buildBankPickerKeyboard,           // Phase 2.1
+  buildWalletPickerKeyboard,         // Phase 2.1
+  buildFiatCurrencyKeyboard,         // Phase 2.1
+  buildCryptoCurrencyKeyboard,       // Phase 2.1
   buildOnboardCurrencyKeyboard,      // Phase 1.30
   buildAfterCreateKeyboard,          // Phase 1.30
   ACCOUNTS_EMPTY_TEXT,               // Phase 1.30
   START_WELCOME_TEXT,                // Phase 1.37-UX: new user welcome
   SETUP_COMPLETE_TEXT,               // Phase 1.37-UX: ReplyKeyboard activation message
   EXCHANGE_PICKER_TEXT,              // Phase 1.30
+  BANK_PICKER_TEXT,                  // Phase 2.1
+  WALLET_PICKER_TEXT,                // Phase 2.1
   CURRENCY_PICKER_TEXT,              // Phase 1.30
   nameInputPrompt,                   // Phase 1.30
   CURRENCY_INPUT_PROMPT,             // Phase 1.30
   type AccountOnboardState,          // Phase 1.30
 } from '../services/account-onboard-keyboard.service.js';
+import {
+  parseBalanceCallback,              // Phase 2.1
+  buildBalanceListKeyboard,          // Phase 2.1
+  buildAccountActionsKeyboard,       // Phase 2.1
+  buildDeleteConfirmKeyboard as buildBalanceDeleteConfirmKeyboard, // Phase 2.1
+  buildCurrencyWarningKeyboard,      // Phase 2.1
+  buildBalanceFiatCurrencyKeyboard,  // Phase 2.1
+  formatAccountDetailText,           // Phase 2.1
+  type BalanceAccountRow,            // Phase 2.1
+} from '../services/balance-keyboard.service.js';
 import {
   parseInlineAccountCallback,        // Phase 1.31
   RENAME_PROMPT,                     // Phase 1.31
@@ -599,7 +618,15 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
               await redisConnection.del(acKey);
               if (acMsgId) void deleteMessage(chatId, acMsgId);
               await clearActiveMessageId(telegramUserId, chatId);
-              void sendMessageWithReplyKeyboard(chatId, SETUP_COMPLETE_TEXT, buildMainMenuKeyboard());
+              // Phase 2.1: if came from balance, return to balance
+              const blSource = await redisConnection.get(`bl:source:${telegramUserId}:${chatId}`);
+              if (blSource) {
+                await redisConnection.del(`bl:source:${telegramUserId}:${chatId}`);
+                const { text, accounts } = await getBalanceData(acResolved.workspaceId, acResolved.userId);
+                void upsertBotMessage(telegramUserId, chatId, text, buildBalanceListKeyboard(accounts as BalanceAccountRow[]));
+              } else {
+                void sendMessageWithReplyKeyboard(chatId, SETUP_COMPLETE_TEXT, buildMainMenuKeyboard());
+              }
 
             } else if (acCmd.cmd === 'more') {
               // User wants to add another account — restart type picker
@@ -608,34 +635,68 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
 
             } else if (acCmd.cmd === 'type') {
               // User selected account type
-              if (acCmd.accountType === 'exchange') {
+              if (acCmd.accountType === 'card') {
+                // Phase 2.1: Card → show bank picker keyboard
+                const state: AccountOnboardState = { step: 'name_input', accountType: 'card' };
+                await redisConnection.set(acKey, JSON.stringify(state), 'EX', ONBOARD_STATE_TTL_SEC);
+                if (acMsgId) void editMessageText(chatId, acMsgId, BANK_PICKER_TEXT, buildBankPickerKeyboard());
+              } else if (acCmd.accountType === 'exchange') {
                 // Exchange: show exchange preset picker first
                 const state: AccountOnboardState = { step: 'name_input', accountType: 'exchange' };
                 await redisConnection.set(acKey, JSON.stringify(state), 'EX', ONBOARD_STATE_TTL_SEC);
                 if (acMsgId) void editMessageText(chatId, acMsgId, EXCHANGE_PICKER_TEXT, buildExchangePickerKeyboard());
+              } else if (acCmd.accountType === 'wallet') {
+                // Phase 2.1: Wallet → show wallet picker keyboard
+                const state: AccountOnboardState = { step: 'name_input', accountType: 'wallet' };
+                await redisConnection.set(acKey, JSON.stringify(state), 'EX', ONBOARD_STATE_TTL_SEC);
+                if (acMsgId) void editMessageText(chatId, acMsgId, WALLET_PICKER_TEXT, buildWalletPickerKeyboard());
               } else if (acCmd.accountType === 'cash') {
-                // Cash: name is auto-determined after currency pick
+                // Cash: name is auto-determined after fiat currency pick
                 const state: AccountOnboardState = { step: 'cur_pick', accountType: 'cash' };
                 await redisConnection.set(acKey, JSON.stringify(state), 'EX', ONBOARD_STATE_TTL_SEC);
-                if (acMsgId) void editMessageText(chatId, acMsgId, CURRENCY_PICKER_TEXT, buildOnboardCurrencyKeyboard());
+                if (acMsgId) void editMessageText(chatId, acMsgId, CURRENCY_PICKER_TEXT, buildFiatCurrencyKeyboard());
               } else {
-                // card / wallet / custom: need free-text name first
+                // custom: need free-text name first
                 const state: AccountOnboardState = { step: 'name_input', accountType: acCmd.accountType };
                 await redisConnection.set(acKey, JSON.stringify(state), 'EX', ONBOARD_STATE_TTL_SEC);
                 if (acMsgId) void editMessageText(chatId, acMsgId, nameInputPrompt(acCmd.accountType), { inline_keyboard: [] });
               }
 
+            } else if (acCmd.cmd === 'bank_preset') {
+              // Phase 2.1: User picked a bank preset — set name, show fiat currency picker
+              const state: AccountOnboardState = { step: 'cur_pick', accountType: 'card', name: acCmd.name };
+              await redisConnection.set(acKey, JSON.stringify(state), 'EX', ONBOARD_STATE_TTL_SEC);
+              if (acMsgId) void editMessageText(chatId, acMsgId, CURRENCY_PICKER_TEXT, buildFiatCurrencyKeyboard());
+
+            } else if (acCmd.cmd === 'bank_custom') {
+              // Phase 2.1: User wants to type a custom bank name
+              const state: AccountOnboardState = { step: 'name_input', accountType: 'card' };
+              await redisConnection.set(acKey, JSON.stringify(state), 'EX', ONBOARD_STATE_TTL_SEC);
+              if (acMsgId) void editMessageText(chatId, acMsgId, nameInputPrompt('card'), { inline_keyboard: [] });
+
             } else if (acCmd.cmd === 'exchange_preset') {
-              // User picked an exchange preset — move to currency pick with name set
+              // User picked an exchange preset — show crypto currency picker
               const state: AccountOnboardState = { step: 'cur_pick', accountType: 'exchange', name: acCmd.name };
               await redisConnection.set(acKey, JSON.stringify(state), 'EX', ONBOARD_STATE_TTL_SEC);
-              if (acMsgId) void editMessageText(chatId, acMsgId, CURRENCY_PICKER_TEXT, buildOnboardCurrencyKeyboard());
+              if (acMsgId) void editMessageText(chatId, acMsgId, CURRENCY_PICKER_TEXT, buildCryptoCurrencyKeyboard());
 
             } else if (acCmd.cmd === 'exchange_custom') {
               // User wants to type a custom exchange name
               const state: AccountOnboardState = { step: 'name_input', accountType: 'exchange' };
               await redisConnection.set(acKey, JSON.stringify(state), 'EX', ONBOARD_STATE_TTL_SEC);
-              if (acMsgId) void editMessageText(chatId, acMsgId, '✏️ Введи название биржи:', { inline_keyboard: [] });
+              if (acMsgId) void editMessageText(chatId, acMsgId, nameInputPrompt('exchange'), { inline_keyboard: [] });
+
+            } else if (acCmd.cmd === 'wallet_preset') {
+              // Phase 2.1: User picked a wallet preset — show crypto currency picker
+              const state: AccountOnboardState = { step: 'cur_pick', accountType: 'wallet', name: acCmd.name };
+              await redisConnection.set(acKey, JSON.stringify(state), 'EX', ONBOARD_STATE_TTL_SEC);
+              if (acMsgId) void editMessageText(chatId, acMsgId, CURRENCY_PICKER_TEXT, buildCryptoCurrencyKeyboard());
+
+            } else if (acCmd.cmd === 'wallet_custom') {
+              // Phase 2.1: User wants to type a custom wallet name
+              const state: AccountOnboardState = { step: 'name_input', accountType: 'wallet' };
+              await redisConnection.set(acKey, JSON.stringify(state), 'EX', ONBOARD_STATE_TTL_SEC);
+              if (acMsgId) void editMessageText(chatId, acMsgId, nameInputPrompt('wallet'), { inline_keyboard: [] });
 
             } else if (acCmd.cmd === 'currency') {
               // User picked a currency — load state, create account
@@ -1945,13 +2006,8 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
 
         try {
           if (navCmd === 'balance') {
-            const balanceMsg = await getAccountBalances(navResolved.workspaceId, navResolved.userId);
-            await upsertBotMessage(telegramUserId, chatId, balanceMsg, {
-              inline_keyboard: [[
-                { text: '📊 Отчёт',    callback_data: 'nav:report' },
-                { text: '⚙️ Настройки', callback_data: 'stg:main' },
-              ]],
-            });
+            const { text: balanceMsg, accounts } = await getBalanceData(navResolved.workspaceId, navResolved.userId);
+            await upsertBotMessage(telegramUserId, chatId, balanceMsg, buildBalanceListKeyboard(accounts as BalanceAccountRow[]));
           } else if (navCmd === 'report') {
             const reportMsg = await getMonthlyReport(navResolved.workspaceId, navResolved.userId);
             await upsertBotMessage(telegramUserId, chatId, reportMsg, {
@@ -1964,6 +2020,149 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
         } catch (err: unknown) {
           const errorClass = err instanceof Error ? err.constructor.name : 'UnknownError';
           request.log.error({ msg: '[midas:bot:webhook] nav: callback failed', callbackId: cq.id, errorClass });
+        }
+
+        await answerCallbackQuery(cq.id);
+        await reply.status(200).send({ ok: true });
+        return;
+      }
+
+      // ── Phase 2.1: balance management callbacks (prefix "bl:") ────
+      if (callbackData.startsWith('bl:')) {
+        const blCmd = parseBalanceCallback(callbackData);
+        if (!blCmd) {
+          await answerCallbackQuery(cq.id);
+          await reply.status(200).send({ ok: true });
+          return;
+        }
+
+        let blResolved: { workspaceId: string; userId: string };
+        try {
+          blResolved = await resolveWorkspace(telegramUserId, chatId);
+        } catch {
+          await answerCallbackQuery(cq.id);
+          await reply.status(200).send({ ok: true });
+          return;
+        }
+
+        const blKey = `bl:state:${telegramUserId}:${chatId}`;
+
+        try {
+          if (blCmd.cmd === 'add_account') {
+            // Redirect to account onboarding — show account type picker
+            // Set a flag so that after creation, the user returns to balance
+            await redisConnection.set(`bl:source:${telegramUserId}:${chatId}`, '1', 'EX', 300);
+            await upsertBotMessage(telegramUserId, chatId, ACCOUNTS_EMPTY_TEXT, buildAccountTypeKeyboard());
+
+          } else if (blCmd.cmd === 'back') {
+            // Return to balance list
+            const { text, accounts } = await getBalanceData(blResolved.workspaceId, blResolved.userId);
+            await upsertBotMessage(telegramUserId, chatId, text, buildBalanceListKeyboard(accounts as BalanceAccountRow[]));
+
+          } else if (blCmd.cmd === 'view_account') {
+            const detail = await getAccountDetail(blResolved.workspaceId, blResolved.userId, blCmd.accountId);
+            if (!detail) {
+              await upsertBotMessage(telegramUserId, chatId, '⚠️ Счёт не найден.');
+            } else {
+              await upsertBotMessage(
+                telegramUserId, chatId,
+                formatAccountDetailText(detail),
+                buildAccountActionsKeyboard(blCmd.accountId),
+              );
+            }
+
+          } else if (blCmd.cmd === 'rename') {
+            // Set text intercept for rename
+            await redisConnection.set(blKey, JSON.stringify({ action: 'rename', accountId: blCmd.accountId }), 'EX', 120);
+            await upsertBotMessage(telegramUserId, chatId, '✏️ Введите новое название счёта:');
+
+          } else if (blCmd.cmd === 'change_currency') {
+            // Check if account has transactions — warn if so
+            const txCount = await getAccountTxCount(blResolved.workspaceId, blResolved.userId, blCmd.accountId);
+            if (txCount > 0) {
+              await upsertBotMessage(
+                telegramUserId, chatId,
+                `⚠️ У этого счёта <b>${String(txCount)}</b> транзакций. Если смените валюту, они не будут учитываться в балансе.\n\nПродолжить?`,
+                buildCurrencyWarningKeyboard(blCmd.accountId),
+              );
+            } else {
+              // No transactions — show currency picker directly
+              await redisConnection.set(blKey, JSON.stringify({ action: 'currency', accountId: blCmd.accountId }), 'EX', 120);
+              await upsertBotMessage(
+                telegramUserId, chatId,
+                '💱 Выберите новую валюту:',
+                buildBalanceFiatCurrencyKeyboard(),
+              );
+            }
+
+          } else if (blCmd.cmd === 'change_currency_force') {
+            // User confirmed currency change despite having transactions
+            await redisConnection.set(blKey, JSON.stringify({ action: 'currency', accountId: blCmd.accountId }), 'EX', 120);
+            await upsertBotMessage(
+              telegramUserId, chatId,
+              '💱 Выберите новую валюту:',
+              buildBalanceFiatCurrencyKeyboard(),
+            );
+
+          } else if (blCmd.cmd === 'currency_set') {
+            // User picked a currency from bl: picker
+            const rawState = await redisConnection.get(blKey);
+            if (rawState) {
+              const state = JSON.parse(rawState) as { action: string; accountId: string };
+              if (state.action === 'currency') {
+                await changeAccountCurrency(blResolved.workspaceId, blResolved.userId, state.accountId, blCmd.code);
+                await redisConnection.del(blKey);
+                const detail = await getAccountDetail(blResolved.workspaceId, blResolved.userId, state.accountId);
+                if (detail) {
+                  await upsertBotMessage(
+                    telegramUserId, chatId,
+                    `✅ Валюта изменена на <b>${escapeHtml(blCmd.code)}</b>.\n\n` + formatAccountDetailText(detail),
+                    buildAccountActionsKeyboard(state.accountId),
+                  );
+                }
+              }
+            }
+
+          } else if (blCmd.cmd === 'currency_input') {
+            // Free-text currency input
+            const rawState = await redisConnection.get(blKey);
+            if (rawState) {
+              const state = JSON.parse(rawState) as { action: string; accountId: string };
+              state.action = 'currency_input';
+              await redisConnection.set(blKey, JSON.stringify(state), 'EX', 120);
+              await upsertBotMessage(telegramUserId, chatId, '✏️ Введите код валюты (например: USD, BTC):');
+            }
+
+          } else if (blCmd.cmd === 'set_balance') {
+            // Set text intercept for balance sync
+            await redisConnection.set(blKey, JSON.stringify({ action: 'set_balance', accountId: blCmd.accountId }), 'EX', 120);
+            await upsertBotMessage(telegramUserId, chatId, '🔄 Введите актуальный баланс счёта:');
+
+          } else if (blCmd.cmd === 'delete') {
+            // Show delete confirmation
+            const detail = await getAccountDetail(blResolved.workspaceId, blResolved.userId, blCmd.accountId);
+            const name = detail ? escapeHtml(detail.name) : 'Счёт';
+            const txInfo = detail && parseInt(detail.tx_count, 10) > 0
+              ? `\n⚠️ У этого счёта ${detail.tx_count} транзакций. Они сохранятся.`
+              : '';
+            await upsertBotMessage(
+              telegramUserId, chatId,
+              `🗑 Удалить счёт <b>${name}</b>?${txInfo}`,
+              buildBalanceDeleteConfirmKeyboard(blCmd.accountId),
+            );
+
+          } else if (blCmd.cmd === 'delete_confirm') {
+            await softDeleteAccount(blResolved.workspaceId, blResolved.userId, blCmd.accountId);
+            const { text, accounts } = await getBalanceData(blResolved.workspaceId, blResolved.userId);
+            await upsertBotMessage(
+              telegramUserId, chatId,
+              '✅ Счёт удалён.\n\n' + text,
+              buildBalanceListKeyboard(accounts as BalanceAccountRow[]),
+            );
+          }
+        } catch (err: unknown) {
+          const errorClass = err instanceof Error ? err.constructor.name : 'UnknownError';
+          request.log.error({ msg: '[midas:bot:webhook] bl: callback failed', callbackId: cq.id, errorClass });
         }
 
         await answerCallbackQuery(cq.id);
@@ -2131,8 +2330,8 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
     if (navText === NAV_BTN_BALANCE) {
       try {
         const resolved = await resolveWorkspace(telegramUserId, chatId);
-        const balanceText = await getAccountBalances(resolved.workspaceId, resolved.userId);
-        void upsertBotMessage(telegramUserId, chatId, balanceText);
+        const { text: balanceText, accounts } = await getBalanceData(resolved.workspaceId, resolved.userId);
+        void upsertBotMessage(telegramUserId, chatId, balanceText, buildBalanceListKeyboard(accounts as BalanceAccountRow[]));
         request.log.info({ msg: '[midas:bot:webhook] nav:balance shortcut', telegramUserId, workspaceId: resolved.workspaceId });
       } catch (err: unknown) {
         const errorClass = err instanceof Error ? err.constructor.name : 'UnknownError';
@@ -2204,6 +2403,94 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
       }
       await reply.status(200).send({ ok: true });
       return;
+    }
+
+    // ── Phase 2.1: Balance management text intercepts ─────────────────
+    // Fires before slash-command routing to capture free-text input for:
+    //   - bl:rn (rename), bl:sb (set_balance), bl:cv (currency_input)
+    const blStateKey = `bl:state:${telegramUserId}:${chatId}`;
+    const rawBlState = await redisConnection.get(blStateKey);
+    if (rawBlState && !commandToken) {
+      try {
+        const blState = JSON.parse(rawBlState) as { action: string; accountId: string };
+        const blResolved = await resolveWorkspace(telegramUserId, chatId);
+        const userInput = message.text.trim();
+
+        if (blState.action === 'rename') {
+          // Rename account
+          if (userInput.length === 0 || userInput.length > 100) {
+            void upsertBotMessage(telegramUserId, chatId, '⚠️ Название должно быть от 1 до 100 символов.');
+          } else {
+            const result = await renameAccount(blResolved.workspaceId, blResolved.userId, blState.accountId, userInput);
+            await redisConnection.del(blStateKey);
+            if (result === 'duplicate') {
+              void upsertBotMessage(telegramUserId, chatId, '⚠️ Счёт с таким названием уже существует.');
+            } else if (result === 'not_found') {
+              void upsertBotMessage(telegramUserId, chatId, '⚠️ Счёт не найден.');
+            } else {
+              const detail = await getAccountDetail(blResolved.workspaceId, blResolved.userId, blState.accountId);
+              if (detail) {
+                void upsertBotMessage(
+                  telegramUserId, chatId,
+                  `✅ Счёт переименован.\\n\\n` + formatAccountDetailText(detail),
+                  buildAccountActionsKeyboard(blState.accountId),
+                );
+              }
+            }
+          }
+          await reply.status(200).send({ ok: true });
+          return;
+        }
+
+        if (blState.action === 'set_balance') {
+          // Sync balance
+          const amountStr = userInput.replace(/,/g, '.').replace(/\s/g, '');
+          if (!/^-?\d+(\.\d+)?$/.test(amountStr)) {
+            void upsertBotMessage(telegramUserId, chatId, '⚠️ Введите числовое значение (например: 1500 или 2847.50).');
+          } else {
+            const result = await setAccountBalanceById(blResolved.workspaceId, blResolved.userId, blState.accountId, amountStr);
+            await redisConnection.del(blStateKey);
+            if (result === 'not_found') {
+              void upsertBotMessage(telegramUserId, chatId, '⚠️ Счёт не найден.');
+            } else {
+              const detail = await getAccountDetail(blResolved.workspaceId, blResolved.userId, blState.accountId);
+              if (detail) {
+                void upsertBotMessage(
+                  telegramUserId, chatId,
+                  `✅ Баланс обновлён.\\n\\n` + formatAccountDetailText(detail),
+                  buildAccountActionsKeyboard(blState.accountId),
+                );
+              }
+            }
+          }
+          await reply.status(200).send({ ok: true });
+          return;
+        }
+
+        if (blState.action === 'currency_input') {
+          // Free-text currency code
+          const code = userInput.toUpperCase().replace(/\s/g, '');
+          if (!/^[A-Z]{1,10}$/.test(code)) {
+            void upsertBotMessage(telegramUserId, chatId, '⚠️ Код валюты должен содержать 1–10 латинских букв (например: USD, BTC).');
+          } else {
+            await changeAccountCurrency(blResolved.workspaceId, blResolved.userId, blState.accountId, code);
+            await redisConnection.del(blStateKey);
+            const detail = await getAccountDetail(blResolved.workspaceId, blResolved.userId, blState.accountId);
+            if (detail) {
+              void upsertBotMessage(
+                telegramUserId, chatId,
+                `✅ Валюта изменена на <b>${escapeHtml(code)}</b>.\\n\\n` + formatAccountDetailText(detail),
+                buildAccountActionsKeyboard(blState.accountId),
+              );
+            }
+          }
+          await reply.status(200).send({ ok: true });
+          return;
+        }
+      } catch (err: unknown) {
+        const errorClass = err instanceof Error ? err.constructor.name : 'UnknownError';
+        request.log.error({ msg: '[midas:bot:webhook] bl: text intercept failed', telegramUserId, errorClass });
+      }
     }
 
     if (commandToken !== null) {
@@ -2321,8 +2608,8 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
       if (commandToken === '/balance') {
         try {
           const resolved = await resolveWorkspace(telegramUserId, chatId);
-          const balanceText = await getAccountBalances(resolved.workspaceId, resolved.userId);
-          void upsertBotMessage(telegramUserId, chatId, balanceText);
+          const { text: balanceText, accounts } = await getBalanceData(resolved.workspaceId, resolved.userId);
+          void upsertBotMessage(telegramUserId, chatId, balanceText, buildBalanceListKeyboard(accounts as BalanceAccountRow[]));
 
           request.log.info({
             msg: '[midas:bot:webhook] /balance sent',
