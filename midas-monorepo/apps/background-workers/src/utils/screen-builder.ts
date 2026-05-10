@@ -295,19 +295,17 @@ export function buildPendingGateScreen(data: GateDraftData): string {
 }
 
 /**
- * Paused preview — replaces the original preview when gate is triggered.
- * Buttons removed, shows "waiting" indicator.
+ * Gate card — edit-in-place version.
+ * Replaces the existing preview card text with an alert banner + draft summary.
+ * The confirm/edit/cancel keyboard is re-attached by the caller.
  */
-export function buildGatePausedPreview(_data: GateDraftData): string {
+export function buildGatePausedPreview(data: GateDraftData): string {
+  const summary = buildDraftSummaryBlock(data);
   return [
-    '❌ <b>Новая транзакция отменена</b>',
+    '⚠️ <b>Новая запись отклонена.</b>',
+    'Завершите эту транзакцию, чтобы продолжить.',
     '',
-    'Нельзя записать новую транзакцию,',
-    'пока не завершена предыдущая.',
-    '',
-    'Подтвердите или отмените транзакцию ниже ↓',
-    '',
-    '🕐 <i>Ожидает вашего ответа</i>',
+    summary,
   ].join('\n');
 }
 

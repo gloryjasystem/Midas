@@ -43,7 +43,6 @@ import {
   buildNonsenseScreen,
   buildConfirmKeyboard,
   buildCurrencyClarScreen,
-  buildPendingGateScreen,
   buildGatePausedPreview,
   escapeHtml,
 } from '../utils/screen-builder.js';
@@ -245,7 +244,8 @@ async function processAiParse(job: Job<AiParseJobPayload>): Promise<void> {
     const alreadySent = await redisConnection.get(gateSentKey);
 
     if (!alreadySent) {
-      // First time — update preview to paused + send gate card
+      // Single edit-in-place: update existing preview card with alert banner + keyboard.
+      // No new messages sent — zero chat clutter.
       const gateData = {
         parsedIntent: pendingDraft.parsedIntent,
         parsedAmount: pendingDraft.parsedAmount,
@@ -254,39 +254,23 @@ async function processAiParse(job: Job<AiParseJobPayload>): Promise<void> {
         itemName: pendingDraft.itemName,
       };
 
-      // Edit preview card → paused state (remove buttons)
       if (pendingDraft.previewMessageId && pendingDraft.previewChatId) {
-        const pauseAlertId = ulid();
+        // Edit the existing preview card: alert header + summary + keyboard stays
+        const gateEditId = ulid();
         await notificationsQueue.add(
           QUEUE_NAMES.NOTIFICATIONS,
           {
-            alertId: pauseAlertId,
+            alertId: gateEditId,
             workspaceId,
             chatId: pendingDraft.previewChatId,
+            draftId: pendingDraft.draftId,
             message: buildGatePausedPreview(gateData),
             activeMessageId: pendingDraft.previewMessageId,
-            // No keyboard → removes buttons
+            inlineKeyboardJson: JSON.stringify(buildConfirmKeyboard(pendingDraft.draftId)),
           },
-          { jobId: IdempotencyKeyBuilder.notification(workspaceId, pauseAlertId) },
+          { jobId: IdempotencyKeyBuilder.notification(workspaceId, gateEditId) },
         );
       }
-
-      // Send gate card with confirm/edit/cancel buttons
-      const gateAlertId = ulid();
-      await notificationsQueue.add(
-        QUEUE_NAMES.NOTIFICATIONS,
-        {
-          alertId: gateAlertId,
-          workspaceId,
-          chatId,
-          draftId: pendingDraft.draftId,
-          message: buildPendingGateScreen(gateData),
-          inlineKeyboardJson: JSON.stringify(buildConfirmKeyboard(pendingDraft.draftId)),
-          telegramUserId,
-          cacheStoreKey: `midas:gate_card:${telegramUserId}:${chatId}`,
-        },
-        { jobId: IdempotencyKeyBuilder.notification(workspaceId, gateAlertId) },
-      );
 
       await redisConnection.set(gateSentKey, '1', 'EX', 3600);
     }
