@@ -1,8 +1,16 @@
 # PROJECT_CONFIG.MD — Конституция проекта Midas
 
 > **Статус документа:** IMMUTABLE — ИИ-агент НЕ ИМЕЕТ ПРАВА изменять этот файл без прямого приказа владельца проекта.
-> **Версия:** 1.4 | **Создан:** 2026-05-04 | **Обновлён:** 2026-05-09 (Phase 1.37 AI Taxonomy)
+> **Версия:** 1.5 | **Создан:** 2026-05-04 | **Обновлён:** 2026-05-10 (Phase 2.0 Reports, Settings, Transaction Hub)
 > **Источники:** Midaz_TZ v1, Мастер-план Midas v2.0, User Decisions 2026-05-04
+
+### Changelog v1.5 (Phase 2.0 — Transaction Hub, Reports 2.0, Settings 2.0)
+- **Transaction Hub:** Новый UI списка транзакций с inline-клавиатурой, фильтрами (расходы/доходы/все), пагинацией и мини-статистикой
+- **Поиск:** Поиск по названию (ILIKE + GIN), по сумме, по категории
+- **Отчёты 2.0:** 8 периодов, 6 типов отчётов (сводка, категории, расходы, доходы, сравнение, по счетам), Unicode bar charts
+- **Настройки 2.0:** Уведомления, формат чисел (ru/en/de), язык (ru/en/ua), CSV экспорт, статистика
+- **3 новых миграции:** GIN trigram index, user_preferences table
+- **/edit депрекейт:** перенаправлен на Transaction Hub
 
 ### Changelog v1.4 (Phase 1.37 — AI Taxonomy & Zero-Clutter UX)
 - **30-категорийная таксономия:** 18 personal + 12 business (добавлены Питомцы, Дом)
@@ -125,6 +133,8 @@
 | `1778800000000_drafts-account-hint.js` | 1.31 | parsed_account_hint TEXT on transaction_drafts |
 | `1778900000000_draft-clarification-state.js` | 1.32 | needs_clarification status in state trigger |
 | `1779000000000_intelligent-transactions.js` | 1.35 | item_name, parsed_category_hint, category_group ENUM, 28-category taxonomy, workspace default accounts |
+| `1779200000000_phase-2-0-gin-search.js` | 2.0 | GIN trigram index on transactions.item_name for ILIKE search |
+| `1779300000000_phase-2-0-preferences.js` | 2.0 | user_preferences table (notifications, number_format, language) + RLS |
 
 ### 2.8 AI Pipeline (claude-client.ts + prompts.ts)
 

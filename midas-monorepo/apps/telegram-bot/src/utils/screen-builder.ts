@@ -421,9 +421,9 @@ type InlineKeyboard = { inline_keyboard: InlineButton[][] };
  * Build the post-confirmation navigation keyboard.
  *
  * Row 1: [✏️ Изменить запись]         ← отдельная строка — редактирование
- * Row 2: [📊 Баланс] [📋 Отчёт]      ← навигация
+ * Row 2: [💰 Баланс] [📊 Отчёт]      ← навигация
  *
- * 3 кнопки в ряд слишком тесно на мобиле — текст обрезается.
+ * Phase 2.0: icons match ReplyKeyboard constants.
  */
 export function buildPostConfirmKeyboard(transactionId: string): InlineKeyboard {
   return {
@@ -432,8 +432,8 @@ export function buildPostConfirmKeyboard(transactionId: string): InlineKeyboard 
         { text: '✏️ Изменить запись', callback_data: `ed:v:${transactionId}` },
       ],
       [
-        { text: '📊 Баланс', callback_data: 'nav:balance' },
-        { text: '📋 Отчёт',  callback_data: 'nav:report' },
+        { text: '💰 Баланс', callback_data: 'nav:balance' },
+        { text: '📊 Отчёт',  callback_data: 'nav:report' },
       ],
     ],
   };
@@ -441,14 +441,15 @@ export function buildPostConfirmKeyboard(transactionId: string): InlineKeyboard 
 
 /**
  * Build the post-rejection / error navigation keyboard.
- * [📊 Баланс] [📋 Отчёт]
+ * [💰 Баланс] [📊 Отчёт]
+ * Phase 2.0: icons match ReplyKeyboard constants.
  */
 export function buildNavKeyboard(): InlineKeyboard {
   return {
     inline_keyboard: [
       [
-        { text: '📊 Баланс', callback_data: 'nav:balance' },
-        { text: '📋 Отчёт',  callback_data: 'nav:report' },
+        { text: '💰 Баланс', callback_data: 'nav:balance' },
+        { text: '📊 Отчёт',  callback_data: 'nav:report' },
       ],
     ],
   };
@@ -495,17 +496,20 @@ export interface ReplyKeyboardMarkup {
  * Button texts for the persistent bottom navigation keyboard.
  * Exported so webhook.route.ts can intercept incoming button-press messages
  * (Reply Keyboard buttons send their label as a plain text message).
+ *
+ * Phase 2.0: unique icons per button (💰 📋 📊 ⚙️).
  */
-export const NAV_BTN_BALANCE  = '📊 Баланс';
-export const NAV_BTN_REPORT   = '📋 Отчёт';
-export const NAV_BTN_SETTINGS = '⚙️ Настройки';
+export const NAV_BTN_BALANCE      = '💰 Баланс';
+export const NAV_BTN_TRANSACTIONS = '📋 Транзакции';  // Phase 2.0
+export const NAV_BTN_REPORT       = '📊 Отчёт';
+export const NAV_BTN_SETTINGS     = '⚙️ Настройки';
 
 /**
  * Build the persistent bottom navigation keyboard (ReplyKeyboardMarkup).
  *
- * Layout:
- *   Row 1: [📊 Баланс]  [📋 Отчёт]
- *   Row 2:      [⚙️ Настройки]
+ * Phase 2.0 Layout (2×2):
+ *   Row 1: [💰 Баланс]  [📋 Транзакции]
+ *   Row 2: [📊 Отчёт]   [⚙️ Настройки]
  *
  * Flags:
  *   resize_keyboard: true  — minimal vertical height
@@ -516,7 +520,8 @@ export const NAV_BTN_SETTINGS = '⚙️ Настройки';
 export function buildMainMenuKeyboard(): ReplyKeyboardMarkup {
   return {
     keyboard: [
-      [NAV_BTN_BALANCE, NAV_BTN_REPORT, NAV_BTN_SETTINGS],
+      [NAV_BTN_BALANCE, NAV_BTN_TRANSACTIONS],
+      [NAV_BTN_REPORT, NAV_BTN_SETTINGS],
     ],
     resize_keyboard: true,
     is_persistent: false,  // Phase 1.38: native ⏄ collapse icon — user controls visibility

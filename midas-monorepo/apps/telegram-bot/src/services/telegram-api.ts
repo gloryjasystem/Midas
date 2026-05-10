@@ -368,3 +368,69 @@ export async function deleteMessage(
     message_id: parseInt(messageId, 10),
   });
 }
+
+// ─────────────────────────────────────────────────────────────
+// sendDocument (Phase 2.0)
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Send a document (file) to a Telegram chat.
+ *
+ * Phase 2.0: Used for CSV export. Uses multipart/form-data.
+ * SEC-12: File content is NOT logged.
+ *
+ * @param chatId   - string Telegram chat ID
+ * @param fileData - Buffer containing file data
+ * @param fileName - file name (e.g. 'export.csv')
+ * @param caption  - optional caption text
+ * @returns true on success, false on any error (non-throwing)
+ */
+export async function sendDocument(
+  chatId: string,
+  fileData: Buffer,
+  fileName: string,
+  caption?: string,
+): Promise<boolean> {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  if (!token) return false;
+
+  const url = `${TELEGRAM_API_BASE}/bot${token}/sendDocument`;
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => { controller.abort(); }, REQUEST_TIMEOUT_MS);
+
+    // Build multipart form data manually
+    const boundary = `----MidasBoundary${Date.now()}`;
+    const parts: string[] = [];
+
+    // chat_id field
+    parts.push(`--${boundary}\r\nContent-Disposition: form-data; name="chat_id"\r\n\r\n${chatId}`);
+
+    // caption field (if provided)
+    if (caption) {
+      parts.push(`--${boundary}\r\nContent-Disposition: form-data; name="caption"\r\n\r\n${caption}`);
+    }
+
+    // Document file field
+    const fileHeader = `--${boundary}\r\nContent-Disposition: form-data; name="document"; filename="${fileName}"\r\nContent-Type: application/octet-stream\r\n\r\n`;
+    const fileFooter = `\r\n--${boundary}--\r\n`;
+
+    const headerBuf = Buffer.from(parts.join('\r\n') + '\r\n' + fileHeader, 'utf-8');
+    const footerBuf = Buffer.from(fileFooter, 'utf-8');
+    const bodyBuf = Buffer.concat([headerBuf, fileData, footerBuf]);
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': `multipart/form-data; boundary=${boundary}` },
+      body: bodyBuf,
+      signal: controller.signal,
+    });
+
+    clearTimeout(timeout);
+    if (!response.ok) return false;
+    const data = (await response.json()) as { ok: boolean };
+    return data.ok;
+  } catch {
+    return false;
+  }
+}

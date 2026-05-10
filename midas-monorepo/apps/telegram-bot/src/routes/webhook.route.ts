@@ -123,6 +123,7 @@ import {
   formatTransactionListLine,
   formatTransactionCard,
   EDIT_PAGE_SIZE,
+  EDITABLE_INTENTS,           // Phase 2.0: intent picker in tx: handler
 } from '../services/edit.service.js';
 import {
   parseEditCallback,
@@ -184,7 +185,18 @@ import {
   NAV_BTN_BALANCE,         // Phase 1.36-UX: button text intercept constants
   NAV_BTN_REPORT,          // Phase 1.36-UX
   NAV_BTN_SETTINGS,        // Phase 1.36-UX
+  NAV_BTN_TRANSACTIONS,    // Phase 2.0
 } from '../utils/screen-builder.js'; // Phase 1.35
+import {
+  getTransactionList,
+  countFilteredTransactions,
+  getMonthMiniStats,
+  TX_PAGE_SIZE,
+} from '../services/transaction-hub.service.js';
+import {
+  buildTxListKeyboard,
+  formatTxListHeader,
+} from '../services/transaction-keyboard.service.js';
 
 // ─────────────────────────────────────────────────────────────
 // Zod schema — validates raw incoming Telegram Update shape
@@ -806,9 +818,279 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
           return;
         }
 
+      // ── Phase 2.0: transaction hub callbacks (prefix "tx:") ───
+      // All handlers use editMessageText (ISSUE-7: never upsertBotMessage from callbacks).
+      if (callbackData.startsWith('tx:')) {
+        const { parseTxCallback, buildSearchMenuKeyboard: buildTxSearchMenu } = await import('../services/transaction-keyboard.service.js');
+        const txCmd = parseTxCallback(callbackData);
+        if (!txCmd) {
+          request.log.warn({ msg: '[midas:bot:webhook] tx callback: unrecognised', callbackId: cq.id });
+          await answerCallbackQuery(cq.id);
+          await reply.status(200).send({ ok: true });
+          return;
+        }
+
+        let txResolved: { workspaceId: string; userId: string };
+        try { txResolved = await resolveWorkspace(telegramUserId, chatId); }
+        catch { await answerCallbackQuery(cq.id); await reply.status(200).send({ ok: true }); return; }
+
+        const txMsgId = cq.message ? String(cq.message.message_id) : null;
+
+        try {
+          if (txCmd.cmd === 'cancel') {
+            if (txMsgId) void editMessageText(chatId, txMsgId, '\u{1F4CB} \u0417\u0430\u043A\u0440\u044B\u0442\u043E.', { inline_keyboard: [] });
+          } else if (txCmd.cmd === 'list') {
+            const [items, total, stats] = await Promise.all([
+              getTransactionList(txResolved.workspaceId, txResolved.userId, txCmd.page, txCmd.filter),
+              countFilteredTransactions(txResolved.workspaceId, txResolved.userId, txCmd.filter),
+              getMonthMiniStats(txResolved.workspaceId, txResolved.userId),
+            ]);
+            const totalPages = Math.max(1, Math.ceil(total / TX_PAGE_SIZE));
+            const header = formatTxListHeader(stats, txCmd.filter);
+            const keyboard = buildTxListKeyboard(items, txCmd.page, totalPages, txCmd.filter);
+            if (txMsgId) void editMessageText(chatId, txMsgId, header, keyboard);
+          } else if (txCmd.cmd === 'view') {
+            const card = await getTransactionCard(txCmd.txId, txResolved.workspaceId, txResolved.userId);
+            if (card) {
+              const text = formatTransactionCard(card);
+              const rows: { text: string; callback_data: string }[][] = [];
+              if (!card.is_cross_currency) rows.push([{ text: '\u270F\uFE0F \u0418\u0437\u043C\u0435\u043D\u0438\u0442\u044C \u0441\u0443\u043C\u043C\u0443', callback_data: `tx:f:amt:${txCmd.txId}` }]);
+              rows.push([{ text: '\u{1F4C1} \u0418\u0437\u043C\u0435\u043D\u0438\u0442\u044C \u043A\u0430\u0442\u0435\u0433\u043E\u0440\u0438\u044E', callback_data: `tx:f:cat:${txCmd.txId}:0` }]);
+              rows.push([{ text: '\u{1F3E6} \u0418\u0437\u043C\u0435\u043D\u0438\u0442\u044C \u0441\u0447\u0451\u0442', callback_data: `tx:f:acc:${txCmd.txId}` }]);
+              rows.push([{ text: '\u{1F504} \u0418\u0437\u043C\u0435\u043D\u0438\u0442\u044C \u0442\u0438\u043F', callback_data: `tx:f:int:${txCmd.txId}` }]);
+              rows.push([{ text: '\u{1F5D1}\uFE0F \u0423\u0434\u0430\u043B\u0438\u0442\u044C', callback_data: `tx:d:ask:${txCmd.txId}` }]);
+              rows.push([{ text: '\u25C0\uFE0F \u041D\u0430\u0437\u0430\u0434 \u043A \u0441\u043F\u0438\u0441\u043A\u0443', callback_data: 'tx:l:0:a' }]);
+              if (txMsgId) void editMessageText(chatId, txMsgId, text, { inline_keyboard: rows });
+            } else {
+              if (txMsgId) void editMessageText(chatId, txMsgId, '\u26A0\uFE0F \u0422\u0440\u0430\u043D\u0437\u0430\u043A\u0446\u0438\u044F \u043D\u0435 \u043D\u0430\u0439\u0434\u0435\u043D\u0430.', { inline_keyboard: [[{ text: '\u25C0\uFE0F \u041D\u0430\u0437\u0430\u0434', callback_data: 'tx:l:0:a' }]] });
+            }
+          } else if (txCmd.cmd === 'search_menu') {
+            if (txMsgId) void editMessageText(chatId, txMsgId, '\u{1F50D} <b>\u041F\u043E\u0438\u0441\u043A \u0442\u0440\u0430\u043D\u0437\u0430\u043A\u0446\u0438\u0439</b>\n\n\u0412\u044B\u0431\u0435\u0440\u0438\u0442\u0435 \u0442\u0438\u043F \u043F\u043E\u0438\u0441\u043A\u0430:', buildTxSearchMenu());
+          } else if (txCmd.cmd === 'field_amount') {
+            if (txMsgId) {
+              void editMessageText(chatId, txMsgId, '\u270F\uFE0F \u0412\u0432\u0435\u0434\u0438\u0442\u0435 \u043D\u043E\u0432\u0443\u044E \u0441\u0443\u043C\u043C\u0443:', { inline_keyboard: [[{ text: '\u25C0\uFE0F \u041E\u0442\u043C\u0435\u043D\u0430', callback_data: `tx:v:${txCmd.txId}` }]] });
+              try { await redisConnection.set(`midas:tx:edit:amt:${telegramUserId}:${chatId}`, txCmd.txId, 'EX', 120); } catch { /* non-fatal */ }
+            }
+          } else if (txCmd.cmd === 'field_cat') {
+            const cats = await getWorkspaceCategories(txResolved.workspaceId, txResolved.userId);
+            const catPageSize = 8; const catCols = 2;
+            const start = txCmd.page * catPageSize;
+            const pageItems = cats.slice(start, start + catPageSize);
+            const catTotalPages = Math.ceil(cats.length / catPageSize);
+            const rows: { text: string; callback_data: string }[][] = [];
+            for (let i = 0; i < pageItems.length; i += catCols) {
+              rows.push(pageItems.slice(i, i + catCols).map((cat) => ({ text: escapeHtml(cat.name), callback_data: `tx:c:cat:${txCmd.txId}:${cat.id}` })));
+            }
+            const navRow: { text: string; callback_data: string }[] = [];
+            if (txCmd.page > 0) navRow.push({ text: '\u25C0\uFE0F', callback_data: `tx:f:cat:${txCmd.txId}:${txCmd.page - 1}` });
+            if (catTotalPages > 1) navRow.push({ text: `${txCmd.page + 1}/${catTotalPages}`, callback_data: 'tx:x' });
+            if (txCmd.page < catTotalPages - 1) navRow.push({ text: '\u25B6\uFE0F', callback_data: `tx:f:cat:${txCmd.txId}:${txCmd.page + 1}` });
+            if (navRow.length > 0) rows.push(navRow);
+            rows.push([{ text: '\u25C0\uFE0F \u041D\u0430\u0437\u0430\u0434', callback_data: `tx:v:${txCmd.txId}` }]);
+            if (txMsgId) void editMessageText(chatId, txMsgId, '\u{1F4C1} \u0412\u044B\u0431\u0435\u0440\u0438\u0442\u0435 \u043A\u0430\u0442\u0435\u0433\u043E\u0440\u0438\u044E:', { inline_keyboard: rows });
+          } else if (txCmd.cmd === 'field_acc') {
+            const accs = await getWorkspaceAccounts(txResolved.workspaceId, txResolved.userId);
+            const rows: { text: string; callback_data: string }[][] = accs.map((acc) => [{ text: escapeHtml(acc.name), callback_data: `tx:c:acc:${txCmd.txId}:${acc.id}` }]);
+            rows.push([{ text: '\u25C0\uFE0F \u041D\u0430\u0437\u0430\u0434', callback_data: `tx:v:${txCmd.txId}` }]);
+            if (txMsgId) void editMessageText(chatId, txMsgId, '\u{1F3E6} \u0412\u044B\u0431\u0435\u0440\u0438\u0442\u0435 \u0441\u0447\u0451\u0442:', { inline_keyboard: rows });
+          } else if (txCmd.cmd === 'field_int') {
+            const intentLabels: Record<string, string> = { income: '\u{1F4B0} \u0414\u043E\u0445\u043E\u0434', expense: '\u{1F4B8} \u0420\u0430\u0441\u0445\u043E\u0434', debt_given: '\u{1F534} \u0414\u043E\u043B\u0433 \u0432\u044B\u0434\u0430\u043D', debt_received: '\u{1F7E2} \u0414\u043E\u043B\u0433 \u043F\u043E\u043B\u0443\u0447\u0435\u043D', transfer: '\u{1F504} \u041F\u0435\u0440\u0435\u0432\u043E\u0434' };
+            const rows: { text: string; callback_data: string }[][] = (EDITABLE_INTENTS as readonly string[]).map((int) => [{ text: intentLabels[int] ?? int, callback_data: `tx:c:int:${txCmd.txId}:${int}` }]);
+            rows.push([{ text: '\u25C0\uFE0F \u041D\u0430\u0437\u0430\u0434', callback_data: `tx:v:${txCmd.txId}` }]);
+            if (txMsgId) void editMessageText(chatId, txMsgId, '\u{1F504} \u0412\u044B\u0431\u0435\u0440\u0438\u0442\u0435 \u0442\u0438\u043F:', { inline_keyboard: rows });
+          } else if (txCmd.cmd === 'confirm_cat') {
+            const result = await updateTransactionCategory(txCmd.txId, txResolved.workspaceId, txResolved.userId, txCmd.catId);
+            if (result.status === 'ok') {
+              const card = await getTransactionCard(txCmd.txId, txResolved.workspaceId, txResolved.userId);
+              if (card && txMsgId) void editMessageText(chatId, txMsgId, '\u2705 \u041A\u0430\u0442\u0435\u0433\u043E\u0440\u0438\u044F \u0438\u0437\u043C\u0435\u043D\u0435\u043D\u0430.\n\n' + formatTransactionCard(card), { inline_keyboard: [[{ text: '\u25C0\uFE0F \u041A \u0442\u0440\u0430\u043D\u0437\u0430\u043A\u0446\u0438\u0438', callback_data: `tx:v:${txCmd.txId}` }]] });
+            } else if (txMsgId) void editMessageText(chatId, txMsgId, '\u26A0\uFE0F \u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u0438\u0437\u043C\u0435\u043D\u0438\u0442\u044C.', { inline_keyboard: [[{ text: '\u25C0\uFE0F \u041D\u0430\u0437\u0430\u0434', callback_data: `tx:v:${txCmd.txId}` }]] });
+          } else if (txCmd.cmd === 'confirm_acc') {
+            const result = await updateTransactionAccount(txCmd.txId, txResolved.workspaceId, txResolved.userId, txCmd.accId);
+            if (result.status === 'ok') {
+              const card = await getTransactionCard(txCmd.txId, txResolved.workspaceId, txResolved.userId);
+              if (card && txMsgId) void editMessageText(chatId, txMsgId, '\u2705 \u0421\u0447\u0451\u0442 \u0438\u0437\u043C\u0435\u043D\u0451\u043D.\n\n' + formatTransactionCard(card), { inline_keyboard: [[{ text: '\u25C0\uFE0F \u041A \u0442\u0440\u0430\u043D\u0437\u0430\u043A\u0446\u0438\u0438', callback_data: `tx:v:${txCmd.txId}` }]] });
+            } else if (txMsgId) void editMessageText(chatId, txMsgId, '\u26A0\uFE0F \u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u0438\u0437\u043C\u0435\u043D\u0438\u0442\u044C.', { inline_keyboard: [[{ text: '\u25C0\uFE0F \u041D\u0430\u0437\u0430\u0434', callback_data: `tx:v:${txCmd.txId}` }]] });
+          } else if (txCmd.cmd === 'confirm_int') {
+            const result = await updateTransactionIntent(txCmd.txId, txResolved.workspaceId, txResolved.userId, txCmd.intent);
+            if (result.status === 'ok') {
+              const card = await getTransactionCard(txCmd.txId, txResolved.workspaceId, txResolved.userId);
+              if (card && txMsgId) void editMessageText(chatId, txMsgId, '\u2705 \u0422\u0438\u043F \u0438\u0437\u043C\u0435\u043D\u0451\u043D.\n\n' + formatTransactionCard(card), { inline_keyboard: [[{ text: '\u25C0\uFE0F \u041A \u0442\u0440\u0430\u043D\u0437\u0430\u043A\u0446\u0438\u0438', callback_data: `tx:v:${txCmd.txId}` }]] });
+            } else if (txMsgId) void editMessageText(chatId, txMsgId, '\u26A0\uFE0F \u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u0438\u0437\u043C\u0435\u043D\u0438\u0442\u044C.', { inline_keyboard: [[{ text: '\u25C0\uFE0F \u041D\u0430\u0437\u0430\u0434', callback_data: `tx:v:${txCmd.txId}` }]] });
+          } else if (txCmd.cmd === 'delete_ask') {
+            if (txMsgId) void editMessageText(chatId, txMsgId, '\u{1F5D1}\uFE0F <b>\u0423\u0434\u0430\u043B\u0438\u0442\u044C \u0442\u0440\u0430\u043D\u0437\u0430\u043A\u0446\u0438\u044E?</b>\n\n\u042D\u0442\u043E \u0434\u0435\u0439\u0441\u0442\u0432\u0438\u0435 \u043D\u0435\u043B\u044C\u0437\u044F \u043E\u0442\u043C\u0435\u043D\u0438\u0442\u044C.', { inline_keyboard: [[{ text: '\u{1F5D1}\uFE0F \u0414\u0430, \u0443\u0434\u0430\u043B\u0438\u0442\u044C', callback_data: `tx:d:yes:${txCmd.txId}` }, { text: '\u25C0\uFE0F \u041E\u0442\u043C\u0435\u043D\u0430', callback_data: `tx:v:${txCmd.txId}` }]] });
+          } else if (txCmd.cmd === 'delete_confirm') {
+            const result = await softDeleteTransaction(txCmd.txId, txResolved.workspaceId, txResolved.userId);
+            if (result.status === 'ok') {
+              if (txMsgId) void editMessageText(chatId, txMsgId, '\u2705 \u0422\u0440\u0430\u043D\u0437\u0430\u043A\u0446\u0438\u044F \u0443\u0434\u0430\u043B\u0435\u043D\u0430.', { inline_keyboard: [[{ text: '\u25C0\uFE0F \u041A \u0441\u043F\u0438\u0441\u043A\u0443', callback_data: 'tx:l:0:a' }]] });
+            } else {
+              if (txMsgId) void editMessageText(chatId, txMsgId, '\u26A0\uFE0F \u0422\u0440\u0430\u043D\u0437\u0430\u043A\u0446\u0438\u044F \u043D\u0435 \u043D\u0430\u0439\u0434\u0435\u043D\u0430.', { inline_keyboard: [[{ text: '\u25C0\uFE0F \u041A \u0441\u043F\u0438\u0441\u043A\u0443', callback_data: 'tx:l:0:a' }]] });
+            }
+          // ── tx:s:n → search by name (set Redis intercept) ──
+          } else if (txCmd.cmd === 'search_name') {
+            const searchKey = `midas:tx:search:${telegramUserId}:${chatId}`;
+            try { await redisConnection.set(searchKey, 'name', 'EX', 120); } catch { /* non-fatal */ }
+            if (txMsgId) void editMessageText(chatId, txMsgId, '\u{1F4DD} <b>\u041F\u043E\u0438\u0441\u043A \u043F\u043E \u043D\u0430\u0437\u0432\u0430\u043D\u0438\u044E</b>\n\n\u041D\u0430\u043F\u0438\u0448\u0438 \u043D\u0430\u0437\u0432\u0430\u043D\u0438\u0435 \u0442\u043E\u0432\u0430\u0440\u0430 \u0438\u043B\u0438 \u0443\u0441\u043B\u0443\u0433\u0438:', { inline_keyboard: [[{ text: '\u25C0\uFE0F \u041E\u0442\u043C\u0435\u043D\u0430', callback_data: 'tx:s' }]] });
+          // ── tx:s:amt → search by amount (set Redis intercept) ──
+          } else if (txCmd.cmd === 'search_amount') {
+            const searchKey = `midas:tx:search:${telegramUserId}:${chatId}`;
+            try { await redisConnection.set(searchKey, 'amount', 'EX', 120); } catch { /* non-fatal */ }
+            if (txMsgId) void editMessageText(chatId, txMsgId, '\u{1F4B2} <b>\u041F\u043E\u0438\u0441\u043A \u043F\u043E \u0441\u0443\u043C\u043C\u0435</b>\n\n\u0412\u0432\u0435\u0434\u0438 \u0441\u0443\u043C\u043C\u0443 (\u043D\u0430\u043F\u0440\u0438\u043C\u0435\u0440: 1000 \u0438\u043B\u0438 250.50):', { inline_keyboard: [[{ text: '\u25C0\uFE0F \u041E\u0442\u043C\u0435\u043D\u0430', callback_data: 'tx:s' }]] });
+          // ── tx:s:c → search by category (show picker) ──
+          } else if (txCmd.cmd === 'search_category') {
+            const cats = await getWorkspaceCategories(txResolved.workspaceId, txResolved.userId);
+            const catRows: { text: string; callback_data: string }[][] = cats.map((cat) => [{ text: escapeHtml(cat.name), callback_data: `tx:s:cv:${cat.id}` }]);
+            catRows.push([{ text: '\u25C0\uFE0F \u041D\u0430\u0437\u0430\u0434', callback_data: 'tx:s' }]);
+            if (txMsgId) void editMessageText(chatId, txMsgId, '\u{1F4C1} <b>\u041F\u043E\u0438\u0441\u043A \u043F\u043E \u043A\u0430\u0442\u0435\u0433\u043E\u0440\u0438\u0438</b>\n\n\u0412\u044B\u0431\u0435\u0440\u0438 \u043A\u0430\u0442\u0435\u0433\u043E\u0440\u0438\u044E:', { inline_keyboard: catRows });
+          // ── tx:s:cv:{catId} → execute category search ──
+          } else if (txCmd.cmd === 'search_cat_result') {
+            const { searchByCategory: searchByCat } = await import('../services/transaction-hub.service.js');
+            const items = await searchByCat(txResolved.workspaceId, txResolved.userId, txCmd.catId);
+            const { buildSearchResultsKeyboard: buildSRK } = await import('../services/transaction-keyboard.service.js');
+            if (items.length === 0) {
+              if (txMsgId) void editMessageText(chatId, txMsgId, '\u{1F50D} \u041D\u0438\u0447\u0435\u0433\u043E \u043D\u0435 \u043D\u0430\u0439\u0434\u0435\u043D\u043E.', { inline_keyboard: [[{ text: '\u{1F50D} \u041D\u043E\u0432\u044B\u0439 \u043F\u043E\u0438\u0441\u043A', callback_data: 'tx:s' }, { text: '\u25C0\uFE0F \u041A \u0441\u043F\u0438\u0441\u043A\u0443', callback_data: 'tx:l:0:a' }]] });
+            } else {
+              if (txMsgId) void editMessageText(chatId, txMsgId, `\u{1F50D} <b>\u0420\u0435\u0437\u0443\u043B\u044C\u0442\u0430\u0442\u044B</b> (${String(items.length)}):`, buildSRK(items));
+            }
+          }
+        } catch (err: unknown) {
+          const errorClass = err instanceof Error ? err.constructor.name : 'UnknownError';
+          request.log.error({ msg: '[midas:bot:webhook] tx callback failed', callbackId: cq.id, errorClass });
+        }
+
+        await answerCallbackQuery(cq.id);
+        await reply.status(200).send({ ok: true });
+        return;
+      }
+
+      // ── Phase 2.0 Sprint 4: report callbacks (prefix "rp:") ─────────────
+      // ISSUE-7: All callback handlers use editMessageText (not upsertBotMessage).
+      if (callbackData.startsWith('rp:')) {
+        const { parseRpCallback, buildPeriodPickerKeyboard, buildReportSubMenuKeyboard, buildReportBackKeyboard, periodCodeToRange, periodLabel: getPeriodLabel } = await import('../services/report-keyboard.service.js');
+        const rpCmd = parseRpCallback(callbackData);
+
+        if (!rpCmd) {
+          await answerCallbackQuery(cq.id);
+          await reply.status(200).send({ ok: true });
+          return;
+        }
+
+        const rpMsgId = String(cq.message?.message_id ?? '');
+
+        try {
+          // period_picker / back → show period picker
+          if (rpCmd.cmd === 'period_picker' || rpCmd.cmd === 'back') {
+            if (rpMsgId) void editMessageText(chatId, rpMsgId, '📊 <b>Отчёты</b>\n\nВыбери период:', buildPeriodPickerKeyboard());
+          }
+
+          // set_period → store in Redis, show sub-menu
+          else if (rpCmd.cmd === 'set_period') {
+            const range = periodCodeToRange(rpCmd.code);
+            const label = getPeriodLabel(rpCmd.code);
+            const rpKey = `midas:rp:period:${telegramUserId}:${chatId}`;
+            await redisConnection.set(rpKey, `${range.start}|${range.end}|${rpCmd.code}`, 'EX', 600);
+            if (rpMsgId) void editMessageText(chatId, rpMsgId, `📊 <b>Отчёты: ${escapeHtml(label)}</b>\n\nВыбери тип отчёта:`, buildReportSubMenuKeyboard());
+          }
+
+          // Report commands — read period from Redis, run query
+          else {
+            const rpKey = `midas:rp:period:${telegramUserId}:${chatId}`;
+            const rpPeriod = await redisConnection.get(rpKey);
+            if (!rpPeriod) {
+              if (rpMsgId) void editMessageText(chatId, rpMsgId, '⚠️ Период не выбран. Выбери период:', buildPeriodPickerKeyboard());
+            } else {
+              const [rpStart, rpEnd, rpCode] = rpPeriod.split('|');
+              const label = getPeriodLabel((rpCode ?? 'tm') as import('../services/report-keyboard.service.js').PeriodCode);
+
+              let rpResolved: { workspaceId: string; userId: string };
+              rpResolved = await resolveWorkspace(telegramUserId, chatId);
+
+              const { getReportSummary, getCategoryBreakdown, getExpenseOnlyReport, getIncomeOnlyReport, getComparisonReport, getAccountMovements } = await import('../services/report-advanced.service.js');
+
+              let reportText = '';
+              if (rpCmd.cmd === 'summary') {
+                reportText = await getReportSummary(rpResolved.workspaceId, rpResolved.userId, rpStart!, rpEnd!, label);
+              } else if (rpCmd.cmd === 'categories') {
+                reportText = await getCategoryBreakdown(rpResolved.workspaceId, rpResolved.userId, rpStart!, rpEnd!, label);
+              } else if (rpCmd.cmd === 'expenses') {
+                reportText = await getExpenseOnlyReport(rpResolved.workspaceId, rpResolved.userId, rpStart!, rpEnd!, label);
+              } else if (rpCmd.cmd === 'income') {
+                reportText = await getIncomeOnlyReport(rpResolved.workspaceId, rpResolved.userId, rpStart!, rpEnd!, label);
+              } else if (rpCmd.cmd === 'comparison') {
+                reportText = await getComparisonReport(rpResolved.workspaceId, rpResolved.userId, rpStart!, rpEnd!, label);
+              } else if (rpCmd.cmd === 'accounts') {
+                reportText = await getAccountMovements(rpResolved.workspaceId, rpResolved.userId, rpStart!, rpEnd!, label);
+              }
+
+              if (rpMsgId && reportText) void editMessageText(chatId, rpMsgId, reportText, buildReportBackKeyboard());
+            }
+          }
+        } catch (err: unknown) {
+          const errorClass = err instanceof Error ? err.constructor.name : 'UnknownError';
+          request.log.error({ msg: '[midas:bot:webhook] rp callback failed', callbackId: cq.id, errorClass });
+        }
+
+        await answerCallbackQuery(cq.id);
+        await reply.status(200).send({ ok: true });
+        return;
+      }
+
       // ── Phase 1.28: edit callbacks (prefix "ed:") ─────────────
-      // Handled synchronously — direct DB update, no queue.
+      // Phase 2.0: ed: is deprecated alias for tx:
+      // ISSUE-2 FIX: structure matches (tx:f: = ed:f:, tx:d: = ed:d:, tx:v: = ed:v:)
+      // Simple prefix remap: ed:v:{id} → tx:v:{id}, ed:l:0 → tx:l:0 (filter defaults to 'a')
       if (callbackData.startsWith('ed:')) {
+        const remapped = 'tx:' + callbackData.slice(3);
+        const { parseTxCallback: parseTxAlias } = await import('../services/transaction-keyboard.service.js');
+        const aliasCmd = parseTxAlias(remapped);
+        if (aliasCmd) {
+          // Re-route to tx: handler — simulate tx: callback
+          request.log.info({ msg: '[midas:bot:webhook] ed: → tx: remap', original: callbackData, remapped });
+          // Process via tx: routing (same logic as the tx: block above)
+          let txResolved: { workspaceId: string; userId: string };
+          try { txResolved = await resolveWorkspace(telegramUserId, chatId); }
+          catch { await answerCallbackQuery(cq.id); await reply.status(200).send({ ok: true }); return; }
+          const txMsgId = cq.message ? String(cq.message.message_id) : null;
+          try {
+            if (aliasCmd.cmd === 'list') {
+              const [items, total, stats] = await Promise.all([
+                getTransactionList(txResolved.workspaceId, txResolved.userId, aliasCmd.page, aliasCmd.filter),
+                countFilteredTransactions(txResolved.workspaceId, txResolved.userId, aliasCmd.filter),
+                getMonthMiniStats(txResolved.workspaceId, txResolved.userId),
+              ]);
+              const totalPages = Math.max(1, Math.ceil(total / TX_PAGE_SIZE));
+              const header = formatTxListHeader(stats, aliasCmd.filter);
+              const keyboard = buildTxListKeyboard(items, aliasCmd.page, totalPages, aliasCmd.filter);
+              if (txMsgId) void editMessageText(chatId, txMsgId, header, keyboard);
+            } else if (aliasCmd.cmd === 'view') {
+              const card = await getTransactionCard(aliasCmd.txId, txResolved.workspaceId, txResolved.userId);
+              if (card) {
+                const text = formatTransactionCard(card);
+                const rows: { text: string; callback_data: string }[][] = [];
+                if (!card.is_cross_currency) rows.push([{ text: '\u270F\uFE0F \u0418\u0437\u043C\u0435\u043D\u0438\u0442\u044C \u0441\u0443\u043C\u043C\u0443', callback_data: `tx:f:amt:${aliasCmd.txId}` }]);
+                rows.push([{ text: '\uD83D\uDCC1 \u0418\u0437\u043C\u0435\u043D\u0438\u0442\u044C \u043A\u0430\u0442\u0435\u0433\u043E\u0440\u0438\u044E', callback_data: `tx:f:cat:${aliasCmd.txId}:0` }]);
+                rows.push([{ text: '\uD83C\uDFE6 \u0418\u0437\u043C\u0435\u043D\u0438\u0442\u044C \u0441\u0447\u0451\u0442', callback_data: `tx:f:acc:${aliasCmd.txId}` }]);
+                rows.push([{ text: '\uD83D\uDD04 \u0418\u0437\u043C\u0435\u043D\u0438\u0442\u044C \u0442\u0438\u043F', callback_data: `tx:f:int:${aliasCmd.txId}` }]);
+                rows.push([{ text: '\uD83D\uDDD1\uFE0F \u0423\u0434\u0430\u043B\u0438\u0442\u044C', callback_data: `tx:d:ask:${aliasCmd.txId}` }]);
+                rows.push([{ text: '\u25C0\uFE0F \u041D\u0430\u0437\u0430\u0434 \u043A \u0441\u043F\u0438\u0441\u043A\u0443', callback_data: 'tx:l:0:a' }]);
+                if (txMsgId) void editMessageText(chatId, txMsgId, text, { inline_keyboard: rows });
+              } else {
+                if (txMsgId) void editMessageText(chatId, txMsgId, '\u26A0\uFE0F \u0422\u0440\u0430\u043D\u0437\u0430\u043A\u0446\u0438\u044F \u043D\u0435 \u043D\u0430\u0439\u0434\u0435\u043D\u0430.', { inline_keyboard: [[{ text: '\u25C0\uFE0F \u041D\u0430\u0437\u0430\u0434', callback_data: 'tx:l:0:a' }]] });
+              }
+            } else if (aliasCmd.cmd === 'cancel') {
+              if (txMsgId) void editMessageText(chatId, txMsgId, '\uD83D\uDCCB \u0417\u0430\u043A\u0440\u044B\u0442\u043E.', { inline_keyboard: [] });
+            }
+            // All other ed: commands still fall through to original ed: handler below
+          } catch (err: unknown) {
+            const errorClass = err instanceof Error ? err.constructor.name : 'UnknownError';
+            request.log.error({ msg: '[midas:bot:webhook] ed→tx remap failed', callbackId: cq.id, errorClass });
+          }
+          if (aliasCmd.cmd === 'list' || aliasCmd.cmd === 'view' || aliasCmd.cmd === 'cancel') {
+            await answerCallbackQuery(cq.id);
+            await reply.status(200).send({ ok: true });
+            return;
+          }
+        }
+        // Fall through to original ed: handler for commands not remapped above
         const cmd = parseEditCallback(callbackData);
         if (!cmd) {
           request.log.warn({
@@ -1116,6 +1398,116 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
             if (messageId) {
               void editMessageText(chatId, messageId, text, buildSettingsMainKeyboard());
             }
+          }
+          // ── Phase 2.0: advanced settings handlers ──
+          else if (cmd.cmd === 'categories') {
+            // Show workspace categories list (reuse existing category.service)
+            const { getCategoryList } = await import('../services/category.service.js');
+            const catText = await getCategoryList(stResolved.workspaceId, stResolved.userId);
+            const kb = { inline_keyboard: [[{ text: '← Назад', callback_data: 'st:back' }]] };
+            if (messageId) void editMessageText(chatId, messageId, catText, kb);
+          }
+          else if (cmd.cmd === 'notifications') {
+            const { getUserPreferences } = await import('../services/settings-advanced.service.js');
+            const prefs = await getUserPreferences(stResolved.workspaceId, stResolved.userId);
+            const ds = prefs.dailySummaryEnabled ? '✅' : '❌';
+            const la = prefs.limitAlertsEnabled ? '✅' : '❌';
+            const rr = prefs.recordReminderEnabled ? '✅' : '❌';
+            let text = '🔔 <b>Уведомления</b>\n\n';
+            text += `📊 Ежедневная сводка:  ${ds} (${String(prefs.dailySummaryHour)}:00)\n`;
+            text += `⚠️ Лимит по категории: ${la}\n`;
+            text += `📝 Напоминание записи: ${rr}\n`;
+            const kb = { inline_keyboard: [
+              [{ text: `📊 Сводка: ${prefs.dailySummaryEnabled ? 'выкл' : 'вкл'}`, callback_data: 'st:ntf:ds' }],
+              [{ text: `⚠️ Лимиты: ${prefs.limitAlertsEnabled ? 'выкл' : 'вкл'}`, callback_data: 'st:ntf:la' }],
+              [{ text: `📝 Напоминания: ${prefs.recordReminderEnabled ? 'выкл' : 'вкл'}`, callback_data: 'st:ntf:rr' }],
+              [{ text: '← Назад', callback_data: 'st:back' }],
+            ] };
+            if (messageId) void editMessageText(chatId, messageId, text, kb);
+          }
+          else if (cmd.cmd === 'ntf_toggle') {
+            const { getUserPreferences, updateNotificationSetting } = await import('../services/settings-advanced.service.js');
+            const prefs = await getUserPreferences(stResolved.workspaceId, stResolved.userId);
+            const keyMap = { ds: 'daily_summary_enabled' as const, la: 'limit_alerts_enabled' as const, rr: 'record_reminder_enabled' as const };
+            const dbKey = keyMap[cmd.key];
+            const currentVal = cmd.key === 'ds' ? prefs.dailySummaryEnabled : cmd.key === 'la' ? prefs.limitAlertsEnabled : prefs.recordReminderEnabled;
+            await updateNotificationSetting(stResolved.workspaceId, stResolved.userId, dbKey, !currentVal);
+            // Re-render notifications screen (re-trigger cmd)
+            const prefs2 = await getUserPreferences(stResolved.workspaceId, stResolved.userId);
+            const ds2 = prefs2.dailySummaryEnabled ? '✅' : '❌';
+            const la2 = prefs2.limitAlertsEnabled ? '✅' : '❌';
+            const rr2 = prefs2.recordReminderEnabled ? '✅' : '❌';
+            let text2 = '🔔 <b>Уведомления</b>\n\n';
+            text2 += `📊 Ежедневная сводка:  ${ds2} (${String(prefs2.dailySummaryHour)}:00)\n`;
+            text2 += `⚠️ Лимит по категории: ${la2}\n`;
+            text2 += `📝 Напоминание записи: ${rr2}\n`;
+            const kb2 = { inline_keyboard: [
+              [{ text: `📊 Сводка: ${prefs2.dailySummaryEnabled ? 'выкл' : 'вкл'}`, callback_data: 'st:ntf:ds' }],
+              [{ text: `⚠️ Лимиты: ${prefs2.limitAlertsEnabled ? 'выкл' : 'вкл'}`, callback_data: 'st:ntf:la' }],
+              [{ text: `📝 Напоминания: ${prefs2.recordReminderEnabled ? 'выкл' : 'вкл'}`, callback_data: 'st:ntf:rr' }],
+              [{ text: '← Назад', callback_data: 'st:back' }],
+            ] };
+            if (messageId) void editMessageText(chatId, messageId, text2, kb2);
+          }
+          else if (cmd.cmd === 'number_format') {
+            const { getUserPreferences } = await import('../services/settings-advanced.service.js');
+            const prefs = await getUserPreferences(stResolved.workspaceId, stResolved.userId);
+            const fmt = prefs.numberFormat;
+            let text = '🔢 <b>Формат отображения</b>\n\n';
+            text += `Текущий: <b>${fmt === 'ru' ? '1 234 567,89' : fmt === 'en' ? '1,234,567.89' : '1.234.567,89'}</b>\n`;
+            const kb = { inline_keyboard: [
+              [{ text: `1,234,567.89 ${fmt === 'en' ? '✓' : ''}`, callback_data: 'st:nf:s:en' }],
+              [{ text: `1 234 567,89 ${fmt === 'ru' ? '✓' : ''}`, callback_data: 'st:nf:s:ru' }],
+              [{ text: `1.234.567,89 ${fmt === 'de' ? '✓' : ''}`, callback_data: 'st:nf:s:de' }],
+              [{ text: '← Назад', callback_data: 'st:back' }],
+            ] };
+            if (messageId) void editMessageText(chatId, messageId, text, kb);
+          }
+          else if (cmd.cmd === 'nf_set') {
+            const { updateNumberFormat } = await import('../services/settings-advanced.service.js');
+            await updateNumberFormat(stResolved.workspaceId, stResolved.userId, cmd.format as 'ru' | 'en' | 'de');
+            const fmtLabel = cmd.format === 'ru' ? '1 234 567,89' : cmd.format === 'en' ? '1,234,567.89' : '1.234.567,89';
+            if (messageId) void editMessageText(chatId, messageId, `✅ Формат чисел: <b>${fmtLabel}</b>`, { inline_keyboard: [[{ text: '← Назад', callback_data: 'st:back' }]] });
+          }
+          else if (cmd.cmd === 'language_menu') {
+            const { getUserPreferences } = await import('../services/settings-advanced.service.js');
+            const prefs = await getUserPreferences(stResolved.workspaceId, stResolved.userId);
+            const lang = prefs.language;
+            const kb = { inline_keyboard: [
+              [{ text: `🇷🇺 Русский ${lang === 'ru' ? '✓' : ''}`, callback_data: 'st:lang:s:ru' }],
+              [{ text: `🇬🇧 English ${lang === 'en' ? '✓' : ''}`, callback_data: 'st:lang:s:en' }],
+              [{ text: `🇺🇦 Українська ${lang === 'ua' ? '✓' : ''}`, callback_data: 'st:lang:s:ua' }],
+              [{ text: '← Назад', callback_data: 'st:back' }],
+            ] };
+            if (messageId) void editMessageText(chatId, messageId, '🌍 <b>Язык интерфейса</b>', kb);
+          }
+          else if (cmd.cmd === 'lang_set') {
+            const { updateLanguage } = await import('../services/settings-advanced.service.js');
+            await updateLanguage(stResolved.workspaceId, stResolved.userId, cmd.lang as 'ru' | 'en' | 'ua');
+            const langLabel = cmd.lang === 'ru' ? '🇷🇺 Русский' : cmd.lang === 'en' ? '🇬🇧 English' : '🇺🇦 Українська';
+            if (messageId) void editMessageText(chatId, messageId, `✅ Язык: <b>${langLabel}</b>`, { inline_keyboard: [[{ text: '← Назад', callback_data: 'st:back' }]] });
+          }
+          else if (cmd.cmd === 'export_menu' || cmd.cmd === 'export_csv') {
+            if (cmd.cmd === 'export_menu') {
+              const kb = { inline_keyboard: [
+                [{ text: '📄 Скачать CSV', callback_data: 'st:exp:csv' }],
+                [{ text: '← Назад', callback_data: 'st:back' }],
+              ] };
+              if (messageId) void editMessageText(chatId, messageId, '📤 <b>Экспорт данных</b>\n\nВыберите формат:', kb);
+            } else {
+              // Generate CSV and send as document
+              const { exportTransactionsCSV } = await import('../services/settings-advanced.service.js');
+              const csvBuf = await exportTransactionsCSV(stResolved.workspaceId, stResolved.userId);
+              const { sendDocument } = await import('../services/telegram-api.js');
+              await sendDocument(chatId, csvBuf, 'midas_export.csv', 'Экспорт транзакций Midas');
+              if (messageId) void editMessageText(chatId, messageId, '✅ Файл отправлен.', { inline_keyboard: [[{ text: '← Назад', callback_data: 'st:back' }]] });
+            }
+          }
+          else if (cmd.cmd === 'info') {
+            const { getWorkspaceStats } = await import('../services/settings-advanced.service.js');
+            const statsText = await getWorkspaceStats(stResolved.workspaceId, stResolved.userId);
+            const kb = { inline_keyboard: [[{ text: '← Назад', callback_data: 'st:back' }]] };
+            if (messageId) void editMessageText(chatId, messageId, statsText, kb);
           }
         } catch (err: unknown) {
           const errorClass = err instanceof Error ? err.constructor.name : 'UnknownError';
@@ -1556,7 +1948,7 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
             const balanceMsg = await getAccountBalances(navResolved.workspaceId, navResolved.userId);
             await upsertBotMessage(telegramUserId, chatId, balanceMsg, {
               inline_keyboard: [[
-                { text: '📋 Отчёт',    callback_data: 'nav:report' },
+                { text: '📊 Отчёт',    callback_data: 'nav:report' },
                 { text: '⚙️ Настройки', callback_data: 'stg:main' },
               ]],
             });
@@ -1564,7 +1956,7 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
             const reportMsg = await getMonthlyReport(navResolved.workspaceId, navResolved.userId);
             await upsertBotMessage(telegramUserId, chatId, reportMsg, {
               inline_keyboard: [[
-                { text: '📊 Баланс',    callback_data: 'nav:balance' },
+                { text: '💰 Баланс',    callback_data: 'nav:balance' },
                 { text: '⚙️ Настройки', callback_data: 'stg:main' },
               ]],
             });
@@ -1753,14 +2145,13 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
 
     if (navText === NAV_BTN_REPORT) {
       try {
-        const resolved = await resolveWorkspace(telegramUserId, chatId);
-        const reportText = await getMonthlyReport(resolved.workspaceId, resolved.userId);
-        void upsertBotMessage(telegramUserId, chatId, reportText);
-        request.log.info({ msg: '[midas:bot:webhook] nav:report shortcut', telegramUserId, workspaceId: resolved.workspaceId });
+        const { buildPeriodPickerKeyboard } = await import('../services/report-keyboard.service.js');
+        void upsertBotMessage(telegramUserId, chatId, '📊 <b>Отчёты</b>\n\nВыбери период:', buildPeriodPickerKeyboard());
+        request.log.info({ msg: '[midas:bot:webhook] nav:report → period picker', telegramUserId });
       } catch (err: unknown) {
         const errorClass = err instanceof Error ? err.constructor.name : 'UnknownError';
-        request.log.error({ msg: '[midas:bot:webhook] nav:report shortcut failed', telegramUserId, errorClass });
-        void upsertBotMessage(telegramUserId, chatId, '⚠️ Не удалось сформировать отчёт. Попробуйте позже.');
+        request.log.error({ msg: '[midas:bot:webhook] nav:report failed', telegramUserId, errorClass });
+        void upsertBotMessage(telegramUserId, chatId, '⚠️ Не удалось открыть отчёты. Попробуйте позже.');
       }
       await reply.status(200).send({ ok: true });
       return;
@@ -1782,6 +2173,34 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
         const errorClass = err instanceof Error ? err.constructor.name : 'UnknownError';
         request.log.error({ msg: '[midas:bot:webhook] nav:settings shortcut failed', telegramUserId, errorClass });
         void upsertBotMessage(telegramUserId, chatId, '⚠️ Ошибка настроек. Попробуйте позже.');
+      }
+      await reply.status(200).send({ ok: true });
+      return;
+    }
+
+    // Phase 2.0: Transaction Hub nav button
+    if (navText === NAV_BTN_TRANSACTIONS) {
+      try {
+        const resolved = await resolveWorkspace(telegramUserId, chatId);
+        const [items, total, stats] = await Promise.all([
+          getTransactionList(resolved.workspaceId, resolved.userId, 0, 'a'),
+          countFilteredTransactions(resolved.workspaceId, resolved.userId, 'a'),
+          getMonthMiniStats(resolved.workspaceId, resolved.userId),
+        ]);
+        if (total === 0) {
+          void upsertBotMessage(telegramUserId, chatId,
+            '📋 <b>Транзакции</b>\n\nТранзакций пока нет.');
+        } else {
+          const totalPages = Math.max(1, Math.ceil(total / TX_PAGE_SIZE));
+          const header = formatTxListHeader(stats, 'a');
+          const keyboard = buildTxListKeyboard(items, 0, totalPages, 'a');
+          void upsertBotMessage(telegramUserId, chatId, header, keyboard);
+        }
+        request.log.info({ msg: '[midas:bot:webhook] nav:transactions', telegramUserId, workspaceId: resolved.workspaceId });
+      } catch (err: unknown) {
+        const errorClass = err instanceof Error ? err.constructor.name : 'UnknownError';
+        request.log.error({ msg: '[midas:bot:webhook] nav:transactions failed', telegramUserId, errorClass });
+        void upsertBotMessage(telegramUserId, chatId, '⚠️ Не удалось загрузить транзакции. Попробуйте позже.');
       }
       await reply.status(200).send({ ok: true });
       return;
@@ -2238,28 +2657,27 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
         return;
       }
 
-      // ── 5f-edit: /edit (Phase 1.28) ──────────────────────────
+      // ── 5f-edit: /edit → redirect to Transaction Hub (Phase 2.0) ──
       if (commandToken === '/edit') {
         try {
           const resolved = await resolveWorkspace(telegramUserId, chatId);
-          const [items, total] = await Promise.all([
-            getRecentTransactions(resolved.workspaceId, resolved.userId, 0),
-            countTransactions(resolved.workspaceId, resolved.userId),
+          // Phase 2.0: redirect /edit to the new Transaction Hub (same as NAV_BTN_TRANSACTIONS)
+          const [items, total, stats] = await Promise.all([
+            getTransactionList(resolved.workspaceId, resolved.userId, 0, 'a'),
+            countFilteredTransactions(resolved.workspaceId, resolved.userId, 'a'),
+            getMonthMiniStats(resolved.workspaceId, resolved.userId),
           ]);
-
           if (total === 0) {
-            void upsertBotMessage(telegramUserId, chatId, '🗒 У вас ещё нет транзакций для редактирования.');
+            void upsertBotMessage(telegramUserId, chatId,
+              '📋 <b>Транзакции</b>\n\nТранзакций пока нет.');
           } else {
-            const totalPages = Math.max(1, Math.ceil(total / EDIT_PAGE_SIZE));
-            const header = formatTransactionListHeader(0, totalPages);
-            const lines = items.map((tx, i) => formatTransactionListLine(tx, i));
-            const text = [header, ...lines].join('\n');
-            const keyboard = buildTransactionListKeyboard(items, 0, totalPages);
-            void upsertBotMessage(telegramUserId, chatId, text, keyboard);
+            const totalPages = Math.max(1, Math.ceil(total / TX_PAGE_SIZE));
+            const header = formatTxListHeader(stats, 'a');
+            const keyboard = buildTxListKeyboard(items, 0, totalPages, 'a');
+            void upsertBotMessage(telegramUserId, chatId, header, keyboard);
           }
-
           request.log.info({
-            msg: '[midas:bot:webhook] /edit list sent',
+            msg: '[midas:bot:webhook] /edit → tx hub redirect',
             telegramUserId,
             workspaceId: resolved.workspaceId,
           });
@@ -2682,6 +3100,55 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
         } else {
           // Malformed state — discard silently, let message fall through
           request.log.warn({ msg: '[midas:bot:webhook] edit: malformed Redis state — discarded', field });
+        }
+        await reply.status(200).send({ ok: true });
+        return;
+      }
+    }
+
+    // ── Step 5g-tx: Phase 2.0 — transaction search text intercept ────────
+    // If user is in tx search mode (tapped Поиск by name/amount), intercept their
+    // next text message as the search query. Runs BEFORE settings search and AI parse.
+    if (!commandToken) {
+      const txSearchKey = `midas:tx:search:${telegramUserId}:${chatId}`;
+      const txSearchMode = await redisConnection.get(txSearchKey);
+      if (txSearchMode) {
+        await redisConnection.del(txSearchKey);
+        const queryText = (message.text ?? '').trim();
+
+        try {
+          const resolved = await resolveWorkspace(telegramUserId, chatId);
+          const { searchByName, searchByAmount } = await import('../services/transaction-hub.service.js');
+          const { buildSearchResultsKeyboard: buildSRKb } = await import('../services/transaction-keyboard.service.js');
+
+          let items: import('../services/transaction-hub.service.js').TxListItem[];
+          if (txSearchMode === 'name') {
+            items = await searchByName(resolved.workspaceId, resolved.userId, queryText);
+          } else {
+            // amount mode — validate numeric input
+            const amountMatch = queryText.replace(/[^\d.,]/g, '').replace(',', '.');
+            if (!amountMatch || !/^\d+(\.\d{1,2})?$/.test(amountMatch)) {
+              void upsertBotMessage(telegramUserId, chatId, '\u26A0\uFE0F \u041D\u0435\u0432\u0435\u0440\u043D\u0430\u044F \u0441\u0443\u043C\u043C\u0430. \u0412\u0432\u0435\u0434\u0438\u0442\u0435 \u0447\u0438\u0441\u043B\u043E, \u043D\u0430\u043F\u0440\u0438\u043C\u0435\u0440: 1000 \u0438\u043B\u0438 250.50');
+              await reply.status(200).send({ ok: true });
+              return;
+            }
+            items = await searchByAmount(resolved.workspaceId, resolved.userId, amountMatch);
+          }
+
+          if (items.length === 0) {
+            void upsertBotMessage(telegramUserId, chatId,
+              '\u{1F50D} \u041D\u0438\u0447\u0435\u0433\u043E \u043D\u0435 \u043D\u0430\u0439\u0434\u0435\u043D\u043E.',
+              { inline_keyboard: [[{ text: '\u{1F50D} \u041D\u043E\u0432\u044B\u0439 \u043F\u043E\u0438\u0441\u043A', callback_data: 'tx:s' }, { text: '\u25C0\uFE0F \u041A \u0441\u043F\u0438\u0441\u043A\u0443', callback_data: 'tx:l:0:a' }]] });
+          } else {
+            void upsertBotMessage(telegramUserId, chatId,
+              `\u{1F50D} <b>\u0420\u0435\u0437\u0443\u043B\u044C\u0442\u0430\u0442\u044B</b> (${String(items.length)}):`,
+              buildSRKb(items));
+          }
+          request.log.info({ msg: '[midas:bot:webhook] tx search handled', mode: txSearchMode, workspaceId: resolved.workspaceId });
+        } catch (err: unknown) {
+          const errorClass = err instanceof Error ? err.constructor.name : 'UnknownError';
+          request.log.error({ msg: '[midas:bot:webhook] tx search failed', errorClass });
+          void upsertBotMessage(telegramUserId, chatId, '\u26A0\uFE0F \u041E\u0448\u0438\u0431\u043A\u0430 \u043F\u043E\u0438\u0441\u043A\u0430. \u041F\u043E\u043F\u0440\u043E\u0431\u0443\u0439\u0442\u0435 \u043F\u043E\u0437\u0436\u0435.');
         }
         await reply.status(200).send({ ok: true });
         return;

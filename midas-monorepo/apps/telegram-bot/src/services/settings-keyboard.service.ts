@@ -1,5 +1,5 @@
 /**
- * Settings Keyboard Service — Phase 1.26 / Phase 1.35
+ * Settings Keyboard Service — Phase 1.26 / Phase 1.35 / Phase 2.0
  *
  * Builds Telegram InlineKeyboardMarkup objects for the /settings UI flow.
  *
@@ -55,6 +55,18 @@ export function buildSettingsMainKeyboard(): InlineKeyboardMarkup {
       [
         { text: '🏦 Счёт расходов', callback_data: 'st:da:e' },
         { text: '🏦 Счёт доходов', callback_data: 'st:da:i' },
+      ],
+      [
+        { text: '📁 Категории', callback_data: 'st:cat' },
+        { text: '🔔 Уведомления', callback_data: 'st:ntf' },
+      ],
+      [
+        { text: '🔢 Формат чисел', callback_data: 'st:nf' },
+        { text: '🌍 Язык', callback_data: 'st:lang' },
+      ],
+      [
+        { text: '📤 Экспорт', callback_data: 'st:exp' },
+        { text: 'ℹ️ О боте', callback_data: 'st:info' },
       ],
     ],
   };
@@ -276,7 +288,19 @@ export type SettingsCallbackCmd =
   | { cmd: 'default_account_set'; kind: 'expense' | 'income'; accountId: string }
   | { cmd: 'default_account_clear'; kind: 'expense' | 'income' }
   | { cmd: 'default_account_new'; kind: 'expense' | 'income' }
-  | { cmd: 'back' };
+  | { cmd: 'back' }
+  // Phase 2.0: advanced settings
+  | { cmd: 'categories' }
+  | { cmd: 'notifications' }
+  | { cmd: 'ntf_toggle'; key: 'ds' | 'la' | 'rr' }
+  | { cmd: 'ntf_hour'; hour: number }
+  | { cmd: 'number_format' }
+  | { cmd: 'nf_set'; format: string }
+  | { cmd: 'language_menu' }
+  | { cmd: 'lang_set'; lang: string }
+  | { cmd: 'export_menu' }
+  | { cmd: 'export_csv' }
+  | { cmd: 'info' };
 
 const CURRENCY_CODE_RE = /^[A-Z]{3,5}$/;
 const GROUP_MAP: Record<string, CurrencyGroup> = { s: 'stable', c: 'crypto', f: 'fiat' };
@@ -291,6 +315,49 @@ export function parseSettingsCallback(data: string): SettingsCallbackCmd | null 
   if (sub === 'x') return { cmd: 'cancel' };
   if (sub === 'srch') return { cmd: 'search' };
   if (sub === 'back') return { cmd: 'back' };
+
+  // Phase 2.0: advanced settings
+  if (sub === 'cat') return { cmd: 'categories' };
+  if (sub === 'ntf') {
+    const action = parts[2] ?? '';
+    if (!action) return { cmd: 'notifications' };
+    if (action === 'ds') return { cmd: 'ntf_toggle', key: 'ds' };
+    if (action === 'la') return { cmd: 'ntf_toggle', key: 'la' };
+    if (action === 'rr') return { cmd: 'ntf_toggle', key: 'rr' };
+    if (action === 'hr') {
+      const hour = parseInt(parts[3] ?? '', 10);
+      if (isNaN(hour) || hour < 0 || hour > 23) return null;
+      return { cmd: 'ntf_hour', hour };
+    }
+    return null;
+  }
+  if (sub === 'nf') {
+    const action = parts[2] ?? '';
+    if (!action) return { cmd: 'number_format' };
+    if (action === 's') {
+      const fmt = parts[3] ?? '';
+      if (['ru', 'en', 'de'].includes(fmt)) return { cmd: 'nf_set', format: fmt };
+      return null;
+    }
+    return null;
+  }
+  if (sub === 'lang') {
+    const action = parts[2] ?? '';
+    if (!action) return { cmd: 'language_menu' };
+    if (action === 's') {
+      const lang = parts[3] ?? '';
+      if (['ru', 'en', 'ua'].includes(lang)) return { cmd: 'lang_set', lang };
+      return null;
+    }
+    return null;
+  }
+  if (sub === 'exp') {
+    const action = parts[2] ?? '';
+    if (!action) return { cmd: 'export_menu' };
+    if (action === 'csv') return { cmd: 'export_csv' };
+    return null;
+  }
+  if (sub === 'info') return { cmd: 'info' };
 
   if (sub === 'p') {
     const code = parts[2] ?? '';
