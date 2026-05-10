@@ -993,27 +993,41 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
           } else if (txCmd.cmd === 'search_name') {
             const searchKey = `midas:tx:search:${telegramUserId}:${chatId}`;
             try { await redisConnection.set(searchKey, 'name', 'EX', 120); } catch { /* non-fatal */ }
-            if (txMsgId) void editMessageText(chatId, txMsgId, '\u{1F4DD} <b>\u041F\u043E\u0438\u0441\u043A \u043F\u043E \u043D\u0430\u0437\u0432\u0430\u043D\u0438\u044E</b>\n\n\u041D\u0430\u043F\u0438\u0448\u0438 \u043D\u0430\u0437\u0432\u0430\u043D\u0438\u0435 \u0442\u043E\u0432\u0430\u0440\u0430 \u0438\u043B\u0438 \u0443\u0441\u043B\u0443\u0433\u0438:', { inline_keyboard: [[{ text: '\u25C0\uFE0F \u041E\u0442\u043C\u0435\u043D\u0430', callback_data: 'tx:s' }]] });
+            if (txMsgId) void editMessageText(chatId, txMsgId,
+              '📝 <b>Поиск по названию</b>\n\nНапиши название товара или услуги:',
+              { inline_keyboard: [[{ text: '◀️ Отмена', callback_data: 'tx:s' }]] });
+
           // ── tx:s:amt → search by amount (set Redis intercept) ──
           } else if (txCmd.cmd === 'search_amount') {
             const searchKey = `midas:tx:search:${telegramUserId}:${chatId}`;
             try { await redisConnection.set(searchKey, 'amount', 'EX', 120); } catch { /* non-fatal */ }
-            if (txMsgId) void editMessageText(chatId, txMsgId, '\u{1F4B2} <b>\u041F\u043E\u0438\u0441\u043A \u043F\u043E \u0441\u0443\u043C\u043C\u0435</b>\n\n\u0412\u0432\u0435\u0434\u0438 \u0441\u0443\u043C\u043C\u0443 (\u043D\u0430\u043F\u0440\u0438\u043C\u0435\u0440: 1000 \u0438\u043B\u0438 250.50):', { inline_keyboard: [[{ text: '\u25C0\uFE0F \u041E\u0442\u043C\u0435\u043D\u0430', callback_data: 'tx:s' }]] });
+            if (txMsgId) void editMessageText(chatId, txMsgId,
+              '💲 <b>Поиск по сумме</b>\n\nВведи сумму (например: 1000 или 250.50):',
+              { inline_keyboard: [[{ text: '◀️ Отмена', callback_data: 'tx:s' }]] });
+
           // ── tx:s:c → search by category (show picker) ──
           } else if (txCmd.cmd === 'search_category') {
             const cats = await getWorkspaceCategories(txResolved.workspaceId, txResolved.userId);
             const catRows: { text: string; callback_data: string }[][] = cats.map((cat) => [{ text: escapeHtml(cat.name), callback_data: `tx:s:cv:${cat.id}` }]);
-            catRows.push([{ text: '\u25C0\uFE0F \u041D\u0430\u0437\u0430\u0434', callback_data: 'tx:s' }]);
-            if (txMsgId) void editMessageText(chatId, txMsgId, '\u{1F4C1} <b>\u041F\u043E\u0438\u0441\u043A \u043F\u043E \u043A\u0430\u0442\u0435\u0433\u043E\u0440\u0438\u0438</b>\n\n\u0412\u044B\u0431\u0435\u0440\u0438 \u043A\u0430\u0442\u0435\u0433\u043E\u0440\u0438\u044E:', { inline_keyboard: catRows });
-          // ── tx:s:cv:{catId} → execute category search ──
+            catRows.push([{ text: '◀️ Назад', callback_data: 'tx:s' }]);
+            if (txMsgId) void editMessageText(chatId, txMsgId, '📁 <b>Поиск по категории</b>\n\nВыбери категорию:', { inline_keyboard: catRows });
+
+          // ── tx:s:cv:{catId} → execute category search (page 0) ──
           } else if (txCmd.cmd === 'search_cat_result') {
-            const { searchByCategory: searchByCat } = await import('../services/transaction-hub.service.js');
-            const items = await searchByCat(txResolved.workspaceId, txResolved.userId, txCmd.catId);
+            const { searchByCategory: searchByCat, SEARCH_PAGE_SIZE: SPS } = await import('../services/transaction-hub.service.js');
+            const { items, total } = await searchByCat(txResolved.workspaceId, txResolved.userId, txCmd.catId, 0);
             const { buildSearchResultsKeyboard: buildSRK } = await import('../services/transaction-keyboard.service.js');
-            if (items.length === 0) {
+            // Store search context for pagination
+            const srCtxKey = `midas:tx:sr:ctx:${telegramUserId}:${chatId}`;
+            const ctx = JSON.stringify({ t: 'c', id: txCmd.catId });
+            try { await redisConnection.set(srCtxKey, ctx, 'EX', 600); } catch { /* non-fatal */ }
+            const totalPages = Math.max(1, Math.ceil(total / SPS));
+            if (total === 0) {
               if (txMsgId) void editMessageText(chatId, txMsgId, '🔍 Ничего не найдено.', { inline_keyboard: [[{ text: '🔍 Новый поиск', callback_data: 'tx:s' }, { text: '◀️ К списку', callback_data: 'tx:l:0:a' }]] });
             } else {
-              if (txMsgId) void editMessageText(chatId, txMsgId, `🔍 <b>Результаты</b> (${String(items.length)}):`, buildSRK(items));
+              if (txMsgId) void editMessageText(chatId, txMsgId,
+                `📁 <b>По категории</b> (${String(total)} тр.):`,
+                buildSRK(items, 0, totalPages, 'tx:s:c'));
             }
 
           // ── tx:s:dt → date picker menu ──────────────────────
@@ -1048,18 +1062,26 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
               const mm1 = String(now.getMonth() + 1).padStart(2, '0');
               label = `${dd0}.${mm0} – ${dd1}.${mm1}`;
             } else {
-              // month
               from  = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
               to    = new Date(now); to.setHours(23, 59, 59, 999);
               const mm = String(now.getMonth() + 1).padStart(2, '0');
               label = `${mm}.${String(now.getFullYear())}`;
             }
 
-            const { searchByDateRange } = await import('../services/transaction-hub.service.js');
+            const { searchByDateRange, SEARCH_PAGE_SIZE: SPS2 } = await import('../services/transaction-hub.service.js');
             const { buildSearchResultsKeyboard: buildSRK2, buildDatePickerKeyboard: buildDPK2 } = await import('../services/transaction-keyboard.service.js');
-            const dateItems = await searchByDateRange(txResolved.workspaceId, txResolved.userId, from.toISOString(), to.toISOString());
+            void buildDPK2;
 
-            if (dateItems.length === 0) {
+            const { items: dateItems, total: dateTotal } = await searchByDateRange(
+              txResolved.workspaceId, txResolved.userId, from.toISOString(), to.toISOString(), 0,
+            );
+            // Store context for pagination
+            const srCtxKey2 = `midas:tx:sr:ctx:${telegramUserId}:${chatId}`;
+            const ctx2 = JSON.stringify({ t: 'd', f: from.toISOString(), to: to.toISOString(), lb: label });
+            try { await redisConnection.set(srCtxKey2, ctx2, 'EX', 600); } catch { /* non-fatal */ }
+
+            const totalPages2 = Math.max(1, Math.ceil(dateTotal / SPS2));
+            if (dateTotal === 0) {
               if (txMsgId) void editMessageText(chatId, txMsgId,
                 `📅 За <b>${escapeHtml(label)}</b>\n\nТранзакций не найдено.`,
                 { inline_keyboard: [
@@ -1068,10 +1090,9 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
                 ] });
             } else {
               if (txMsgId) void editMessageText(chatId, txMsgId,
-                `📅 <b>За ${escapeHtml(label)}</b> (${String(dateItems.length)} тр.):`,
-                buildSRK2(dateItems));
+                `📅 <b>За ${escapeHtml(label)}</b> (${String(dateTotal)} тр.):`,
+                buildSRK2(dateItems, 0, totalPages2, 'tx:s:dt'));
             }
-            void buildDPK2; // suppress unused import
 
           // ── tx:s:dt:custom → prompt free-text date input ──────
           } else if (txCmd.cmd === 'search_date_custom') {
@@ -1092,6 +1113,61 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
             try { await redisConnection.del(searchKey); } catch { /* non-fatal */ }
             const { buildDatePickerKeyboard: buildDPK3 } = await import('../services/transaction-keyboard.service.js');
             if (txMsgId) void editMessageText(chatId, txMsgId, '📅 <b>Поиск по дате</b>\n\nВыбери период:', buildDPK3());
+
+          // ── tx:sr:p:{page} → paginated search results navigation ──
+          } else if (txCmd.cmd === 'search_results_page') {
+            const srCtxKey3 = `midas:tx:sr:ctx:${telegramUserId}:${chatId}`;
+            const ctxRaw = await redisConnection.get(srCtxKey3);
+            if (!ctxRaw) {
+              // Context expired — ask user to search again
+              if (txMsgId) void editMessageText(chatId, txMsgId,
+                '⚠️ Сессия поиска истекла. Выполни поиск заново.',
+                { inline_keyboard: [[{ text: '🔍 К поиску', callback_data: 'tx:s' }]] });
+            } else {
+              const srCtx = JSON.parse(ctxRaw) as {
+                t: 'n' | 'a' | 'c' | 'd';
+                q?: string; id?: string;
+                f?: string; to?: string; lb?: string;
+              };
+              const page = txCmd.page;
+              const { searchByName, searchByAmount, searchByCategory: searchByCatPg,
+                      searchByDateRange: searchByDRPg, SEARCH_PAGE_SIZE: SPS3 } =
+                await import('../services/transaction-hub.service.js');
+              const { buildSearchResultsKeyboard: buildSRK3 } =
+                await import('../services/transaction-keyboard.service.js');
+
+              let pgItems: import('../services/transaction-hub.service.js').TxListItem[];
+              let pgTotal = 0;
+              let pgHeader = '🔍 <b>Результаты</b>';
+              let pgBack = 'tx:s';
+
+              if (srCtx.t === 'n') {
+                const r = await searchByName(txResolved.workspaceId, txResolved.userId, srCtx.q ?? '', page);
+                pgItems = r.items; pgTotal = r.total;
+                pgHeader = `📝 <b>По названию</b> (${String(pgTotal)} тр.)`;
+                pgBack = 'tx:s';
+              } else if (srCtx.t === 'a') {
+                const r = await searchByAmount(txResolved.workspaceId, txResolved.userId, srCtx.q ?? '', page);
+                pgItems = r.items; pgTotal = r.total;
+                pgHeader = `💲 <b>По сумме</b> (${String(pgTotal)} тр.)`;
+                pgBack = 'tx:s';
+              } else if (srCtx.t === 'c') {
+                const r = await searchByCatPg(txResolved.workspaceId, txResolved.userId, srCtx.id ?? '', page);
+                pgItems = r.items; pgTotal = r.total;
+                pgHeader = `📁 <b>По категории</b> (${String(pgTotal)} тр.)`;
+                pgBack = 'tx:s:c';
+              } else {
+                const r = await searchByDRPg(txResolved.workspaceId, txResolved.userId, srCtx.f ?? '', srCtx.to ?? '', page);
+                pgItems = r.items; pgTotal = r.total;
+                pgHeader = `📅 <b>За ${escapeHtml(srCtx.lb ?? '')}</b> (${String(pgTotal)} тр.)`;
+                pgBack = 'tx:s:dt';
+              }
+
+              const pgTotalPages = Math.max(1, Math.ceil(pgTotal / SPS3));
+              if (txMsgId) void editMessageText(chatId, txMsgId,
+                `${pgHeader}:`,
+                buildSRK3(pgItems, page, pgTotalPages, pgBack));
+            }
           }
 
         } catch (err: unknown) {
@@ -3622,7 +3698,7 @@ Midas создан, чтобы сделать учет денег максима
     }
 
     // ── Step 5g-tx: Phase 2.0 — transaction search text intercept ────────
-    // If user is in tx search mode (tapped Поиск by name/amount), intercept their
+    // If user is in tx search mode (tapped Поиск by name/amount/date), intercept their
     // next text message as the search query. Runs BEFORE settings search and AI parse.
     if (!commandToken) {
       const txSearchKey = `midas:tx:search:${telegramUserId}:${chatId}`;
@@ -3633,20 +3709,30 @@ Midas создан, чтобы сделать учет денег максима
 
         try {
           const resolved = await resolveWorkspace(telegramUserId, chatId);
-          const { searchByName, searchByAmount } = await import('../services/transaction-hub.service.js');
-          const { buildSearchResultsKeyboard: buildSRKb } = await import('../services/transaction-keyboard.service.js');
+          const { searchByName, searchByAmount, searchByDateRange, parseDateInput,
+                  SEARCH_PAGE_SIZE: SPS_TX } = await import('../services/transaction-hub.service.js');
+          const { buildSearchResultsKeyboard: buildSRKtx } = await import('../services/transaction-keyboard.service.js');
+          const srCtxKeyTx = `midas:tx:sr:ctx:${telegramUserId}:${chatId}`;
 
-          let items: import('../services/transaction-hub.service.js').TxListItem[];
           if (txSearchMode === 'name') {
-            items = await searchByName(resolved.workspaceId, resolved.userId, queryText);
+            const { items, total } = await searchByName(resolved.workspaceId, resolved.userId, queryText, 0);
+            // Store context for pagination
+            try { await redisConnection.set(srCtxKeyTx, JSON.stringify({ t: 'n', q: queryText }), 'EX', 600); } catch { /* non-fatal */ }
+            if (total === 0) {
+              void upsertBotMessage(telegramUserId, chatId, '🔍 Ничего не найдено.',
+                { inline_keyboard: [[{ text: '🔍 Новый поиск', callback_data: 'tx:s' }, { text: '◀️ К списку', callback_data: 'tx:l:0:a' }]] });
+            } else {
+              const totalPages = Math.max(1, Math.ceil(total / SPS_TX));
+              void upsertBotMessage(telegramUserId, chatId,
+                `📝 <b>По названию: «${queryText}»</b> (${String(total)} тр.):`,
+                buildSRKtx(items, 0, totalPages, 'tx:s'));
+            }
+
           } else if (txSearchMode === 'date') {
-            // ── date: parse user input → date range → search ──
-            const { parseDateInput, searchByDateRange } = await import('../services/transaction-hub.service.js');
             const parsed = parseDateInput(queryText);
             if (!parsed) {
               void upsertBotMessage(telegramUserId, chatId,
-                '⚠️ Не удалось распознать дату.\n\n' +
-                'Попробуй:\n' +
+                '⚠️ Не удалось распознать дату.\n\nПопробуй:\n' +
                 '  <code>10.05</code>  — конкретный день\n' +
                 '  <code>10.05.2026</code>  — с годом\n' +
                 '  <code>01.05 - 10.05</code>  — диапазон',
@@ -3655,51 +3741,57 @@ Midas создан, чтобы сделать учет денег максима
               await reply.status(200).send({ ok: true });
               return;
             }
-            items = await searchByDateRange(resolved.workspaceId, resolved.userId, parsed.from, parsed.to);
-            const { buildSearchResultsKeyboard: buildSRKd } = await import('../services/transaction-keyboard.service.js');
-            if (items.length === 0) {
+            const { items: dtItems, total: dtTotal } = await searchByDateRange(
+              resolved.workspaceId, resolved.userId, parsed.from, parsed.to, 0,
+            );
+            try { await redisConnection.set(srCtxKeyTx, JSON.stringify({ t: 'd', f: parsed.from, to: parsed.to, lb: parsed.label }), 'EX', 600); } catch { /* non-fatal */ }
+            if (dtTotal === 0) {
               void upsertBotMessage(telegramUserId, chatId,
                 `📅 За <b>${parsed.label}</b>\n\nТранзакций не найдено.`,
                 { inline_keyboard: [[{ text: '◀️ К выбору периода', callback_data: 'tx:s:dt' }, { text: '◀️ К списку', callback_data: 'tx:l:0:a' }]] },
               );
             } else {
+              const dtTotalPages = Math.max(1, Math.ceil(dtTotal / SPS_TX));
               void upsertBotMessage(telegramUserId, chatId,
-                `📅 <b>За ${parsed.label}</b> (${String(items.length)} тр.):`,
-                buildSRKd(items),
+                `📅 <b>За ${parsed.label}</b> (${String(dtTotal)} тр.):`,
+                buildSRKtx(dtItems, 0, dtTotalPages, 'tx:s:dt'),
               );
             }
             await reply.status(200).send({ ok: true });
             return;
+
           } else {
             // amount mode — validate numeric input
             const amountMatch = queryText.replace(/[^\d.,]/g, '').replace(',', '.');
             if (!amountMatch || !/^\d+(\.\d{1,2})?$/.test(amountMatch)) {
-              void upsertBotMessage(telegramUserId, chatId, '\u26A0\uFE0F \u041D\u0435\u0432\u0435\u0440\u043D\u0430\u044F \u0441\u0443\u043C\u043C\u0430. \u0412\u0432\u0435\u0434\u0438\u0442\u0435 \u0447\u0438\u0441\u043B\u043E, \u043D\u0430\u043F\u0440\u0438\u043C\u0435\u0440: 1000 \u0438\u043B\u0438 250.50');
+              void upsertBotMessage(telegramUserId, chatId, '⚠️ Неверная сумма. Введите число, например: 1000 или 250.50');
               await reply.status(200).send({ ok: true });
               return;
             }
-            items = await searchByAmount(resolved.workspaceId, resolved.userId, amountMatch);
+            const { items: amtItems, total: amtTotal } = await searchByAmount(resolved.workspaceId, resolved.userId, amountMatch, 0);
+            try { await redisConnection.set(srCtxKeyTx, JSON.stringify({ t: 'a', q: amountMatch }), 'EX', 600); } catch { /* non-fatal */ }
+            if (amtTotal === 0) {
+              void upsertBotMessage(telegramUserId, chatId, '🔍 Ничего не найдено.',
+                { inline_keyboard: [[{ text: '🔍 Новый поиск', callback_data: 'tx:s' }, { text: '◀️ К списку', callback_data: 'tx:l:0:a' }]] });
+            } else {
+              const amtTotalPages = Math.max(1, Math.ceil(amtTotal / SPS_TX));
+              void upsertBotMessage(telegramUserId, chatId,
+                `💲 <b>По сумме: ${amountMatch}</b> (${String(amtTotal)} тр.):`,
+                buildSRKtx(amtItems, 0, amtTotalPages, 'tx:s'));
+            }
           }
 
-          if (items.length === 0) {
-            void upsertBotMessage(telegramUserId, chatId,
-              '\u{1F50D} \u041D\u0438\u0447\u0435\u0433\u043E \u043D\u0435 \u043D\u0430\u0439\u0434\u0435\u043D\u043E.',
-              { inline_keyboard: [[{ text: '\u{1F50D} \u041D\u043E\u0432\u044B\u0439 \u043F\u043E\u0438\u0441\u043A', callback_data: 'tx:s' }, { text: '\u25C0\uFE0F \u041A \u0441\u043F\u0438\u0441\u043A\u0443', callback_data: 'tx:l:0:a' }]] });
-          } else {
-            void upsertBotMessage(telegramUserId, chatId,
-              `\u{1F50D} <b>\u0420\u0435\u0437\u0443\u043B\u044C\u0442\u0430\u0442\u044B</b> (${String(items.length)}):`,
-              buildSRKb(items));
-          }
           request.log.info({ msg: '[midas:bot:webhook] tx search handled', mode: txSearchMode, workspaceId: resolved.workspaceId });
         } catch (err: unknown) {
           const errorClass = err instanceof Error ? err.constructor.name : 'UnknownError';
           request.log.error({ msg: '[midas:bot:webhook] tx search failed', errorClass });
-          void upsertBotMessage(telegramUserId, chatId, '\u26A0\uFE0F \u041E\u0448\u0438\u0431\u043A\u0430 \u043F\u043E\u0438\u0441\u043A\u0430. \u041F\u043E\u043F\u0440\u043E\u0431\u0443\u0439\u0442\u0435 \u043F\u043E\u0437\u0436\u0435.');
+          void upsertBotMessage(telegramUserId, chatId, '⚠️ Ошибка поиска. Попробуйте позже.');
         }
         await reply.status(200).send({ ok: true });
         return;
       }
     }
+
 
     // ── Step 5h: Phase 1.26 — settings search mode intercept ───────────
     // If user is in settings search mode (pressed 🔍 in /settings UI),

@@ -199,22 +199,43 @@ export function buildDatePickerKeyboard(): InlineKeyboardMarkup {
  * Build search results keyboard.
  * Lists found transactions with back-to-search button.
  */
+/**
+ * Build paginated search results keyboard.
+ *
+ * Layout:
+ *   Row 0..N: transaction buttons (max SEARCH_PAGE_SIZE)
+ *   Row N+1:  [◀️] [page/total] [▶️]  — only if totalPages > 1
+ *   Row N+2:  [🔍 Новый поиск]  [◀️ К транзакциям]
+ */
 export function buildSearchResultsKeyboard(
   items: TxListItem[],
+  page: number,
+  totalPages: number,
+  _backCallback = 'tx:s',
 ): InlineKeyboardMarkup {
   const rows: InlineKeyboardButton[][] = items.map((tx) => {
     const emoji = intentEmoji(tx.transaction_intent);
-    const cat   = escapeHtml(tx.category_name);
+    const label = tx.item_name ? escapeHtml(tx.item_name) : escapeHtml(tx.category_name);
     const amt   = formatAmountStr(tx.base_amount);
     const cur   = escapeHtml(tx.base_currency);
-    return [{
-      text: `${emoji} ${cat} — ${amt} ${cur}`,
-      callback_data: `tx:v:${tx.id}`,
-    }];
+    const date  = shortDate(tx.transaction_time);
+    return [{ text: `${emoji} ${label}  ${amt} ${cur}  ${date}`, callback_data: `tx:v:${tx.id}` }];
   });
 
-  rows.push([{ text: '🔍 Новый поиск',   callback_data: 'tx:s' }]);
-  rows.push([{ text: '◀️ К транзакциям', callback_data: 'tx:l:0:a' }]);
+  // Pagination row — only when multiple pages
+  if (totalPages > 1) {
+    const nav: InlineKeyboardButton[] = [];
+    if (page > 0) nav.push({ text: '\u25C0\uFE0F', callback_data: `tx:sr:p:${String(page - 1)}` });
+    nav.push({ text: `${String(page + 1)}/${String(totalPages)}`, callback_data: 'tx:x' });
+    if (page < totalPages - 1) nav.push({ text: '\u25B6\uFE0F', callback_data: `tx:sr:p:${String(page + 1)}` });
+    rows.push(nav);
+  }
+
+  // Footer navigation
+  rows.push([
+    { text: '\uD83D\uDD0D \u041D\u043E\u0432\u044B\u0439 \u043F\u043E\u0438\u0441\u043A', callback_data: 'tx:s' },
+    { text: '\u25C0\uFE0F \u041A \u0441\u043F\u0438\u0441\u043A\u0443', callback_data: 'tx:l:0:a' },
+  ]);
 
   return { inline_keyboard: rows };
 }
@@ -305,6 +326,7 @@ export type TxCallbackCmd =
   | { cmd: 'search_date_preset'; preset: 'today' | 'yday' | 'week' | 'month' }
   | { cmd: 'search_date_custom' }
   | { cmd: 'search_date_cancel' }
+  | { cmd: 'search_results_page'; page: number }
   | { cmd: 'field_amount'; txId: string }
   | { cmd: 'field_cat'; txId: string; page: number }
   | { cmd: 'field_acc'; txId: string }
@@ -336,6 +358,16 @@ export function parseTxCallback(data: string): TxCallbackCmd | null {
 
   // tx:close → close (remove keyboard)
   if (sub === 'close') return { cmd: 'close' };
+
+  // tx:sr:p:{page} → search results page navigation
+  if (sub === 'sr') {
+    if (parts[2] === 'p') {
+      const page = parseInt(parts[3] ?? '0', 10);
+      if (isNaN(page) || page < 0) return null;
+      return { cmd: 'search_results_page', page };
+    }
+    return null;
+  }
 
   // tx:l:<page>:<filter?> → list (filter defaults to 'a' for ed: compat)
   if (sub === 'l') {

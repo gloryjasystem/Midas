@@ -176,8 +176,8 @@ export async function getMonthMiniStats(
 // Search (Sprint 3)
 // ─────────────────────────────────────────────────────────────
 
-/** Maximum search results to return */
-const SEARCH_LIMIT = 20;
+/** Maximum search results per page (displayed as inline buttons). */
+export const SEARCH_PAGE_SIZE = 8;
 
 /**
  * Search transactions by item_name (ILIKE).
@@ -188,27 +188,42 @@ export async function searchByName(
   workspaceId: string,
   userId: string,
   query: string,
-): Promise<TxListItem[]> {
+  page = 0,
+): Promise<{ items: TxListItem[]; total: number }> {
+  const offset = page * SEARCH_PAGE_SIZE;
   const result = await withTenantTransaction(workspaceId, userId, async (client) => {
-    const r = await client.query<TxListItem>(
-      `SELECT
-         t.id,
-         ROUND(t.base_amount, 2)::text AS base_amount,
-         t.base_currency,
-         t.transaction_intent,
-         t.transaction_time::text,
-         COALESCE(c.name, '—') AS category_name,
-         t.item_name
-       FROM transactions t
-       LEFT JOIN categories c ON c.id = t.category_id
-       WHERE t.workspace_id = $1
-         AND t.deleted_at IS NULL
-         AND t.item_name ILIKE '%' || $2 || '%'
-       ORDER BY t.transaction_time DESC
-       LIMIT $3`,
-      [workspaceId, query, SEARCH_LIMIT],
-    );
-    return r.rows;
+    const [itemsRes, cntRes] = await Promise.all([
+      client.query<TxListItem>(
+        `SELECT
+           t.id,
+           ROUND(t.base_amount, 2)::text AS base_amount,
+           t.base_currency,
+           t.transaction_intent,
+           t.transaction_time::text,
+           COALESCE(c.name, '—') AS category_name,
+           t.item_name
+         FROM transactions t
+         LEFT JOIN categories c ON c.id = t.category_id
+         WHERE t.workspace_id = $1
+           AND t.deleted_at IS NULL
+           AND t.item_name ILIKE '%' || $2 || '%'
+         ORDER BY t.transaction_time DESC
+         LIMIT $3 OFFSET $4`,
+        [workspaceId, query, SEARCH_PAGE_SIZE, offset],
+      ),
+      client.query<{ cnt: string }>(
+        `SELECT COUNT(*)::text AS cnt
+         FROM transactions
+         WHERE workspace_id = $1
+           AND deleted_at IS NULL
+           AND item_name ILIKE '%' || $2 || '%'`,
+        [workspaceId, query],
+      ),
+    ]);
+    return {
+      items: itemsRes.rows,
+      total: parseInt(cntRes.rows[0]?.cnt ?? '0', 10),
+    };
   });
   return result;
 }
@@ -221,27 +236,42 @@ export async function searchByAmount(
   workspaceId: string,
   userId: string,
   amount: string,
-): Promise<TxListItem[]> {
+  page = 0,
+): Promise<{ items: TxListItem[]; total: number }> {
+  const offset = page * SEARCH_PAGE_SIZE;
   const result = await withTenantTransaction(workspaceId, userId, async (client) => {
-    const r = await client.query<TxListItem>(
-      `SELECT
-         t.id,
-         ROUND(t.base_amount, 2)::text AS base_amount,
-         t.base_currency,
-         t.transaction_intent,
-         t.transaction_time::text,
-         COALESCE(c.name, '—') AS category_name,
-         t.item_name
-       FROM transactions t
-       LEFT JOIN categories c ON c.id = t.category_id
-       WHERE t.workspace_id = $1
-         AND t.deleted_at IS NULL
-         AND ROUND(t.base_amount, 2) = $2::numeric
-       ORDER BY t.transaction_time DESC
-       LIMIT $3`,
-      [workspaceId, amount, SEARCH_LIMIT],
-    );
-    return r.rows;
+    const [itemsRes, cntRes] = await Promise.all([
+      client.query<TxListItem>(
+        `SELECT
+           t.id,
+           ROUND(t.base_amount, 2)::text AS base_amount,
+           t.base_currency,
+           t.transaction_intent,
+           t.transaction_time::text,
+           COALESCE(c.name, '—') AS category_name,
+           t.item_name
+         FROM transactions t
+         LEFT JOIN categories c ON c.id = t.category_id
+         WHERE t.workspace_id = $1
+           AND t.deleted_at IS NULL
+           AND ROUND(t.base_amount, 2) = $2::numeric
+         ORDER BY t.transaction_time DESC
+         LIMIT $3 OFFSET $4`,
+        [workspaceId, amount, SEARCH_PAGE_SIZE, offset],
+      ),
+      client.query<{ cnt: string }>(
+        `SELECT COUNT(*)::text AS cnt
+         FROM transactions
+         WHERE workspace_id = $1
+           AND deleted_at IS NULL
+           AND ROUND(base_amount, 2) = $2::numeric`,
+        [workspaceId, amount],
+      ),
+    ]);
+    return {
+      items: itemsRes.rows,
+      total: parseInt(cntRes.rows[0]?.cnt ?? '0', 10),
+    };
   });
   return result;
 }
@@ -254,27 +284,42 @@ export async function searchByCategory(
   workspaceId: string,
   userId: string,
   categoryId: string,
-): Promise<TxListItem[]> {
+  page = 0,
+): Promise<{ items: TxListItem[]; total: number }> {
+  const offset = page * SEARCH_PAGE_SIZE;
   const result = await withTenantTransaction(workspaceId, userId, async (client) => {
-    const r = await client.query<TxListItem>(
-      `SELECT
-         t.id,
-         ROUND(t.base_amount, 2)::text AS base_amount,
-         t.base_currency,
-         t.transaction_intent,
-         t.transaction_time::text,
-         COALESCE(c.name, '—') AS category_name,
-         t.item_name
-       FROM transactions t
-       LEFT JOIN categories c ON c.id = t.category_id
-       WHERE t.workspace_id = $1
-         AND t.deleted_at IS NULL
-         AND t.category_id = $2
-       ORDER BY t.transaction_time DESC
-       LIMIT $3`,
-      [workspaceId, categoryId, SEARCH_LIMIT],
-    );
-    return r.rows;
+    const [itemsRes, cntRes] = await Promise.all([
+      client.query<TxListItem>(
+        `SELECT
+           t.id,
+           ROUND(t.base_amount, 2)::text AS base_amount,
+           t.base_currency,
+           t.transaction_intent,
+           t.transaction_time::text,
+           COALESCE(c.name, '—') AS category_name,
+           t.item_name
+         FROM transactions t
+         LEFT JOIN categories c ON c.id = t.category_id
+         WHERE t.workspace_id = $1
+           AND t.deleted_at IS NULL
+           AND t.category_id = $2
+         ORDER BY t.transaction_time DESC
+         LIMIT $3 OFFSET $4`,
+        [workspaceId, categoryId, SEARCH_PAGE_SIZE, offset],
+      ),
+      client.query<{ cnt: string }>(
+        `SELECT COUNT(*)::text AS cnt
+         FROM transactions
+         WHERE workspace_id = $1
+           AND deleted_at IS NULL
+           AND category_id = $2`,
+        [workspaceId, categoryId],
+      ),
+    ]);
+    return {
+      items: itemsRes.rows,
+      total: parseInt(cntRes.rows[0]?.cnt ?? '0', 10),
+    };
   });
   return result;
 }
@@ -291,28 +336,44 @@ export async function searchByDateRange(
   userId: string,
   from: string,
   to: string,
-): Promise<TxListItem[]> {
+  page = 0,
+): Promise<{ items: TxListItem[]; total: number }> {
+  const offset = page * SEARCH_PAGE_SIZE;
   const result = await withTenantTransaction(workspaceId, userId, async (client) => {
-    const r = await client.query<TxListItem>(
-      `SELECT
-         t.id,
-         ROUND(t.base_amount, 2)::text AS base_amount,
-         t.base_currency,
-         t.transaction_intent,
-         t.transaction_time::text,
-         COALESCE(c.name, '—') AS category_name,
-         t.item_name
-       FROM transactions t
-       LEFT JOIN categories c ON c.id = t.category_id
-       WHERE t.workspace_id = $1
-         AND t.deleted_at IS NULL
-         AND t.transaction_time >= $2::timestamptz
-         AND t.transaction_time <= $3::timestamptz
-       ORDER BY t.transaction_time DESC
-       LIMIT $4`,
-      [workspaceId, from, to, SEARCH_LIMIT],
-    );
-    return r.rows;
+    const [itemsRes, cntRes] = await Promise.all([
+      client.query<TxListItem>(
+        `SELECT
+           t.id,
+           ROUND(t.base_amount, 2)::text AS base_amount,
+           t.base_currency,
+           t.transaction_intent,
+           t.transaction_time::text,
+           COALESCE(c.name, '—') AS category_name,
+           t.item_name
+         FROM transactions t
+         LEFT JOIN categories c ON c.id = t.category_id
+         WHERE t.workspace_id = $1
+           AND t.deleted_at IS NULL
+           AND t.transaction_time >= $2::timestamptz
+           AND t.transaction_time <= $3::timestamptz
+         ORDER BY t.transaction_time DESC
+         LIMIT $4 OFFSET $5`,
+        [workspaceId, from, to, SEARCH_PAGE_SIZE, offset],
+      ),
+      client.query<{ cnt: string }>(
+        `SELECT COUNT(*)::text AS cnt
+         FROM transactions
+         WHERE workspace_id = $1
+           AND deleted_at IS NULL
+           AND transaction_time >= $2::timestamptz
+           AND transaction_time <= $3::timestamptz`,
+        [workspaceId, from, to],
+      ),
+    ]);
+    return {
+      items: itemsRes.rows,
+      total: parseInt(cntRes.rows[0]?.cnt ?? '0', 10),
+    };
   });
   return result;
 }
