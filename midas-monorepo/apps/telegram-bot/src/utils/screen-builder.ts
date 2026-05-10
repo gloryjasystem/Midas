@@ -508,8 +508,8 @@ export const NAV_BTN_SETTINGS     = '⚙️ Настройки';
  * Build the persistent bottom navigation keyboard (ReplyKeyboardMarkup).
  *
  * Phase 2.0 Layout (2×2):
- *   Row 1: [💰 Баланс]  [📋 Транзакции]
- *   Row 2: [📊 Отчёт]   [⚙️ Настройки]
+ *   Row 1: [💰 Баланс]      [📊 Отчёт]
+ *   Row 2: [📋 Транзакции]  [⚙️ Настройки]
  *
  * Flags:
  *   resize_keyboard: true  — minimal vertical height
@@ -520,8 +520,8 @@ export const NAV_BTN_SETTINGS     = '⚙️ Настройки';
 export function buildMainMenuKeyboard(): ReplyKeyboardMarkup {
   return {
     keyboard: [
-      [NAV_BTN_BALANCE, NAV_BTN_TRANSACTIONS],
-      [NAV_BTN_REPORT, NAV_BTN_SETTINGS],
+      [NAV_BTN_BALANCE, NAV_BTN_REPORT],
+      [NAV_BTN_TRANSACTIONS, NAV_BTN_SETTINGS],
     ],
     resize_keyboard: true,
     is_persistent: false,  // Phase 1.38: native ⏄ collapse icon — user controls visibility
