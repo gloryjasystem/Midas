@@ -83,7 +83,7 @@ export async function patchDraftAmount(
     if (row.rows.length === 0) return { status: 'not_found' };
     const draft = row.rows[0];
     if (!draft) return { status: 'not_found' };
-    if (draft.status !== 'needs_clarification') return { status: 'wrong_state' };
+    if (draft.status !== 'needs_clarification' && draft.status !== 'pending_user') return { status: 'wrong_state' };
     if (new Date(draft.expires_at) <= new Date()) return { status: 'not_found' };
 
     const hasIntent = draft.parsed_intent !== null;
@@ -150,7 +150,7 @@ export async function patchDraftIntent(
     if (row.rows.length === 0) return { status: 'not_found' };
     const draft = row.rows[0];
     if (!draft) return { status: 'not_found' };
-    if (draft.status !== 'needs_clarification') return { status: 'wrong_state' };
+    if (draft.status !== 'needs_clarification' && draft.status !== 'pending_user') return { status: 'wrong_state' };
     if (new Date(draft.expires_at) <= new Date()) return { status: 'not_found' };
 
     const hasAmount = draft.parsed_amount !== null;
