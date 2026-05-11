@@ -50,26 +50,44 @@ import type { InlineKeyboardMarkup } from '../services/telegram-api.js';
  *   cur_input      → bot awaiting free-text currency code
  *   bal_input      → bot awaiting initial balance amount (Phase 2.2)
  */
-export type OnboardStep = 'type_pick' | 'name_input' | 'smart_confirm' | 'cur_pick' | 'cur_input' | 'bal_input';
+export type OnboardStep =
+  | 'type_pick'
+  | 'wallet_subtype'
+  | 'name_input'
+  | 'smart_confirm'
+  | 'cur_pick'
+  | 'cur_input'
+  | 'bal_input';
+
+/** Wallet sub-category — drives currency routing */
+export type WalletSubtype = 'crypto' | 'ewallet' | 'ton' | 'lightning';
 
 export interface AccountOnboardState {
   step: OnboardStep;
-  /** Account type selected — present from type_pick step onward */
+  /** Account type selected */
   accountType?: 'card' | 'cash' | 'exchange' | 'wallet' | 'custom';
-  /** Account name resolved — present from cur_pick step onward */
+  /** Wallet sub-type — set when accountType === 'wallet' */
+  walletSubtype?: WalletSubtype;
+  /** When true: next name_input skips fuzzy and accepts text as-is */
+  fuzzyDisabled?: boolean;
+  /** Account name resolved */
   name?: string;
-  /** Account ULID — set after DB insert; used by bal_input step (Phase 2.2) */
+  /** Account ULID — set after DB insert */
   accountId?: string;
-  /** Currency code — stored for bal_input display (Phase 2.2) */
+  /** Currency code */
   currency?: string;
+  /** Unix ms of account creation — used for 15-sec undo window */
+  createdAt?: number;
+  /** Display name of successfully created account (for success screen) */
+  createdAccountName?: string;
+  /** Display currency of created account (for success screen) */
+  createdAccountCurrency?: string;
+  /** Display balance of created account (for success screen, optional) */
+  createdAccountBalance?: string;
   // Phase 2.3: smart name matching
-  /** Raw text the user originally typed (before fuzzy suggestion) */
   originalName?: string;
-  /** Fuzzy-matched preset name to suggest */
   suggestedName?: string;
-  /** Account type inferred from the fuzzy match */
   suggestedType?: 'card' | 'cash' | 'exchange' | 'wallet';
-  /** Default currency for the suggested preset */
   suggestedCurrency?: string;
 }
 
@@ -433,6 +451,121 @@ export const WALLET_PRESETS: ReadonlyMap<string, string> = new Map([
 ]);
 
 // ─────────────────────────────────────────────────────────────
+// E-Wallet preset allowlist (SEC-01)
+// ─────────────────────────────────────────────────────────────
+
+export const EWALLET_PRESETS: ReadonlyMap<string, { name: string; defaultCurrency: string }> = new Map([
+  // RU/CIS e-wallets
+  ['yoomoney',     { name: 'ЮМoney',          defaultCurrency: 'RUB' }],
+  ['qiwi',         { name: 'QIWI',             defaultCurrency: 'RUB' }],
+  ['webmoney',     { name: 'WebMoney',         defaultCurrency: 'RUB' }],
+  ['payeer',       { name: 'Payeer',           defaultCurrency: 'USD' }],
+  ['advcash',      { name: 'AdvCash',          defaultCurrency: 'USD' }],
+  ['volet',        { name: 'Volet',            defaultCurrency: 'USD' }],
+  ['perfectmoney', { name: 'Perfect Money',    defaultCurrency: 'USD' }],
+  ['capitalist',   { name: 'Capitalist',       defaultCurrency: 'USD' }],
+  ['epayments',    { name: 'ePayments',        defaultCurrency: 'USD' }],
+  // International e-wallets
+  ['skrill',       { name: 'Skrill',           defaultCurrency: 'EUR' }],
+  ['neteller',     { name: 'Neteller',         defaultCurrency: 'USD' }],
+  ['payoneer',     { name: 'Payoneer',         defaultCurrency: 'USD' }],
+  ['paysera',      { name: 'Paysera',          defaultCurrency: 'EUR' }],
+  ['alipay',       { name: 'Alipay',           defaultCurrency: 'CNY' }],
+  ['wechatpay',    { name: 'WeChat Pay',       defaultCurrency: 'CNY' }],
+  ['paytm',        { name: 'Paytm',            defaultCurrency: 'INR' }],
+  ['gcash',        { name: 'GCash',            defaultCurrency: 'PHP' }],
+  ['dana',         { name: 'DANA',             defaultCurrency: 'IDR' }],
+  ['ovo',          { name: 'OVO',              defaultCurrency: 'IDR' }],
+  ['stripe',       { name: 'Stripe',           defaultCurrency: 'USD' }],
+]);
+
+// ─────────────────────────────────────────────────────────────
+// TON/Telegram wallet preset allowlist (SEC-01)
+// ─────────────────────────────────────────────────────────────
+
+export const TON_WALLET_PRESETS: ReadonlyMap<string, string> = new Map([
+  ['telegramwallet', 'Telegram Wallet'],
+  ['tonkeeper',      'Tonkeeper'],
+  ['tonspace',       'TON Space'],
+  ['mytonwallet',    'MyTonWallet'],
+  ['tonhub',         'Tonhub'],
+  ['tonwallet',      'TON Wallet'],
+  ['bitkeep',        'BitKeep TON'],
+]);
+
+// ─────────────────────────────────────────────────────────────
+// Lightning wallet preset allowlist (SEC-01)
+// ─────────────────────────────────────────────────────────────
+
+export const LIGHTNING_PRESETS: ReadonlyMap<string, string> = new Map([
+  ['phoenix',          'Phoenix'],
+  ['breez',            'Breez'],
+  ['zeus',             'Zeus'],
+  ['strike',           'Strike'],
+  ['alby',             'Alby'],
+  ['muun',             'Muun'],
+  ['bluewallet',       'Blue Wallet'],
+  ['walletofsatoshi',  'Wallet of Satoshi'],
+  ['blink',            'Blink'],
+  ['river',            'River'],
+  ['speed',            'Speed'],
+]);
+
+// ─────────────────────────────────────────────────────────────
+// Provider icon map — emoji per known provider key (SEC-01)
+// ─────────────────────────────────────────────────────────────
+
+export const PROVIDER_ICONS: ReadonlyMap<string, string> = new Map([
+  // Banks
+  ['sber', '🟢'], ['tinkoff', '🟡'], ['alfa', '🔴'], ['vtb', '🔵'],
+  ['mono', '⬛'], ['privat', '🟢'], ['oschad', '🔵'],
+  ['binance', '🟠'], ['bybit', '🔶'], ['okx', '⚫'], ['coinbase', '🔵'],
+  ['kraken', '🟣'], ['kucoin', '🟢'],
+  ['metamask', '🦊'], ['ledger', '🔒'], ['trezor', '🛡️'],
+  ['phantom', '👻'], ['trust', '🛡️'],
+  ['telegramwallet', '📲'], ['tonkeeper', '📲'], ['tonspace', '📲'],
+  ['phoenix', '⚡'], ['breez', '⚡'], ['zeus', '⚡'], ['strike', '⚡'],
+  ['yoomoney', '🟡'], ['qiwi', '🦃'], ['webmoney', '🟣'],
+  ['visa', '💳'], ['mastercard', '💳'], ['mir', '💳'],
+]);
+
+/** Returns emoji icon for provider key, fallback to account type default */
+export function getProviderIcon(
+  providerKey: string | undefined,
+  accountType: string,
+  walletSubtype?: string,
+): string {
+  if (providerKey) {
+    const icon = PROVIDER_ICONS.get(providerKey.toLowerCase());
+    if (icon) return icon;
+  }
+  // Fallback by type
+  if (accountType === 'cash') return '💵';
+  if (accountType === 'exchange') return '🔄';
+  if (accountType === 'wallet') {
+    if (walletSubtype === 'ewallet') return '📱';
+    if (walletSubtype === 'ton') return '📲';
+    if (walletSubtype === 'lightning') return '⚡';
+    return '💎';
+  }
+  return '💳';
+}
+
+/** Capitalize first character of any string */
+export function capitalizeFirst(s: string): string {
+  if (!s) return s;
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+// ─────────────────────────────────────────────────────────────
+// TON currency presets (TON-ecosystem focused)
+// ─────────────────────────────────────────────────────────────
+
+export const TON_CURRENCY_PRESETS = [
+  'TON', 'USDT', 'BTC', 'ETH', 'NOT', 'DOGS', 'USDC',
+] as const;
+
+// ─────────────────────────────────────────────────────────────
 // Currency presets — split by asset class
 // Banks/Cash → fiat only. Exchanges/Wallets → crypto only.
 // Custom → all common currencies.
@@ -552,6 +685,19 @@ export function parseAccountCallback(data: string): AccountOnboardCmd | null {
     return { cmd: 'wallet_preset', key, name };
   }
 
+  // Wallet sub-type picker: ac:wsub:{subtype}
+  if (sub === 'wsub') {
+    const subtype = parts[2] ?? '';
+    const WSUB_ALLOWLIST = new Set(['crypto', 'ewallet', 'ton', 'lightning']);
+    if (!WSUB_ALLOWLIST.has(subtype)) return null;
+    return { cmd: 'wallet_subtype', subtype };
+  }
+
+  // Back to type picker: ac:type:back
+  if (sub === 'type' && (parts[2] === 'back')) {
+    return { cmd: 'type_back' };
+  }
+
   if (sub === 'cur') {
     const code = parts[2] ?? '';
     if (code === 'custom') return { cmd: 'currency_custom' };
@@ -621,9 +767,7 @@ export function buildStartSimpleKeyboard(): InlineKeyboardMarkup {
 
 /**
  * Build the guided /start account type keyboard for new users.
- * Scenario Е from the roadmap — includes [⏩ Пропустить] button.
- * Used when user taps "Добавить счёт" from the start simple keyboard (ac:open).
- * Also used from /accounts empty-state (Scenario Д).
+ * Updated label: '🔐 Кошелёк' (generic) — sub-type chosen on next screen.
  */
 export function buildStartOnboardKeyboard(): InlineKeyboardMarkup {
   return {
@@ -634,11 +778,182 @@ export function buildStartOnboardKeyboard(): InlineKeyboardMarkup {
       ],
       [
         { text: '🔄 Крипто-биржа',  callback_data: 'ac:type:exchange' },
-        { text: '🔐 Крипто-кошелёк', callback_data: 'ac:type:wallet' },
+        { text: '🔐 Кошелёк',           callback_data: 'ac:type:wallet' },
       ],
       [{ text: '✏️ Своё название', callback_data: 'ac:type:custom' }],
     ],
   };
+}
+
+/**
+ * Wallet sub-type picker — Экран 2А.
+ * Lets user choose wallet category before entering a name.
+ * Each sub-type drives the correct currency pool on Экран 4.
+ *
+ *   ac:wsub:crypto    → crypto currencies
+ *   ac:wsub:ewallet   → fiat currencies
+ *   ac:wsub:ton       → TON-ecosystem currencies
+ *   ac:wsub:lightning → BTC fixed (no currency picker)
+ */
+export function buildWalletSubtypeKeyboard(): InlineKeyboardMarkup {
+  return {
+    inline_keyboard: [
+      [
+        { text: '💎 Крипто-кошелёк',       callback_data: 'ac:wsub:crypto' },
+        { text: '📱 Электронный',            callback_data: 'ac:wsub:ewallet' },
+      ],
+      [
+        { text: '📲 Кошелёк в Telegram',   callback_data: 'ac:wsub:ton' },
+        { text: '⚡ Lightning',               callback_data: 'ac:wsub:lightning' },
+      ],
+      [{ text: '◀️ К типу счёта', callback_data: 'ac:type:back' }],
+    ],
+  };
+}
+
+// ─────────────────────────────────────────────────────────────
+// Progress header helper
+// ─────────────────────────────────────────────────────────────
+
+/** Total steps by account type + wallet sub-type */
+export function getStepTotal(
+  accountType: string,
+  walletSubtype?: string,
+): number {
+  if (accountType === 'cash') return 4;      // type → currency → balance → done
+  if (accountType === 'wallet') {
+    if (walletSubtype === 'lightning') return 5; // type → sub → name → balance → done
+    return 6; // type → sub → name → confirm → currency → balance → done
+  }
+  return 5; // card / exchange: type → name → confirm → currency → balance → done
+}
+
+/** Builds header line: «💳 Банковская карта · Шаг 3 из 5» */
+export function buildStepHeader(
+  accountType: string,
+  currentStep: number,
+  walletSubtype?: string,
+): string {
+  const labels: Record<string, string> = {
+    card: '💳 Банковская карта',
+    cash: '💵 Наличные',
+    exchange: '🔄 Крипто-биржа',
+    wallet_crypto: '💎 Крипто-кошелёк',
+    wallet_ewallet: '📱 Электронный кошелёк',
+    wallet_ton: '📲 Кошелёк в Telegram',
+    wallet_lightning: '⚡ Lightning',
+    custom: '✏️ Свой счёт',
+  };
+  const key = accountType === 'wallet' && walletSubtype
+    ? `wallet_${walletSubtype}`
+    : accountType;
+  const label = labels[key] ?? accountType;
+  const total = getStepTotal(accountType, walletSubtype);
+  return `${label} · Шаг ${currentStep} из ${total}`;
+}
+
+// ─────────────────────────────────────────────────────────────
+// Input prompt builders (Экраны 2Б / re-prompt after «Другой»)
+// ─────────────────────────────────────────────────────────────
+
+const INPUT_PROMPT_EXAMPLES: Record<string, string[]> = {
+  card:      ['Тинькофф', 'Монобанк', 'Visa', 'Мир'],
+  exchange:  ['Binance', 'Bybit', 'OKX', 'WhiteBIT'],
+  crypto:    ['MetaMask', 'Ledger', 'Phantom', 'Zerion'],
+  ewallet:   ['ЮМoney', 'QIWI', 'Skrill', 'Payoneer'],
+  ton:       ['Telegram Wallet', 'Tonkeeper', 'TON Space'],
+  lightning: ['Phoenix', 'Breez', 'Zeus', 'Strike'],
+};
+
+const REPROMPT_EXAMPLES: Record<string, string[]> = {
+  card:      ['Сбербанк', 'Альфа-Банк', 'Mastercard', 'Простір'],
+  exchange:  ['KuCoin', 'Kraken', 'MEXC', 'Gate.io'],
+  crypto:    ['Trust Wallet', 'Exodus', 'Rabby', 'Backpack'],
+  ewallet:   ['WebMoney', 'Payeer', 'Neteller', 'Alipay'],
+  ton:       ['MyTonWallet', 'Tonhub', 'TON Wallet'],
+  lightning: ['Alby', 'Muun', 'Wallet of Satoshi', 'Blue Wallet'],
+};
+
+/** Question label for input prompt */
+const INPUT_QUESTIONS: Record<string, string> = {
+  card:      '🏦 Как называется ваш банк?',
+  exchange:  '📊 Какая биржа?',
+  crypto:    '🔐 Какой кошелёк используете?',
+  ewallet:   '📱 Какой e-кошелёк используете?',
+  ton:       '📲 Какой TON-кошелёк используете?',
+  lightning: '⚡ Какой Lightning-кошелёк?',
+};
+
+/** Builds the initial name-input prompt text (Экран 2Б) */
+export function buildInputPromptText(
+  accountType: string,
+  walletSubtype?: string,
+  stepN?: number,
+  stepTotal?: number,
+): string {
+  const key = walletSubtype ?? accountType;
+  const header = (stepN && stepTotal)
+    ? `<b>${accountType === 'wallet' && walletSubtype
+        ? { crypto: '💎 Крипто-кошелёк', ewallet: '📱 Электронный', ton: '📲 Кошелёк в Telegram', lightning: '⚡ Lightning' }[walletSubtype]
+        : { card: '💳 Банковская карта', exchange: '🔄 Крипто-биржа' }[accountType]}
+       · Шаг ${stepN} из ${stepTotal}</b>`
+    : '';
+  const question = INPUT_QUESTIONS[key] ?? 'Введите название:';
+  const examples = (INPUT_PROMPT_EXAMPLES[key] ?? []).join(', ');
+  return `${header}\n${question}\n<i>Например: ${examples}</i>`.trimStart();
+}
+
+/** Builds re-prompt after «✏️ Другой...» (Экран 3 → re-edit, fuzzy off) */
+export function buildFreeTextPromptText(
+  accountType: string,
+  walletSubtype?: string,
+): string {
+  const key = walletSubtype ?? accountType;
+  const labels: Record<string, string> = {
+    card: 'банка', exchange: 'биржи', crypto: 'кошелька',
+    ewallet: 'e-кошелька', ton: 'TON-кошелька', lightning: 'Lightning-кошелька',
+  };
+  const label = labels[key] ?? 'счёта';
+  const examples = (REPROMPT_EXAMPLES[key] ?? []).join(', ');
+  return `✏️ Введите название ${label}:\n<i>Например: ${examples}</i>`;
+}
+
+/** Keyboard for free-text re-prompt (back button only) */
+export function buildFreeTextPromptKeyboard(
+  backTarget: 'type' | 'subtype',
+): InlineKeyboardMarkup {
+  const backCb = backTarget === 'subtype' ? 'ac:type:wallet' : 'ac:type:back';
+  const backLabel = backTarget === 'subtype' ? '◀️ К типу кошелька' : '◀️ К типу счёта';
+  return { inline_keyboard: [[{ text: backLabel, callback_data: backCb }]] };
+}
+
+// ─────────────────────────────────────────────────────────────
+// Success screen text builder (Экран 6)
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Builds the final «Готово. Можно начинать.» message text.
+ * Matches the format from the Phase 2.3 success screen.
+ * name/currency/balance come from createdAccount* state fields.
+ */
+export function buildSuccessScreenText(
+  name: string,
+  currency: string,
+  balance?: string,
+  icon = '💳',
+): string {
+  const balanceLine = balance
+    ? ` · ${balance}`
+    : '';
+  return (
+    `✅ <b>Готово. Можно начинать.</b>\n\n` +
+    `Запишите первую операцию — просто напишите \n` +
+    `что потратили или получили:\n` +
+    `<i>«кофе 350» · «зарплата 5000» · «перевод Максу 200»</i>\n\n` +
+    `Midas распознает сумму, тип и категорию автоматически.\n\n` +
+    `<b>Счёт по умолчанию:</b> ${icon} ${name} · ${currency}${balanceLine}\n` +
+    `<i>Добавить карты и биржи → 🏦 Баланс</i>`
+  );
 }
 
 // ─────────────────────────────────────────────────────────────
