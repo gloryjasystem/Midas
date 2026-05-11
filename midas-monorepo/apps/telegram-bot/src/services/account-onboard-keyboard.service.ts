@@ -251,7 +251,8 @@ export type AccountOnboardCmd =
   | { cmd: 'exchange_page'; page: number } // Phase 2.2
   | { cmd: 'fiat_page';     page: number } // Phase 2.2
   | { cmd: 'crypto_page';   page: number } // Phase 2.2
-  | { cmd: 'bal_skip' };                   // Phase 2.2: skip initial balance
+  | { cmd: 'bal_skip' }                    // Phase 2.2: skip initial balance
+  | { cmd: 'fin' };                        // Phase 2.3: finish onboarding from type picker
 
 // ─────────────────────────────────────────────────────────────
 // Parser — SEC-01 allowlist
@@ -278,6 +279,7 @@ export function parseAccountCallback(data: string): AccountOnboardCmd | null {
   if (sub === 'skip') return { cmd: 'skip' };
   if (sub === 'more') return { cmd: 'more' };
   if (sub === 'done') return { cmd: 'done' };
+  if (sub === 'fin')  return { cmd: 'fin' };  // Phase 2.3: finish onboarding from type picker
   if (sub === 'open') return { cmd: 'open' }; // Phase 1.37-UX: open type picker
 
   if (sub === 'type') {
@@ -394,10 +396,10 @@ export function buildStartOnboardKeyboard(): InlineKeyboardMarkup {
         { text: '💵 Наличные',         callback_data: 'ac:type:cash' },
       ],
       [
-        { text: '🔶 Крипто-биржа',  callback_data: 'ac:type:exchange' },
-        { text: '₿ Крипто-кошелёк', callback_data: 'ac:type:wallet' },
+        { text: '🔄 Крипто-биржа',  callback_data: 'ac:type:exchange' },
+        { text: '🔐 Крипто-кошелёк', callback_data: 'ac:type:wallet' },
       ],
-      [{ text: '↩️ Назад',  callback_data: 'ac:skip' }],
+      [{ text: '✏️ Своё название', callback_data: 'ac:type:custom' }],
     ],
   };
 }
@@ -546,6 +548,35 @@ export function buildAccountTypeKeyboard(): InlineKeyboardMarkup {
       [{ text: '✏️ Своё название', callback_data: 'ac:type:custom' }],
     ],
   };
+}
+
+/**
+ * Phase 2.3: Type picker shown immediately after account creation.
+ * Confirms last account and offers to add another or finish.
+ */
+export function buildFinishOnboardKeyboard(): InlineKeyboardMarkup {
+  return {
+    inline_keyboard: [
+      [
+        { text: '💳 Банковская карта', callback_data: 'ac:type:card' },
+        { text: '💵 Наличные',         callback_data: 'ac:type:cash' },
+      ],
+      [
+        { text: '🔄 Крипто-биржа',  callback_data: 'ac:type:exchange' },
+        { text: '🔐 Крипто-кошелёк', callback_data: 'ac:type:wallet' },
+      ],
+      [{ text: '✏️ Своё название', callback_data: 'ac:type:custom' }],
+      [{ text: '✅ Завершить',      callback_data: 'ac:fin' }],
+    ],
+  };
+}
+
+/**
+ * Phase 2.3: Confirmation text shown after account creation — replaces afterCreate screen.
+ * Displayed above buildFinishOnboardKeyboard.
+ */
+export function accountAddedText(name: string, currency: string): string {
+  return `✅ <b>${name}</b> (${currency}) добавлен!\n\nДобавить ещё один счёт:`;
 }
 
 /** Exchange picker keyboard (Phase 2.2 alias → page 0). */

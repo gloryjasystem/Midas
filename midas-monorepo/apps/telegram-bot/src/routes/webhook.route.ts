@@ -165,6 +165,8 @@ import {
   CURRENCY_PICKER_TEXT,              // Phase 1.30
   nameInputPrompt,                   // Phase 1.30
   CURRENCY_INPUT_PROMPT,             // Phase 1.30
+  buildFinishOnboardKeyboard,        // Phase 2.3
+  accountAddedText,                  // Phase 2.3
   type AccountOnboardState,          // Phase 1.30
 } from '../services/account-onboard-keyboard.service.js';
 import {
@@ -609,9 +611,16 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
 
             } else if (acCmd.cmd === 'skip') {
               // Phase 1.37-UX: User skipped onboarding — clean chat.
-              // Delete the onboarding message, send ONE brief confirmation.
-              // ReplyKeyboard appears after first confirmed transaction (workers send replyKeyboardJson).
+              // Phase 2.3: Silently create default 'Кошелёк' account if user has none.
               await redisConnection.del(acKey);
+              try {
+                const noAccounts = !(await hasAccounts(acResolved.workspaceId, acResolved.userId));
+                if (noAccounts) {
+                  // Create silent default account — user will see it in /accounts later.
+                  // Duplicate is fine if somehow called twice (ON CONFLICT DO NOTHING).
+                  await addAccountWithCurrency(acResolved.workspaceId, acResolved.userId, 'Кошелёк', 'USD');
+                }
+              } catch { /* Non-fatal — skip silently, don't block UX */ }
               if (acMsgId) void deleteMessage(chatId, acMsgId);
               await clearActiveMessageId(telegramUserId, chatId);
               void upsertBotMessage(
@@ -620,13 +629,10 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
               );
 
             } else if (acCmd.cmd === 'done') {
-              // Phase 1.37-UX: User finished account setup.
-              // Clean chat: delete the onboarding message, send ONE activation message with ReplyKeyboard.
-              // This is the single moment the ReplyKeyboard appears for new users.
+              // Phase 1.37-UX: User finished account setup (backward compat — old buttons in chat).
               await redisConnection.del(acKey);
               if (acMsgId) void deleteMessage(chatId, acMsgId);
               await clearActiveMessageId(telegramUserId, chatId);
-              // Phase 2.1: if came from balance, return to balance
               const blSource = await redisConnection.get(`bl:source:${telegramUserId}:${chatId}`);
               if (blSource) {
                 await redisConnection.del(`bl:source:${telegramUserId}:${chatId}`);
@@ -636,10 +642,27 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
                 void sendMessageWithReplyKeyboard(chatId, SETUP_COMPLETE_TEXT, buildMainMenuKeyboard());
               }
 
-            } else if (acCmd.cmd === 'more') {
-              // User wants to add another account — restart type picker
+            } else if (acCmd.cmd === 'fin') {
+              // Phase 2.3: User tapped "✅ Завершить" from the new type picker after account creation.
               await redisConnection.del(acKey);
-              if (acMsgId) void editMessageText(chatId, acMsgId, ACCOUNTS_EMPTY_TEXT, buildAccountTypeKeyboard());
+              if (acMsgId) void deleteMessage(chatId, acMsgId);
+              await clearActiveMessageId(telegramUserId, chatId);
+              const blSourceFin = await redisConnection.get(`bl:source:${telegramUserId}:${chatId}`);
+              if (blSourceFin) {
+                await redisConnection.del(`bl:source:${telegramUserId}:${chatId}`);
+                const { text, accounts } = await getBalanceData(acResolved.workspaceId, acResolved.userId);
+                void upsertBotMessage(telegramUserId, chatId, text, buildBalanceListKeyboard(accounts as BalanceAccountRow[]));
+              } else {
+                void sendMessageWithReplyKeyboard(chatId, SETUP_COMPLETE_TEXT, buildMainMenuKeyboard());
+              }
+
+            } else if (acCmd.cmd === 'more') {
+              // Phase 2.3: backward compat — old [+Добавить ещё счёт] button in old messages.
+              // Redirect to ac:fin flow (clean finish).
+              await redisConnection.del(acKey);
+              if (acMsgId) void deleteMessage(chatId, acMsgId);
+              await clearActiveMessageId(telegramUserId, chatId);
+              void sendMessageWithReplyKeyboard(chatId, SETUP_COMPLETE_TEXT, buildMainMenuKeyboard());
 
             } else if (acCmd.cmd === 'type') {
               // User selected account type
@@ -752,12 +775,22 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
               }
 
             } else if (acCmd.cmd === 'bal_skip') {
-              // Phase 2.2: user skipped balance input
+              // Phase 2.3: user skipped balance input — show type picker immediately (no intermediate screen)
+              const rawStateBal = await redisConnection.get(acKey);
+              let skippedName = 'Счёт';
+              let skippedCur  = '';
+              if (rawStateBal) {
+                try {
+                  const s = JSON.parse(rawStateBal) as AccountOnboardState;
+                  skippedName = s.name ?? 'Счёт';
+                  skippedCur  = s.currency ?? '';
+                } catch { /* ignore */ }
+              }
               await redisConnection.del(acKey);
               if (acMsgId) void editMessageText(
                 chatId, acMsgId,
-                '✅ Счёт создан! Баланс можно синхронизировать позже через /balance.',
-                buildAfterCreateKeyboard(),
+                accountAddedText(escapeHtml(skippedName), skippedCur),
+                buildFinishOnboardKeyboard(),
               );
 
             } else if (acCmd.cmd === 'bank_page') {
@@ -3712,9 +3745,9 @@ Midas создан, чтобы сделать учет денег максима
           }
 
           if (!acState.accountId) {
-            // Safety: missing accountId — skip to afterCreate
+            // Safety: missing accountId — skip to finish keyboard
             await redisConnection.del(acKey);
-            void upsertBotMessage(telegramUserId, chatId, '⚠️ Ошибка состояния. Счёт создан.', buildAfterCreateKeyboard());
+            void upsertBotMessage(telegramUserId, chatId, '⚠️ Ошибка состояния. Счёт создан.', buildFinishOnboardKeyboard());
             await reply.status(200).send({ ok: true });
             return;
           }
@@ -3723,18 +3756,17 @@ Midas создан, чтобы сделать учет денег максима
           try {
             const resolved = await resolveWorkspace(telegramUserId, chatId);
             await setAccountBalanceById(resolved.workspaceId, resolved.userId, acState.accountId, amount);
-            const nameEsc = escapeHtml(acState.name ?? 'Счёт');
-            const curEsc  = escapeHtml(acState.currency ?? '');
+            // Phase 2.3: show type picker immediately instead of afterCreate screen
             void upsertBotMessage(
               telegramUserId, chatId,
-              `✅ Баланс <b>${nameEsc}</b>: ${amount} ${curEsc}`,
-              buildAfterCreateKeyboard(),
+              accountAddedText(escapeHtml(acState.name ?? 'Счёт'), acState.currency ?? ''),
+              buildFinishOnboardKeyboard(),
             );
             request.log.info({ msg: '[midas:bot:webhook] ac: balance set via onboarding', workspaceId: resolved.workspaceId });
           } catch (err: unknown) {
             const errorClass = err instanceof Error ? err.constructor.name : 'UnknownError';
             request.log.error({ msg: '[midas:bot:webhook] ac: bal_input setBalance failed', errorClass });
-            void upsertBotMessage(telegramUserId, chatId, '⚠️ Не удалось записать баланс. Счёт создан.', buildAfterCreateKeyboard());
+            void upsertBotMessage(telegramUserId, chatId, '⚠️ Не удалось записать баланс. Счёт создан.', buildFinishOnboardKeyboard());
           }
           await reply.status(200).send({ ok: true });
           return;
