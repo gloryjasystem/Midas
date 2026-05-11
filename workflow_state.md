@@ -1,7 +1,7 @@
 # WORKFLOW_STATE.MD — Диспетчер задач ИИ-агента Midas
 
 > **Тип:** MUTABLE — кратковременная память агента. Обновляется на каждом шаге работы.
-> **Обновлён:** 2026-05-10 19:58 (UTC+3)
+> **Обновлён:** 2026-05-11 09:00 (UTC+3)
 
 ---
 
@@ -10,12 +10,12 @@
 | Параметр | Значение |
 |---|---|
 | **PHASE** | `2 — Advanced UX & Account Management` |
-| **STEP** | `Phase 2.2 — Settings UI Overhaul (DEPLOYED)` |
-| **AGENT STATUS** | `DEPLOYED — Phase 2.2 Settings 6-button grid + currency search expansion deployed to Railway` |
+| **STEP** | `Phase 2.3 — Search Pagination + UX Polish (DEPLOYED)` |
+| **AGENT STATUS** | `DEPLOYED — Paginated transaction search (8/page, Redis context), close button in reports, button order swap in persistent keyboard` |
 | **DEPLOYMENT** | `Railway (spirited-happiness project)` — `Midas` bot service + `background-workers` service + `Postgres` + `Redis` |
-| **LAST COMPLETED** | `Phase 2.2: Settings UI Overhaul — 6-button 2x3 grid (💵 Валюта, 🏦 Основной счет, 🕒 Часовой пояс, 🔔 Уведомления, 💬 Поддержка, ℹ️ О боте). Unified Main Account picker. Currency search with Russian aliases. Soft-deleted accounts filtered. Back button after currency pick. Commit 3e650c1.` |
+| **LAST COMPLETED** | `Phase 2.3: (1) Paginated tx search — SEARCH_PAGE_SIZE=8, Redis context midas:tx:sr:ctx, all 4 search methods support LIMIT/OFFSET+COUNT, tx:sr:p:{page} callback, buildSearchResultsKeyboard with ◀️/▶️ navigation. (2) Reports close button — rp:cl callback on all 3 report keyboards (period picker, sub-menu, back keyboard), deleteMessage handler. (3) Persistent keyboard button order — [💰 Баланс][📊 Отчёт] / [📋 Транзакции][⚙️ Настройки]. Commits: 6da4464, 049233d, 70a5d41.` |
 | **BLOCKER** | None. |
-| **NEXT ACTION** | Run smoke tests (smoke-test-phase22.mjs). Verify currency search in Russian/English. Verify Main Account sets both income+expense defaults. |
+| **NEXT ACTION** | Test paginated search in production. Verify ✖️ Закрыть button dismisses reports. Verify persistent keyboard new button order after /start. |
 
 ---
 
@@ -72,6 +72,7 @@
 | 2.0 Transaction Hub + Reports 2.0 + Settings 2.0 | ✅ DEPLOYED | `transaction-list.service.ts` (NEW), `transaction-keyboard.service.ts` (NEW), `report-keyboard.service.ts` (NEW), `settings-keyboard.service.ts` (MODIFY). Interactive paginated lists, period picker, filter tabs, /edit deprecation → tx: namespace. Deployed from GitHub `main`. |
 | 2.1 Account Management Dashboard | ✅ DEPLOYED | `balance-keyboard.service.ts` (NEW — 450+ lines), `account-onboard-keyboard.service.ts` (MODIFY — bank/wallet presets, fiat/crypto pickers), `account.service.ts` (MODIFY — renameAccount, changeAccountCurrency, softDeleteAccount, deleted_at filters), `balance.service.ts` (MODIFY — getBalanceData, getAccountDetail, setAccountBalanceById, getAccountTxCount), `webhook.route.ts` (MODIFY — bl: handler, text intercepts, balance navigation update). DB migration: `updated_at` + `deleted_at` columns on `account_sources`. |
 | 2.2 Settings UI Overhaul | ✅ DEPLOYED | `settings-keyboard.service.ts` (MODIFY — 6-button 2x3 grid, URL поддержки, инфо о боте), `currencies.ts` (MODIFY — Russian aliases, 5-pass search, FIAT 40+ / CRYPTO 48+), `settings.service.ts` (FIX — `deleted_at IS NULL` в `getWorkspaceAccounts`), `webhook.route.ts` (MODIFY — кнопка назад после выбора валюты, единый Main Account handler). Commit `3e650c1`. |
+| 2.3 Search Pagination + UX Polish | ✅ DEPLOYED | **Pagination:** `transaction-hub.service.ts` (SEARCH_PAGE_SIZE=8, все 4 search-метода → LIMIT/OFFSET + COUNT(*) = `{items, total}`). `transaction-keyboard.service.ts` (`buildSearchResultsKeyboard(items, page, totalPages)` с ◀️/▶️ навигацией, `search_results_page` cmd, tx:sr:p:{page} parser). `webhook.route.ts` (Redis context `midas:tx:sr:ctx:{uid}:{cid}` TTL 600s, `search_results_page` handler, все text intercepts → paginated API). **Reports close:** `report-keyboard.service.ts` (✖️ Закрыть = `rp:cl` на всех 3 клавиатурах, type `close` в RpCallbackCmd). `webhook.route.ts` (`rp:close` handler → deleteMessage). **Keyboard order:** `screen-builder.ts` — Row 1: [💰 Баланс][📊 Отчёт], Row 2: [📋 Транзакции][⚙️ Настройки]. Commits `6da4464`, `049233d`, `70a5d41`. |
 
 ---
 
@@ -104,7 +105,7 @@
   - Rich Screen Cards: `screen-builder.ts` pure functions → buildPreviewScreen, buildConfirmedScreen, buildClarificationScreen
   - Centralized confirmKb/confirmPreview helpers (DRY, 8 entry points)
   - Post-confirm card: `[✏️ Изменить запись]` only — nav buttons removed (handled by Reply Keyboard)
-  - **Persistent Navigation:** `ReplyKeyboardMarkup` (`is_persistent: false`, `resize_keyboard: true`) — single row `[📊 Баланс][📋 Отчёт][⚙️ Настройки]`. Sent on `/start`. NAV_BTN_* intercepted before AI parse.
+  - **Persistent Navigation:** `ReplyKeyboardMarkup` (`is_persistent: false`, `resize_keyboard: true`) — 2×2 grid: Row 1 `[💰 Баланс][📊 Отчёт]`, Row 2 `[📋 Транзакции][⚙️ Настройки]`. Sent on `/start`. NAV_BTN_* intercepted before AI parse. **(Phase 2.3: Отчёт и Транзакции поменяны местами — Отчёт теперь вверху справа)**
   - **Keyboard Carrier:** Greeting message `✅ Вы уже зарегистрированы...` остаётся в чате **навсегда** — является постоянным носителем ReplyKeyboardMarkup. Не удаляется ни при каких условиях.
   - **Transaction History (FINAL):** Каждая preview-карточка — это **новое** сообщение (`sendMessage`), `activeMessageId` НЕ передаётся из `ai-parse.worker`. История транзакций накапливается в чате. Старый механизм `midas:am:{userId}:{chatId}` (active-message pointer) **удалён** из notifications.worker.
   - **Preview→Confirmed Edit:** При approve `confirmation.worker` читает `midas:preview:{draftId}` (TTL 600s) — message_id preview-карточки, записанный `notifications.worker` при отправке. Approve → `editMessageText(previewMsgId, confirmedText, inlineKeyboard)`. Reject → `editMessageText(previewMsgId, ❌ Отменено)` (Phase 1.38 fix).
@@ -121,6 +122,7 @@
     - `midas:dead_card:{chatId}` — message_id карточки "❌ Отменено" или "⏰ Черновик истёк", TTL 24h. Записывается confirmation.worker (reject/expired) и draft-expiration.worker (CRON expire). Читается и удаляется ai-parse.worker при отправке следующей preview — карточка автоматически удаляется из чата. (Phase 1.40)
     - `bl:state:{telegramUserId}:{chatId}` — Phase 2.1: state для текстовых intercepts баланс-менеджмента. Хранит `{action, accountId}`. Actions: `rename`, `set_balance`, `currency_input`. TTL 300s.
     - `bl:source:{telegramUserId}:{chatId}` — Phase 2.1: флаг что добавление счёта инициировано из баланса. При `ac:done` возвращает в balance dashboard вместо setup complete.
+     - `midas:tx:sr:ctx:{telegramUserId}:{chatId}` — Phase 2.3: поисковый контекст для пагинации. Хранит JSON `{t: 'name'|'amount'|'category'|'date', q?: string, f?: string, to?: string, lb?: string}` TTL 600s. Создаётся при первом поиске, читается при навигации по страницам (tx:sr:p:{page}). При устаревании — дружелюбное сообщение «поиск заново».
   - **Auto-Activation:** `replyKeyboardJson` в `NotificationJobPayload`. rejection/expiry/intent_missing sends ReplyKeyboard на `sendMessage` path. `editMessageText` path — только inline keyboard (Telegram API limitation).
   - **Collapsibility:** `is_persistent: false` — Telegram показывает ⏄ иконку рядом с 🎤; пользователь может скрывать/восстанавливать клавиатуру.
   - **Race Condition Fix:** `redisConnection.del(clarKey)` на confirm/reject → stale `midas:clar:*` не перехватывает следующее сообщение.
@@ -234,13 +236,14 @@ apps/background-workers/src/services/draft.service.ts  ← createDraft logic
 > Midas is DEPLOYED to Railway (project: spirited-happiness, env: production).
 > MCP servers: Railway, GitHub, Postgres, Filesystem — all active.
 > Auto-deploy: push to `main` → GitHub → Railway builds both `Midas` and `background-workers`.
-> Phases 1.1–1.40 DONE. Phase 2.0–2.2 DEPLOYED. Settings overhaul complete.
+> Phases 1.1–1.40 DONE. Phase 2.0–2.3 DEPLOYED.
 > Database: PostgreSQL on Railway, RLS enabled. account_sources has updated_at + deleted_at columns.
 > AI model: Claude Haiku 4.5 via Anthropic API, temperature: 0, post-processing intent recovery.
 > AI parsing rule (FINAL): any number = amount (price). No PRICE vs QUANTITY distinction.
 > Key production fixes applied: markdown fence stripping, formatAmount() String() cast for NUMERIC, RLS policies.
 > Phase 2.1: Balance button → interactive account list (bl: namespace). Account detail → rename/currency/sync/delete.
 > Phase 2.2: Settings 6-button 2x3 grid. Main Account = unified income+expense default. Currency search supports Russian aliases (биткоин/доллар/евро/рубль etc.) + partial code match (5-pass algorithm).
+> Phase 2.3: Paginated search (SEARCH_PAGE_SIZE=8, Redis context midas:tx:sr:ctx TTL 600s). Reports ✖️ Закрыть button (rp:cl → deleteMessage). Keyboard: [💰 Баланс][📊 Отчёт] / [📋 Транзакции][⚙️ Настройки].
 > AI fallback chain: AI parsed value → workspace.default_currency / default_expense_account_id (by intent).
 > Do not modify project_config.md.
 
@@ -353,6 +356,9 @@ apps/background-workers/src/services/draft.service.ts  ← createDraft logic
 | 2026-05-10 15:30 | **Phase 2.0 — Transaction Hub + Reports 2.0 + Settings 2.0 deployed.** GitHub auto-deploy from `main`. |
 | 2026-05-10 18:44 | **Phase 2.1 — Account Management Dashboard.** Полная реализация интерактивного управления счетами через баланс. **Новые файлы:** `balance-keyboard.service.ts` (450+ строк — parseBalanceCallback, buildBalanceListKeyboard, buildAccountActionsKeyboard, buildDeleteConfirmKeyboard, buildCurrencyWarningKeyboard, buildBalanceFiatCurrencyKeyboard, formatAccountDetailText, BalanceAccountRow type). **Модифицированные файлы:** (1) `account-onboard-keyboard.service.ts` — расширен пресетами банков (10: Тинькофф, Сбербанк, Альфа, ВТБ, Моно, Приват, Каспи, N26, Revolut, Wise) и кошельков (9: Trust Wallet, MetaMask, Exodus, Ledger, Trezor, Phantom, Coinbase Wallet, SafePal, Tangem). (2) `account.service.ts` — `renameAccount()`, `changeAccountCurrency()`, `softDeleteAccount()`. (3) `balance.service.ts` — `getBalanceData()`, `getAccountDetail()`, `setAccountBalanceById()`, `getAccountTxCount()`. (4) `webhook.route.ts` — bl: callback handler, text intercepts, ac:done проверяет bl:source. **DB Migration:** updated_at + deleted_at на account_sources. Build+Deploy: 0 ошибок. |
 | 2026-05-10 19:58 | **Phase 2.2 — Settings UI Overhaul (DEPLOYED).** (1) `currencies.ts`: расширен список (FIAT 40+, CRYPTO 48+); `CURRENCY_RU_ALIASES` — 50+ русских алиасов (биткоин, доллар, евро, рубль, гривна, тенге, лира и др.); `searchCurrencies()` — 5-pass алгоритм (exact/startsWith/includes/EN-name/RU-alias), лимит 10. (2) `settings.service.ts`: `getWorkspaceAccounts()` + `deleted_at IS NULL` (soft-deleted счета не показываются); `setDefaultAccount()` атомарно обновляет оба поля (expense+income). (3) `settings-keyboard.service.ts`: `buildSettingsMainKeyboard()` — строгий 2x3 грид; выбор валюты с объявлением; новый текст выбора основной валюты. (4) `webhook.route.ts`: после выбора валюты кнопка `[⚙️ Назад в настройки]`; единый обработчик `st:da:sa:` — один Main Account для income+expense. Build: `tsc` 0 ошибок. Commit `3e650c1`. Deployed to Railway (auto-deploy). |
+| 2026-05-10 22:00 | **Phase 2.3 — Paginated Transaction Search.** `transaction-hub.service.ts`: добавлен `SEARCH_PAGE_SIZE=8`; все 4 search-функции (`searchByName`, `searchByAmount`, `searchByCategory`, `searchByDateRange`) переработаны — принимают `page: number`, параллельный `COUNT(*)` → возвращают `{items: TxListItem[], total: number}`. Удалена константа `SEARCH_LIMIT=200`. `transaction-keyboard.service.ts`: `buildSearchResultsKeyboard(items, page, totalPages)` — кнопки товаров + строка навигации `[◀️][p/total][▶️]` + footer `[🔍 Новый поиск][◀️ К списку]`; `search_results_page` в `TxCallbackCmd`; парсер `tx:sr:p:{page}`. `webhook.route.ts`: все search-handlers сохраняют контекст в Redis `midas:tx:sr:ctx:{uid}:{cid}` TTL 600s; `search_results_page` handler — читает контекст, пересчитывает offset, обновляет сообщение; text intercepts (name/amount/date) → paginated API; при устаревшем контексте — дружелюбное «Поищите снова»; удалён дублирующий старый text intercept блок. Build: `tsc` 0 ошибок. Commit `6da4464`. |
+| 2026-05-10 22:10 | **Phase 2.3 — Reports Close Button.** `report-keyboard.service.ts`: добавлен `rp:cl` callback (`✖️ Закрыть`) как последняя строка на всех 3 клавиатурах (`buildPeriodPickerKeyboard`, `buildReportSubMenuKeyboard`, `buildReportBackKeyboard`); тип `{ cmd: 'close' }` добавлен в `RpCallbackCmd`; `parseRpCallback`: `rp:cl → { cmd: 'close' }`; обновлён docstring. `webhook.route.ts`: в блоке `rp:` добавлен handler `else if (rpCmd.cmd === 'close')` → `deleteMessage(chatId, rpMsgId)` — полностью убирает сообщение из чата. Build: `tsc` 0 ошибок. Commit `049233d`. |
+| 2026-05-10 22:11 | **Phase 2.3 — Persistent Keyboard Button Order.** `screen-builder.ts` (`buildMainMenuKeyboard`): порядок кнопок изменён — Row 1: `[💰 Баланс][📊 Отчёт]`, Row 2: `[📋 Транзакции][⚙️ Настройки]` (до: Row 1 Баланс+Транзакции, Row 2 Отчёт+Настройки). Обновлён docstring. Build: `tsc` 0 ошибок. Commit `70a5d41`. Deployed to Railway (auto-deploy). |
 
 ---
 
