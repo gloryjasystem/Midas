@@ -1160,7 +1160,7 @@ export function buildAccountTypeKeyboard(): InlineKeyboardMarkup {
       ],
       [
         { text: '🔄 Крипто-биржа',  callback_data: 'ac:type:exchange' },
-        { text: '🔐 Крипто-кошелёк', callback_data: 'ac:type:wallet' },
+        { text: '🔐 Кошелёк',         callback_data: 'ac:type:wallet' },
       ],
       [{ text: '✏️ Своё название', callback_data: 'ac:type:custom' }],
     ],
@@ -1180,7 +1180,7 @@ export function buildFinishOnboardKeyboard(): InlineKeyboardMarkup {
       ],
       [
         { text: '🔄 Крипто-биржа',  callback_data: 'ac:type:exchange' },
-        { text: '🔐 Крипто-кошелёк', callback_data: 'ac:type:wallet' },
+        { text: '🔐 Кошелёк',         callback_data: 'ac:type:wallet' },
       ],
       [{ text: '✏️ Своё название', callback_data: 'ac:type:custom' }],
       [{ text: '✅ Завершить',      callback_data: 'ac:fin' }],
