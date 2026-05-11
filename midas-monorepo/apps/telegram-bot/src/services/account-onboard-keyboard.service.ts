@@ -655,6 +655,8 @@ export function parseAccountCallback(data: string): AccountOnboardCmd | null {
   }
 
   if (sub === 'type') {
+    // Must check 'back' BEFORE ACCOUNT_TYPES to avoid null-return
+    if (parts[2] === 'back') return { cmd: 'type_back' };
     const t = parts[2] ?? '';
     if (!ACCOUNT_TYPES.has(t as 'card')) return null;
     return { cmd: 'type', accountType: t as 'card' | 'cash' | 'exchange' | 'wallet' | 'custom' };
@@ -693,11 +695,6 @@ export function parseAccountCallback(data: string): AccountOnboardCmd | null {
     const WSUB_ALLOWLIST = new Set<WalletSubtype>(['crypto', 'ewallet', 'ton', 'lightning']);
     if (!WSUB_ALLOWLIST.has(subtype as WalletSubtype)) return null;
     return { cmd: 'wallet_subtype', subtype: subtype as WalletSubtype };
-  }
-
-  // Back to type picker: ac:type:back
-  if (sub === 'type' && (parts[2] === 'back')) {
-    return { cmd: 'type_back' };
   }
 
   if (sub === 'cur') {
@@ -801,7 +798,7 @@ export function buildWalletSubtypeKeyboard(): InlineKeyboardMarkup {
   return {
     inline_keyboard: [
       [
-        { text: '💎 Крипто-кошелёк',       callback_data: 'ac:wsub:crypto' },
+        { text: '💎 Кошелёк',              callback_data: 'ac:wsub:crypto' },
         { text: '📱 Электронный',            callback_data: 'ac:wsub:ewallet' },
       ],
       [
