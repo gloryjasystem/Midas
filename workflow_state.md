@@ -1,7 +1,7 @@
 # WORKFLOW_STATE.MD — Диспетчер задач ИИ-агента Midas
 
 > **Тип:** MUTABLE — кратковременная память агента. Обновляется на каждом шаге работы.
-> **Обновлён:** 2026-05-11 14:17 (UTC+3)
+> **Обновлён:** 2026-05-11 19:52 (UTC+3)
 
 ---
 
@@ -10,12 +10,12 @@
 | Параметр | Значение |
 |---|---|
 | **PHASE** | `2 — Advanced UX & Account Management` |
-| **STEP** | `Phase 2.3 — Onboarding UX Polish (DEPLOYED)` |
-| **AGENT STATUS** | `DEPLOYED — Streamlined onboarding: immediate type picker after account creation, ✅ Завершить button, silent default Кошелёк account on skip, unified icons 🔄🔐` |
+| **STEP** | `Master Roadmap — Onboarding Input-First UX (DEPLOYED, SMOKE ✅)` |
+| **AGENT STATUS** | `DEPLOYED — master_roadmap Phase 1+2: input-first onboarding, flag-based currency picker (🇷🇺🇺🇸₿Ξ), no-match screen, fuzzy currency search, button-free success screen` |
 | **DEPLOYMENT** | `Railway (spirited-happiness project)` — `Midas` bot service + `background-workers` service + `Postgres` + `Redis` |
-| **LAST COMPLETED** | `Phase 2.3 Onboarding UX Polish: (1) Removed intermediate afterCreate screen — after bal_input or bal_skip shows buildFinishOnboardKeyboard immediately with accountAddedText. (2) New ac:fin command + handler = Завершить button that cleans chat + sends ReplyKeyboard. (3) ac:more backward compat — old buttons now redirect to ac:fin flow. (4) buildStartOnboardKeyboard icons fixed 🔶→🔄, ₿→🔐. (5) Silently creates default «Кошелёк» (USD) account when user presses «▶️ Начать без счёта» and has zero accounts. Commit: 395e1f2. Deploy: 7089846c — SUCCESS.` |
+| **LAST COMPLETED** | `master_roadmap Phases 1–4: (Phase 1) CURRENCY_FLAGS registry 40+ currencies, getCurrencyFlag(), buildPaginatedPicker() 2-arrow nav, buildCurrencyPickerText(name,isCustom), 🔍 Найти валюту button in both pickers, searchCurrencies() fuzzy+translit, buildNoMatchText/buildNoMatchKeyboard. (Phase 2) webhook.route.ts FSM: no-match on fuzzy null → cus_save/cus_keep, cur_search callback, cur_list callback, cur_search text interceptor → searchCurrencies, button-free success screens. (Phase 3) 70/70 smoke tests PASS via smoke-test-master-roadmap.mjs. (Phase 4) Git commit 35c92e0, Railway deploy — Midas+background-workers both Online.` |
 | **BLOCKER** | None. |
-| **NEXT ACTION** | Smoke test: (1) /start → «▶️ Начать без счёта» → проверить /accounts = «Кошелёк». (2) Создать счёт → ввести баланс → сразу пикер типа + «✅ Завершить». (3) «⏩ Пропустить» баланс → тот же пикер. (4) «✅ Завершить» → setup complete + ReplyKeyboard. |
+| **NEXT ACTION** | Ручной smoke test в Telegram (@midaswallet_bot). Затем — следующая фаза по product-roadmap.md. |
 
 
 ---
@@ -241,14 +241,7 @@ apps/background-workers/src/services/draft.service.ts  ← createDraft logic
 > Midas is DEPLOYED to Railway (project: spirited-happiness, env: production).
 > MCP servers: Railway, GitHub, Postgres, Filesystem — all active.
 > Auto-deploy: push to `main` → GitHub → Railway builds both `Midas` and `background-workers`.
-> Phases 1.1–1.40 DONE. Phase 2.0–2.3 DEPLOYED.
-> Database: PostgreSQL on Railway, RLS enabled. account_sources has updated_at + deleted_at columns.
-> AI model: Claude Haiku 4.5 via Anthropic API, temperature: 0, post-processing intent recovery.
-> AI parsing rule (FINAL): any number = amount (price). No PRICE vs QUANTITY distinction.
-> Key production fixes applied: markdown fence stripping, formatAmount() String() cast for NUMERIC, RLS policies.
-> Phase 2.1: Balance button → interactive account list (bl: namespace). Account detail → rename/currency/sync/delete.
-> Phase 2.2: Settings 6-button 2x3 grid. Main Account = unified income+expense default. Currency search supports Russian aliases (биткоин/доллар/евро/рубль etc.) + partial code match (5-pass algorithm).
-> Phases 1.1–1.40 DONE. Phase 2.0–2.3 DEPLOYED (search pagination + onboarding UX polish).
+> Phases 1.1–1.40 DONE. Phase 2.0–2.3 + Master Roadmap DEPLOYED.
 > Database: PostgreSQL on Railway, RLS enabled. account_sources has updated_at + deleted_at columns.
 > AI model: Claude Haiku 4.5 via Anthropic API, temperature: 0, post-processing intent recovery.
 > AI parsing rule (FINAL): any number = amount (price). No PRICE vs QUANTITY distinction.
@@ -257,6 +250,7 @@ apps/background-workers/src/services/draft.service.ts  ← createDraft logic
 > Phase 2.2: Settings 6-button 2x3 grid. Main Account = unified income+expense default. Currency search supports Russian aliases (биткоин/доллар/евро/рубль etc.) + partial code match (5-pass algorithm).
 > Phase 2.3 Search: Paginated search (SEARCH_PAGE_SIZE=8, Redis context midas:tx:sr:ctx TTL 600s). Reports ✖️ Закрыть button (rp:cl → deleteMessage). Keyboard: [💰 Баланс][📊 Отчёт] / [📋 Транзакции][⚙️ Настройки].
 > Phase 2.3 Onboarding: No intermediate afterCreate screen. After account creation → immediate buildFinishOnboardKeyboard + accountAddedText. ac:fin = «✅ Завершить» button. ac:skip silently creates «Кошелёк» (USD) if user has 0 accounts. Icons unified: 🔄 Крипто-биржа, 🔐 Крипто-кошелёк.
+> Master Roadmap: Input-first onboarding. CURRENCY_FLAGS 40+ (🇷🇺🇺🇸₿Ξ). buildPaginatedPicker always 2 arrows. searchCurrencies fuzzy+translit. No-match screen «Похожего банка не нашли» → cus_save/cus_keep. cur_search text interceptor. Button-free success screens. 70/70 smoke PASS. Git 35c92e0. Deployed Online.
 > AI fallback chain: AI parsed value → workspace.default_currency / default_expense_account_id (by intent).
 > Do not modify project_config.md.
 
@@ -379,6 +373,10 @@ apps/background-workers/src/services/draft.service.ts  ← createDraft logic
 | 2026-05-11 14:08 | **Phase 2.3 Onboarding UX Polish — ЭТАП 2 (imports).** `webhook.route.ts`: добавлены импорты `buildFinishOnboardKeyboard`, `accountAddedText` из account-onboard-keyboard.service.js. tsc пока 2 предупреждения (unused — ожидаемо до этапа 3). |
 | 2026-05-11 14:10 | **Phase 2.3 Onboarding UX Polish — ЭТАП 3 (handlers).** `webhook.route.ts`: (1) `ac:fin` handler — идентичен `ac:done`, backward compat; (2) `ac:more` → redirect to fin flow (deleteMessage + sendMessageWithReplyKeyboard); (3) `ac:bal:s` — читает состояние Redis, затем показывает `accountAddedText` + `buildFinishOnboardKeyboard` вместо старого afterCreate; (4) `bal_input` text intercept — `buildFinishOnboardKeyboard` вместо `buildAfterCreateKeyboard`, `accountAddedText` вместо старой строки с балансом; (5) safety fallback в `bal_input` → `buildFinishOnboardKeyboard`. tsc 0 ошибок. |
 | 2026-05-11 14:13 | **Phase 2.3 Onboarding UX Polish — ЭТАП 4 (default account).** `webhook.route.ts` `ac:skip` handler: перед удалением Redis-ключа вызывает `hasAccounts()` — если 0 счетов, создаёт `addAccountWithCurrency(workspaceId, userId, 'Кошелёк', 'USD')` в блоке try/catch (non-fatal). tsc 0 ошибок. Commit `395e1f2`. git push origin main. Deploy Railway: `7089846c — SUCCESS`. |
+| 2026-05-11 16:30 | **master_roadmap Phase 1 — Keyboard Service.** `account-onboard-keyboard.service.ts` +478 строк: `CURRENCY_FLAGS` (40+ валют: 🇷🇺RUB 🇺🇸USD ₿BTC Ξ ETH TON и др.), `getCurrencyFlag(code)`, `CURRENCY_NAMES`. `buildPaginatedPicker()` рефакторинг — обе стрелки всегда, noop на краях. `buildCurrencyPickerText(name?,isCustom?)` — 3 ветки. `buildFiatCurrencyPage()` + `buildCryptoCurrencyPage()` — флаги + ac:cur:search. `searchCurrencies()` — fuzzy+транслитерация. `buildNoMatchText/Keyboard`. `buildCurrencySearch*`. Удалены FIAT_ITEMS, CRYPTO_ITEMS, CURRENCY_PICKER_TEXT. tsc 0 ошибок. |
+| 2026-05-11 16:33 | **master_roadmap Phase 2 — Webhook FSM.** `webhook.route.ts`: `name_input` → no-match screen при fuzzy null. `ac:cus:save` → isCustomName=true → cur_pick. `ac:cus:keep` → name_input retry. `ac:cur:search` → cur_search step. `ac:cur:list` → возврат к списку. `cur_search` text interceptor → searchCurrencies → результаты или no-results. 3 success-screens button-free `{ inline_keyboard: [] }`. `chooseCurKeyboard()` module-level. Все callback_data ≤64 байт. tsc 0 ошибок. |
+| 2026-05-11 16:43 | **master_roadmap Phase 3 — Smoke Tests.** `smoke-test-master-roadmap.mjs` (NEW): 70 проверок, запуск `node apps/telegram-bot/smoke-test-master-roadmap.mjs` (против скомпилированного dist/). Покрыты все 14 сценариев. Результат: **70/70 ✅ / 0 ❌**. |
+| 2026-05-11 16:44 | **master_roadmap Phase 4 — Deploy.** Git commit `35c92e0` `feat(onboard): no-match screen, cur-search, flags, nav-arrows, button-free success [master_roadmap]`. Push → Railway auto-deploy. Status: Midas ● Online, background-workers ● Online. Deploy logs: clean start, Redis connected, no errors. |
 
 
 ---
@@ -764,3 +762,260 @@ Waiting for APPROVED before implementation.
 | Нет scope creep | ✅ / ❌ |
 
 При обнаружении `❌` — исправить немедленно или уведомить владельца.
+
+---
+
+## 15. ПОЛНЫЙ ФЛОУ ПРОДУКТА (текущее состояние)
+
+> Этот раздел описывает полный путь пользователя — от первого запуска бота до момента создания первой транзакции. Обновлён: 2026-05-11 19:52 (UTC+3).
+
+---
+
+### 🚀 Этап 0 — Первый запуск `/start`
+
+1. Пользователь пишет `/start` в чат бота.
+2. `webhook.route.ts` → `resolveWorkspace()` → вызывает `system_find_or_create_user()` (SECURITY DEFINER, atomic, pg_advisory_xact_lock).
+3. Создаётся: **workspace** (default_currency=USDT, timezone=UTC), **workspace_membership**, **default account_source** («По умолчанию», USDT), **default category** (Другое).
+4. Бот отправляет приветственное сообщение с ReplyKeyboard (`is_persistent: false`, `resize_keyboard: true`):
+   ```
+   Строка 1: [💰 Баланс]  [📊 Отчёт]
+   Строка 2: [📋 Транзакции]  [⚙️ Настройки]
+   ```
+5. Если у пользователя **0 счетов** → бот также показывает guided onboarding keyboard (`buildStartOnboardKeyboard`).
+6. Greeting-сообщение **никогда не удаляется** — оно носитель ReplyKeyboard.
+
+---
+
+### 🏦 Этап 1 — Создание ПЕРВОГО счёта (онбординг)
+
+#### 1.1 Выбор типа счёта
+
+Пользователь видит inline-клавиатуру:
+```
+[🏦 Банковская карта]  [💵 Наличные]
+[🔄 Крипто-биржа]      [🔐 Крипто-кошелёк]
+[✏️ Своё название]
+[▶️ Начать без счёта]
+```
+
+**`[▶️ Начать без счёта]` (ac:skip):**
+- Если у пользователя **0 счетов** → тихо создаётся счёт «Кошелёк» (USD) — non-fatal try/catch.
+- Redis-ключ `midas:ac:` удаляется.
+- Пользователь получает ReplyKeyboard и может сразу вводить транзакции.
+
+#### 1.2 Сценарий «Банковская карта» (ac:type:card)
+
+1. FSM переходит в шаг `name_input`.
+2. Бот показывает промпт ввода названия с blockquote-примерами:
+   ```
+   Введите название банка:
+   <blockquote>Например: Тинькофф · Сбербанк · Альфа · Monobank</blockquote>
+   ```
+3. Пользователь вводит текст → `name_input` text interceptor.
+
+**Случай A — fuzzy match найден** (например «тинькофф» → «Тинькофф»):
+- Бот показывает экран подтверждения с blockquote «Тинькофф».
+- Кнопки: `[✅ Да, Тинькофф]` / `[✏️ Нет, изменить]`.
+- Если подтверждено → FSM переходит в `cur_pick`.
+
+**Случай B — fuzzy null** (например «Абв»):
+- Бот показывает no-match экран:
+  ```
+  🔍 Похожего банка не нашли.
+  <blockquote>«Абв»</blockquote>
+  Хотите создать счёт с таким названием?
+  ```
+- Кнопки:
+  - `[✅ Создать «Абв»]` (ac:cus:save) → сохраняет как `pendingName`, `isCustomName=true`, переходит в `cur_pick`.
+  - `[✏️ Изменить название]` (ac:cus:keep) → возврат в `name_input`.
+  - `[◀️ К типу счёта]` (ac:type:back) → возврат на стартовый экран.
+
+#### 1.3 Сценарий «Наличные» (ac:type:cash)
+
+- Название формируется автоматически: «Наличные {CURRENCY}» (имя счёта создаётся после выбора валюты).
+- Пользователь сразу видит currency picker (шаг `cur_pick`).
+- **Нет экрана ввода названия.**
+
+#### 1.4 Сценарий «Крипто-биржа» / «Крипто-кошелёк»
+
+- **Крипто-биржа (ac:type:exchange):** Показывает paginated picker бирж (5 пресетов: Binance/Bybit/OKX/Kraken/Huobi + ✏️ Своя).
+- **Крипто-кошелёк (ac:type:wallet):** Показывает sub-picker: crypto / e-wallet / TON / Lightning.
+  - Lightning → фиксированная валюта BTC, минует currency picker.
+  - Остальные → идут в crypto currency picker.
+- Paginated pickers банков/бирж — навигация `[◀️][N / Total][▶️]`, всегда обе стрелки (noop на краях).
+
+---
+
+### 💱 Этап 2 — Выбор валюты (шаг `cur_pick`)
+
+Пользователь видит:
+```
+В какой валюте открыть счёт «Тинькофф»?
+
+[🇷🇺 RUB]  [🇺🇸 USD]  [🇪🇺 EUR]
+[🇬🇧 GBP]  [🇹🇷 TRY]  [₿ BTC]
+[◀️] [1 / 2] [▶️]
+[🔍 Найти валюту]
+```
+
+Для кастомных счётов (`isCustomName=true`) текст: «Для вашего счёта (свой счёт)».
+
+**Кнопка `[🔍 Найти валюту]` (ac:cur:search):**
+1. FSM переходит в шаг `cur_search`.
+2. Бот показывает промпт:
+   ```
+   🔍 Поиск валюты для счёта «Тинькофф»
+   Введите код или название: RUB, доллар, bitcoin...
+   ```
+3. Пользователь вводит текст → `cur_search` text interceptor.
+4. `searchCurrencies(query, pool)` — fuzzy + транслитерация (rub/руб → RUB, dollar/доллар → USD, btc → BTC).
+5. **Найдено:** показывает кнопки результатов + `[◀️ Вернуться к списку]` (ac:cur:list).
+6. **Не найдено:** «Такой валюты нет. Попробуйте: USD, RUB, BTC...».
+
+**Выбор валюты (ac:cur:{CODE}):**
+- Счёт создаётся в БД: `addAccountWithCurrency(workspaceId, userId, name, currency)` → INSERT в `account_sources`, тип `manual`.
+- FSM переходит в шаг `bal_input`.
+
+---
+
+### 💰 Этап 3 — Ввод начального баланса (шаг `bal_input`)
+
+```
+💳 Счёт «Тинькофф» (RUB) создан!
+Введите начальный баланс или пропустите:
+
+[⏩ Пропустить]
+```
+
+- **Ввод числа** → text interceptor `bal_input` → `setAccountBalanceById()` → `initial_balance` в БД.
+- **`[⏩ Пропустить]`** (ac:bal:s) → баланс остаётся 0.
+
+После ввода/пропуска — **success screen** (без кнопок, только текст):
+```
+✅ Счёт создан!
+🏦 Тинькофф · RUB
+Начальный баланс: 15 000 ₽
+```
+Затем сразу — пикер типа для добавления следующего счёта (`buildFinishOnboardKeyboard`):
+```
+[🏦 Банковская карта]  [💵 Наличные]
+[🔄 Крипто-биржа]      [🔐 Крипто-кошелёк]
+[✏️ Своё название]
+[✅ Завершить]
+```
+
+---
+
+### ➕ Этап 4 — Создание ВТОРОГО счёта (необязательно)
+
+Пользователь нажимает любой тип в `buildFinishOnboardKeyboard` → повторяет Этапы 1–3.
+
+**Пример двух счетов:**
+1. «Тинькофф» → RUB → баланс 15 000 (банковская карта)
+2. «Наличные RUB» → RUB → баланс 5 000 (наличные, имя авто)
+
+Флоу Наличных (второй счёт):
+- Нажать `[💵 Наличные]` → сразу currency picker (нет name_input) → выбрать `[🇷🇺 RUB]` → ввести баланс `5000` → success screen.
+
+После — снова `buildFinishOnboardKeyboard`. Пользователь нажимает `[✅ Завершить]` (ac:fin):
+- Redis-ключ `midas:ac:` очищается.
+- Сообщение удаляется (`deleteMessage`).
+- Отправляется `sendMessageWithReplyKeyboard` — ReplyKeyboard появляется снова.
+- Если пришёл из баланс-дашборда (`bl:source` в Redis) → возврат в баланс. Иначе — финальный экран «Всё готово!».
+
+---
+
+### 📝 Этап 5 — Первая транзакция (ввод расхода)
+
+#### 5.1 Ввод свободным текстом
+
+Пользователь просто **пишет в чат** (не команда, не кнопка):
+```
+кофе 150 рублей
+```
+
+**Маршрут:**
+1. `webhook.route.ts` — сообщение проходит все text interceptors (нет активных Redis-ключей).
+2. Попадает в раздел AI parse → `addJobToWebhookIngestionQueue()`.
+3. **`webhook-ingestion` worker** (BullMQ) → `ai-parse.worker.ts`.
+
+#### 5.2 AI parse pipeline
+
+1. `parseTransaction(text)` → Claude Haiku 4.5, `temperature: 0`, `max_tokens: 256`.
+2. System prompt: MULTILINGUAL RECOGNITION (RU/EN/UA) + FUZZY MATCHING + 30-категорийная таксономия + 500+ якорных слов + DISAMBIGUATION RULES.
+3. **Результат:**
+   ```json
+   { "intent": "expense", "amount": "150", "currency": "RUB", "category_hint": "Кафе и рестораны", "confidence": 0.95 }
+   ```
+4. Post-processing (safety net): 7 групп regex, negation guard, confidence boost.
+5. `ALLOWED_CATEGORIES` валидация: если `category_hint` ∉ set → заменяется на «Другое».
+6. `CategoryResolverService`: exact DB match → 200+ alias map → fallback.
+7. **Dead card cleanup:** если в Redis есть `midas:dead_card:{chatId}` (старая ❌ карточка) → `deleteMessage` перед отправкой preview.
+
+#### 5.3 Создание черновика и preview
+
+1. `createDraft()` → INSERT в `transaction_drafts` (статус `pending_user`).
+2. `notifications.worker` → отправляет preview-карточку в чат:
+   ```
+   ☕ Кафе и рестораны
+   Расход · 150 ₽
+   [✅ Записать]  
+   [✏️ Изменить] [✖️ Отмена]
+   ```
+3. `midas:preview:{draftId}` (TTL 600s) → сохраняет message_id карточки.
+
+#### 5.4 Подтверждение
+
+**Пользователь нажимает `[✅ Записать]`:**
+1. `callback_query` → `confirmation.worker`.
+2. SELECT FOR UPDATE SKIP LOCKED → атомарная защита от двойного подтверждения.
+3. INSERT в `transactions` (intent=expense, category=Кафе и рестораны, base_amount=150, currency=RUB, account_id=Тинькофф, base_currency=RUB).
+4. `confirmation.worker` читает `midas:preview:{draftId}` → `editMessageText` → preview превращается в confirmed card:
+   ```
+   ✅ Записано!
+   ☕ Кафе и рестораны
+   Расход · 150 ₽ · Тинькофф
+   [✏️ Изменить запись]
+   ```
+5. `midas:preview:{draftId}` удаляется из Redis.
+
+**Пользователь нажимает `[✖️ Отмена]`:**
+- `draft_status` → `rejected`.
+- preview-карточка редактируется → «❌ Отменено».
+- Сохраняется в `midas:dead_card:{chatId}` (TTL 24h) — автоудалится при следующем preview.
+
+#### 5.5 Если Claude не распознал валюту (awaiting_cur)
+
+- `midas:awaiting_cur:{chatId}` (TTL 600s) создаётся если есть сумма но нет валюты и нет `midas:cur_set:{workspaceId}`.
+- Следующий текст пользователя перехватывается как валюта: «евро» → EUR, «150 руб» → RUB.
+
+#### 5.6 Если Claude вернул partial (нет суммы)
+
+- `needs_clarification` статус черновика.
+- Пользователю задаётся вопрос: «Какая сумма?».
+- `midas:clar:{userId}:{chatId}` (TTL 300s) → следующее число — сумма.
+
+---
+
+### 📊 Итоговая схема: ключевые сущности
+
+```
+workspaces
+  └── workspace_memberships (telegramUserId → workspaceId)
+  └── account_sources (Тинькофф/RUB, Наличные/RUB)
+  └── categories (Кафе и рестораны, Продукты, ...)
+  └── transaction_drafts (pending → approved/rejected/expired)
+  └── transactions (confirmed расходы/доходы)
+```
+
+### 📦 Redis-ключи в активном онбординге
+
+| Ключ | TTL | Назначение |
+|---|---|---|
+| `midas:ac:{userId}:{chatId}` | 300s | State машина онбординга (step, name, currency, pendingName, isCustomName, cur_search) |
+| `bl:source:{userId}:{chatId}` | 300s | Флаг: онбординг инициирован из баланс-дашборда |
+| `midas:preview:{draftId}` | 600s | message_id preview-карточки |
+| `midas:dead_card:{chatId}` | 24h | message_id карточки ❌ для автоудаления |
+| `midas:awaiting_cur:{chatId}` | 600s | Ожидание ввода валюты |
+| `midas:clar:{userId}:{chatId}` | 300s | Ожидание ввода суммы при clarification |
+| `midas:cur_set:{workspaceId}` | - | Флаг установленной валюты (не запрашивать повторно) |
