@@ -55,7 +55,9 @@ export type OnboardStep =
   | 'wallet_subtype'
   | 'name_input'
   | 'smart_confirm'
+  | 'name_confirm_custom'  // no-match: waiting user to confirm/reject custom name
   | 'cur_pick'
+  | 'cur_search'           // currency free-text search active
   | 'cur_input'
   | 'bal_input';
 
@@ -89,6 +91,13 @@ export interface AccountOnboardState {
   suggestedName?: string;
   suggestedType?: 'card' | 'cash' | 'exchange' | 'wallet';
   suggestedCurrency?: string;
+  // Phase «master_roadmap»: no-match + currency search
+  /** Pending unconfirmed custom name (no-match flow) */
+  pendingName?: string;
+  /** True when account name came via no-match cus_save (custom, not a preset) */
+  isCustomName?: boolean;
+  /** Currency pool to show after name confirmation */
+  currencyPool?: 'fiat' | 'crypto' | 'ton';
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -559,8 +568,65 @@ export const LIGHTNING_PRESETS: ReadonlyMap<string, string> = new Map([
 ]);
 
 // ─────────────────────────────────────────────────────────────
-// Provider icon map — emoji per known provider key (SEC-01)
+// Currency flags & names (master_roadmap 1.2)
 // ─────────────────────────────────────────────────────────────
+
+/**
+ * Flag emoji or symbol per currency code.
+ * Fiat: country flags. Crypto: token symbols.
+ */
+export const CURRENCY_FLAGS: Record<string, string> = {
+  // Fiat
+  RUB: '🇷🇺', USD: '🇺🇸', EUR: '🇪🇺', UAH: '🇺🇦', GBP: '🇬🇧',
+  PLN: '🇵🇱', CHF: '🇨🇭', KZT: '🇰🇿', BYN: '🇧🇾', GEL: '🇬🇪',
+  CZK: '🇨🇿', TRY: '🇹🇷', AED: '🇦🇪', CNY: '🇨🇳', JPY: '🇯🇵',
+  KRW: '🇰🇷', INR: '🇮🇳', BRL: '🇧🇷', MXN: '🇲🇽', CAD: '🇨🇦',
+  AUD: '🇦🇺', SEK: '🇸🇪', NOK: '🇳🇴', DKK: '🇩🇰', HUF: '🇭🇺',
+  RON: '🇷🇴', UZS: '🇺🇿', SGD: '🇸🇬', HKD: '🇭🇰', ZAR: '🇿🇦',
+  THB: '🇹🇭', PHP: '🇵🇭', IDR: '🇮🇩', MYR: '🇲🇾', SAR: '🇸🇦',
+  QAR: '🇶🇦', AMD: '🇦🇲', AZN: '🇦🇿', MDL: '🇲🇩', BGN: '🇧🇬',
+  // Crypto
+  BTC: '₿', ETH: 'Ξ', USDT: '💵', SOL: '◎', TON: '🔷',
+  BNB: '◆', USDC: '💲', XRP: '✕', TRX: '⚡', DOGE: '🐕',
+  ADA: '₳', DOT: '●', AVAX: '🔺', NEAR: '🌐', ATOM: '⚛️',
+  LTC: 'Ł', MATIC: '🟣', DAI: '◈', NOT: '🎯', DOGS: '🐶',
+};
+
+/** Returns flag/symbol for currency code, or empty string if not found. */
+export function getCurrencyFlag(code: string): string {
+  return CURRENCY_FLAGS[code.toUpperCase()] ?? '';
+}
+
+/**
+ * CURRENCY_NAMES: code → search tokens (RU + EN).
+ * Used by searchCurrencies() for fuzzy matching.
+ */
+export const CURRENCY_NAMES: Record<string, string> = {
+  RUB: 'рубль рублей ruble russia', USD: 'доллар dollar usa america',
+  EUR: 'евро euro europe', UAH: 'гривна гривень hryvnia ukraine',
+  GBP: 'фунт pound sterling britain uk', PLN: 'злотый zloty poland',
+  CHF: 'франк franc switzerland', KZT: 'тенге tenge kazakhstan',
+  BYN: 'беларусь belrus ruble', GEL: 'лари lari georgia',
+  CZK: 'крона koruna czech', TRY: 'лира lira turkey',
+  AED: 'дирхам dirham uae dubai', CNY: 'юань yuan china renminbi',
+  JPY: 'иена yen japan', KRW: 'вон won korea',
+  INR: 'рупия rupee india', BRL: 'реал real brazil',
+  MXN: 'песо peso mexico', CAD: 'канадский доллар canada',
+  AUD: 'австралийский доллар australia', SEK: 'крона krone sweden',
+  NOK: 'крона krone norway', DKK: 'крона krone denmark',
+  SGD: 'доллар dollar singapore', HKD: 'гонконг hong kong',
+  BTC: 'биткоин bitcoin btc', ETH: 'эфириум эфир ethereum ether',
+  USDT: 'тезер tether stablecoin usdt', SOL: 'солана solana',
+  TON: 'тон telegram ton', BNB: 'бинанс binance bnb',
+  USDC: 'юсдс usdc stablecoin', XRP: 'рипл ripple xrp',
+  TRX: 'трон tron trx', DOGE: 'додж dogecoin doge',
+  ADA: 'кардано cardano ada', DOT: 'полкадот polkadot dot',
+  AVAX: 'авалянч avalanche avax', NEAR: 'нир near protocol',
+  ATOM: 'козм cosmos atom', LTC: 'лайткоин litecoin ltc',
+  MATIC: 'матик polygon matic', DAI: 'дай dai stablecoin',
+  NOT: 'нотоин notcoin not', DOGS: 'dogs meme token',
+};
+
 
 export const PROVIDER_ICONS: ReadonlyMap<string, string> = new Map([
   // Banks
@@ -663,8 +729,11 @@ export type AccountOnboardCmd =
   | { cmd: 'fin' }                         // Phase 2.3: finish onboarding from type picker
   | { cmd: 'cus_ok' }                      // Phase 2.3: confirm fuzzy-matched name
   | { cmd: 'cus_keep' }                    // Phase 2.3: keep original typed name (reject suggestion)
+  | { cmd: 'cus_save' }                    // master_roadmap: confirm custom name from no-match screen
   | { cmd: 'wallet_subtype'; subtype: WalletSubtype } // Phase 2.3: wallet sub-type selection
-  | { cmd: 'type_back' };                  // Phase 2.3: back to type picker from wallet subtype
+  | { cmd: 'type_back' }                   // Phase 2.3: back to type picker from wallet subtype
+  | { cmd: 'cur_search' }                  // master_roadmap: open currency free-text search
+  | { cmd: 'cur_list' };                   // master_roadmap: return to currency list from search
 
 // ─────────────────────────────────────────────────────────────
 // Parser — SEC-01 allowlist
@@ -693,11 +762,12 @@ export function parseAccountCallback(data: string): AccountOnboardCmd | null {
   if (sub === 'done') return { cmd: 'done' };
   if (sub === 'fin')  return { cmd: 'fin' };   // Phase 2.3: finish onboarding from type picker
   if (sub === 'open') return { cmd: 'open' };  // Phase 1.37-UX: open type picker
-  // Phase 2.3: smart name confirm/reject
+  // Phase 2.3 + master_roadmap: smart name confirm/reject/save
   if (sub === 'cus') {
     const act = parts[2] ?? '';
     if (act === 'ok')   return { cmd: 'cus_ok' };
     if (act === 'keep') return { cmd: 'cus_keep' };
+    if (act === 'save') return { cmd: 'cus_save' };  // no-match confirm
     return null;
   }
 
@@ -747,6 +817,8 @@ export function parseAccountCallback(data: string): AccountOnboardCmd | null {
   if (sub === 'cur') {
     const code = parts[2] ?? '';
     if (code === 'custom') return { cmd: 'currency_custom' };
+    if (code === 'search') return { cmd: 'cur_search' }; // master_roadmap 1.8
+    if (code === 'list')   return { cmd: 'cur_list' };   // master_roadmap 1.8
     if (!CURRENCY_CODE_RE.test(code)) return null;
     return { cmd: 'currency', code };
   }
@@ -958,7 +1030,7 @@ export function buildInputPromptText(
   return (
     `<b>${header}</b>\n\n` +
     `${question}\n` +
-    `<blockquote>${examples} или другой</blockquote>`
+    `<blockquote>Например: ${examples}</blockquote>`
   );
 }
 
@@ -977,7 +1049,7 @@ export function buildFreeTextPromptText(
   return (
     `✏️ <b>Другое название</b>\n\n` +
     `Введите название ${label}:\n` +
-    `<blockquote>${examples}...</blockquote>`
+    `<blockquote>Например: ${examples}</blockquote>`
   );
 }
 
@@ -1068,20 +1140,21 @@ function buildPaginatedPicker(
     );
   }
 
-  // Navigation row (skip if only 1 page)
+  // Navigation row — always show both arrows (master_roadmap 1.3)
+  // At edge pages: arrow still shown but points to ac:noop (no action)
   if (totalPages > 1) {
     const navRow: Array<{ text: string; callback_data: string }> = [];
-    if (safePage > 0) {
-      navRow.push({ text: '◀️', callback_data: `${pagePrefix}${String(safePage - 1)}` });
-    } else {
-      navRow.push({ text: '·', callback_data: 'ac:noop' });
-    }
+    navRow.push(
+      safePage > 0
+        ? { text: '◀️', callback_data: `${pagePrefix}${String(safePage - 1)}` }
+        : { text: '◀️', callback_data: 'ac:noop' },
+    );
     navRow.push({ text: `${String(safePage + 1)}/${String(totalPages)}`, callback_data: 'ac:noop' });
-    if (safePage < totalPages - 1) {
-      navRow.push({ text: '▶️', callback_data: `${pagePrefix}${String(safePage + 1)}` });
-    } else {
-      navRow.push({ text: '·', callback_data: 'ac:noop' });
-    }
+    navRow.push(
+      safePage < totalPages - 1
+        ? { text: '▶️', callback_data: `${pagePrefix}${String(safePage + 1)}` }
+        : { text: '▶️', callback_data: 'ac:noop' },
+    );
     rows.push(navRow);
   }
 
@@ -1103,13 +1176,6 @@ const EXCHANGE_ITEMS: ReadonlyArray<{ key: string; label: string }> = Array.from
   ([key, name]) => ({ key, label: name }),
 );
 
-const FIAT_ITEMS: ReadonlyArray<{ key: string; label: string }> = FIAT_CURRENCY_PRESETS.map(
-  (code) => ({ key: code, label: code }),
-);
-
-const CRYPTO_ITEMS: ReadonlyArray<{ key: string; label: string }> = CRYPTO_CURRENCY_PRESETS.map(
-  (code) => ({ key: code, label: code }),
-);
 
 // ─────────────────────────────────────────────────────────────
 // Paginated keyboard builders (Phase 2.2)
@@ -1131,15 +1197,23 @@ export function buildExchangePickerPage(page: number): InlineKeyboardMarkup {
 
 /** Fiat currency picker — paginated. */
 export function buildFiatCurrencyPage(page: number): InlineKeyboardMarkup {
+  const items = FIAT_CURRENCY_PRESETS.map((code) => ({
+    key: code,
+    label: `${getCurrencyFlag(code)} ${code}`.trim(),
+  }));
   return buildPaginatedPicker(
-    FIAT_ITEMS, page, 'ac:cur:', 'ac:cfp:', '\u270f\ufe0f Другая валюта', 'ac:cur:custom',
+    items, page, 'ac:cur:', 'ac:cfp:', '\uD83D\uDD0D Найти валюту', 'ac:cur:search',
   );
 }
 
 /** Crypto currency picker — paginated. */
 export function buildCryptoCurrencyPage(page: number): InlineKeyboardMarkup {
+  const items = CRYPTO_CURRENCY_PRESETS.map((code) => ({
+    key: code,
+    label: `${getCurrencyFlag(code)} ${code}`.trim(),
+  }));
   return buildPaginatedPicker(
-    CRYPTO_ITEMS, page, 'ac:cur:', 'ac:ccp:', '\u270f\ufe0f Другая валюта', 'ac:cur:custom',
+    items, page, 'ac:cur:', 'ac:ccp:', '\uD83D\uDD0D Найти валюту', 'ac:cur:search',
   );
 }
 
@@ -1321,10 +1395,17 @@ export const CURRENCY_PICKER_TEXT = 'В какой валюте?';
 
 /**
  * Context-aware currency picker header — shows account name in blockquote.
+ * master_roadmap 1.4: extended signature with isCustom flag.
+ *
+ * @param name      Account name (preset or custom)
+ * @param isCustom  True when name came via no-match / custom save
  */
-export function buildCurrencyPickerText(name?: string): string {
-  if (!name) return CURRENCY_PICKER_TEXT;
-  return `<blockquote>${name}</blockquote>\nВыберите валюту:`;
+export function buildCurrencyPickerText(name?: string, isCustom = false): string {
+  if (!name) return '\uD83C\uDF0D В какой валюте ведёте счёт?';
+  if (isCustom) {
+    return `<blockquote>${name}  \u00b7  свой счёт</blockquote>\nВыберите валюту:`;
+  }
+  return `<blockquote>«${name}»</blockquote>\nВыберите валюту:`;
 }
 
 /** Prompt for free-text account name input. */
@@ -1603,6 +1684,202 @@ export function buildSmartConfirmKeyboard(suggestedName: string): InlineKeyboard
       [
         { text: '✏️ Другое название', callback_data: 'ac:cus:keep' },
         { text: '◀️ К типу счёта',    callback_data: 'ac:open' },
+      ],
+    ],
+  };
+}
+
+// ─────────────────────────────────────────────────────────────
+// master_roadmap 1.6 — Currency search
+// ─────────────────────────────────────────────────────────────
+
+/** Transliteration table for Cyrillic → Latin (for currency search). */
+const CUR_CYR_LAT: Record<string, string> = {
+  'а':'a','б':'b','в':'v','г':'g','д':'d','е':'e','ё':'yo',
+  'ж':'zh','з':'z','и':'i','й':'j','к':'k','л':'l','м':'m',
+  'н':'n','о':'o','п':'p','р':'r','с':'s','т':'t','у':'u',
+  'ф':'f','х':'kh','ц':'ts','ч':'ch','ш':'sh','щ':'shch',
+  'ъ':'','ы':'y','ь':'','э':'e','ю':'yu','я':'ya',
+  'і':'i','ї':'yi','є':'ye','ґ':'g',
+};
+
+function translitCurrency(s: string): string {
+  return s.toLowerCase().split('').map((c) => CUR_CYR_LAT[c] ?? c).join('');
+}
+
+/**
+ * master_roadmap 1.6: Search currencies by free-text query.
+ * Checks: exact code match, code starts-with, name contains, transliteration.
+ * Returns up to 9 matches.
+ *
+ * @param query  User-typed search text
+ * @param pool   Array of currency codes to search within
+ */
+export function searchCurrencies(query: string, pool: string[]): string[] {
+  const q = query.toLowerCase().trim();
+  const qt = translitCurrency(q);
+  if (q.length === 0) return [];
+
+  const scored: Array<{ code: string; score: number }> = [];
+
+  for (const code of pool) {
+    const codeLow = code.toLowerCase();
+    const nameTokens = (CURRENCY_NAMES[code] ?? '').toLowerCase();
+    let score = 0;
+
+    if (codeLow === q || codeLow === qt) {
+      score = 100;
+    } else if (codeLow.startsWith(q) || codeLow.startsWith(qt)) {
+      score = 90;
+    } else if (nameTokens.split(' ').some((t) => t.startsWith(q) || t.startsWith(qt))) {
+      score = 80;
+    } else if (nameTokens.includes(q) || nameTokens.includes(qt)) {
+      score = 70;
+    } else if (codeLow.includes(q)) {
+      score = 60;
+    }
+
+    if (score > 0) scored.push({ code, score });
+  }
+
+  return scored
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 9)
+    .map((x) => x.code);
+}
+
+/**
+ * master_roadmap 1.6: Prompt text for currency search mode.
+ * Shown when user taps '\uD83D\uDD0D Найти валюту'.
+ */
+export function buildCurrencySearchPromptText(name: string, isCustom: boolean): string {
+  const nameBlock = name
+    ? (isCustom ? `<blockquote>${name}  \u00b7  свой счёт</blockquote>\n` : `<blockquote>«${name}»</blockquote>\n`)
+    : '';
+  return (
+    `\uD83D\uDD0D <b>Поиск валюты</b>\n` +
+    nameBlock +
+    `Введите код или название:\n` +
+    `<blockquote>Например: rub, евро, dollar, btc</blockquote>`
+  );
+}
+
+/**
+ * master_roadmap 1.6: Header text for currency search results.
+ */
+export function buildCurrencySearchResultsText(query: string, name: string, isCustom: boolean): string {
+  const nameBlock = name
+    ? (isCustom ? `<blockquote>${name}  \u00b7  свой счёт</blockquote>\n` : `<blockquote>«${name}»</blockquote>\n`)
+    : '';
+  return (
+    `\uD83D\uDD0D По запросу «${query}»\n` +
+    nameBlock +
+    `Найдено:`
+  );
+}
+
+/**
+ * master_roadmap 1.6: Keyboard showing currency search results with flags.
+ *
+ * @param matches   Array of currency codes matching the query
+ * @param backCb    Callback_data for the back button (e.g. 'ac:cur:list')
+ */
+export function buildCurrencySearchResultsKeyboard(
+  matches: string[],
+  backCb: string,
+): InlineKeyboardMarkup {
+  const rows: Array<Array<{ text: string; callback_data: string }>> = [];
+  const cols = 3;
+  for (let i = 0; i < matches.length; i += cols) {
+    rows.push(
+      matches.slice(i, i + cols).map((code) => ({
+        text: `${getCurrencyFlag(code)} ${code}`.trim(),
+        callback_data: `ac:cur:${code}`,
+      })),
+    );
+  }
+  rows.push([{ text: '\u25c0️ Вернуться к списку', callback_data: backCb }]);
+  return { inline_keyboard: rows };
+}
+
+/**
+ * master_roadmap 1.6: Text shown when currency search returns no results.
+ */
+export function buildCurrencySearchNoResultsText(
+  query: string,
+  name: string,
+  isCustom: boolean,
+): string {
+  const nameBlock = name
+    ? (isCustom ? `<blockquote>${name}  \u00b7  свой счёт</blockquote>\n` : `<blockquote>«${name}»</blockquote>\n`)
+    : '';
+  return (
+    `\uD83D\uDD0D По запросу «${query}»\n` +
+    nameBlock +
+    `Такой валюты нет в списке.\n` +
+    `Попробуйте другой запрос:\n` +
+    `<blockquote>Например: rub, usd, eur, btc</blockquote>`
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// master_roadmap 1.7 — No-match screen
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * master_roadmap 1.7: Text for the no-match screen — when fuzzy finds nothing.
+ * Type-specific heading.
+ *
+ * @param name           User-entered name
+ * @param accountType    Account type ('card'|'exchange'|'wallet'|'custom')
+ * @param walletSubtype  Optional wallet sub-type
+ */
+export function buildNoMatchText(
+  name: string,
+  accountType: string,
+  walletSubtype?: string,
+): string {
+  const typeLabels: Record<string, string> = {
+    card:             'банка',
+    exchange:         'биржи',
+    custom:           'счёта',
+    wallet_crypto:    'кошелька',
+    wallet_ewallet:   'е-кошелька',
+    wallet_ton:       'TON-кошелька',
+    wallet_lightning: 'Lightning-кошелька',
+  };
+  const key = accountType === 'wallet' && walletSubtype ? `wallet_${walletSubtype}` : accountType;
+  const label = typeLabels[key] ?? 'счёта';
+  return (
+    `\uD83D\uDD0D <b>Похожего ${label} не нашли</b>\n` +
+    `<blockquote>«${name}»</blockquote>\n` +
+    `Создать счёт с этим названием или попробовать ещё раз?`
+  );
+}
+
+/**
+ * master_roadmap 1.7: Keyboard for the no-match screen.
+ * ac:cus:save  → 12 bytes ✅
+ * ac:cus:keep  → 15 bytes ✅
+ * ac:type:back → 12 bytes ✅
+ * ac:type:wallet → 14 bytes ✅
+ *
+ * @param name        User-entered name (for button label preview)
+ * @param backTarget  'subtype' → back to wallet subtype; 'type' → back to type picker
+ */
+export function buildNoMatchKeyboard(
+  name: string,
+  backTarget: 'type' | 'subtype',
+): InlineKeyboardMarkup {
+  const preview = name.length > 22 ? `${name.slice(0, 20)}…` : name;
+  const backCb = backTarget === 'subtype' ? 'ac:type:wallet' : 'ac:type:back';
+  const backLabel = backTarget === 'subtype' ? '\u25c0️ К подтипу' : '\u25c0️ К типу счёта';
+  return {
+    inline_keyboard: [
+      [{ text: `✅ Создать «${preview}»`, callback_data: 'ac:cus:save' }],
+      [
+        { text: '✏️ Изменить название', callback_data: 'ac:cus:keep' },
+        { text: backLabel,                  callback_data: backCb },
       ],
     ],
   };

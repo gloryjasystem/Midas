@@ -156,7 +156,6 @@ import {
   SETUP_COMPLETE_TEXT,               // Phase 1.37-UX: ReplyKeyboard activation message
   EXCHANGE_PICKER_TEXT,              // Phase 1.30
   BANK_PICKER_TEXT,                  // Phase 2.1
-  CURRENCY_PICKER_TEXT,              // Phase 1.30 (legacy fallback)
   CURRENCY_INPUT_PROMPT,             // Phase 1.30
   buildFinishOnboardKeyboard,        // Phase 2.3
   SKIP_COMPLETE_TEXT,                // Phase 2.3: ac:skip D1 message with ReplyKeyboard
@@ -173,6 +172,17 @@ import {
   buildBalancePromptText,            // Phase 2.3: context-aware balance prompt
   getProviderIcon,                   // Phase 2.3: provider emoji for success screen
   capitalizeFirst,                   // Phase 2.3: auto-capitalize user input
+  // master_roadmap: no-match screen + currency search
+  buildNoMatchText,                  // master_roadmap 1.7
+  buildNoMatchKeyboard,              // master_roadmap 1.7
+  buildCurrencySearchPromptText,     // master_roadmap 1.6
+  buildCurrencySearchResultsText,    // master_roadmap 1.6
+  buildCurrencySearchResultsKeyboard,// master_roadmap 1.6
+  buildCurrencySearchNoResultsText,  // master_roadmap 1.6
+  searchCurrencies as searchCurrenciesOnboard, // master_roadmap 1.6
+  FIAT_CURRENCY_PRESETS,             // master_roadmap: currency pool helper
+  CRYPTO_CURRENCY_PRESETS,           // master_roadmap: currency pool helper
+  TON_CURRENCY_PRESETS,              // master_roadmap: currency pool helper
   type AccountOnboardState,          // Phase 1.30
 } from '../services/account-onboard-keyboard.service.js';
 import {
@@ -462,6 +472,18 @@ function confirmKb(draftId: string) {
       ],
     ],
   };
+}
+
+/** master_roadmap: pick currency keyboard based on account type + wallet sub-type. */
+function chooseCurKeyboard(typ: string, sub?: string) {
+  if (typ === 'card' || typ === 'cash') return buildFiatCurrencyPage(0);
+  if (typ === 'wallet') {
+    if (sub === 'ton')     return buildCryptoCurrencyPage(0); // TON ecosystem
+    if (sub === 'ewallet') return buildFiatCurrencyPage(0);   // fiat e-wallets
+    return buildCryptoCurrencyPage(0); // crypto / lightning default
+  }
+  if (typ === 'exchange') return buildCryptoCurrencyPage(0);
+  return buildOnboardCurrencyKeyboard(); // custom
 }
 
 
@@ -890,7 +912,7 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
               if (acMsgId) void editMessageText(
                 chatId, acMsgId,
                 buildSuccessScreenText(escapeHtml(skippedName), skippedCur, undefined, skippedIcon),
-                buildFinishOnboardKeyboard(),
+                { inline_keyboard: [] }, // master_roadmap 2.7: success screen is button-free
               );
 
             } else if (acCmd.cmd === 'bank_page') {
@@ -903,11 +925,88 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
 
             } else if (acCmd.cmd === 'fiat_page') {
               // Phase 2.2: paginate fiat currency picker
-              if (acMsgId) void editMessageText(chatId, acMsgId, CURRENCY_PICKER_TEXT, buildFiatCurrencyPage(acCmd.page));
+              const rawStateFp = await redisConnection.get(acKey);
+              let fiatPageName: string | undefined;
+              let fiatPageCustom = false;
+              if (rawStateFp) {
+                try {
+                  const s = JSON.parse(rawStateFp) as AccountOnboardState;
+                  fiatPageName = s.name;
+                  fiatPageCustom = s.isCustomName === true;
+                } catch { /* ignore */ }
+              }
+              if (acMsgId) void editMessageText(chatId, acMsgId, buildCurrencyPickerText(fiatPageName, fiatPageCustom), buildFiatCurrencyPage(acCmd.page));
 
             } else if (acCmd.cmd === 'crypto_page') {
               // Phase 2.2: paginate crypto currency picker
-              if (acMsgId) void editMessageText(chatId, acMsgId, CURRENCY_PICKER_TEXT, buildCryptoCurrencyPage(acCmd.page));
+              const rawStateCp = await redisConnection.get(acKey);
+              let cryptoPageName: string | undefined;
+              let cryptoPageCustom = false;
+              if (rawStateCp) {
+                try {
+                  const s = JSON.parse(rawStateCp) as AccountOnboardState;
+                  cryptoPageName = s.name;
+                  cryptoPageCustom = s.isCustomName === true;
+                } catch { /* ignore */ }
+              }
+              if (acMsgId) void editMessageText(chatId, acMsgId, buildCurrencyPickerText(cryptoPageName, cryptoPageCustom), buildCryptoCurrencyPage(acCmd.page));
+
+            } else if (acCmd.cmd === 'cus_save') {
+              // master_roadmap 2.2: user confirmed custom name from no-match screen
+              const rawStateSave = await redisConnection.get(acKey);
+              if (!rawStateSave) {
+                if (acMsgId) void editMessageText(chatId, acMsgId, ACCOUNTS_EMPTY_TEXT, buildAccountTypeKeyboard());
+              } else {
+                let sSave: AccountOnboardState;
+                try { sSave = JSON.parse(rawStateSave) as AccountOnboardState; }
+                catch { sSave = { step: 'type_pick' }; }
+                const savedName = sSave.pendingName ?? 'Счёт';
+                const newStateSave: AccountOnboardState = {
+                  ...sSave,
+                  step: 'cur_pick',
+                  name: savedName,
+                  isCustomName: true,
+                  pendingName: undefined,
+                };
+                await redisConnection.set(acKey, JSON.stringify(newStateSave), 'EX', ONBOARD_STATE_TTL_SEC);
+                const curKb = chooseCurKeyboard(sSave.accountType ?? 'custom', sSave.walletSubtype);
+                if (acMsgId) void editMessageText(chatId, acMsgId, buildCurrencyPickerText(savedName, true), curKb);
+              }
+
+            } else if (acCmd.cmd === 'cur_search') {
+              // master_roadmap 2.3: open currency free-text search mode
+              const rawStateCs = await redisConnection.get(acKey);
+              if (!rawStateCs) {
+                if (acMsgId) void editMessageText(chatId, acMsgId, ACCOUNTS_EMPTY_TEXT, buildAccountTypeKeyboard());
+              } else {
+                let sCs: AccountOnboardState;
+                try { sCs = JSON.parse(rawStateCs) as AccountOnboardState; }
+                catch { sCs = { step: 'cur_pick' }; }
+                const newStateCs: AccountOnboardState = { ...sCs, step: 'cur_search' };
+                await redisConnection.set(acKey, JSON.stringify(newStateCs), 'EX', ONBOARD_STATE_TTL_SEC);
+                const isCustomCs = sCs.isCustomName === true;
+                if (acMsgId) void editMessageText(
+                  chatId, acMsgId,
+                  buildCurrencySearchPromptText(sCs.name ?? '', isCustomCs),
+                  { inline_keyboard: [[{ text: '◀️ Вернуться к списку', callback_data: 'ac:cur:list' }]] },
+                );
+              }
+
+            } else if (acCmd.cmd === 'cur_list') {
+              // master_roadmap 2.4: return from search back to currency list
+              const rawStateCl = await redisConnection.get(acKey);
+              if (!rawStateCl) {
+                if (acMsgId) void editMessageText(chatId, acMsgId, ACCOUNTS_EMPTY_TEXT, buildAccountTypeKeyboard());
+              } else {
+                let sCl: AccountOnboardState;
+                try { sCl = JSON.parse(rawStateCl) as AccountOnboardState; }
+                catch { sCl = { step: 'cur_pick' }; }
+                const newStateCl: AccountOnboardState = { ...sCl, step: 'cur_pick' };
+                await redisConnection.set(acKey, JSON.stringify(newStateCl), 'EX', ONBOARD_STATE_TTL_SEC);
+                const isCustomCl = sCl.isCustomName === true;
+                const curKbCl = chooseCurKeyboard(sCl.accountType ?? 'custom', sCl.walletSubtype);
+                if (acMsgId) void editMessageText(chatId, acMsgId, buildCurrencyPickerText(sCl.name, isCustomCl), curKbCl);
+              }
 
             } else {
               // currency_custom: prompt free-text currency input
@@ -921,6 +1020,7 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
               }
               if (acMsgId) void editMessageText(chatId, acMsgId, CURRENCY_INPUT_PROMPT, { inline_keyboard: [] });
             }
+
 
           } catch (err: unknown) {
             const errorClass = err instanceof Error ? err.constructor.name : 'UnknownError';
@@ -3794,18 +3894,6 @@ Midas создан, чтобы сделать учет денег максима
           }
 
           {
-            // Helper: pick the right currency keyboard for this account / wallet sub-type
-            const chooseCurKeyboard = (typ: string, sub?: string) => {
-              if (typ === 'card' || typ === 'cash') return buildFiatCurrencyPage(0);
-              if (typ === 'wallet') {
-                if (sub === 'ton')       return buildCryptoCurrencyPage(0); // TON ecosystem
-                if (sub === 'ewallet')   return buildFiatCurrencyPage(0);   // fiat e-wallets
-                return buildCryptoCurrencyPage(0); // crypto / lightning default
-              }
-              if (typ === 'exchange') return buildCryptoCurrencyPage(0);
-              return buildOnboardCurrencyKeyboard(); // custom
-            };
-
             // Phase 2.3: skip fuzzy if user already rejected a suggestion once
             const skipFuzzy = acState.fuzzyDisabled === true;
 
@@ -3849,33 +3937,88 @@ Midas создан, чтобы сделать учет денег максима
               }
             }
 
-            // No match (or fuzzy disabled) — proceed directly to currency picker
-            // Special case: Lightning — currency is always BTC, skip currency picker
+            // No match (or fuzzy disabled)
+            // master_roadmap 2.1: show no-match screen instead of jumping to currency picker
+            // Special case: Lightning — currency is always BTC, always skip currency picker
             if (acState.accountType === 'wallet' && acState.walletSubtype === 'lightning') {
               // Lightning → create account directly with BTC currency
               const acName = trimmed;
               const acCur  = 'BTC';
-              const updatedState: AccountOnboardState = { ...acState, step: 'cur_pick', name: acName, currency: acCur };
+              const updatedState: AccountOnboardState = { ...acState, step: 'cur_pick', name: acName, currency: acCur, isCustomName: true };
               await redisConnection.set(acKey, JSON.stringify(updatedState), 'EX', ONBOARD_STATE_TTL_SEC);
               try {
                 const resolved = await resolveWorkspace(telegramUserId, chatId);
-                void upsertBotMessage(telegramUserId, chatId, buildCurrencyPickerText(acName), buildCryptoCurrencyPage(0));
+                void upsertBotMessage(telegramUserId, chatId, buildCurrencyPickerText(acName, true), buildCryptoCurrencyPage(0));
                 request.log.info({ msg: '[midas:bot:webhook] ac: wallet/lightning name received', workspaceId: resolved.workspaceId });
               } catch {
-                void upsertBotMessage(telegramUserId, chatId, buildCurrencyPickerText(acName), buildCryptoCurrencyPage(0));
+                void upsertBotMessage(telegramUserId, chatId, buildCurrencyPickerText(acName, true), buildCryptoCurrencyPage(0));
               }
-            } else {
-              const updatedState: AccountOnboardState = { ...acState, step: 'cur_pick', name: trimmed };
+            } else if (acState.fuzzyDisabled === true) {
+              // User already rejected a suggestion — go directly to currency picker with this name
+              const updatedState: AccountOnboardState = { ...acState, step: 'cur_pick', name: trimmed, isCustomName: true };
               await redisConnection.set(acKey, JSON.stringify(updatedState), 'EX', ONBOARD_STATE_TTL_SEC);
               try {
                 const resolved = await resolveWorkspace(telegramUserId, chatId);
                 const curKb = chooseCurKeyboard(acState.accountType ?? 'custom', acState.walletSubtype);
-                void upsertBotMessage(telegramUserId, chatId, buildCurrencyPickerText(trimmed), curKb);
-                request.log.info({ msg: '[midas:bot:webhook] ac: name input received', workspaceId: resolved.workspaceId });
+                void upsertBotMessage(telegramUserId, chatId, buildCurrencyPickerText(trimmed, true), curKb);
+                request.log.info({ msg: '[midas:bot:webhook] ac: name re-input received (fuzzy disabled)', workspaceId: resolved.workspaceId });
               } catch {
-                void upsertBotMessage(telegramUserId, chatId, buildCurrencyPickerText(trimmed));
+                void upsertBotMessage(telegramUserId, chatId, buildCurrencyPickerText(trimmed, true));
               }
+            } else {
+              // master_roadmap 1.7: no match found → show no-match screen
+              const noMatchState: AccountOnboardState = {
+                ...acState,
+                step: 'name_confirm_custom',
+                pendingName: trimmed,
+              };
+              await redisConnection.set(acKey, JSON.stringify(noMatchState), 'EX', ONBOARD_STATE_TTL_SEC);
+              const backTarget = acState.accountType === 'wallet' ? 'subtype' : 'type';
+              void upsertBotMessage(
+                telegramUserId, chatId,
+                buildNoMatchText(trimmed, acState.accountType ?? 'custom', acState.walletSubtype),
+                buildNoMatchKeyboard(trimmed, backTarget),
+              );
             }
+          }
+          await reply.status(200).send({ ok: true });
+          return;
+
+        } else if (acState.step === 'cur_search') {
+          // master_roadmap 2.5: user typed a currency search query
+          const query = message.text.trim();
+          if (query.length === 0) {
+            await reply.status(200).send({ ok: true });
+            return;
+          }
+          // Determine which pool to search
+          const poolType = acState.accountType ?? 'custom';
+          const pool: string[] = (
+            poolType === 'card' || poolType === 'cash'
+              ? [...FIAT_CURRENCY_PRESETS]
+              : poolType === 'wallet' && acState.walletSubtype === 'ewallet'
+              ? [...FIAT_CURRENCY_PRESETS]
+              : poolType === 'wallet' && acState.walletSubtype === 'ton'
+              ? [...TON_CURRENCY_PRESETS]
+              : poolType === 'wallet' || poolType === 'exchange'
+              ? [...CRYPTO_CURRENCY_PRESETS]
+              : [...FIAT_CURRENCY_PRESETS, ...CRYPTO_CURRENCY_PRESETS] // custom
+          );
+          const matches = searchCurrenciesOnboard(query, pool);
+          const isCustomPool = acState.isCustomName === true;
+          const acNamePool = acState.name ?? '';
+          if (matches.length === 0) {
+            void upsertBotMessage(
+              telegramUserId, chatId,
+              buildCurrencySearchNoResultsText(query, acNamePool, isCustomPool),
+              { inline_keyboard: [[{ text: '◀️ Вернуться к списку', callback_data: 'ac:cur:list' }]] },
+            );
+          } else {
+            void upsertBotMessage(
+              telegramUserId, chatId,
+              buildCurrencySearchResultsText(query, acNamePool, isCustomPool),
+              buildCurrencySearchResultsKeyboard(matches, 'ac:cur:list'),
+            );
           }
           await reply.status(200).send({ ok: true });
           return;
@@ -3912,7 +4055,7 @@ Midas создан, чтобы сделать учет денег максима
                 telegramUserId,
                 chatId,
                 buildSuccessScreenText(escapeHtml(accountName), escapeHtml(rawCode), undefined, icon),
-                buildFinishOnboardKeyboard(),
+                { inline_keyboard: [] }, // master_roadmap 2.7: success screen is button-free
               );
               request.log.info({ msg: '[midas:bot:webhook] ac: account created via custom currency text', workspaceId: resolved.workspaceId });
             }
@@ -3956,7 +4099,7 @@ Midas создан, чтобы сделать учет денег максима
             void upsertBotMessage(
               telegramUserId, chatId,
               buildSuccessScreenText(escapeHtml(acName), escapeHtml(acCur), amount, icon),
-              buildFinishOnboardKeyboard(),
+              { inline_keyboard: [] }, // master_roadmap 2.7: success screen is button-free
             );
             request.log.info({ msg: '[midas:bot:webhook] ac: balance set via onboarding', workspaceId: resolved.workspaceId });
           } catch (err: unknown) {
@@ -3968,7 +4111,8 @@ Midas создан, чтобы сделать учет денег максима
           return;
         } else {
           // Onboarding is active but current step does NOT expect free text
-          // (e.g. cur_pick, wallet_subtype, type_pick — waiting for a button tap).
+          // (cur_pick, wallet_subtype, type_pick, name_confirm_custom — waiting for button).
+          // cur_search is handled above (2.5) and NEVER falls through to here.
           // Silently swallow the message so it never reaches the AI parser.
           await reply.status(200).send({ ok: true });
           return;
