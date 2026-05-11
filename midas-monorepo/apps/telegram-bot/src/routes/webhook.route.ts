@@ -3966,6 +3966,12 @@ Midas создан, чтобы сделать учет денег максима
           }
           await reply.status(200).send({ ok: true });
           return;
+        } else {
+          // Onboarding is active but current step does NOT expect free text
+          // (e.g. cur_pick, wallet_subtype, type_pick — waiting for a button tap).
+          // Silently swallow the message so it never reaches the AI parser.
+          await reply.status(200).send({ ok: true });
+          return;
         }
       }
     }
