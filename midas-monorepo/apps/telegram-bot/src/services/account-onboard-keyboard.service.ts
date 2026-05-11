@@ -47,8 +47,9 @@ import type { InlineKeyboardMarkup } from '../services/telegram-api.js';
  *   name_input   → bot awaiting free-text account name
  *   cur_pick     → bot showing currency keyboard
  *   cur_input    → bot awaiting free-text currency code
+ *   bal_input    → bot awaiting initial balance amount (Phase 2.2)
  */
-export type OnboardStep = 'type_pick' | 'name_input' | 'cur_pick' | 'cur_input';
+export type OnboardStep = 'type_pick' | 'name_input' | 'cur_pick' | 'cur_input' | 'bal_input';
 
 export interface AccountOnboardState {
   step: OnboardStep;
@@ -56,6 +57,10 @@ export interface AccountOnboardState {
   accountType?: 'card' | 'cash' | 'exchange' | 'wallet' | 'custom';
   /** Account name resolved — present from cur_pick step onward */
   name?: string;
+  /** Account ULID — set after DB insert; used by bal_input step (Phase 2.2) */
+  accountId?: string;
+  /** Currency code — stored for bal_input display (Phase 2.2) */
+  currency?: string;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -69,15 +74,84 @@ export interface PresetInfo {
 }
 
 export const BANK_PRESETS: ReadonlyMap<string, PresetInfo> = new Map([
-  ['tinkoff',    { name: 'Тинькофф',    defaultCurrency: 'RUB' }],
-  ['sber',       { name: 'Сбербанк',    defaultCurrency: 'RUB' }],
-  ['mono',       { name: 'Монобанк',    defaultCurrency: 'UAH' }],
-  ['privat',     { name: 'ПриватБанк',  defaultCurrency: 'UAH' }],
-  ['revolut',    { name: 'Revolut',     defaultCurrency: 'EUR' }],
-  ['wise',       { name: 'Wise',        defaultCurrency: 'EUR' }],
-  ['chase',      { name: 'Chase',       defaultCurrency: 'USD' }],
-  ['n26',        { name: 'N26',         defaultCurrency: 'EUR' }],
-  ['raiffeisen', { name: 'Raiffeisen',  defaultCurrency: 'EUR' }],
+  // Russia
+  ['tinkoff',    { name: 'Тинькофф',      defaultCurrency: 'RUB' }],
+  ['sber',       { name: 'Сбербанк',      defaultCurrency: 'RUB' }],
+  ['vtb',        { name: 'ВТБ',           defaultCurrency: 'RUB' }],
+  ['alfa',       { name: 'Альфа-Банк',    defaultCurrency: 'RUB' }],
+  ['ozon',       { name: 'Озон Банк',     defaultCurrency: 'RUB' }],
+  ['mkb',        { name: 'МКБ',           defaultCurrency: 'RUB' }],
+  ['gazprom',    { name: 'Газпромбанк',   defaultCurrency: 'RUB' }],
+  ['psb',        { name: 'Промсвязьбанк', defaultCurrency: 'RUB' }],
+  ['uralsib',    { name: 'Уралсиб',       defaultCurrency: 'RUB' }],
+  ['sovkombank', { name: 'Совкомбанк',    defaultCurrency: 'RUB' }],
+  ['rosselhoz',  { name: 'Россельхоз',    defaultCurrency: 'RUB' }],
+  ['mkb2',       { name: 'Открытие',      defaultCurrency: 'RUB' }],
+  // Ukraine
+  ['mono',       { name: 'Монобанк',      defaultCurrency: 'UAH' }],
+  ['privat',     { name: 'ПриватБанк',    defaultCurrency: 'UAH' }],
+  ['ukrsib',     { name: 'Укрсиббанк',    defaultCurrency: 'UAH' }],
+  ['oschad',     { name: 'Ощадбанк',      defaultCurrency: 'UAH' }],
+  ['pumb',       { name: 'ПУМБ',          defaultCurrency: 'UAH' }],
+  ['abank',      { name: 'A-Банк',        defaultCurrency: 'UAH' }],
+  // Belarus
+  ['belinvest',  { name: 'Белинвестбанк', defaultCurrency: 'BYN' }],
+  ['priorbank',  { name: 'Приорбанк',     defaultCurrency: 'BYN' }],
+  ['mtbank',     { name: 'МТБанк',        defaultCurrency: 'BYN' }],
+  // Kazakhstan
+  ['kaspi',      { name: 'Kaspi Bank',    defaultCurrency: 'KZT' }],
+  ['halyk',      { name: 'Halyk Bank',    defaultCurrency: 'KZT' }],
+  ['jusan',      { name: 'Jusan Bank',    defaultCurrency: 'KZT' }],
+  // Uzbekistan
+  ['kapital',    { name: 'Kapitalbank',   defaultCurrency: 'UZS' }],
+  ['click',      { name: 'Click',         defaultCurrency: 'UZS' }],
+  // Georgia
+  ['tbc',        { name: 'TBC Bank',      defaultCurrency: 'GEL' }],
+  ['bog',        { name: 'Bank of Georgia', defaultCurrency: 'GEL' }],
+  // Germany
+  ['ing',        { name: 'ING',           defaultCurrency: 'EUR' }],
+  ['n26',        { name: 'N26',           defaultCurrency: 'EUR' }],
+  ['dkb',        { name: 'DKB',           defaultCurrency: 'EUR' }],
+  ['commerzbank',{ name: 'Commerzbank',   defaultCurrency: 'EUR' }],
+  ['postbank',   { name: 'Postbank',      defaultCurrency: 'EUR' }],
+  // France / Spain
+  ['bnp',        { name: 'BNP Paribas',   defaultCurrency: 'EUR' }],
+  ['socgen',     { name: 'SocGen',        defaultCurrency: 'EUR' }],
+  ['lcl',        { name: 'LCL',           defaultCurrency: 'EUR' }],
+  ['caxia',      { name: 'CaixaBank',     defaultCurrency: 'EUR' }],
+  ['bbva',       { name: 'BBVA',          defaultCurrency: 'EUR' }],
+  ['santander',  { name: 'Santander',     defaultCurrency: 'EUR' }],
+  // UK
+  ['barclays',   { name: 'Barclays',      defaultCurrency: 'GBP' }],
+  ['hsbc',       { name: 'HSBC',          defaultCurrency: 'GBP' }],
+  ['lloyds',     { name: 'Lloyds',        defaultCurrency: 'GBP' }],
+  ['monzo',      { name: 'Monzo',         defaultCurrency: 'GBP' }],
+  ['starling',   { name: 'Starling',      defaultCurrency: 'GBP' }],
+  ['natwest',    { name: 'NatWest',       defaultCurrency: 'GBP' }],
+  // Poland
+  ['pko',        { name: 'PKO BP',        defaultCurrency: 'PLN' }],
+  ['mbank',      { name: 'mBank',         defaultCurrency: 'PLN' }],
+  ['pekao',      { name: 'Pekao',         defaultCurrency: 'PLN' }],
+  ['millennium', { name: 'Millennium',    defaultCurrency: 'PLN' }],
+  // Switzerland / Austria
+  ['ubs',        { name: 'UBS',           defaultCurrency: 'CHF' }],
+  ['csbank',     { name: 'Credit Suisse', defaultCurrency: 'CHF' }],
+  ['raiffeisen', { name: 'Raiffeisen',    defaultCurrency: 'EUR' }],
+  // Scandinavia
+  ['nordea',     { name: 'Nordea',        defaultCurrency: 'SEK' }],
+  ['dnb',        { name: 'DNB',           defaultCurrency: 'NOK' }],
+  ['seb',        { name: 'SEB',           defaultCurrency: 'SEK' }],
+  ['handels',    { name: 'Handelsbanken', defaultCurrency: 'SEK' }],
+  // USA
+  ['chase',      { name: 'Chase',         defaultCurrency: 'USD' }],
+  ['bofa',       { name: 'Bank of America', defaultCurrency: 'USD' }],
+  ['wells',      { name: 'Wells Fargo',   defaultCurrency: 'USD' }],
+  ['citi',       { name: 'Citibank',      defaultCurrency: 'USD' }],
+  ['amex',       { name: 'Amex',          defaultCurrency: 'USD' }],
+  // International / Online
+  ['revolut',    { name: 'Revolut',       defaultCurrency: 'EUR' }],
+  ['wise',       { name: 'Wise',          defaultCurrency: 'EUR' }],
+  ['paypal',     { name: 'PayPal',        defaultCurrency: 'USD' }],
 ]);
 
 // ─────────────────────────────────────────────────────────────
@@ -85,15 +159,34 @@ export const BANK_PRESETS: ReadonlyMap<string, PresetInfo> = new Map([
 // ─────────────────────────────────────────────────────────────
 
 export const EXCHANGE_PRESETS: ReadonlyMap<string, string> = new Map([
-  ['binance',  'Binance'],
-  ['bybit',    'Bybit'],
-  ['okx',      'OKX'],
-  ['kraken',   'Kraken'],
-  ['coinbase', 'Coinbase'],
-  ['kucoin',   'KuCoin'],
-  ['huobi',    'Huobi'],
-  ['gateio',   'Gate.io'],
-  ['bitget',   'Bitget'],
+  ['binance',   'Binance'],
+  ['bybit',     'Bybit'],
+  ['okx',       'OKX'],
+  ['coinbase',  'Coinbase'],
+  ['kraken',    'Kraken'],
+  ['kucoin',    'KuCoin'],
+  ['gateio',    'Gate.io'],
+  ['htx',       'HTX'],
+  ['bitget',    'Bitget'],
+  ['mexc',      'MEXC'],
+  ['bitfinex',  'Bitfinex'],
+  ['gemini',    'Gemini'],
+  ['cryptocom', 'Crypto.com'],
+  ['bingx',     'BingX'],
+  ['phemex',    'Phemex'],
+  ['whitebit',  'WhiteBIT'],
+  ['bitstamp',  'Bitstamp'],
+  ['poloniex',  'Poloniex'],
+  ['bitmart',   'BitMart'],
+  ['coinex',    'CoinEx'],
+  ['lbank',     'LBank'],
+  ['deribit',   'Deribit'],
+  ['ascendex',  'AscendEX'],
+  ['xtcom',     'XT.com'],
+  ['probit',    'ProBit'],
+  ['upbit',     'Upbit'],
+  ['bithumb',   'Bithumb'],
+  ['huobi',     'Huobi'],
 ]);
 
 // ─────────────────────────────────────────────────────────────
@@ -117,11 +210,21 @@ export const WALLET_PRESETS: ReadonlyMap<string, string> = new Map([
 // Custom → all common currencies.
 // ─────────────────────────────────────────────────────────────
 
-/** Fiat currencies for banks and cash accounts. */
-export const FIAT_CURRENCY_PRESETS = ['USD', 'EUR', 'RUB', 'UAH', 'GBP', 'PLN'] as const;
+/** Fiat currencies for banks and cash accounts (~30). */
+export const FIAT_CURRENCY_PRESETS = [
+  'USD', 'EUR', 'RUB', 'UAH', 'GBP', 'PLN',
+  'CZK', 'HUF', 'RON', 'TRY', 'KZT', 'BYN',
+  'GEL', 'UZS', 'SEK', 'NOK', 'DKK', 'CHF',
+  'CAD', 'AUD', 'JPY', 'CNY', 'INR', 'AED',
+  'SGD', 'HKD', 'BRL', 'ZAR', 'MXN', 'THB',
+] as const;
 
-/** Crypto currencies for exchanges and wallets. */
-export const CRYPTO_CURRENCY_PRESETS = ['USDT', 'BTC', 'ETH', 'BNB', 'SOL', 'USDC'] as const;
+/** Crypto currencies for exchanges and wallets (~18). */
+export const CRYPTO_CURRENCY_PRESETS = [
+  'USDT', 'BTC',  'ETH',  'BNB',  'SOL',  'USDC',
+  'XRP',  'TRX',  'DOGE', 'ADA',  'DOT',  'AVAX',
+  'TON',  'NEAR', 'ATOM', 'LTC',  'MATIC','DAI',
+] as const;
 
 /** Mixed currencies for custom account type. */
 const CUSTOM_CURRENCY_PRESETS = ['USD', 'EUR', 'RUB', 'USDT', 'BTC', 'ETH'] as const;
@@ -143,7 +246,12 @@ export type AccountOnboardCmd =
   | { cmd: 'skip' }
   | { cmd: 'more' }
   | { cmd: 'done' }
-  | { cmd: 'open' }; // Phase 1.37-UX: open full account type picker from start 2-button keyboard
+  | { cmd: 'open' }    // Phase 1.37-UX: open full account type picker from start 2-button keyboard
+  | { cmd: 'bank_page';     page: number } // Phase 2.2: pagination
+  | { cmd: 'exchange_page'; page: number } // Phase 2.2
+  | { cmd: 'fiat_page';     page: number } // Phase 2.2
+  | { cmd: 'crypto_page';   page: number } // Phase 2.2
+  | { cmd: 'bal_skip' };                   // Phase 2.2: skip initial balance
 
 // ─────────────────────────────────────────────────────────────
 // Parser — SEC-01 allowlist
@@ -212,32 +320,45 @@ export function parseAccountCallback(data: string): AccountOnboardCmd | null {
     return { cmd: 'currency', code };
   }
 
+  // Phase 2.2: pagination callbacks
+  // ac:bp:{N}   → bank_page
+  // ac:xp:{N}   → exchange_page
+  // ac:cfp:{N}  → fiat_page
+  // ac:ccp:{N}  → crypto_page
+  // ac:bal:s    → bal_skip
+  if (sub === 'bp') {
+    const page = parseInt(parts[2] ?? '', 10);
+    if (isNaN(page) || page < 0 || page > 99) return null;
+    return { cmd: 'bank_page', page };
+  }
+  if (sub === 'xp') {
+    const page = parseInt(parts[2] ?? '', 10);
+    if (isNaN(page) || page < 0 || page > 99) return null;
+    return { cmd: 'exchange_page', page };
+  }
+  if (sub === 'cfp') {
+    const page = parseInt(parts[2] ?? '', 10);
+    if (isNaN(page) || page < 0 || page > 99) return null;
+    return { cmd: 'fiat_page', page };
+  }
+  if (sub === 'ccp') {
+    const page = parseInt(parts[2] ?? '', 10);
+    if (isNaN(page) || page < 0 || page > 99) return null;
+    return { cmd: 'crypto_page', page };
+  }
+  if (sub === 'bal') {
+    const act = parts[2] ?? '';
+    if (act === 's') return { cmd: 'bal_skip' };
+    return null;
+  }
+
   return null;
 }
 
 // ─────────────────────────────────────────────────────────────
-// Keyboard builders
+// Start keyboards
 // ─────────────────────────────────────────────────────────────
 
-/**
- * Build the guided account type keyboard shown when /accounts is empty.
- * Scenario Д from the roadmap.
- */
-export function buildAccountTypeKeyboard(): InlineKeyboardMarkup {
-  return {
-    inline_keyboard: [
-      [
-        { text: '💳 Банковская карта', callback_data: 'ac:type:card' },
-        { text: '💵 Наличные',         callback_data: 'ac:type:cash' },
-      ],
-      [
-        { text: '🔶 Крипто-биржа',  callback_data: 'ac:type:exchange' },
-        { text: '₿ Крипто-кошелёк', callback_data: 'ac:type:wallet' },
-      ],
-      [{ text: '✏️ Своё название', callback_data: 'ac:type:custom' }],
-    ],
-  };
-}
 
 /**
  * Phase 1.37-UX: Minimal 2-button keyboard for /start new user flow.
@@ -281,68 +402,158 @@ export function buildStartOnboardKeyboard(): InlineKeyboardMarkup {
   };
 }
 
+// ─────────────────────────────────────────────────────────────
+// Universal paginator (Phase 2.2)
+// ─────────────────────────────────────────────────────────────
+
+const DEFAULT_COLS = 3;
+const DEFAULT_PER_PAGE = 6;
+
 /**
- * Build the exchange preset picker.
- * Shown after user picks [🔶 Крипто-биржа].
+ * Build a paginated InlineKeyboardMarkup for any list of items.
+ *
+ * Layout per page:
+ *   Row 1..N : cols items each
+ *   Nav row  : [◀️ Назад] [N/Total] [Вперёд ▶️]  (hidden if only 1 page)
+ *   Last row : customLabel button
+ *
+ * @param items          Full list of {key, label} items
+ * @param page           0-indexed current page
+ * @param callbackPrefix Prefix for item callbacks, e.g. 'ac:bnk:'
+ * @param pagePrefix     Prefix for page nav callbacks, e.g. 'ac:bp:'
+ * @param customLabel    Label of the freeform button, e.g. '✏️ Другой банк'
+ * @param customCallback callback_data for freeform button, e.g. 'ac:bnk:custom'
+ * @param cols           Items per row (default 3)
+ * @param perPage        Items per page (default 6)
  */
-/**
- * Build the bank picker keyboard.
- * 9 popular banks (EU/CIS/US) + [✏️ Другой банк] for free-text.
- */
+function buildPaginatedPicker(
+  items: ReadonlyArray<{ key: string; label: string }>,
+  page: number,
+  callbackPrefix: string,
+  pagePrefix: string,
+  customLabel: string,
+  customCallback: string,
+  cols: number = DEFAULT_COLS,
+  perPage: number = DEFAULT_PER_PAGE,
+): InlineKeyboardMarkup {
+  const totalPages = Math.max(1, Math.ceil(items.length / perPage));
+  const safePage = Math.max(0, Math.min(page, totalPages - 1));
+  const pageItems = items.slice(safePage * perPage, safePage * perPage + perPage);
+
+  // Build item rows
+  const rows: Array<Array<{ text: string; callback_data: string }>> = [];
+  for (let i = 0; i < pageItems.length; i += cols) {
+    rows.push(
+      pageItems.slice(i, i + cols).map((item) => ({
+        text: item.label,
+        callback_data: `${callbackPrefix}${item.key}`,
+      })),
+    );
+  }
+
+  // Navigation row (skip if only 1 page)
+  if (totalPages > 1) {
+    const navRow: Array<{ text: string; callback_data: string }> = [];
+    if (safePage > 0) {
+      navRow.push({ text: '◀️', callback_data: `${pagePrefix}${String(safePage - 1)}` });
+    } else {
+      navRow.push({ text: '·', callback_data: 'ac:noop' });
+    }
+    navRow.push({ text: `${String(safePage + 1)}/${String(totalPages)}`, callback_data: 'ac:noop' });
+    if (safePage < totalPages - 1) {
+      navRow.push({ text: '▶️', callback_data: `${pagePrefix}${String(safePage + 1)}` });
+    } else {
+      navRow.push({ text: '·', callback_data: 'ac:noop' });
+    }
+    rows.push(navRow);
+  }
+
+  // Custom (freeform) button always at the bottom
+  rows.push([{ text: customLabel, callback_data: customCallback }]);
+
+  return { inline_keyboard: rows };
+}
+
+// ─────────────────────────────────────────────────────────────
+// Bank items list (derived from BANK_PRESETS)
+// ─────────────────────────────────────────────────────────────
+
+const BANK_ITEMS: ReadonlyArray<{ key: string; label: string }> = Array.from(BANK_PRESETS.entries()).map(
+  ([key, info]) => ({ key, label: info.name }),
+);
+
+const EXCHANGE_ITEMS: ReadonlyArray<{ key: string; label: string }> = Array.from(EXCHANGE_PRESETS.entries()).map(
+  ([key, name]) => ({ key, label: name }),
+);
+
+const FIAT_ITEMS: ReadonlyArray<{ key: string; label: string }> = FIAT_CURRENCY_PRESETS.map(
+  (code) => ({ key: code, label: code }),
+);
+
+const CRYPTO_ITEMS: ReadonlyArray<{ key: string; label: string }> = CRYPTO_CURRENCY_PRESETS.map(
+  (code) => ({ key: code, label: code }),
+);
+
+// ─────────────────────────────────────────────────────────────
+// Paginated keyboard builders (Phase 2.2)
+// ─────────────────────────────────────────────────────────────
+
+/** Bank picker — paginated. page=0 is the first page. */
+export function buildBankPickerPage(page: number): InlineKeyboardMarkup {
+  return buildPaginatedPicker(
+    BANK_ITEMS, page, 'ac:bnk:', 'ac:bp:', '\u270f\ufe0f Другой банк', 'ac:bnk:custom',
+  );
+}
+
+/** Exchange picker — paginated. */
+export function buildExchangePickerPage(page: number): InlineKeyboardMarkup {
+  return buildPaginatedPicker(
+    EXCHANGE_ITEMS, page, 'ac:xch:', 'ac:xp:', '\u270f\ufe0f Другая биржа', 'ac:xch:custom',
+  );
+}
+
+/** Fiat currency picker — paginated. */
+export function buildFiatCurrencyPage(page: number): InlineKeyboardMarkup {
+  return buildPaginatedPicker(
+    FIAT_ITEMS, page, 'ac:cur:', 'ac:cfp:', '\u270f\ufe0f Другая валюта', 'ac:cur:custom',
+  );
+}
+
+/** Crypto currency picker — paginated. */
+export function buildCryptoCurrencyPage(page: number): InlineKeyboardMarkup {
+  return buildPaginatedPicker(
+    CRYPTO_ITEMS, page, 'ac:cur:', 'ac:ccp:', '\u270f\ufe0f Другая валюта', 'ac:cur:custom',
+  );
+}
+
+/** Bank picker keyboard (Phase 2.2 alias → page 0). */
 export function buildBankPickerKeyboard(): InlineKeyboardMarkup {
+  return buildBankPickerPage(0);
+}
+
+/** Account type keyboard — shown at /accounts empty-state and ac:open (Phase 2.2). */
+export function buildAccountTypeKeyboard(): InlineKeyboardMarkup {
   return {
     inline_keyboard: [
       [
-        { text: 'Тинькофф',   callback_data: 'ac:bnk:tinkoff' },
-        { text: 'Сбербанк',   callback_data: 'ac:bnk:sber' },
-        { text: 'Монобанк',   callback_data: 'ac:bnk:mono' },
+        { text: '💳 Банковская карта', callback_data: 'ac:type:card' },
+        { text: '💵 Наличные',         callback_data: 'ac:type:cash' },
       ],
       [
-        { text: 'ПриватБанк', callback_data: 'ac:bnk:privat' },
-        { text: 'Revolut',    callback_data: 'ac:bnk:revolut' },
-        { text: 'Wise',       callback_data: 'ac:bnk:wise' },
+        { text: '🔄 Крипто-биржа',  callback_data: 'ac:type:exchange' },
+        { text: '🔐 Крипто-кошелёк', callback_data: 'ac:type:wallet' },
       ],
-      [
-        { text: 'Chase',      callback_data: 'ac:bnk:chase' },
-        { text: 'N26',        callback_data: 'ac:bnk:n26' },
-        { text: 'Raiffeisen', callback_data: 'ac:bnk:raiffeisen' },
-      ],
-      [{ text: '✏️ Другой банк', callback_data: 'ac:bnk:custom' }],
+      [{ text: '✏️ Своё название', callback_data: 'ac:type:custom' }],
     ],
   };
 }
 
-/**
- * Build the exchange picker keyboard.
- * 9 popular crypto exchanges + [✏️ Другая] for free-text.
- */
+/** Exchange picker keyboard (Phase 2.2 alias → page 0). */
 export function buildExchangePickerKeyboard(): InlineKeyboardMarkup {
-  return {
-    inline_keyboard: [
-      [
-        { text: 'Binance',  callback_data: 'ac:xch:binance' },
-        { text: 'Bybit',    callback_data: 'ac:xch:bybit' },
-        { text: 'OKX',      callback_data: 'ac:xch:okx' },
-      ],
-      [
-        { text: 'Kraken',   callback_data: 'ac:xch:kraken' },
-        { text: 'Coinbase', callback_data: 'ac:xch:coinbase' },
-        { text: 'KuCoin',   callback_data: 'ac:xch:kucoin' },
-      ],
-      [
-        { text: 'Huobi',    callback_data: 'ac:xch:huobi' },
-        { text: 'Gate.io',  callback_data: 'ac:xch:gateio' },
-        { text: 'Bitget',   callback_data: 'ac:xch:bitget' },
-      ],
-      [{ text: '✏️ Другая биржа', callback_data: 'ac:xch:custom' }],
-    ],
-  };
+  return buildExchangePickerPage(0);
 }
 
-/**
- * Build the wallet picker keyboard.
- * 8 popular crypto wallets + [✏️ Другой] for free-text.
- */
+/** Wallet picker keyboard (static — 8 presets, no pagination needed). */
 export function buildWalletPickerKeyboard(): InlineKeyboardMarkup {
   return {
     inline_keyboard: [
@@ -365,48 +576,14 @@ export function buildWalletPickerKeyboard(): InlineKeyboardMarkup {
   };
 }
 
-// ─────────────────────────────────────────────────────────────
-// Currency keyboards — split by asset class
-// ─────────────────────────────────────────────────────────────
-
-/**
- * Fiat currency picker — for banks and cash accounts.
- * No crypto here: a Тинькофф card cannot be in USDT.
- */
+/** Fiat currency keyboard (Phase 2.2 alias → page 0). */
 export function buildFiatCurrencyKeyboard(): InlineKeyboardMarkup {
-  return {
-    inline_keyboard: [
-      FIAT_CURRENCY_PRESETS.slice(0, 3).map((code) => ({
-        text: code,
-        callback_data: `ac:cur:${code}`,
-      })),
-      FIAT_CURRENCY_PRESETS.slice(3, 6).map((code) => ({
-        text: code,
-        callback_data: `ac:cur:${code}`,
-      })),
-      [{ text: '✏️ Другая валюта', callback_data: 'ac:cur:custom' }],
-    ],
-  };
+  return buildFiatCurrencyPage(0);
 }
 
-/**
- * Crypto currency picker — for exchanges and wallets.
- * No fiat here: Binance account is not in RUB.
- */
+/** Crypto currency keyboard (Phase 2.2 alias → page 0). */
 export function buildCryptoCurrencyKeyboard(): InlineKeyboardMarkup {
-  return {
-    inline_keyboard: [
-      CRYPTO_CURRENCY_PRESETS.slice(0, 3).map((code) => ({
-        text: code,
-        callback_data: `ac:cur:${code}`,
-      })),
-      CRYPTO_CURRENCY_PRESETS.slice(3, 6).map((code) => ({
-        text: code,
-        callback_data: `ac:cur:${code}`,
-      })),
-      [{ text: '✏️ Другая валюта', callback_data: 'ac:cur:custom' }],
-    ],
-  };
+  return buildCryptoCurrencyPage(0);
 }
 
 /**
@@ -503,3 +680,29 @@ export const WALLET_PICKER_TEXT = '₿ Выберите кошелёк:';
 /** Prompt for free-text currency input. */
 export const CURRENCY_INPUT_PROMPT =
   '💱 Введи код валюты (например: <i>SOL</i>, <i>MATIC</i>, <i>UAH</i>):';
+
+// ─────────────────────────────────────────────────────────────
+// Balance input step (Phase 2.2)
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Prompt shown after account is created — asking for initial balance.
+ * Includes ['⏩ Пропустить] button.
+ */
+export const BAL_INPUT_PROMPT =
+  '💰 <b>Сколько сейчас на счёте?</b>\n\n' +
+  'Напиши сумму цифрами, например: <i>15000</i>\n' +
+  'Или пропусти — баланс можно синхронизировать позже.';
+
+/**
+ * Keyboard for the bal_input step.
+ * Single button to skip balance input.
+ * ac:bal:s → bal_skip → 8 bytes ✅
+ */
+export function buildSkipBalanceKeyboard(): InlineKeyboardMarkup {
+  return {
+    inline_keyboard: [
+      [{ text: '⏩ Пропустить', callback_data: 'ac:bal:s' }],
+    ],
+  };
+}

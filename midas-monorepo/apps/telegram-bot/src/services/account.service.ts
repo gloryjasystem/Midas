@@ -519,6 +519,66 @@ export async function addAccountWithCurrency(
 }
 
 // ─────────────────────────────────────────────────────────────
+// addAccountReturningId — Phase 2.2
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Result of addAccountReturningId().
+ *   created   — new row inserted; accountId is the ULID of the new account.
+ *   duplicate — name already exists in this workspace; accountId is undefined.
+ */
+export interface AddAccountWithIdResult {
+  status: 'created' | 'duplicate';
+  accountId?: string;
+}
+
+/**
+ * Insert a new account_sources row with an explicitly supplied currency and
+ * return the generated account ULID on success.
+ *
+ * This is the Phase 2.2 successor to addAccountWithCurrency() for the guided
+ * onboarding flow. The returned accountId is stored in AccountOnboardState and
+ * used by the bal_input step to call setAccountBalanceById() without a second
+ * DB round-trip.
+ *
+ * @param workspaceId - Internal workspace ULID (from trusted backend — SEC-03)
+ * @param userId      - Internal user ULID (required by withTenantTransaction)
+ * @param name        - Account name (pre-validated, non-empty, max 100 chars)
+ * @param currency    - Explicit currency code (pre-validated, non-empty, max 10 chars)
+ * @returns AddAccountWithIdResult: { status, accountId? }
+ *
+ * SEC-03: INSERT runs inside withTenantTransaction — RLS enforced.
+ * SEC-02: No financial amounts. No float arithmetic.
+ * SEC-12: Name and currency NOT logged.
+ */
+export async function addAccountReturningId(
+  workspaceId: string,
+  userId: string,
+  name: string,
+  currency: string,
+): Promise<AddAccountWithIdResult> {
+  const accountId = generateUlid();
+
+  const rowsInserted = await withTenantTransaction<number>(
+    workspaceId,
+    userId,
+    async (client) => {
+      const result = await client.query<{ id: string }>(
+        `INSERT INTO account_sources (id, workspace_id, name, type, currency)
+         VALUES ($1, $2, $3, 'manual'::account_source_type, $4)
+         ON CONFLICT ON CONSTRAINT account_sources_workspace_id_name_key DO NOTHING
+         RETURNING id`,
+        [accountId, workspaceId, name, currency],
+      );
+      return result.rowCount ?? 0;
+    },
+  );
+
+  if (rowsInserted === 0) return { status: 'duplicate' };
+  return { status: 'created', accountId };
+}
+
+// ─────────────────────────────────────────────────────────────
 // renameAccount — Phase 2.1
 // ─────────────────────────────────────────────────────────────
 

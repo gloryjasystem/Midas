@@ -72,12 +72,13 @@ import {
 import {
   getAccountList,
   addAccount,
-  hasAccounts,             // Phase 1.30
-  addAccountWithCurrency,  // Phase 1.30
+  hasAccounts,              // Phase 1.30
+  addAccountWithCurrency,   // Phase 1.30 (used in cur_input text path)
+  addAccountReturningId,    // Phase 2.2 (used in currency callback → bal_input)
   parseAddAccountArgs,
-  renameAccount,           // Phase 2.1
-  changeAccountCurrency,   // Phase 2.1
-  softDeleteAccount,       // Phase 2.1
+  renameAccount,            // Phase 2.1
+  changeAccountCurrency,    // Phase 2.1
+  softDeleteAccount,        // Phase 2.1
 } from '../services/account.service.js';
 import {
   getSettings,
@@ -141,13 +142,20 @@ import {
   parseAccountCallback,             // Phase 1.30
   buildAccountTypeKeyboard,          // Phase 1.30
   buildStartSimpleKeyboard,          // Phase 1.37-UX: 2-button /start keyboard
-  buildExchangePickerKeyboard,       // Phase 1.30
-  buildBankPickerKeyboard,           // Phase 2.1
+  buildExchangePickerKeyboard,       // Phase 1.30 (alias → page 0)
+  buildBankPickerKeyboard,           // Phase 2.1 (alias → page 0)
   buildWalletPickerKeyboard,         // Phase 2.1
-  buildFiatCurrencyKeyboard,         // Phase 2.1
-  buildCryptoCurrencyKeyboard,       // Phase 2.1
+  buildFiatCurrencyKeyboard,         // Phase 2.1 (alias → page 0)
+  buildCryptoCurrencyKeyboard,       // Phase 2.1 (alias → page 0)
   buildOnboardCurrencyKeyboard,      // Phase 1.30
   buildAfterCreateKeyboard,          // Phase 1.30
+  // Phase 2.2: paginated builders
+  buildBankPickerPage,               // Phase 2.2
+  buildExchangePickerPage,           // Phase 2.2
+  buildFiatCurrencyPage,             // Phase 2.2
+  buildCryptoCurrencyPage,           // Phase 2.2
+  buildSkipBalanceKeyboard,          // Phase 2.2
+  BAL_INPUT_PROMPT,                  // Phase 2.2
   ACCOUNTS_EMPTY_TEXT,               // Phase 1.30
   START_WELCOME_TEXT,                // Phase 1.37-UX: new user welcome
   SETUP_COMPLETE_TEXT,               // Phase 1.37-UX: ReplyKeyboard activation message
@@ -699,7 +707,7 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
               if (acMsgId) void editMessageText(chatId, acMsgId, nameInputPrompt('wallet'), { inline_keyboard: [] });
 
             } else if (acCmd.cmd === 'currency') {
-              // User picked a currency — load state, create account
+              // User picked a currency — load state, create account, go to bal_input
               const rawState = await redisConnection.get(acKey);
               if (!rawState) {
                 // State expired — restart
@@ -716,30 +724,57 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
                   accountName = state.name ?? 'Счёт';
                 }
 
-                const res = await addAccountWithCurrency(
+                const res = await addAccountReturningId(
                   acResolved.workspaceId, acResolved.userId, accountName, acCmd.code,
                 );
 
-                await redisConnection.del(acKey);
-
-                if (res === 'duplicate') {
+                if (res.status === 'duplicate') {
+                  await redisConnection.del(acKey);
                   if (acMsgId) void editMessageText(
                     chatId, acMsgId,
                     `⚠️ Счёт <b>${escapeHtml(accountName)}</b> уже существует.`,
                     buildAfterCreateKeyboard(),
                   );
                 } else {
-                  // Phase 1.37-UX: Account created — show [➕ Ещё] [✅ Готово] inline keyboard.
-                  // Do NOT activate ReplyKeyboard yet — user might add more accounts.
-                  // ReplyKeyboard activates only at ac:done (the final "Готово" tap).
-                  if (acMsgId) void editMessageText(
-                    chatId, acMsgId,
-                    `✅ Счёт <b>${escapeHtml(accountName)}</b> (${escapeHtml(acCmd.code)}) создан!`,
-                    buildAfterCreateKeyboard(),
-                  );
-                  request.log.info({ msg: '[midas:bot:webhook] ac: account created via onboarding', workspaceId: acResolved.workspaceId });
+                  // Phase 2.2: transition to bal_input step
+                  const newState: AccountOnboardState = {
+                    step: 'bal_input',
+                    accountType: state.accountType,
+                    name: accountName,
+                    accountId: res.accountId,
+                    currency: acCmd.code,
+                  };
+                  await redisConnection.set(acKey, JSON.stringify(newState), 'EX', ONBOARD_STATE_TTL_SEC);
+                  const balPrompt = `✅ Счёт <b>${escapeHtml(accountName)}</b> (${escapeHtml(acCmd.code)}) создан!\n\n${BAL_INPUT_PROMPT}`;
+                  if (acMsgId) void editMessageText(chatId, acMsgId, balPrompt, buildSkipBalanceKeyboard());
+                  request.log.info({ msg: '[midas:bot:webhook] ac: account created, awaiting balance', workspaceId: acResolved.workspaceId });
                 }
               }
+
+            } else if (acCmd.cmd === 'bal_skip') {
+              // Phase 2.2: user skipped balance input
+              await redisConnection.del(acKey);
+              if (acMsgId) void editMessageText(
+                chatId, acMsgId,
+                '✅ Счёт создан! Баланс можно синхронизировать позже через /balance.',
+                buildAfterCreateKeyboard(),
+              );
+
+            } else if (acCmd.cmd === 'bank_page') {
+              // Phase 2.2: paginate bank picker
+              if (acMsgId) void editMessageText(chatId, acMsgId, BANK_PICKER_TEXT, buildBankPickerPage(acCmd.page));
+
+            } else if (acCmd.cmd === 'exchange_page') {
+              // Phase 2.2: paginate exchange picker
+              if (acMsgId) void editMessageText(chatId, acMsgId, EXCHANGE_PICKER_TEXT, buildExchangePickerPage(acCmd.page));
+
+            } else if (acCmd.cmd === 'fiat_page') {
+              // Phase 2.2: paginate fiat currency picker
+              if (acMsgId) void editMessageText(chatId, acMsgId, CURRENCY_PICKER_TEXT, buildFiatCurrencyPage(acCmd.page));
+
+            } else if (acCmd.cmd === 'crypto_page') {
+              // Phase 2.2: paginate crypto currency picker
+              if (acMsgId) void editMessageText(chatId, acMsgId, CURRENCY_PICKER_TEXT, buildCryptoCurrencyPage(acCmd.page));
 
             } else {
               // currency_custom: prompt free-text currency input
@@ -3605,7 +3640,13 @@ Midas создан, чтобы сделать учет денег максима
             await redisConnection.set(acKey, JSON.stringify(updatedState), 'EX', ONBOARD_STATE_TTL_SEC);
             try {
               const resolved = await resolveWorkspace(telegramUserId, chatId);
-              void upsertBotMessage(telegramUserId, chatId, CURRENCY_PICKER_TEXT, buildOnboardCurrencyKeyboard());
+              // Phase 2.2 bugfix: route to correct currency keyboard by accountType
+              const curKb = acState.accountType === 'card'
+                ? buildFiatCurrencyPage(0)
+                : acState.accountType === 'exchange' || acState.accountType === 'wallet'
+                ? buildCryptoCurrencyPage(0)
+                : buildOnboardCurrencyKeyboard(); // custom → mixed
+              void upsertBotMessage(telegramUserId, chatId, CURRENCY_PICKER_TEXT, curKb);
               request.log.info({ msg: '[midas:bot:webhook] ac: name input received', workspaceId: resolved.workspaceId });
             } catch {
               void upsertBotMessage(telegramUserId, chatId, CURRENCY_PICKER_TEXT);
@@ -3656,8 +3697,48 @@ Midas создан, чтобы сделать учет денег максима
           }
           await reply.status(200).send({ ok: true });
           return;
+
+        } else if (acState.step === 'bal_input') {
+          // Phase 2.2: user typed initial balance amount
+          const amount = extractAmountFromText(message.text);
+          if (!amount) {
+            void upsertBotMessage(
+              telegramUserId, chatId,
+              '⚠️ Не распознал число. Напиши сумму цифрами, например: <i>15000</i>',
+              buildSkipBalanceKeyboard(),
+            );
+            await reply.status(200).send({ ok: true });
+            return;
+          }
+
+          if (!acState.accountId) {
+            // Safety: missing accountId — skip to afterCreate
+            await redisConnection.del(acKey);
+            void upsertBotMessage(telegramUserId, chatId, '⚠️ Ошибка состояния. Счёт создан.', buildAfterCreateKeyboard());
+            await reply.status(200).send({ ok: true });
+            return;
+          }
+
+          await redisConnection.del(acKey);
+          try {
+            const resolved = await resolveWorkspace(telegramUserId, chatId);
+            await setAccountBalanceById(resolved.workspaceId, resolved.userId, acState.accountId, amount);
+            const nameEsc = escapeHtml(acState.name ?? 'Счёт');
+            const curEsc  = escapeHtml(acState.currency ?? '');
+            void upsertBotMessage(
+              telegramUserId, chatId,
+              `✅ Баланс <b>${nameEsc}</b>: ${amount} ${curEsc}`,
+              buildAfterCreateKeyboard(),
+            );
+            request.log.info({ msg: '[midas:bot:webhook] ac: balance set via onboarding', workspaceId: resolved.workspaceId });
+          } catch (err: unknown) {
+            const errorClass = err instanceof Error ? err.constructor.name : 'UnknownError';
+            request.log.error({ msg: '[midas:bot:webhook] ac: bal_input setBalance failed', errorClass });
+            void upsertBotMessage(telegramUserId, chatId, '⚠️ Не удалось записать баланс. Счёт создан.', buildAfterCreateKeyboard());
+          }
+          await reply.status(200).send({ ok: true });
+          return;
         }
-        // Other steps (type_pick, cur_pick) don't intercept text — fall through
       }
     }
 
