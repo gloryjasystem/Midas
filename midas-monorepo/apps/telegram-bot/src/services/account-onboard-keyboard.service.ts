@@ -941,13 +941,13 @@ const TYPE_FULL_LABELS: Record<string, string> = {
   wallet_lightning: '⚡ Lightning',
 };
 
-const SEP = '\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500';
 
-/** Builds the initial name-input prompt text (Экран 2Б) — clean, no step counter */
+
+/** Builds the initial name-input prompt text (Экран 2Б) — clean, blockquote for examples */
 export function buildInputPromptText(
   accountType: string,
   walletSubtype?: string,
-  _stepN?: number,   // kept for API compatibility, no longer rendered
+  _stepN?: number,
   _stepTotal?: number,
 ): string {
   const key = walletSubtype ?? accountType;
@@ -956,14 +956,13 @@ export function buildInputPromptText(
   const question = INPUT_QUESTIONS[key] ?? 'Введите название:';
   const examples = (INPUT_PROMPT_EXAMPLES[key] ?? []).slice(0, 3).map((e) => `«${e}»`).join(', ');
   return (
-    `<b>${header}</b>\n` +
-    `${SEP}\n` +
-    `${question}\n\n` +
-    `<i>${examples} или другой</i>`
+    `<b>${header}</b>\n\n` +
+    `${question}\n` +
+    `<blockquote>${examples} или другой</blockquote>`
   );
 }
 
-/** Builds re-prompt after «✏️ Другое название» — same clean style */
+/** Builds re-prompt after «✏️ Другое название» — blockquote for examples */
 export function buildFreeTextPromptText(
   accountType: string,
   walletSubtype?: string,
@@ -976,10 +975,9 @@ export function buildFreeTextPromptText(
   const label   = labels[key] ?? 'счёта';
   const examples = (REPROMPT_EXAMPLES[key] ?? []).slice(0, 3).map((e) => `«${e}»`).join(', ');
   return (
-    `✏️ <b>Другое название</b>\n` +
-    `${SEP}\n` +
-    `Введите название ${label}:\n\n` +
-    `<i>${examples}...</i>`
+    `✏️ <b>Другое название</b>\n\n` +
+    `Введите название ${label}:\n` +
+    `<blockquote>${examples}...</blockquote>`
   );
 }
 
@@ -1322,12 +1320,11 @@ export const EXCHANGE_PICKER_TEXT = 'Какая биржа?';
 export const CURRENCY_PICKER_TEXT = 'В какой валюте?';
 
 /**
- * Context-aware currency picker header — shows account name above separator.
- * Falls back to generic text when name is unknown.
+ * Context-aware currency picker header — shows account name in blockquote.
  */
 export function buildCurrencyPickerText(name?: string): string {
   if (!name) return CURRENCY_PICKER_TEXT;
-  return `<b>«${name}»</b>\n${SEP}\nВыберите валюту:`;
+  return `<blockquote>${name}</blockquote>\nВыберите валюту:`;
 }
 
 /** Prompt for free-text account name input. */
@@ -1365,12 +1362,11 @@ export const BAL_INPUT_PROMPT =
   'Или пропусти — баланс можно синхронизировать позже.';
 
 /**
- * Context-aware balance prompt — shows «Name · CURRENCY» above separator.
+ * Context-aware balance prompt — shows name · CURRENCY in blockquote.
  */
 export function buildBalancePromptText(name: string, currency: string): string {
   return (
-    `<b>«${name}»</b> · <b>${currency}</b>\n` +
-    `${SEP}\n` +
+    `<blockquote>${name} · ${currency}</blockquote>\n` +
     `💰 Какой начальный баланс?\n\n` +
     `<i>Введите сумму или пропустите</i>`
   );
@@ -1481,8 +1477,10 @@ function computeScore(norm: string, translit: string, key: string, nameLower: st
 /** Cash keyword patterns (RU/UK/EN). */
 const CASH_KEYWORDS = [
   'наличн','наличк','налик','нал','cash','готівк','кэш','кеш','кэшь',
-  'cash','moneta','монета',
 ];
+
+/** Minimum input length to allow kw.startsWith(norm) check — prevents 'mon' matching 'moneta' etc. */
+const CASH_PREFIX_MIN_LEN = 4;
 
 /**
  * Phase 2.3: Fuzzy-match user's free-text input against all known presets.
@@ -1503,7 +1501,11 @@ export function fuzzyMatchAccountName(
   // Cash check (no typeFilter restriction — cash is universal)
   if (!typeFilter || typeFilter === 'card') {
     for (const kw of CASH_KEYWORDS) {
-      if (norm.startsWith(kw) || kw.startsWith(norm) || norm.includes(kw)) {
+      if (
+        norm.startsWith(kw) ||
+        (norm.length >= CASH_PREFIX_MIN_LEN && kw.startsWith(norm)) || // min-len guard: prevents 'mon' matching long keywords
+        norm.includes(kw)
+      ) {
         return { name: 'Наличные', type: 'cash', defaultCurrency: 'RUB', score: 0.88 };
       }
     }
@@ -1531,12 +1533,33 @@ export function fuzzyMatchAccountName(
     }
   }
 
-  // Wallets
+  // Wallets (crypto)
   if (!typeFilter || typeFilter === 'wallet') {
     for (const [key, name] of WALLET_PRESETS.entries()) {
       const score = computeScore(norm, translit, key, normalizeKey(name));
       if (score > FUZZY_THRESHOLD && score > (best?.score ?? 0)) {
         best = { name, type: 'wallet', defaultCurrency: 'USDT', score };
+      }
+    }
+    // E-wallets (fiat): QIWI, ЮМoney, Skrill, Payoneer etc.
+    for (const [key, info] of EWALLET_PRESETS.entries()) {
+      const score = computeScore(norm, translit, key, normalizeKey(info.name));
+      if (score > FUZZY_THRESHOLD && score > (best?.score ?? 0)) {
+        best = { name: info.name, type: 'wallet', defaultCurrency: info.defaultCurrency, score };
+      }
+    }
+    // TON ecosystem wallets
+    for (const [key, name] of TON_WALLET_PRESETS.entries()) {
+      const score = computeScore(norm, translit, key, normalizeKey(name));
+      if (score > FUZZY_THRESHOLD && score > (best?.score ?? 0)) {
+        best = { name, type: 'wallet', defaultCurrency: 'TON', score };
+      }
+    }
+    // Lightning wallets
+    for (const [key, name] of LIGHTNING_PRESETS.entries()) {
+      const score = computeScore(norm, translit, key, normalizeKey(name));
+      if (score > FUZZY_THRESHOLD && score > (best?.score ?? 0)) {
+        best = { name, type: 'wallet', defaultCurrency: 'BTC', score };
       }
     }
   }
@@ -1556,8 +1579,7 @@ export function fuzzyMatchAccountName(
 export function buildSmartConfirmText(match: FuzzyAccountMatch): string {
   return (
     `💡 <b>Нашли похожее</b>\n` +
-    `${SEP}\n` +
-    `«<b>${match.name}</b>»\n\n` +
+    `<blockquote>${match.name}</blockquote>\n` +
     `Это верно?`
   );
 }
