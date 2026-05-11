@@ -43,13 +43,14 @@ import type { InlineKeyboardMarkup } from '../services/telegram-api.js';
 
 /**
  * Onboarding flow step.
- *   type_pick    → user taps /accounts or /start guided keyboard
- *   name_input   → bot awaiting free-text account name
- *   cur_pick     → bot showing currency keyboard
- *   cur_input    → bot awaiting free-text currency code
- *   bal_input    → bot awaiting initial balance amount (Phase 2.2)
+ *   type_pick      → user taps /accounts or /start guided keyboard
+ *   name_input     → bot awaiting free-text account name
+ *   smart_confirm  → bot showed fuzzy suggestion, awaiting confirm/reject (Phase 2.3)
+ *   cur_pick       → bot showing currency keyboard
+ *   cur_input      → bot awaiting free-text currency code
+ *   bal_input      → bot awaiting initial balance amount (Phase 2.2)
  */
-export type OnboardStep = 'type_pick' | 'name_input' | 'cur_pick' | 'cur_input' | 'bal_input';
+export type OnboardStep = 'type_pick' | 'name_input' | 'smart_confirm' | 'cur_pick' | 'cur_input' | 'bal_input';
 
 export interface AccountOnboardState {
   step: OnboardStep;
@@ -61,6 +62,15 @@ export interface AccountOnboardState {
   accountId?: string;
   /** Currency code — stored for bal_input display (Phase 2.2) */
   currency?: string;
+  // Phase 2.3: smart name matching
+  /** Raw text the user originally typed (before fuzzy suggestion) */
+  originalName?: string;
+  /** Fuzzy-matched preset name to suggest */
+  suggestedName?: string;
+  /** Account type inferred from the fuzzy match */
+  suggestedType?: 'card' | 'cash' | 'exchange' | 'wallet';
+  /** Default currency for the suggested preset */
+  suggestedCurrency?: string;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -252,7 +262,9 @@ export type AccountOnboardCmd =
   | { cmd: 'fiat_page';     page: number } // Phase 2.2
   | { cmd: 'crypto_page';   page: number } // Phase 2.2
   | { cmd: 'bal_skip' }                    // Phase 2.2: skip initial balance
-  | { cmd: 'fin' };                        // Phase 2.3: finish onboarding from type picker
+  | { cmd: 'fin' }                         // Phase 2.3: finish onboarding from type picker
+  | { cmd: 'cus_ok' }                      // Phase 2.3: confirm fuzzy-matched name
+  | { cmd: 'cus_keep' };                   // Phase 2.3: keep original typed name (reject suggestion)
 
 // ─────────────────────────────────────────────────────────────
 // Parser — SEC-01 allowlist
@@ -279,8 +291,15 @@ export function parseAccountCallback(data: string): AccountOnboardCmd | null {
   if (sub === 'skip') return { cmd: 'skip' };
   if (sub === 'more') return { cmd: 'more' };
   if (sub === 'done') return { cmd: 'done' };
-  if (sub === 'fin')  return { cmd: 'fin' };  // Phase 2.3: finish onboarding from type picker
-  if (sub === 'open') return { cmd: 'open' }; // Phase 1.37-UX: open type picker
+  if (sub === 'fin')  return { cmd: 'fin' };   // Phase 2.3: finish onboarding from type picker
+  if (sub === 'open') return { cmd: 'open' };  // Phase 1.37-UX: open type picker
+  // Phase 2.3: smart name confirm/reject
+  if (sub === 'cus') {
+    const act = parts[2] ?? '';
+    if (act === 'ok')   return { cmd: 'cus_ok' };
+    if (act === 'keep') return { cmd: 'cus_keep' };
+    return null;
+  }
 
   if (sub === 'type') {
     const t = parts[2] ?? '';
@@ -747,6 +766,216 @@ export function buildSkipBalanceKeyboard(): InlineKeyboardMarkup {
   return {
     inline_keyboard: [
       [{ text: '⏩ Пропустить', callback_data: 'ac:bal:s' }],
+    ],
+  };
+}
+
+// ─────────────────────────────────────────────────────────────
+// Phase 2.3: Smart name matching engine
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Result of a fuzzy account name match.
+ * Score is 0–1; only matches above FUZZY_THRESHOLD are returned.
+ */
+export interface FuzzyAccountMatch {
+  name: string;
+  type: 'card' | 'cash' | 'exchange' | 'wallet';
+  defaultCurrency: string;
+  score: number;
+}
+
+/** Minimum confidence to surface a fuzzy suggestion. */
+const FUZZY_THRESHOLD = 0.62;
+
+/** Cyrillic → Latin transliteration table (Russian + Ukrainian). */
+const CYR_LAT: Record<string, string> = {
+  'а':'a','б':'b','в':'v','г':'g','д':'d','е':'e','ё':'yo',
+  'ж':'zh','з':'z','и':'i','й':'j','к':'k','л':'l','м':'m',
+  'н':'n','о':'o','п':'p','р':'r','с':'s','т':'t','у':'u',
+  'ф':'f','х':'kh','ц':'ts','ч':'ch','ш':'sh','щ':'shch',
+  'ъ':'','ы':'y','ь':'','э':'e','ю':'yu','я':'ya',
+  // Ukrainian
+  'і':'i','ї':'yi','є':'ye','ґ':'g',
+};
+
+function transliterate(s: string): string {
+  return s.toLowerCase().split('').map((c) => CYR_LAT[c] ?? c).join('');
+}
+
+function normalizeKey(s: string): string {
+  return s.toLowerCase().replace(/[\s\-_.,!?'"()]/g, '');
+}
+
+/** Levenshtein distance — O(m×n), safe for short strings. */
+function levenshtein(a: string, b: string): number {
+  if (a.length === 0) return b.length;
+  if (b.length === 0) return a.length;
+  const prev = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i++) {
+    let prev_diag = prev[0]!;
+    prev[0] = i;
+    for (let j = 1; j <= b.length; j++) {
+      const temp = prev[j]!;
+      prev[j] = a[i - 1] === b[j - 1]
+        ? prev_diag
+        : 1 + Math.min(prev[j]!, prev[j - 1]!, prev_diag);
+      prev_diag = temp;
+    }
+  }
+  return prev[b.length]!;
+}
+
+/**
+ * Compute match score (0–1) between user input and a preset key/name.
+ * Checks: exact → substring → prefix → Levenshtein.
+ */
+function computeScore(norm: string, translit: string, key: string, nameLower: string): number {
+  // Exact
+  if (norm === key || translit === key) return 1.0;
+  // Key contains input (min 3 chars to avoid noise)
+  if (norm.length >= 3 && key.includes(norm)) return 0.92;
+  if (translit.length >= 3 && key.includes(translit)) return 0.90;
+  // Name contains input
+  if (norm.length >= 3 && nameLower.includes(norm)) return 0.87;
+  if (translit.length >= 3 && nameLower.includes(translit)) return 0.85;
+  // Input contains key
+  if (key.length >= 3 && norm.includes(key)) return 0.82;
+  // Prefix match
+  if (norm.length >= 3 && key.startsWith(norm)) return 0.80;
+  if (translit.length >= 3 && key.startsWith(translit)) return 0.78;
+  if (key.length >= 3 && norm.startsWith(key)) return 0.75;
+  // Levenshtein (only for inputs ≥ 3 chars to avoid false positives)
+  if (norm.length >= 3) {
+    const d = levenshtein(norm, key);
+    const s = 1 - d / Math.max(norm.length, key.length);
+    if (s > FUZZY_THRESHOLD) return s;
+    if (translit !== norm) {
+      const dt = levenshtein(translit, key);
+      const st = 1 - dt / Math.max(translit.length, key.length);
+      if (st > FUZZY_THRESHOLD) return st;
+    }
+  }
+  return 0;
+}
+
+/** Cash keyword patterns (RU/UK/EN). */
+const CASH_KEYWORDS = [
+  'наличн','наличк','налик','нал','cash','готівк','кэш','кеш','кэшь',
+  'cash','moneta','монета',
+];
+
+/**
+ * Phase 2.3: Fuzzy-match user's free-text input against all known presets.
+ * Supports Russian, Ukrainian, English and transliterated input.
+ * Returns the best match above FUZZY_THRESHOLD, or null.
+ *
+ * @param input   Raw text the user typed
+ * @param typeFilter  Optional: restrict to one account type (for card/exchange/wallet custom flows)
+ */
+export function fuzzyMatchAccountName(
+  input: string,
+  typeFilter?: 'card' | 'exchange' | 'wallet',
+): FuzzyAccountMatch | null {
+  const norm = normalizeKey(input);
+  const translit = transliterate(norm);
+  if (norm.length < 2) return null;
+
+  // Cash check (no typeFilter restriction — cash is universal)
+  if (!typeFilter || typeFilter === 'card') {
+    for (const kw of CASH_KEYWORDS) {
+      if (norm.startsWith(kw) || kw.startsWith(norm) || norm.includes(kw)) {
+        return { name: 'Наличные', type: 'cash', defaultCurrency: 'RUB', score: 0.88 };
+      }
+    }
+  }
+
+  let best: FuzzyAccountMatch | null = null;
+
+  // Banks (card)
+  if (!typeFilter || typeFilter === 'card') {
+    for (const [key, info] of BANK_PRESETS.entries()) {
+      const score = computeScore(norm, translit, key, normalizeKey(info.name));
+      if (score > FUZZY_THRESHOLD && score > (best?.score ?? 0)) {
+        best = { name: info.name, type: 'card', defaultCurrency: info.defaultCurrency, score };
+      }
+    }
+  }
+
+  // Exchanges
+  if (!typeFilter || typeFilter === 'exchange') {
+    for (const [key, name] of EXCHANGE_PRESETS.entries()) {
+      const score = computeScore(norm, translit, key, normalizeKey(name));
+      if (score > FUZZY_THRESHOLD && score > (best?.score ?? 0)) {
+        best = { name, type: 'exchange', defaultCurrency: 'USDT', score };
+      }
+    }
+  }
+
+  // Wallets
+  if (!typeFilter || typeFilter === 'wallet') {
+    for (const [key, name] of WALLET_PRESETS.entries()) {
+      const score = computeScore(norm, translit, key, normalizeKey(name));
+      if (score > FUZZY_THRESHOLD && score > (best?.score ?? 0)) {
+        best = { name, type: 'wallet', defaultCurrency: 'USDT', score };
+      }
+    }
+  }
+
+  return best;
+}
+
+// ─────────────────────────────────────────────────────────────
+// Phase 2.3: Smart confirm UI
+// ─────────────────────────────────────────────────────────────
+
+const TYPE_LABELS: Record<string, string> = {
+  card:     '💳 Банковская карта',
+  cash:     '💵 Наличные',
+  exchange: '🔄 Крипто-биржа',
+  wallet:   '🔐 Крипто-кошелёк',
+};
+
+const TYPE_EMOJI: Record<string, string> = {
+  card: '🏦', cash: '💵', exchange: '📊', wallet: '🔐',
+};
+
+/**
+ * Message shown when a fuzzy match is found.
+ * Professional fintech style — clear, concise, no noise.
+ */
+export function buildSmartConfirmText(match: FuzzyAccountMatch): string {
+  const emoji = TYPE_EMOJI[match.type] ?? '💼';
+  const typeLabel = TYPE_LABELS[match.type] ?? match.type;
+  return (
+    `🔍 <b>Похоже, вы имели в виду:</b>\n\n` +
+    `${emoji} <b>${match.name}</b>\n` +
+    `Тип: ${typeLabel}\n` +
+    `Валюта: ${match.defaultCurrency}\n\n` +
+    `Подтвердите или введите другое название:`
+  );
+}
+
+/**
+ * Phase 2.3: Keyboard for the smart confirm step.
+ *   [✅ Да, {name}]
+ *   [✏️ Другое название]  [◀️ К типу счёта]
+ *
+ * ac:cus:ok   → 12 bytes ✅
+ * ac:cus:keep → 15 bytes ✅
+ * ac:open     → 7 bytes  ✅
+ */
+export function buildSmartConfirmKeyboard(suggestedName: string): InlineKeyboardMarkup {
+  const preview = suggestedName.length > 28
+    ? `${suggestedName.slice(0, 26)}…`
+    : suggestedName;
+  return {
+    inline_keyboard: [
+      [{ text: `✅ Да, ${preview}`, callback_data: 'ac:cus:ok' }],
+      [
+        { text: '✏️ Другое название', callback_data: 'ac:cus:keep' },
+        { text: '◀️ К типу счёта',    callback_data: 'ac:open' },
+      ],
     ],
   };
 }

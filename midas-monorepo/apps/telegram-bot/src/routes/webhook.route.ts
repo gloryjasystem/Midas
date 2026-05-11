@@ -168,6 +168,9 @@ import {
   buildFinishOnboardKeyboard,        // Phase 2.3
   accountAddedText,                  // Phase 2.3
   SKIP_COMPLETE_TEXT,                // Phase 2.3: ac:skip D1 message with ReplyKeyboard
+  fuzzyMatchAccountName,             // Phase 2.3: smart name fuzzy matching
+  buildSmartConfirmKeyboard,         // Phase 2.3: smart confirm UI
+  buildSmartConfirmText,             // Phase 2.3: smart confirm message
   type AccountOnboardState,          // Phase 1.30
 } from '../services/account-onboard-keyboard.service.js';
 import {
@@ -665,6 +668,55 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
               if (acMsgId) void deleteMessage(chatId, acMsgId);
               await clearActiveMessageId(telegramUserId, chatId);
               void sendMessageWithReplyKeyboard(chatId, SETUP_COMPLETE_TEXT, buildMainMenuKeyboard());
+
+            } else if (acCmd.cmd === 'cus_ok') {
+              // Phase 2.3: user confirmed the fuzzy-matched name suggestion.
+              // Load state → use suggestedName + suggestedType → route to currency picker.
+              const rawStateCus = await redisConnection.get(acKey);
+              if (!rawStateCus) {
+                if (acMsgId) void editMessageText(chatId, acMsgId, ACCOUNTS_EMPTY_TEXT, buildAccountTypeKeyboard());
+              } else {
+                let sCus: AccountOnboardState;
+                try { sCus = JSON.parse(rawStateCus) as AccountOnboardState; }
+                catch { sCus = { step: 'type_pick' }; }
+
+                const confirmedName = sCus.suggestedName ?? sCus.originalName ?? 'Счёт';
+                const confirmedType = sCus.suggestedType ?? 'custom';
+                const newState: AccountOnboardState = {
+                  ...sCus,
+                  step: 'cur_pick',
+                  accountType: confirmedType,
+                  name: confirmedName,
+                };
+                await redisConnection.set(acKey, JSON.stringify(newState), 'EX', ONBOARD_STATE_TTL_SEC);
+                const curKb = (confirmedType === 'card' || confirmedType === 'cash')
+                  ? buildFiatCurrencyPage(0)
+                  : (confirmedType === 'exchange' || confirmedType === 'wallet')
+                  ? buildCryptoCurrencyPage(0)
+                  : buildOnboardCurrencyKeyboard();
+                if (acMsgId) void editMessageText(chatId, acMsgId, CURRENCY_PICKER_TEXT, curKb);
+              }
+
+            } else if (acCmd.cmd === 'cus_keep') {
+              // Phase 2.3: user rejected the suggestion — proceed with their original typed name.
+              const rawStateCusK = await redisConnection.get(acKey);
+              if (!rawStateCusK) {
+                if (acMsgId) void editMessageText(chatId, acMsgId, ACCOUNTS_EMPTY_TEXT, buildAccountTypeKeyboard());
+              } else {
+                let sKeep: AccountOnboardState;
+                try { sKeep = JSON.parse(rawStateCusK) as AccountOnboardState; }
+                catch { sKeep = { step: 'type_pick' }; }
+
+                const keptName = sKeep.originalName ?? sKeep.name ?? 'Счёт';
+                const newStateK: AccountOnboardState = {
+                  ...sKeep,
+                  step: 'cur_pick',
+                  accountType: 'custom',
+                  name: keptName,
+                };
+                await redisConnection.set(acKey, JSON.stringify(newStateK), 'EX', ONBOARD_STATE_TTL_SEC);
+                if (acMsgId) void editMessageText(chatId, acMsgId, CURRENCY_PICKER_TEXT, buildOnboardCurrencyKeyboard());
+              }
 
             } else if (acCmd.cmd === 'type') {
               // User selected account type
@@ -3666,25 +3718,61 @@ Midas создан, чтобы сделать учет денег максима
         }
 
         if (acState.step === 'name_input') {
-          // User typed the account name — validate and move to currency pick
+          // User typed the account name — validate, fuzzy-match, then move to currency pick.
           const trimmed = message.text.trim();
           if (trimmed.length === 0 || trimmed.length > 100) {
             void upsertBotMessage(telegramUserId, chatId, '⚠️ Название не может быть пустым или длиннее 100 символов. Попробуй ещё раз:');
           } else {
-            const updatedState: AccountOnboardState = { ...acState, step: 'cur_pick', name: trimmed };
-            await redisConnection.set(acKey, JSON.stringify(updatedState), 'EX', ONBOARD_STATE_TTL_SEC);
-            try {
-              const resolved = await resolveWorkspace(telegramUserId, chatId);
-              // Phase 2.2 bugfix: route to correct currency keyboard by accountType
-              const curKb = acState.accountType === 'card'
-                ? buildFiatCurrencyPage(0)
-                : acState.accountType === 'exchange' || acState.accountType === 'wallet'
-                ? buildCryptoCurrencyPage(0)
-                : buildOnboardCurrencyKeyboard(); // custom → mixed
-              void upsertBotMessage(telegramUserId, chatId, CURRENCY_PICKER_TEXT, curKb);
-              request.log.info({ msg: '[midas:bot:webhook] ac: name input received', workspaceId: resolved.workspaceId });
-            } catch {
-              void upsertBotMessage(telegramUserId, chatId, CURRENCY_PICKER_TEXT);
+            // Phase 2.3: run fuzzy match — restrict by accountType for typed-custom paths
+            const typeFilter = acState.accountType === 'card'
+              ? 'card'
+              : acState.accountType === 'exchange'
+              ? 'exchange'
+              : acState.accountType === 'wallet'
+              ? 'wallet'
+              : undefined; // 'custom' → match across all types
+
+            const fuzzyMatch: import('../services/account-onboard-keyboard.service.js').FuzzyAccountMatch | null =
+              fuzzyMatchAccountName(trimmed, typeFilter);
+
+            if (fuzzyMatch) {
+              // Smart confirm: save state with suggestion, show confirm UI
+              const smartState: AccountOnboardState = {
+                ...acState,
+                step: 'smart_confirm',
+                originalName: trimmed,
+                suggestedName: fuzzyMatch.name,
+                suggestedType: fuzzyMatch.type,
+                suggestedCurrency: fuzzyMatch.defaultCurrency,
+              };
+              await redisConnection.set(acKey, JSON.stringify(smartState), 'EX', ONBOARD_STATE_TTL_SEC);
+              try {
+                const resolved = await resolveWorkspace(telegramUserId, chatId);
+                void upsertBotMessage(
+                  telegramUserId, chatId,
+                  buildSmartConfirmText(fuzzyMatch),
+                  buildSmartConfirmKeyboard(fuzzyMatch.name),
+                );
+                request.log.info({ msg: '[midas:bot:webhook] ac: smart name suggestion shown', workspaceId: resolved.workspaceId });
+              } catch {
+                void upsertBotMessage(telegramUserId, chatId, buildSmartConfirmText(fuzzyMatch), buildSmartConfirmKeyboard(fuzzyMatch.name));
+              }
+            } else {
+              // No match — proceed directly to currency picker with their original name
+              const updatedState: AccountOnboardState = { ...acState, step: 'cur_pick', name: trimmed };
+              await redisConnection.set(acKey, JSON.stringify(updatedState), 'EX', ONBOARD_STATE_TTL_SEC);
+              try {
+                const resolved = await resolveWorkspace(telegramUserId, chatId);
+                const curKb = acState.accountType === 'card'
+                  ? buildFiatCurrencyPage(0)
+                  : acState.accountType === 'exchange' || acState.accountType === 'wallet'
+                  ? buildCryptoCurrencyPage(0)
+                  : buildOnboardCurrencyKeyboard();
+                void upsertBotMessage(telegramUserId, chatId, CURRENCY_PICKER_TEXT, curKb);
+                request.log.info({ msg: '[midas:bot:webhook] ac: name input received', workspaceId: resolved.workspaceId });
+              } catch {
+                void upsertBotMessage(telegramUserId, chatId, CURRENCY_PICKER_TEXT);
+              }
             }
           }
           await reply.status(200).send({ ok: true });
