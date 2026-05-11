@@ -1,7 +1,7 @@
 # WORKFLOW_STATE.MD — Диспетчер задач ИИ-агента Midas
 
 > **Тип:** MUTABLE — кратковременная память агента. Обновляется на каждом шаге работы.
-> **Обновлён:** 2026-05-11 09:00 (UTC+3)
+> **Обновлён:** 2026-05-11 14:17 (UTC+3)
 
 ---
 
@@ -10,12 +10,13 @@
 | Параметр | Значение |
 |---|---|
 | **PHASE** | `2 — Advanced UX & Account Management` |
-| **STEP** | `Phase 2.3 — Search Pagination + UX Polish (DEPLOYED)` |
-| **AGENT STATUS** | `DEPLOYED — Paginated transaction search (8/page, Redis context), close button in reports, button order swap in persistent keyboard` |
+| **STEP** | `Phase 2.3 — Onboarding UX Polish (DEPLOYED)` |
+| **AGENT STATUS** | `DEPLOYED — Streamlined onboarding: immediate type picker after account creation, ✅ Завершить button, silent default Кошелёк account on skip, unified icons 🔄🔐` |
 | **DEPLOYMENT** | `Railway (spirited-happiness project)` — `Midas` bot service + `background-workers` service + `Postgres` + `Redis` |
-| **LAST COMPLETED** | `Phase 2.3: (1) Paginated tx search — SEARCH_PAGE_SIZE=8, Redis context midas:tx:sr:ctx, all 4 search methods support LIMIT/OFFSET+COUNT, tx:sr:p:{page} callback, buildSearchResultsKeyboard with ◀️/▶️ navigation. (2) Reports close button — rp:cl callback on all 3 report keyboards (period picker, sub-menu, back keyboard), deleteMessage handler. (3) Persistent keyboard button order — [💰 Баланс][📊 Отчёт] / [📋 Транзакции][⚙️ Настройки]. Commits: 6da4464, 049233d, 70a5d41.` |
+| **LAST COMPLETED** | `Phase 2.3 Onboarding UX Polish: (1) Removed intermediate afterCreate screen — after bal_input or bal_skip shows buildFinishOnboardKeyboard immediately with accountAddedText. (2) New ac:fin command + handler = Завершить button that cleans chat + sends ReplyKeyboard. (3) ac:more backward compat — old buttons now redirect to ac:fin flow. (4) buildStartOnboardKeyboard icons fixed 🔶→🔄, ₿→🔐. (5) Silently creates default «Кошелёк» (USD) account when user presses «▶️ Начать без счёта» and has zero accounts. Commit: 395e1f2. Deploy: 7089846c — SUCCESS.` |
 | **BLOCKER** | None. |
-| **NEXT ACTION** | Test paginated search in production. Verify ✖️ Закрыть button dismisses reports. Verify persistent keyboard new button order after /start. |
+| **NEXT ACTION** | Smoke test: (1) /start → «▶️ Начать без счёта» → проверить /accounts = «Кошелёк». (2) Создать счёт → ввести баланс → сразу пикер типа + «✅ Завершить». (3) «⏩ Пропустить» баланс → тот же пикер. (4) «✅ Завершить» → setup complete + ReplyKeyboard. |
+
 
 ---
 
@@ -73,6 +74,8 @@
 | 2.1 Account Management Dashboard | ✅ DEPLOYED | `balance-keyboard.service.ts` (NEW — 450+ lines), `account-onboard-keyboard.service.ts` (MODIFY — bank/wallet presets, fiat/crypto pickers), `account.service.ts` (MODIFY — renameAccount, changeAccountCurrency, softDeleteAccount, deleted_at filters), `balance.service.ts` (MODIFY — getBalanceData, getAccountDetail, setAccountBalanceById, getAccountTxCount), `webhook.route.ts` (MODIFY — bl: handler, text intercepts, balance navigation update). DB migration: `updated_at` + `deleted_at` columns on `account_sources`. |
 | 2.2 Settings UI Overhaul | ✅ DEPLOYED | `settings-keyboard.service.ts` (MODIFY — 6-button 2x3 grid, URL поддержки, инфо о боте), `currencies.ts` (MODIFY — Russian aliases, 5-pass search, FIAT 40+ / CRYPTO 48+), `settings.service.ts` (FIX — `deleted_at IS NULL` в `getWorkspaceAccounts`), `webhook.route.ts` (MODIFY — кнопка назад после выбора валюты, единый Main Account handler). Commit `3e650c1`. |
 | 2.3 Search Pagination + UX Polish | ✅ DEPLOYED | **Pagination:** `transaction-hub.service.ts` (SEARCH_PAGE_SIZE=8, все 4 search-метода → LIMIT/OFFSET + COUNT(*) = `{items, total}`). `transaction-keyboard.service.ts` (`buildSearchResultsKeyboard(items, page, totalPages)` с ◀️/▶️ навигацией, `search_results_page` cmd, tx:sr:p:{page} parser). `webhook.route.ts` (Redis context `midas:tx:sr:ctx:{uid}:{cid}` TTL 600s, `search_results_page` handler, все text intercepts → paginated API). **Reports close:** `report-keyboard.service.ts` (✖️ Закрыть = `rp:cl` на всех 3 клавиатурах, type `close` в RpCallbackCmd). `webhook.route.ts` (`rp:close` handler → deleteMessage). **Keyboard order:** `screen-builder.ts` — Row 1: [💰 Баланс][📊 Отчёт], Row 2: [📋 Транзакции][⚙️ Настройки]. Commits `6da4464`, `049233d`, `70a5d41`. |
+| 2.3 Onboarding UX Polish | ✅ DEPLOYED | **Нет промежуточного afterCreate экрана:** после bal_input/bal_skip сразу показывается `buildFinishOnboardKeyboard()` + `accountAddedText()`. **Новая команда `ac:fin`:** кнопка «✅ Завершить» в пикере типа — чистит Redis, удаляет сообщение, отправляет ReplyKeyboard. **Backward compat:** `ac:more` и `ac:done` обработчики сохранены (старые кнопки в чате). **Иконки:** `buildStartOnboardKeyboard()` исправлен: 🔶→🔄, ₿→🔐, ↩️Назад→✏️Своё название. **Дефолтный счёт:** `ac:skip` тихо создаёт «Кошелёк» (USD) если у пользователя 0 счетов. Commit `395e1f2`. Deploy `7089846c` — SUCCESS. |
+
 
 ---
 
@@ -123,6 +126,8 @@
     - `bl:state:{telegramUserId}:{chatId}` — Phase 2.1: state для текстовых intercepts баланс-менеджмента. Хранит `{action, accountId}`. Actions: `rename`, `set_balance`, `currency_input`. TTL 300s.
     - `bl:source:{telegramUserId}:{chatId}` — Phase 2.1: флаг что добавление счёта инициировано из баланса. При `ac:done` возвращает в balance dashboard вместо setup complete.
      - `midas:tx:sr:ctx:{telegramUserId}:{chatId}` — Phase 2.3: поисковый контекст для пагинации. Хранит JSON `{t: 'name'|'amount'|'category'|'date', q?: string, f?: string, to?: string, lb?: string}` TTL 600s. Создаётся при первом поиске, читается при навигации по страницам (tx:sr:p:{page}). При устаревании — дружелюбное сообщение «поиск заново».
+    - `bl:source:{telegramUserId}:{chatId}` — Phase 2.3: при `ac:fin`/`ac:done` проверяется для возврата в balance dashboard вместо setup complete.
+
   - **Auto-Activation:** `replyKeyboardJson` в `NotificationJobPayload`. rejection/expiry/intent_missing sends ReplyKeyboard на `sendMessage` path. `editMessageText` path — только inline keyboard (Telegram API limitation).
   - **Collapsibility:** `is_persistent: false` — Telegram показывает ⏄ иконку рядом с 🎤; пользователь может скрывать/восстанавливать клавиатуру.
   - **Race Condition Fix:** `redisConnection.del(clarKey)` на confirm/reject → stale `midas:clar:*` не перехватывает следующее сообщение.
@@ -243,9 +248,18 @@ apps/background-workers/src/services/draft.service.ts  ← createDraft logic
 > Key production fixes applied: markdown fence stripping, formatAmount() String() cast for NUMERIC, RLS policies.
 > Phase 2.1: Balance button → interactive account list (bl: namespace). Account detail → rename/currency/sync/delete.
 > Phase 2.2: Settings 6-button 2x3 grid. Main Account = unified income+expense default. Currency search supports Russian aliases (биткоин/доллар/евро/рубль etc.) + partial code match (5-pass algorithm).
-> Phase 2.3: Paginated search (SEARCH_PAGE_SIZE=8, Redis context midas:tx:sr:ctx TTL 600s). Reports ✖️ Закрыть button (rp:cl → deleteMessage). Keyboard: [💰 Баланс][📊 Отчёт] / [📋 Транзакции][⚙️ Настройки].
+> Phases 1.1–1.40 DONE. Phase 2.0–2.3 DEPLOYED (search pagination + onboarding UX polish).
+> Database: PostgreSQL on Railway, RLS enabled. account_sources has updated_at + deleted_at columns.
+> AI model: Claude Haiku 4.5 via Anthropic API, temperature: 0, post-processing intent recovery.
+> AI parsing rule (FINAL): any number = amount (price). No PRICE vs QUANTITY distinction.
+> Key production fixes applied: markdown fence stripping, formatAmount() String() cast for NUMERIC, RLS policies.
+> Phase 2.1: Balance button → interactive account list (bl: namespace). Account detail → rename/currency/sync/delete.
+> Phase 2.2: Settings 6-button 2x3 grid. Main Account = unified income+expense default. Currency search supports Russian aliases (биткоин/доллар/евро/рубль etc.) + partial code match (5-pass algorithm).
+> Phase 2.3 Search: Paginated search (SEARCH_PAGE_SIZE=8, Redis context midas:tx:sr:ctx TTL 600s). Reports ✖️ Закрыть button (rp:cl → deleteMessage). Keyboard: [💰 Баланс][📊 Отчёт] / [📋 Транзакции][⚙️ Настройки].
+> Phase 2.3 Onboarding: No intermediate afterCreate screen. After account creation → immediate buildFinishOnboardKeyboard + accountAddedText. ac:fin = «✅ Завершить» button. ac:skip silently creates «Кошелёк» (USD) if user has 0 accounts. Icons unified: 🔄 Крипто-биржа, 🔐 Крипто-кошелёк.
 > AI fallback chain: AI parsed value → workspace.default_currency / default_expense_account_id (by intent).
 > Do not modify project_config.md.
+
 
 ## 10. ИСТОРИЯ ДЕЙСТВИЙ (СЖАТАЯ)
 
@@ -359,6 +373,13 @@ apps/background-workers/src/services/draft.service.ts  ← createDraft logic
 | 2026-05-10 22:00 | **Phase 2.3 — Paginated Transaction Search.** `transaction-hub.service.ts`: добавлен `SEARCH_PAGE_SIZE=8`; все 4 search-функции (`searchByName`, `searchByAmount`, `searchByCategory`, `searchByDateRange`) переработаны — принимают `page: number`, параллельный `COUNT(*)` → возвращают `{items: TxListItem[], total: number}`. Удалена константа `SEARCH_LIMIT=200`. `transaction-keyboard.service.ts`: `buildSearchResultsKeyboard(items, page, totalPages)` — кнопки товаров + строка навигации `[◀️][p/total][▶️]` + footer `[🔍 Новый поиск][◀️ К списку]`; `search_results_page` в `TxCallbackCmd`; парсер `tx:sr:p:{page}`. `webhook.route.ts`: все search-handlers сохраняют контекст в Redis `midas:tx:sr:ctx:{uid}:{cid}` TTL 600s; `search_results_page` handler — читает контекст, пересчитывает offset, обновляет сообщение; text intercepts (name/amount/date) → paginated API; при устаревшем контексте — дружелюбное «Поищите снова»; удалён дублирующий старый text intercept блок. Build: `tsc` 0 ошибок. Commit `6da4464`. |
 | 2026-05-10 22:10 | **Phase 2.3 — Reports Close Button.** `report-keyboard.service.ts`: добавлен `rp:cl` callback (`✖️ Закрыть`) как последняя строка на всех 3 клавиатурах (`buildPeriodPickerKeyboard`, `buildReportSubMenuKeyboard`, `buildReportBackKeyboard`); тип `{ cmd: 'close' }` добавлен в `RpCallbackCmd`; `parseRpCallback`: `rp:cl → { cmd: 'close' }`; обновлён docstring. `webhook.route.ts`: в блоке `rp:` добавлен handler `else if (rpCmd.cmd === 'close')` → `deleteMessage(chatId, rpMsgId)` — полностью убирает сообщение из чата. Build: `tsc` 0 ошибок. Commit `049233d`. |
 | 2026-05-10 22:11 | **Phase 2.3 — Persistent Keyboard Button Order.** `screen-builder.ts` (`buildMainMenuKeyboard`): порядок кнопок изменён — Row 1: `[💰 Баланс][📊 Отчёт]`, Row 2: `[📋 Транзакции][⚙️ Настройки]` (до: Row 1 Баланс+Транзакции, Row 2 Отчёт+Настройки). Обновлён docstring. Build: `tsc` 0 ошибок. Commit `70a5d41`. Deployed to Railway (auto-deploy). |
+| 2026-05-11 09:00 | **Phase 2.2 Onboarding Pagination (Phase 2.2).** `account-onboard-keyboard.service.ts` полностью переписан с универсальным движком пагинации `buildPaginatedPicker()`. Реализованы: paginated banks (70+ записей, 6/страница, 3 колонки, ac:bp:{N}), paginated exchanges (ac:xp:{N}), paginated fiat currencies (ac:cfp:{N}), paginated crypto currencies (ac:ccp:{N}). `OnboardStep` расширен: `bal_input`. `AccountOnboardState` — поля `accountId`, `currency`. `addAccountReturningId()` добавлен в `account.service.ts`. `webhook.route.ts`: FSM handlers для bank_page, exchange_page, fiat_page, crypto_page, bal_skip. Баланс вводится текстом (validateAmountFromText intercept) или пропускается (ac:bal:s). Коммит в phase 2.2 серии. tsc 0 ошибок. |
+| 2026-05-11 12:00 | **Phase 2.3 Onboarding UX Polish (PLAN APPROVED).** Пользователь утвердил план: (1) убрать промежуточный afterCreate экран, (2) добавить кнопку «✅ Завершить» (ac:fin) прямо в пикер типа, (3) buildStartOnboardKeyboard — исправить иконки (🔶→🔄, ₿→🔐), (4) при «▶️ Начать без счёта» тихо создавать «Кошелёк» (USD). Реализация поделена на 4 этапа с tsc-проверкой после каждого. |
+| 2026-05-11 14:07 | **Phase 2.3 Onboarding UX Polish — ЭТАП 1 (account-onboard-keyboard.service.ts).** Добавлен `{ cmd: 'fin' }` в `AccountOnboardCmd` union + парсер `if (sub === 'fin')`. Добавлена `buildFinishOnboardKeyboard()` — пикер типа + «✅ Завершить» (ac:fin), иконки 🔄🔐. Добавлена `accountAddedText(name, currency)`. `buildStartOnboardKeyboard()` исправлен: 🔶→🔄, ₿→🔐, ↩️Назад→✏️Своё название. tsc 0 ошибок. |
+| 2026-05-11 14:08 | **Phase 2.3 Onboarding UX Polish — ЭТАП 2 (imports).** `webhook.route.ts`: добавлены импорты `buildFinishOnboardKeyboard`, `accountAddedText` из account-onboard-keyboard.service.js. tsc пока 2 предупреждения (unused — ожидаемо до этапа 3). |
+| 2026-05-11 14:10 | **Phase 2.3 Onboarding UX Polish — ЭТАП 3 (handlers).** `webhook.route.ts`: (1) `ac:fin` handler — идентичен `ac:done`, backward compat; (2) `ac:more` → redirect to fin flow (deleteMessage + sendMessageWithReplyKeyboard); (3) `ac:bal:s` — читает состояние Redis, затем показывает `accountAddedText` + `buildFinishOnboardKeyboard` вместо старого afterCreate; (4) `bal_input` text intercept — `buildFinishOnboardKeyboard` вместо `buildAfterCreateKeyboard`, `accountAddedText` вместо старой строки с балансом; (5) safety fallback в `bal_input` → `buildFinishOnboardKeyboard`. tsc 0 ошибок. |
+| 2026-05-11 14:13 | **Phase 2.3 Onboarding UX Polish — ЭТАП 4 (default account).** `webhook.route.ts` `ac:skip` handler: перед удалением Redis-ключа вызывает `hasAccounts()` — если 0 счетов, создаёт `addAccountWithCurrency(workspaceId, userId, 'Кошелёк', 'USD')` в блоке try/catch (non-fatal). tsc 0 ошибок. Commit `395e1f2`. git push origin main. Deploy Railway: `7089846c — SUCCESS`. |
+
 
 ---
 
