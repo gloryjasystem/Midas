@@ -345,6 +345,17 @@ export const BANK_PRESETS: ReadonlyMap<string, PresetInfo> = new Map([
   ['revolut',    { name: 'Revolut',       defaultCurrency: 'EUR' }],
   ['wise',       { name: 'Wise',          defaultCurrency: 'EUR' }],
   ['paypal',     { name: 'PayPal',        defaultCurrency: 'USD' }],
+  // ── Part 1: Payment systems (type: card) ──
+  ['visa',       { name: 'Visa',          defaultCurrency: 'USD' }],
+  ['mastercard', { name: 'Mastercard',    defaultCurrency: 'USD' }],
+  ['mir',        { name: 'Карта Мир',     defaultCurrency: 'RUB' }],
+  ['unionpay',   { name: 'UnionPay',      defaultCurrency: 'CNY' }],
+  ['jcb',        { name: 'JCB',           defaultCurrency: 'JPY' }],
+  ['dinersclub', { name: 'Diners Club',   defaultCurrency: 'USD' }],
+  ['maestro',    { name: 'Maestro',       defaultCurrency: 'EUR' }],
+  ['troy',       { name: 'Troy',          defaultCurrency: 'TRY' }],
+  ['belkart',    { name: 'Белкарт',      defaultCurrency: 'BYN' }],
+  ['prostir',    { name: 'Простір',       defaultCurrency: 'UAH' }],
 ]);
 
 // ─────────────────────────────────────────────────────────────
@@ -448,6 +459,42 @@ export const WALLET_PRESETS: ReadonlyMap<string, string> = new Map([
   ['gnosis',     'Safe (Gnosis)'],
   ['frame',      'Frame'],
   ['mathwallet', 'Math Wallet'],
+  // ── Part 3A: Browser extension wallets ──
+  ['bravewallet','Brave Wallet'],
+  ['keplr',      'Keplr'],
+  ['petra',      'Petra'],
+  ['nami',       'Nami'],
+  ['yoroi',      'Yoroi'],
+  ['eternl',     'Eternl'],
+  ['talisman',   'Talisman'],
+  ['subwallet',  'SubWallet'],
+  ['corewallet', 'Core Wallet'],
+  ['xdefi',      'XDEFI'],
+  ['glow',       'Glow'],
+  ['solflare',   'Solflare'],
+  ['backpack',   'Backpack'],
+  ['onto',       'ONTO'],
+  ['coin98',     'Coin98'],
+  ['zerion',     'Zerion'],
+  // ── Part 3D: Hardware wallets ──
+  ['bitbox',     'BitBox02'],
+  ['ellipal',    'Ellipal'],
+  ['foundation', 'Foundation Passport'],
+  ['jade',       'Blockstream Jade'],
+  ['ngrave',     'Ngrave Zero'],
+  ['dcent',      "D'CENT"],
+  ['secux',      'SecuX'],
+  // ── Part 3E: Mobile wallets ──
+  ['mycelium',   'Mycelium'],
+  ['guarda',     'Guarda'],
+  ['unstoppable','Unstoppable Wallet'],
+  ['blockchaincom','Blockchain.com'],
+  ['cryptodfi',  'Crypto.com DeFi Wallet'],
+  ['bybitweb3',  'Bybit Web3'],
+  ['alphawallet','Alpha Wallet'],
+  ['status',     'Status'],
+  ['uniswapwallet','Uniswap Wallet'],
+  ['pillar',     'Pillar'],
 ]);
 
 // ─────────────────────────────────────────────────────────────
