@@ -497,6 +497,105 @@ packages/database/migrations/
 - **Зачем:** Без GIN index `ILIKE '%query%'` выполняет seq scan — медленно при росте данных.
 - **Верификация:** `EXPLAIN SELECT ... WHERE item_name ILIKE '%test%'` — должен показывать Bitmap Index Scan
 
+### Задача 3.7 — Поиск по дате (Вариант 1 «Быстрые периоды»)
+- **Статус:** `[ ]`
+- **Контекст:** Дата транзакций хранится в поле `transaction_time` (timestamptz). Callback_data ≤ 64 байт. Redis intercept для ввода конкретной даты.
+- **UX Flow:**
+  ```
+  [🔍 Поиск] → [📅 По дате]
+      ↓
+  ┌─────────────────────────────┐
+  │  📅 Выбери период           │
+  │                             │
+  │  [📆 Сегодня]               │
+  │  [📅 Вчера]                 │
+  │  [🗓 Эта неделя]            │
+  │  [📊 Этот месяц]            │
+  │  [✏️ Ввести дату вручную]   │
+  │  [◀️ Назад]                 │
+  └─────────────────────────────┘
+      ↓ (если «Сегодня»)
+  ✅ Результаты за 10.05.2026 (5 транзакций)
+  [💸 Кофе  150.00 USDT  10.05]
+  ...
+  [🔍 Новый поиск]  [◀️ К списку]
+      ↓ (если «Ввести дату вручную»)
+  📝 Введи дату в формате: ДД.ММ или ДД.ММ.ГГГГ
+  Примеры: 10.05, 01.05.2026, 15.04
+  [◀️ Отмена]
+  ```
+- **Файлы:**
+  1. `apps/telegram-bot/src/services/transaction-keyboard.service.ts`
+  2. `apps/telegram-bot/src/services/transaction-hub.service.ts`
+  3. `apps/telegram-bot/src/routes/webhook.route.ts`
+- **Изменения в `transaction-keyboard.service.ts`:**
+  ```diff
+  // buildSearchMenuKeyboard — добавить кнопку "По дате"
+  + [{ text: '📅 По дате', callback_data: 'tx:s:dt' }],
+
+  // Новая функция buildDatePickerKeyboard()
+  [{ text: '📆 Сегодня',      callback_data: 'tx:s:dt:today' }],
+  [{ text: '📅 Вчера',        callback_data: 'tx:s:dt:yday' }],
+  [{ text: '🗓 Эта неделя',   callback_data: 'tx:s:dt:week' }],
+  [{ text: '📊 Этот месяц',   callback_data: 'tx:s:dt:month' }],
+  [{ text: '✏️ Ввести дату',  callback_data: 'tx:s:dt:custom' }],
+  [{ text: '◀️ Назад',        callback_data: 'tx:s' }],
+  ```
+- **Расширение `TxCallbackCmd`:**
+  ```typescript
+  | { cmd: 'search_date_menu' }                                        // tx:s:dt
+  | { cmd: 'search_date_preset'; preset: 'today'|'yday'|'week'|'month' } // tx:s:dt:{preset}
+  | { cmd: 'search_date_custom' }                                      // tx:s:dt:custom
+  | { cmd: 'search_results_page'; page: number }                       // tx:sr:p:{page} (пагинация)
+  ```
+- **Byte verification:**
+  ```
+  tx:s:dt           = 7 bytes  ✓
+  tx:s:dt:today     = 13 bytes ✓
+  tx:s:dt:yday      = 12 bytes ✓
+  tx:s:dt:week      = 12 bytes ✓
+  tx:s:dt:month     = 13 bytes ✓
+  tx:s:dt:custom    = 14 bytes ✓
+  ```
+- **Новая функция `searchByDateRange` в `transaction-hub.service.ts`:**
+  ```typescript
+  export async function searchByDateRange(
+    workspaceId: string,
+    userId: string,
+    from: string,   // ISO date string (inclusive)
+    to: string,     // ISO date string (exclusive)
+    page: number
+  ): Promise<{ items: TxListItem[]; total: number }>;
+  // SQL:
+  // WHERE workspace_id = $1
+  //   AND deleted_at IS NULL
+  //   AND transaction_time >= $2::timestamptz
+  //   AND transaction_time <  $3::timestamptz
+  // ORDER BY transaction_time DESC
+  // LIMIT SEARCH_PAGE_SIZE OFFSET $4
+  ```
+- **Обработчики в `webhook.route.ts`:**
+  - `search_date_menu` → `editMessageText(buildDatePickerKeyboard())`
+  - `search_date_preset` → вычислить `from/to` по пресету → `searchByDateRange()` → `buildSearchResultsKeyboard()` → сохранить контекст в `midas:tx:sr:ctx:{uid}:{cid}`
+  - `search_date_custom` → Redis SET `midas:tx:search:{uid}:{cid}` = `'date'`, EX 120 → промпт ввода + `[◀️ Отмена]`
+  - Текстовый интерцепт `state === 'date'`: парсить `ДД.ММ` / `ДД.ММ.ГГГГ` → если невалидно → «Неверный формат. Попробуй ещё раз» → `searchByDateRange()`
+- **Логика пресетов (UTC-aware):**
+  ```typescript
+  today  → [startOfToday, startOfTomorrow)
+  yday   → [startOfYesterday, startOfToday)
+  week   → [startOfCurrentWeek(Mon), now)
+  month  → [startOfCurrentMonth, now)
+  ```
+- **Пагинация при поиске по дате:** Переиспользовать механизм `midas:tx:sr:ctx` TTL 600s (Phase 2.3). Тип контекста: `{ t: 'date', f: from, to: to, lb: label }`
+- **Верификация:**
+  - «Сегодня» → транзакции за текущий день
+  - «Эта неделя» → транзакции с понедельника
+  - «Ввести дату» → `10.05` → транзакции за 10 мая
+  - «Ввести дату» → `10.05.2026` → то же самое
+  - Невалидная дата → сообщение об ошибке, Redis intercept остаётся активным
+  - 0 результатов → «Транзакций за выбранный период нет»
+  - `[◀️ Отмена]` при ручном вводе → `buildSearchMenuKeyboard()` без удаления Redis ключа
+
 ---
 
 ## 🏃 СПРИНТ 4 — Отчёты 2.0
@@ -897,11 +996,11 @@ packages/database/migrations/
 |---|---|---|---|
 | 1 — Фундамент | 6 | 6 | ✅ Завершён |
 | 2 — Фильтры | 4 | 4 | ✅ Завершён |
-| 3 — Поиск | 6 | 6 | ✅ Завершён |
+| 3 — Поиск | 7 | 6 | ⏳ Задача 3.7 (поиск по дате) пендинг |
 | 4 — Отчёты | 5 | 5 | ✅ Завершён |
 | 5 — Настройки | 5 | 5 | ✅ Завершён |
 | 6 — Полировка | 6 | 6 | ✅ Завершён |
-| **Итого** | **32** | **32** | **100% ✅** |
+| **Итого** | **33** | **32** | **97% — осталась задача 3.7** |
 
 ---
 
