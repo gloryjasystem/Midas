@@ -171,6 +171,7 @@ import {
   buildFreeTextPromptKeyboard,       // Phase 2.3: keyboard for re-prompt
   buildSuccessScreenText,            // Phase 2.3: post-creation success screen
   getProviderIcon,                   // Phase 2.3: provider emoji for success screen
+  capitalizeFirst,                   // Phase 2.3: auto-capitalize user input
   type AccountOnboardState,          // Phase 1.30
 } from '../services/account-onboard-keyboard.service.js';
 import {
@@ -3762,11 +3763,36 @@ Midas создан, чтобы сделать учет денег максима
         }
 
         if (acState.step === 'name_input') {
-          // User typed the account name — validate, fuzzy-match, then move to currency pick.
-          const trimmed = message.text.trim();
-          if (trimmed.length === 0 || trimmed.length > 100) {
-            void upsertBotMessage(telegramUserId, chatId, '⚠️ Название не может быть пустым или длиннее 100 символов. Попробуй ещё раз:');
-          } else {
+          // User typed the account name — validate, auto-capitalize, fuzzy-match, then move to currency.
+          const raw     = message.text.trim();
+          const trimmed = capitalizeFirst(raw); // U4: auto-capitalize first char
+
+          // U6: empty input — friendly nudge, not an error
+          if (raw.length === 0) {
+            void upsertBotMessage(
+              telegramUserId, chatId,
+              '🤔 Просто напишите название — например, <i>Тинькофф</i> или <i>Binance</i>',
+            );
+            await reply.status(200).send({ ok: true });
+            return;
+          }
+
+          // Hard limit: >100 chars is garbage input
+          if (trimmed.length > 100) {
+            void upsertBotMessage(telegramUserId, chatId, '⚠️ Название слишком длинное (макс. 100 символов). Попробуй покороче:');
+            await reply.status(200).send({ ok: true });
+            return;
+          }
+
+          // U7: soft warning for >28 chars (still accepted, just notified)
+          if (trimmed.length > 28) {
+            void upsertBotMessage(
+              telegramUserId, chatId,
+              `ℹ️ Название длинновато — в интерфейсе оно может обрезаться. Продолжаем...`,
+            );
+          }
+
+          {
             // Helper: pick the right currency keyboard for this account / wallet sub-type
             const chooseCurKeyboard = (typ: string, sub?: string) => {
               if (typ === 'card' || typ === 'cash') return buildFiatCurrencyPage(0);
