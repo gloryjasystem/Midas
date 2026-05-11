@@ -167,6 +167,7 @@ import {
   CURRENCY_INPUT_PROMPT,             // Phase 1.30
   buildFinishOnboardKeyboard,        // Phase 2.3
   accountAddedText,                  // Phase 2.3
+  SKIP_COMPLETE_TEXT,                // Phase 2.3: ac:skip D1 message with ReplyKeyboard
   type AccountOnboardState,          // Phase 1.30
 } from '../services/account-onboard-keyboard.service.js';
 import {
@@ -611,22 +612,23 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
 
             } else if (acCmd.cmd === 'skip') {
               // Phase 1.37-UX: User skipped onboarding — clean chat.
-              // Phase 2.3: Silently create default 'Кошелёк' account if user has none.
+              // Phase 2.3: Silently create default account if user has none.
+              // Note: system_find_or_create_user already creates 'Default' (USDT) at
+              // registration, so hasAccounts() guards against double-creation only.
               await redisConnection.del(acKey);
               try {
                 const noAccounts = !(await hasAccounts(acResolved.workspaceId, acResolved.userId));
                 if (noAccounts) {
                   // Create silent default account — user will see it in /accounts later.
                   // Duplicate is fine if somehow called twice (ON CONFLICT DO NOTHING).
-                  await addAccountWithCurrency(acResolved.workspaceId, acResolved.userId, 'Кошелёк', 'USD');
+                  await addAccountWithCurrency(acResolved.workspaceId, acResolved.userId, 'Основной', 'USDT');
                 }
               } catch { /* Non-fatal — skip silently, don't block UX */ }
               if (acMsgId) void deleteMessage(chatId, acMsgId);
               await clearActiveMessageId(telegramUserId, chatId);
-              void upsertBotMessage(
-                telegramUserId, chatId,
-                '✅ Хорошо. Счёт добавишь позже через /accounts или /add_account.',
-              );
+              // Phase 2.3: D1 message — action-first, informs about default account.
+              // sendMessageWithReplyKeyboard activates the nav panel (same as ac:fin/ac:done).
+              void sendMessageWithReplyKeyboard(chatId, SKIP_COMPLETE_TEXT, buildMainMenuKeyboard());
 
             } else if (acCmd.cmd === 'done') {
               // Phase 1.37-UX: User finished account setup (backward compat — old buttons in chat).

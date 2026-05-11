@@ -685,6 +685,19 @@ export const SETUP_COMPLETE_TEXT =
   '✅ <b>Всё готово!</b>\n\n' +
   'Опишите любую операцию — бот распознает сумму, категорию и тип автоматически.';
 
+/**
+ * Phase 2.3: Message shown after user taps «▶️ Начать без счёта» (ac:skip).
+ * Variant D1 — action-first, mentions the auto-created default account.
+ * Sent with ReplyKeyboard (buildMainMenuKeyboard) so nav panel activates.
+ */
+export const SKIP_COMPLETE_TEXT =
+  '✅ <b>Готово. Можно начинать.</b>\n\n' +
+  'Запишите первую операцию — просто напишите что потратили или получили:\n' +
+  '<i>«кофе 350» · «зарплата 5000» · «перевод Максу 200»</i>\n\n' +
+  'Midas распознает сумму, тип и категорию автоматически.\n\n' +
+  '<b>Счёт по умолчанию:</b> 💼 Основной · USDT\n' +
+  '<i>Добавить карты и биржи → 💰 Баланс</i>';
+
 /** Text for exchange picker step. */
 export const EXCHANGE_PICKER_TEXT = 'Какая биржа?';
 
