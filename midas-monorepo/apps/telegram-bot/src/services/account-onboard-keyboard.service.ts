@@ -615,7 +615,9 @@ export type AccountOnboardCmd =
   | { cmd: 'bal_skip' }                    // Phase 2.2: skip initial balance
   | { cmd: 'fin' }                         // Phase 2.3: finish onboarding from type picker
   | { cmd: 'cus_ok' }                      // Phase 2.3: confirm fuzzy-matched name
-  | { cmd: 'cus_keep' };                   // Phase 2.3: keep original typed name (reject suggestion)
+  | { cmd: 'cus_keep' }                    // Phase 2.3: keep original typed name (reject suggestion)
+  | { cmd: 'wallet_subtype'; subtype: WalletSubtype } // Phase 2.3: wallet sub-type selection
+  | { cmd: 'type_back' };                  // Phase 2.3: back to type picker from wallet subtype
 
 // ─────────────────────────────────────────────────────────────
 // Parser — SEC-01 allowlist
@@ -688,9 +690,9 @@ export function parseAccountCallback(data: string): AccountOnboardCmd | null {
   // Wallet sub-type picker: ac:wsub:{subtype}
   if (sub === 'wsub') {
     const subtype = parts[2] ?? '';
-    const WSUB_ALLOWLIST = new Set(['crypto', 'ewallet', 'ton', 'lightning']);
-    if (!WSUB_ALLOWLIST.has(subtype)) return null;
-    return { cmd: 'wallet_subtype', subtype };
+    const WSUB_ALLOWLIST = new Set<WalletSubtype>(['crypto', 'ewallet', 'ton', 'lightning']);
+    if (!WSUB_ALLOWLIST.has(subtype as WalletSubtype)) return null;
+    return { cmd: 'wallet_subtype', subtype: subtype as WalletSubtype };
   }
 
   // Back to type picker: ac:type:back
