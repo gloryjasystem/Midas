@@ -162,12 +162,13 @@ packages/database/migrations/
      export const NAV_BTN_SETTINGS     = '⚙️ Настройки';   // без изменений
      ```
   3. Обновить `buildMainMenuKeyboard()` — **2 строки по 2 кнопки**:
-     ```typescript
-     keyboard: [
-       [NAV_BTN_BALANCE, NAV_BTN_TRANSACTIONS],
-       [NAV_BTN_REPORT, NAV_BTN_SETTINGS],
-     ],
-     ```
+  ```typescript
+  keyboard: [
+  [NAV_BTN_BALANCE, NAV_BTN_REPORT],
+  [NAV_BTN_TRANSACTIONS, NAV_BTN_SETTINGS],
+  ],
+  ```
+   > ⚠️ **Финальный порядок (Phase 2.3):** Отчёт поменян с Транзакциями местами — Отчёт вверху справа.
 - **Верификация:** `npx turbo build` — 0 errors
 
 ### Задача 1.2 — Создать transaction-hub.service.ts
@@ -197,7 +198,7 @@ packages/database/migrations/
 
   export type IntentFilter = 'a' | 'e' | 'i' | 'd'; // all/expense/income/debt
 
-  export const TX_PAGE_SIZE = 8;
+  export const TX_PAGE_SIZE = 6;  // макс 6 транзакций на страницу
 
   // Функции
   export async function getTransactionList(
@@ -215,16 +216,22 @@ packages/database/migrations/
   ): Promise<MonthMiniStats>;
 
   export async function searchByName(
-    workspaceId: string, userId: string, query: string
-  ): Promise<TxListItem[]>;
+    workspaceId: string, userId: string, query: string, page: number
+  ): Promise<{ items: TxListItem[]; total: number }>;
 
   export async function searchByAmount(
-    workspaceId: string, userId: string, amount: string
-  ): Promise<TxListItem[]>;
+    workspaceId: string, userId: string, amount: string, page: number
+  ): Promise<{ items: TxListItem[]; total: number }>;
 
   export async function searchByCategory(
-    workspaceId: string, userId: string, categoryId: string
-  ): Promise<TxListItem[]>;
+    workspaceId: string, userId: string, categoryId: string, page: number
+  ): Promise<{ items: TxListItem[]; total: number }>;
+
+  export async function searchByDateRange(
+    workspaceId: string, userId: string, from: string, to: string, page: number
+  ): Promise<{ items: TxListItem[]; total: number }>;
+
+  export const SEARCH_PAGE_SIZE = 8;  // отдельный лимит для поиска
   ```
 - **SQL для getTransactionList:**
   ```sql
@@ -291,28 +298,49 @@ packages/database/migrations/
     | { cmd: 'view'; txId: string }
     | { cmd: 'search_menu' }
     | { cmd: 'search_name' }
-    | { cmd: 'search_amount' }       // tx:s:amt (ISSUE-6: не tx:s:a — путается с filter 'a')
+    | { cmd: 'search_amount' }       // tx:s:amt
     | { cmd: 'search_category' }
     | { cmd: 'search_cat_result'; catId: string }
-    | { cmd: 'field_amount'; txId: string }    // tx:f:amt (ISSUE-2: = ed:f:amt)
-    | { cmd: 'field_cat'; txId: string; page: number } // tx:f:cat (= ed:f:cat)
-    | { cmd: 'field_acc'; txId: string }       // tx:f:acc (= ed:f:acc)
-    | { cmd: 'field_int'; txId: string }       // tx:f:int (= ed:f:int)
-    | { cmd: 'delete_ask'; txId: string }      // tx:d:ask (= ed:d:ask)
-    | { cmd: 'delete_confirm'; txId: string }  // tx:d:yes (= ed:d:yes)
+    | { cmd: 'search_date_menu' }                                         // tx:s:dt
+    | { cmd: 'search_date_preset'; preset: 'today'|'yday'|'week'|'month' }// tx:s:dt:{preset}
+    | { cmd: 'search_date_custom' }                                       // tx:s:dt:custom
+    | { cmd: 'search_date_cancel' }                                       // tx:s:dt:cancel
+    | { cmd: 'search_results_page'; page: number }                        // tx:sr:p:{page}
+    | { cmd: 'field_amount'; txId: string }
+    | { cmd: 'field_cat'; txId: string; page: number }
+    | { cmd: 'field_acc'; txId: string }
+    | { cmd: 'field_int'; txId: string }
+    | { cmd: 'delete_ask'; txId: string }
+    | { cmd: 'delete_confirm'; txId: string }
     | { cmd: 'confirm_cat'; txId: string; catId: string }
     | { cmd: 'confirm_acc'; txId: string; accId: string }
     | { cmd: 'confirm_int'; txId: string; intent: string }
-    | { cmd: 'cancel' };
+    | { cmd: 'cancel' }
+    | { cmd: 'close' };               // tx:close → удаляет inline-keyboard
 
   export function parseTxCallback(data: string): TxCallbackCmd | null;
   ```
-- **buildTxListKeyboard layout:**
+- **buildTxListKeyboard layout (реальный код):**
   ```
-  Row 0: [💸 Расходы] [💰 Доходы] [📋 Все]     ← filter row
-  Row 1: [🔍 Поиск]                              ← search
-  Row 2..N: [emoji category — amount CUR  date]  ← tx buttons (8 max)
-  Row N+1: [◀️] [1/7] [▶️]                       ← pagination
+  Row 0: [💸 Расходы] [💰 Доходы] [📋 Все]      ← 3 filter-кнопки (без Долгов)
+  Row 1: [🔍 Поиск]                               ← search
+  Row 2..N: [emoji name  amt CUR  dd.mm]           ← tx buttons (макс 6/page)
+  Row N+1: [◀️] [1/7] [▶️]                        ← пагинация (только если totalPages > 1)
+  Row N+2: [✖️ Закрыть]                            ← всегда
+  ```
+- **buildSearchMenuKeyboard layout (реальный код):**
+  ```
+  [📝 По названию]   → tx:s:n
+  [💲 По сумме]       → tx:s:amt
+  [📁 По категории]   → tx:s:c
+  [📅 По дате]        → tx:s:dt
+  [◀️ Назад]          → tx:l:0:a
+  ```
+- **buildSearchResultsKeyboard layout (реальный код):**
+  ```
+  Row 0..N: [emoji name  amt CUR  dd.mm]           ← результаты (макс SEARCH_PAGE_SIZE=8)
+  Row N+1: [◀️] [page/total] [▶️]                  ← пагинация (только если totalPages > 1)
+  Row N+2: [🔍 Новый поиск]  [◀️ К списку]         ← footer навигация (всегда)
   ```
 - **callback_data byte verification table** (ISSUE-2: `tx:f:` = `ed:f:` для чистого remap):
   ```
@@ -498,7 +526,7 @@ packages/database/migrations/
 - **Верификация:** `EXPLAIN SELECT ... WHERE item_name ILIKE '%test%'` — должен показывать Bitmap Index Scan
 
 ### Задача 3.7 — Поиск по дате (Вариант 1 «Быстрые периоды»)
-- **Статус:** `[ ]`
+- **Статус:** `[x]`
 - **Контекст:** Дата транзакций хранится в поле `transaction_time` (timestamptz). Callback_data ≤ 64 байт. Redis intercept для ввода конкретной даты.
 - **UX Flow:**
   ```
@@ -603,19 +631,26 @@ packages/database/migrations/
 ### Задача 4.1 — report-keyboard.service.ts
 - **Статус:** `[x]`
 - **Файл:** `apps/telegram-bot/src/services/report-keyboard.service.ts` (NEW)
-- **Period picker layout:**
+- **Period picker layout (реальный код):**
   ```
-  [Сегодня]   [Вчера]
-  [Эта неделя] [Прошлая]
-  [Этот месяц] [Прошлый]
-  [3 месяца]   [Год]
+  [📅 Сегодня]    [📅 Вчера]
+  [📆 Эта неделя] [📆 Прошлая]
+  [🗓 Этот месяц] [🗓 Прошлый]
+  [📊 3 месяца]  [📊 Год]
+  [✖️ Закрыть]
   ```
-- **Sub-menu (после выбора периода):**
+- **Report sub-menu layout (реальный код):**
   ```
-  [📋 Сводка]  [📊 Категории]
-  [💸 Расходы] [💰 Доходы]
-  [📈 Сравнение] [🏦 По счетам]
+  [📋 Сводка]      [📊 Категории]
+  [💸 Расходы]     [💰 Доходы]
+  [📈 Сравнение]   [🏦 По счетам]
   [◀️ Выбрать период]
+  [✖️ Закрыть]
+  ```
+- **Report back keyboard (реальный код, используется в отчётах-результатах):**
+  ```
+  [◀️ К отчётам]   [📅 Другой период]
+  [✖️ Закрыть]
   ```
 - **Полная таблица callback_data:**
 
@@ -637,6 +672,7 @@ packages/database/migrations/
   | `rp:cmp` | Сравнение с прошлым | 6 |
   | `rp:acc` | По счетам | 6 |
   | `rp:bk` | Назад к period picker | 5 |
+  | `rp:cl` | Закрыть / dismiss keyboard | 5 |
 
   All ≤ 64 bytes ✓
 
@@ -650,7 +686,8 @@ packages/database/migrations/
     | { cmd: 'summary' } | { cmd: 'categories' }
     | { cmd: 'expenses' } | { cmd: 'income' }
     | { cmd: 'comparison' } | { cmd: 'accounts' }
-    | { cmd: 'back' };
+    | { cmd: 'back' }
+    | { cmd: 'close' };          // rp:cl → удаляет inline-keyboard
   export function parseRpCallback(data: string): RpCallbackCmd | null;
   ```
 
@@ -814,34 +851,47 @@ packages/database/migrations/
 
 ### Задача 5.3 — Расширить settings keyboard
 - **Статус:** `[x]`
-- **Новый layout клавиатуры:**
+- **Реальный layout клавиатуры (`buildSettingsMainKeyboard`):**
   ```
-  [✏️ Изменить валюту]
-  [🏦 Счёт расходов] [🏦 Счёт доходов]
-  [📁 Категории]     [🔔 Уведомления]
-  [🔢 Формат чисел]  [🌍 Язык]
-  [📤 Экспорт]       [ℹ️ О боте]
+  [💵 Основная валюта]  [🏦 Основной счет]
+  [🕒 Часовой пояс]    [🔔 Уведомления]
+  [💬 Поддержка]         [ℹ️ О боте]
+  [✖️ Закрыть]
   ```
+  > ⚠️ Фактический лайаут отличается от роадмапа. Кнопок «Категории», «Формат чисел», «Язык», «Экспорт» нет — есть часовой пояс, поддержка (ссылка url), о боте.
 - **Полная таблица callback_data:**
 
   | callback | Действие | Bytes |
   |---|---|---|
-  | `st:cat` | Категории: список | 6 |
-  | `st:cat:a` | Добавить категорию (intercept) | 8 |
-  | `st:cat:d:{catId}` | Удалить категорию | 35 |
-  | `st:cat:r:{catId}` | Переименовать (intercept) | 35 |
+  | `st:g:pick` | Выбор группы валюты | 8 |
+  | `st:g:s` | Стейблкоины | 6 |
+  | `st:g:c:0` | Крипто, стр 0 | 8 |
+  | `st:g:f:0` | Фиат, стр 0 | 8 |
+  | `st:n:c:{N}` | Крипто: следующая стр | 10 |
+  | `st:v:c:{N}` | Крипто: предыдущая стр | 10 |
+  | `st:p:{CODE}` | Выбрать валюту | ≤10 |
+  | `st:srch` | Поиск валюты | 7 |
+  | `st:da:all` | Выбор основного счёта | 9 |
+  | `st:da:sa:{id}` | Установить счёт | 38 |
+  | `st:da:ca` | Сбросить счёт | 8 |
+  | `st:da:new` | Создать счёт | 9 |
+  | `st:tz` | Часовой пояс: меню | 5 |
+  | `st:tz:srch` | Поиск timezone | 9 |
+  | `st:tz:c:{N}` | Disambiguation picker | 11 |
+  | `st:tz:p:{b64}` | Установить IANA | ≤64 |
   | `st:ntf` | Уведомления: меню | 6 |
   | `st:ntf:ds` | Toggle ежедневной сводки | 9 |
-  | `st:ntf:hr:{h}` | Установить час сводки | 11 |
   | `st:ntf:la` | Toggle лимитов | 9 |
   | `st:ntf:rr` | Toggle напоминаний | 9 |
+  | `st:ntf:hr:{h}` | Час сводки | 12 |
   | `st:nf` | Формат чисел: меню | 5 |
   | `st:nf:s:{fmt}` | Установить формат (ru/en/de) | 11 |
   | `st:lang` | Язык: меню | 7 |
   | `st:lang:s:{l}` | Установить язык (ru/en/ua) | 11 |
   | `st:exp` | Экспорт: меню | 6 |
   | `st:exp:csv` | Сгенерировать CSV | 10 |
-  | `st:info` | О боте | 7 |
+  | `st:info` | О боте (статистика) | 7 |
+  | `st:cancel` | Закрыть настройки | 9 |
 
   All ≤ 64 bytes ✓
 
@@ -996,11 +1046,11 @@ packages/database/migrations/
 |---|---|---|---|
 | 1 — Фундамент | 6 | 6 | ✅ Завершён |
 | 2 — Фильтры | 4 | 4 | ✅ Завершён |
-| 3 — Поиск | 7 | 6 | ⏳ Задача 3.7 (поиск по дате) пендинг |
+| 3 — Поиск | 7 | 7 | ✅ Завершён |
 | 4 — Отчёты | 5 | 5 | ✅ Завершён |
 | 5 — Настройки | 5 | 5 | ✅ Завершён |
 | 6 — Полировка | 6 | 6 | ✅ Завершён |
-| **Итого** | **33** | **32** | **97% — осталась задача 3.7** |
+| **Итого** | **33** | **33** | **100% ✅** |
 
 ---
 
