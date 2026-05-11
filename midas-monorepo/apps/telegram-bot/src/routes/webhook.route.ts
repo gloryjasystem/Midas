@@ -373,7 +373,7 @@ function editStateKey(telegramUserId: string, chatId: string): string {
 
 // Phase 1.30: Redis key for account onboarding multi-step state
 // Value format: JSON.stringify(AccountOnboardState)
-const ONBOARD_STATE_TTL_SEC = 300; // 5 minutes
+const ONBOARD_STATE_TTL_SEC = 1800; // 30 minutes — covers full onboarding session incl. idle time
 function onboardStateKey(telegramUserId: string, chatId: string): string {
   return `midas:ac:${telegramUserId}:${chatId}`;
 }
@@ -636,6 +636,9 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
               // Phase 1.37-UX: User tapped "Добавить счёт" from the 2-button /start keyboard.
               // Edit the same message in-place — no new message, chat stays clean.
               if (acMsgId) void editMessageText(chatId, acMsgId, ACCOUNTS_EMPTY_TEXT, buildAccountTypeKeyboard());
+              // Silent gate: set FSM state so any text typed here is silently swallowed.
+              // The 'type_pick' step is caught by the else-branch in Step 5f-ac text intercept.
+              await redisConnection.set(acKey, JSON.stringify({ step: 'type_pick' }), 'EX', ONBOARD_STATE_TTL_SEC);
 
             } else if (acCmd.cmd === 'skip') {
               // Phase 1.37-UX: User skipped onboarding — clean chat.
@@ -3058,6 +3061,15 @@ Midas создан, чтобы сделать учет денег максима
               telegramUserId, chatId,
               START_WELCOME_TEXT,
               buildStartSimpleKeyboard(),
+            );
+            // Silent gate: set FSM state so text messages are silently swallowed
+            // while the user is on the /start 2-button screen (before any button tap).
+            // Cleared automatically by ac:skip / ac:done / ac:fin handlers.
+            await redisConnection.set(
+              onboardStateKey(telegramUserId, chatId),
+              JSON.stringify({ step: 'type_pick' }),
+              'EX',
+              ONBOARD_STATE_TTL_SEC,
             );
           }
         } catch (err: unknown) {
