@@ -930,26 +930,40 @@ const INPUT_QUESTIONS: Record<string, string> = {
   lightning: '⚡ Какой Lightning-кошелёк?',
 };
 
-/** Builds the initial name-input prompt text (Экран 2Б) */
+const TYPE_FULL_LABELS: Record<string, string> = {
+  card:             '💳 Банковская карта',
+  cash:             '💵 Наличные',
+  exchange:         '🔄 Крипто-биржа',
+  custom:           '✏️ Свой счёт',
+  wallet_crypto:    '💎 Кошелёк',
+  wallet_ewallet:   '📱 Электронный кошелёк',
+  wallet_ton:       '📲 Кошелёк в Telegram',
+  wallet_lightning: '⚡ Lightning',
+};
+
+const SEP = '\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500';
+
+/** Builds the initial name-input prompt text (Экран 2Б) — clean, no step counter */
 export function buildInputPromptText(
   accountType: string,
   walletSubtype?: string,
-  stepN?: number,
-  stepTotal?: number,
+  _stepN?: number,   // kept for API compatibility, no longer rendered
+  _stepTotal?: number,
 ): string {
   const key = walletSubtype ?? accountType;
-  const header = (stepN && stepTotal)
-    ? `<b>${accountType === 'wallet' && walletSubtype
-        ? { crypto: '💎 Крипто-кошелёк', ewallet: '📱 Электронный', ton: '📲 Кошелёк в Telegram', lightning: '⚡ Lightning' }[walletSubtype]
-        : { card: '💳 Банковская карта', exchange: '🔄 Крипто-биржа' }[accountType]}
-       · Шаг ${stepN} из ${stepTotal}</b>`
-    : '';
+  const labelKey = accountType === 'wallet' && walletSubtype ? `wallet_${walletSubtype}` : accountType;
+  const header   = TYPE_FULL_LABELS[labelKey] ?? accountType;
   const question = INPUT_QUESTIONS[key] ?? 'Введите название:';
-  const examples = (INPUT_PROMPT_EXAMPLES[key] ?? []).join(', ');
-  return `${header}\n${question}\n<i>Например: ${examples}</i>`.trimStart();
+  const examples = (INPUT_PROMPT_EXAMPLES[key] ?? []).slice(0, 3).map((e) => `«${e}»`).join(', ');
+  return (
+    `<b>${header}</b>\n` +
+    `${SEP}\n` +
+    `${question}\n\n` +
+    `<i>${examples} или другой</i>`
+  );
 }
 
-/** Builds re-prompt after «✏️ Другой...» (Экран 3 → re-edit, fuzzy off) */
+/** Builds re-prompt after «✏️ Другое название» — same clean style */
 export function buildFreeTextPromptText(
   accountType: string,
   walletSubtype?: string,
@@ -957,11 +971,16 @@ export function buildFreeTextPromptText(
   const key = walletSubtype ?? accountType;
   const labels: Record<string, string> = {
     card: 'банка', exchange: 'биржи', crypto: 'кошелька',
-    ewallet: 'e-кошелька', ton: 'TON-кошелька', lightning: 'Lightning-кошелька',
+    ewallet: 'кошелька', ton: 'TON-кошелька', lightning: 'Lightning-кошелька',
   };
-  const label = labels[key] ?? 'счёта';
-  const examples = (REPROMPT_EXAMPLES[key] ?? []).join(', ');
-  return `✏️ Введите название ${label}:\n<i>Например: ${examples}</i>`;
+  const label   = labels[key] ?? 'счёта';
+  const examples = (REPROMPT_EXAMPLES[key] ?? []).slice(0, 3).map((e) => `«${e}»`).join(', ');
+  return (
+    `✏️ <b>Другое название</b>\n` +
+    `${SEP}\n` +
+    `Введите название ${label}:\n\n` +
+    `<i>${examples}...</i>`
+  );
 }
 
 /** Keyboard for free-text re-prompt (back button only) */
@@ -987,7 +1006,7 @@ export function buildSuccessScreenText(
   currency: string,
   balance?: string,
   icon = '💳',
-): string {
+): string { // eslint-disable-line @typescript-eslint/no-unused-vars — icon used below
   const balanceLine = balance
     ? ` · ${balance}`
     : '';
@@ -1302,6 +1321,15 @@ export const EXCHANGE_PICKER_TEXT = 'Какая биржа?';
 /** Text for currency picker step. */
 export const CURRENCY_PICKER_TEXT = 'В какой валюте?';
 
+/**
+ * Context-aware currency picker header — shows account name above separator.
+ * Falls back to generic text when name is unknown.
+ */
+export function buildCurrencyPickerText(name?: string): string {
+  if (!name) return CURRENCY_PICKER_TEXT;
+  return `<b>«${name}»</b>\n${SEP}\nВыберите валюту:`;
+}
+
 /** Prompt for free-text account name input. */
 export function nameInputPrompt(accountType: string): string {
   const labels: Record<string, string> = {
@@ -1335,6 +1363,18 @@ export const BAL_INPUT_PROMPT =
   '💰 <b>Сколько сейчас на счёте?</b>\n\n' +
   'Напиши сумму цифрами, например: <i>15000</i>\n' +
   'Или пропусти — баланс можно синхронизировать позже.';
+
+/**
+ * Context-aware balance prompt — shows «Name · CURRENCY» above separator.
+ */
+export function buildBalancePromptText(name: string, currency: string): string {
+  return (
+    `<b>«${name}»</b> · <b>${currency}</b>\n` +
+    `${SEP}\n` +
+    `💰 Какой начальный баланс?\n\n` +
+    `<i>Введите сумму или пропустите</i>`
+  );
+}
 
 /**
  * Keyboard for the bal_input step.
@@ -1508,30 +1548,17 @@ export function fuzzyMatchAccountName(
 // Phase 2.3: Smart confirm UI
 // ─────────────────────────────────────────────────────────────
 
-const TYPE_LABELS: Record<string, string> = {
-  card:     '💳 Банковская карта',
-  cash:     '💵 Наличные',
-  exchange: '🔄 Крипто-биржа',
-  wallet:   '🔐 Крипто-кошелёк',
-};
-
-const TYPE_EMOJI: Record<string, string> = {
-  card: '🏦', cash: '💵', exchange: '📊', wallet: '🔐',
-};
 
 /**
  * Message shown when a fuzzy match is found.
  * Professional fintech style — clear, concise, no noise.
  */
 export function buildSmartConfirmText(match: FuzzyAccountMatch): string {
-  const emoji = TYPE_EMOJI[match.type] ?? '💼';
-  const typeLabel = TYPE_LABELS[match.type] ?? match.type;
   return (
-    `🔍 <b>Похоже, вы имели в виду:</b>\n\n` +
-    `${emoji} <b>${match.name}</b>\n` +
-    `Тип: ${typeLabel}\n` +
-    `Валюта: ${match.defaultCurrency}\n\n` +
-    `Подтвердите или введите другое название:`
+    `💡 <b>Нашли похожее</b>\n` +
+    `${SEP}\n` +
+    `«<b>${match.name}</b>»\n\n` +
+    `Это верно?`
   );
 }
 

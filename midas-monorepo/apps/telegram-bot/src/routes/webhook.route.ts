@@ -151,13 +151,12 @@ import {
   buildFiatCurrencyPage,             // Phase 2.2
   buildCryptoCurrencyPage,           // Phase 2.2
   buildSkipBalanceKeyboard,          // Phase 2.2
-  BAL_INPUT_PROMPT,                  // Phase 2.2
   ACCOUNTS_EMPTY_TEXT,               // Phase 1.30
   START_WELCOME_TEXT,                // Phase 1.37-UX: new user welcome
   SETUP_COMPLETE_TEXT,               // Phase 1.37-UX: ReplyKeyboard activation message
   EXCHANGE_PICKER_TEXT,              // Phase 1.30
   BANK_PICKER_TEXT,                  // Phase 2.1
-  CURRENCY_PICKER_TEXT,              // Phase 1.30
+  CURRENCY_PICKER_TEXT,              // Phase 1.30 (legacy fallback)
   CURRENCY_INPUT_PROMPT,             // Phase 1.30
   buildFinishOnboardKeyboard,        // Phase 2.3
   SKIP_COMPLETE_TEXT,                // Phase 2.3: ac:skip D1 message with ReplyKeyboard
@@ -170,6 +169,8 @@ import {
   buildFreeTextPromptText,           // Phase 2.3: re-prompt after cus_keep
   buildFreeTextPromptKeyboard,       // Phase 2.3: keyboard for re-prompt
   buildSuccessScreenText,            // Phase 2.3: post-creation success screen
+  buildCurrencyPickerText,           // Phase 2.3: context-aware currency picker header
+  buildBalancePromptText,            // Phase 2.3: context-aware balance prompt
   getProviderIcon,                   // Phase 2.3: provider emoji for success screen
   capitalizeFirst,                   // Phase 2.3: auto-capitalize user input
   type AccountOnboardState,          // Phase 1.30
@@ -695,7 +696,7 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
                   : (confirmedType === 'exchange' || confirmedType === 'wallet')
                   ? buildCryptoCurrencyPage(0)
                   : buildOnboardCurrencyKeyboard();
-                if (acMsgId) void editMessageText(chatId, acMsgId, CURRENCY_PICKER_TEXT, curKb);
+                if (acMsgId) void editMessageText(chatId, acMsgId, buildCurrencyPickerText(confirmedName), curKb);
               }
 
             } else if (acCmd.cmd === 'cus_keep') {
@@ -750,7 +751,7 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
                 // Cash: name is auto-determined from currency (e.g. «Наличные RUB»)
                 const state: AccountOnboardState = { step: 'cur_pick', accountType: 'cash' };
                 await redisConnection.set(acKey, JSON.stringify(state), 'EX', ONBOARD_STATE_TTL_SEC);
-                if (acMsgId) void editMessageText(chatId, acMsgId, CURRENCY_PICKER_TEXT, buildFiatCurrencyKeyboard());
+                if (acMsgId) void editMessageText(chatId, acMsgId, buildCurrencyPickerText('Наличные'), buildFiatCurrencyKeyboard());
 
               } else {
                 // Custom: input prompt with generic label
@@ -783,7 +784,7 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
               // Phase 2.1: User picked a bank preset — set name, show fiat currency picker
               const state: AccountOnboardState = { step: 'cur_pick', accountType: 'card', name: acCmd.name };
               await redisConnection.set(acKey, JSON.stringify(state), 'EX', ONBOARD_STATE_TTL_SEC);
-              if (acMsgId) void editMessageText(chatId, acMsgId, CURRENCY_PICKER_TEXT, buildFiatCurrencyPage(0));
+              if (acMsgId) void editMessageText(chatId, acMsgId, buildCurrencyPickerText(acCmd.name), buildFiatCurrencyPage(0));
 
             } else if (acCmd.cmd === 'bank_custom') {
               // Phase 2.3: User tapped "Другой банк" — show free-text re-prompt
@@ -796,7 +797,7 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
               // User picked an exchange preset — show crypto currency picker
               const state: AccountOnboardState = { step: 'cur_pick', accountType: 'exchange', name: acCmd.name };
               await redisConnection.set(acKey, JSON.stringify(state), 'EX', ONBOARD_STATE_TTL_SEC);
-              if (acMsgId) void editMessageText(chatId, acMsgId, CURRENCY_PICKER_TEXT, buildCryptoCurrencyPage(0));
+              if (acMsgId) void editMessageText(chatId, acMsgId, buildCurrencyPickerText(acCmd.name), buildCryptoCurrencyPage(0));
 
             } else if (acCmd.cmd === 'exchange_custom') {
               // Phase 2.3: User tapped "Другая биржа" — show free-text re-prompt
@@ -809,7 +810,7 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
               // Phase 2.3: User picked a wallet preset — show crypto currency picker
               const state: AccountOnboardState = { step: 'cur_pick', accountType: 'wallet', name: acCmd.name };
               await redisConnection.set(acKey, JSON.stringify(state), 'EX', ONBOARD_STATE_TTL_SEC);
-              if (acMsgId) void editMessageText(chatId, acMsgId, CURRENCY_PICKER_TEXT, buildCryptoCurrencyPage(0));
+              if (acMsgId) void editMessageText(chatId, acMsgId, buildCurrencyPickerText(acCmd.name), buildCryptoCurrencyPage(0));
 
             } else if (acCmd.cmd === 'wallet_custom') {
               // Phase 2.3: User tapped "Другой кошелёк" — re-prompt with subtype context
@@ -862,7 +863,7 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
                     currency: acCmd.code,
                   };
                   await redisConnection.set(acKey, JSON.stringify(newState), 'EX', ONBOARD_STATE_TTL_SEC);
-                  const balPrompt = `✅ Счёт <b>${escapeHtml(accountName)}</b> (${escapeHtml(acCmd.code)}) создан!\n\n${BAL_INPUT_PROMPT}`;
+                  const balPrompt = buildBalancePromptText(escapeHtml(accountName), escapeHtml(acCmd.code));
                   if (acMsgId) void editMessageText(chatId, acMsgId, balPrompt, buildSkipBalanceKeyboard());
                   request.log.info({ msg: '[midas:bot:webhook] ac: account created, awaiting balance', workspaceId: acResolved.workspaceId });
                 }
@@ -3858,10 +3859,10 @@ Midas создан, чтобы сделать учет денег максима
               await redisConnection.set(acKey, JSON.stringify(updatedState), 'EX', ONBOARD_STATE_TTL_SEC);
               try {
                 const resolved = await resolveWorkspace(telegramUserId, chatId);
-                void upsertBotMessage(telegramUserId, chatId, CURRENCY_PICKER_TEXT, buildCryptoCurrencyPage(0));
+                void upsertBotMessage(telegramUserId, chatId, buildCurrencyPickerText(acName), buildCryptoCurrencyPage(0));
                 request.log.info({ msg: '[midas:bot:webhook] ac: wallet/lightning name received', workspaceId: resolved.workspaceId });
               } catch {
-                void upsertBotMessage(telegramUserId, chatId, CURRENCY_PICKER_TEXT, buildCryptoCurrencyPage(0));
+                void upsertBotMessage(telegramUserId, chatId, buildCurrencyPickerText(acName), buildCryptoCurrencyPage(0));
               }
             } else {
               const updatedState: AccountOnboardState = { ...acState, step: 'cur_pick', name: trimmed };
@@ -3869,10 +3870,10 @@ Midas создан, чтобы сделать учет денег максима
               try {
                 const resolved = await resolveWorkspace(telegramUserId, chatId);
                 const curKb = chooseCurKeyboard(acState.accountType ?? 'custom', acState.walletSubtype);
-                void upsertBotMessage(telegramUserId, chatId, CURRENCY_PICKER_TEXT, curKb);
+                void upsertBotMessage(telegramUserId, chatId, buildCurrencyPickerText(trimmed), curKb);
                 request.log.info({ msg: '[midas:bot:webhook] ac: name input received', workspaceId: resolved.workspaceId });
               } catch {
-                void upsertBotMessage(telegramUserId, chatId, CURRENCY_PICKER_TEXT);
+                void upsertBotMessage(telegramUserId, chatId, buildCurrencyPickerText(trimmed));
               }
             }
           }
