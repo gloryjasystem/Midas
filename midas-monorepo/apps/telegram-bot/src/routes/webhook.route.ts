@@ -909,10 +909,13 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
               }
               await redisConnection.del(acKey);
               const skippedIcon = getProviderIcon(undefined, skippedType, skippedSub);
-              if (acMsgId) void editMessageText(
-                chatId, acMsgId,
+              // Activate nav keyboard: delete inline onboarding msg, send success + ReplyKeyboard
+              if (acMsgId) void deleteMessage(chatId, acMsgId);
+              await clearActiveMessageId(telegramUserId, chatId);
+              void sendMessageWithReplyKeyboard(
+                chatId,
                 buildSuccessScreenText(escapeHtml(skippedName), skippedCur, undefined, skippedIcon),
-                { inline_keyboard: [] }, // master_roadmap 2.7: success screen is button-free
+                buildMainMenuKeyboard(),
               );
 
             } else if (acCmd.cmd === 'bank_page') {
@@ -4051,11 +4054,14 @@ Midas создан, чтобы сделать учет денег максима
               );
             } else {
               const icon = getProviderIcon(undefined, acState.accountType ?? 'custom', acState.walletSubtype);
-              void upsertBotMessage(
-                telegramUserId,
+              // Activate nav keyboard: delete inline onboarding msg, send success + ReplyKeyboard
+              const oldMsgIdCi = await getActiveMessageId(telegramUserId, chatId);
+              if (oldMsgIdCi) void deleteMessage(chatId, oldMsgIdCi);
+              await clearActiveMessageId(telegramUserId, chatId);
+              void sendMessageWithReplyKeyboard(
                 chatId,
                 buildSuccessScreenText(escapeHtml(accountName), escapeHtml(rawCode), undefined, icon),
-                { inline_keyboard: [] }, // master_roadmap 2.7: success screen is button-free
+                buildMainMenuKeyboard(),
               );
               request.log.info({ msg: '[midas:bot:webhook] ac: account created via custom currency text', workspaceId: resolved.workspaceId });
             }
@@ -4096,10 +4102,14 @@ Midas создан, чтобы сделать учет денег максима
             const acName = acState.name ?? 'Счёт';
             const acCur  = acState.currency ?? '';
             const icon   = getProviderIcon(undefined, acState.accountType ?? 'custom', acState.walletSubtype);
-            void upsertBotMessage(
-              telegramUserId, chatId,
+            // Activate nav keyboard: delete inline onboarding msg, send success + ReplyKeyboard
+            const oldMsgIdBal = await getActiveMessageId(telegramUserId, chatId);
+            if (oldMsgIdBal) void deleteMessage(chatId, oldMsgIdBal);
+            await clearActiveMessageId(telegramUserId, chatId);
+            void sendMessageWithReplyKeyboard(
+              chatId,
               buildSuccessScreenText(escapeHtml(acName), escapeHtml(acCur), amount, icon),
-              { inline_keyboard: [] }, // master_roadmap 2.7: success screen is button-free
+              buildMainMenuKeyboard(),
             );
             request.log.info({ msg: '[midas:bot:webhook] ac: balance set via onboarding', workspaceId: resolved.workspaceId });
           } catch (err: unknown) {
