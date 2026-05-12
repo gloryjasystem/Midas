@@ -1537,9 +1537,13 @@ function computeScore(norm: string, translit: string, key: string, nameLower: st
   const check = (a: string, b: string, weight = 1.0) => {
     if (!a || !b) return;
     if (a === b) { if (1.0 * weight > best) best = 1.0 * weight; return; }
-    if (a.length >= 3 && b.includes(a)) { if (0.90 * weight > best) best = 0.90 * weight; }
-    if (a.length >= 3 && b.startsWith(a)) { if (0.80 * weight > best) best = 0.80 * weight; }
-    if (a.length >= 3 && a.includes(b)) { if (0.80 * weight > best) best = 0.80 * weight; }
+    // Substring/prefix: require input ≥ 4 chars AND at least 40% of target length
+    // Prevents "ban"(3) matching "sberbank"(8), "бан" → "ban" matching Citibank etc.
+    const minSubLen = 4;
+    const proportional = a.length >= b.length * 0.40;
+    if (a.length >= minSubLen && proportional && b.includes(a)) { if (0.90 * weight > best) best = 0.90 * weight; }
+    if (a.length >= minSubLen && proportional && b.startsWith(a)) { if (0.80 * weight > best) best = 0.80 * weight; }
+    if (a.length >= minSubLen && a.includes(b)) { if (0.80 * weight > best) best = 0.80 * weight; }
     
     if (a.length >= 3) {
       const d = levenshtein(a, b);
@@ -1567,11 +1571,164 @@ function computeScore(norm: string, translit: string, key: string, nameLower: st
 
 /** Cash keyword patterns (RU/UK/EN). */
 const CASH_KEYWORDS = [
-  'наличн','наличк','налик','нал','cash','готівк','кэш','кеш','кэшь',
+  'наличн','наличк','налик','нал','готівк','кэш','кеш','кэшь',
+  // 'cash' handled separately to avoid matching 'advcash', 'cashapp' etc.
 ];
 
+/**
+ * Russian/CIS aliases: maps a normalised Russian/Ukrainian input
+ * (or a common variant) directly to the canonical preset key.
+ * This short-circuits fuzzy computation for cases where transliteration
+ * is unreliable or ambiguous.
+ *
+ * Format: 'alias' → 'preset_key' (must exist in a *_PRESETS map)
+ * Checked BEFORE Levenshtein scoring.
+ */
+const RU_PRESET_ALIASES: Record<string, string> = {
+  // ── Банковские карты / Payment systems ──
+  'виза': 'visa', 'визу': 'visa', 'виз': 'visa',
+  'мастеркард': 'mastercard', 'мастер': 'mastercard',
+  'мир': 'mir', 'картамир': 'mir',
+  'юнионпей': 'unionpay', 'юнион': 'unionpay',
+  'маэстро': 'maestro',
+  'белкарт': 'belkart',
+  'простір': 'prostir',
+  // ── Российские банки ──
+  'тинькофф': 'tinkoff', 'тинк': 'tinkoff', 'тинькоф': 'tinkoff',
+  'сбер': 'sber', 'сбербанк': 'sber',
+  'альфа': 'alfa', 'альфабанк': 'alfa', 'алфа': 'alfa',
+  'втб': 'vtb',
+  'озон': 'ozon', 'озонбанк': 'ozon',
+  'газпром': 'gazprom', 'газпромбанк': 'gazprom', 'газ': 'gazprom',
+  'промсвязь': 'psb', 'промсвязьбанк': 'psb',
+  'совкомбанк': 'sovkombank', 'совком': 'sovkombank',
+  'россельхоз': 'rosselhoz', 'россельхозбанк': 'rosselhoz',
+  'открытие': 'mkb2',
+  'росбанк': 'rosbank',
+  'райффайзен': 'raifrus', 'райфф': 'raifrus', 'райф': 'raifrus',
+  'почтабанк': 'pochta', 'почта': 'pochta',
+  'мтсбанк': 'mtsbank', 'мтс': 'mtsbank',
+  'хоумкредит': 'hcredit', 'хоум': 'hcredit',
+  'отпбанк': 'otprus',
+  'акбарс': 'akbars',
+  'ренессанс': 'renaissance', 'ренессанскредит': 'renaissance',
+  'рнкб': 'rnkb',
+  'экспобанк': 'expobank',
+  'уралсиб': 'uralsib',
+  'юникредит': 'unicreditrus',
+  // ── Украинские банки ──
+  'моно': 'mono', 'монобанк': 'mono',
+  'приват': 'privat', 'приватбанк': 'privat',
+  'укрсиббанк': 'ukrsib', 'укрсиб': 'ukrsib',
+  'ощадбанк': 'oschad', 'ощад': 'oschad',
+  'пумб': 'pumb',
+  'абанк': 'abank',
+  'сенсбанк': 'sense', 'сенс': 'sense',
+  'укрексімбанк': 'ukrexim', 'укрексім': 'ukrexim',
+  'укргазбанк': 'ukrgaz',
+  'таскомбанк': 'tascom',
+  'кредобанк': 'kredobank',
+  'південний': 'pivdenny',
+  'глобусбанк': 'globus',
+  // ── Беларусь ──
+  'белинвестбанк': 'belinvest', 'белинвест': 'belinvest',
+  'приорбанк': 'priorbank',
+  'беларусбанк': 'belarusbank',
+  'дабрабыт': 'dabrabyt',
+  'альфабай': 'alfaby',
+  // ── Казахстан ──
+  'каспи': 'kaspi', 'каспибанк': 'kaspi',
+  'халык': 'halyk', 'халыкбанк': 'halyk',
+  'жусан': 'jusan', 'жусанбанк': 'jusan',
+  'центркредит': 'centercredit',
+  'евразийский': 'eurasian', 'евразийскийбанк': 'eurasian',
+  'атфбанк': 'atfbank',
+  // ── Онлайн-банки ──
+  'революст': 'revolut', 'революты': 'revolut', 'револют': 'revolut',
+  'вайз': 'wise',
+  'пейпал': 'paypal', 'пайпал': 'paypal',
+  'н26': 'n26',
+  'монзо': 'monzo',
+  // ── Биржи (Exchanges) ──
+  'бинанс': 'binance', 'байнанс': 'binance',
+  'байбит': 'bybit', 'бибит': 'bybit',
+  'окс': 'okx',
+  'кракен': 'kraken',
+  'кукоин': 'kucoin',
+  'вайтбит': 'whitebit',
+  'гейт': 'gateio', 'гейтио': 'gateio',
+  'гемини': 'gemini',
+  'эксмо': 'exmo',
+  'хуоби': 'huobi',
+  'коинбейс': 'coinbase', 'коинбэйс': 'coinbase',
+  'криптоком': 'cryptocom',
+  'битфинекс': 'bitfinex',
+  'полониекс': 'poloniex',
+  'битстамп': 'bitstamp',
+  'юпитер': 'jupiter',
+  'хайперликвид': 'hyperliquid',
+  // ── Крипто-кошельки (Wallets) ──
+  'метамаск': 'metamask', 'мета': 'metamask',
+  'траст': 'trust', 'трастволет': 'trust',
+  'фантом': 'phantom',
+  'эксодус': 'exodus',
+  'леджер': 'ledger',
+  'трезор': 'trezor',
+  'атомик': 'atomic', 'атомикволет': 'atomic',
+  'зерион': 'zerion',
+  'зенго': 'zengo',
+  'рэбби': 'rabby',
+  'рейнбоу': 'rainbow',
+  'кеплр': 'keplr',
+  'аргент': 'argent',
+  'электрум': 'electrum',
+  'мицелиум': 'mycelium',
+  // ── E-кошельки (EWallets) ──
+  'юмани': 'yoomoney', 'юмоней': 'yoomoney', 'юмоні': 'yoomoney',
+  'юмони': 'yoomoney',
+  'киви': 'qiwi',
+  'вебмани': 'webmoney', 'вебмоней': 'webmoney',
+  'скрилл': 'skrill',
+  'пайонир': 'payoneer', 'пайонер': 'payoneer',
+  'нетелер': 'neteller',
+  'пайер': 'payeer',
+  'адвкэш': 'advcash', 'адвкеш': 'advcash',
+  'алипей': 'alipay',
+  'вичатпей': 'wechatpay', 'вичат': 'wechatpay',
+  'пейтм': 'paytm',
+  // ── TON кошельки ──
+  'тонкипер': 'tonkeeper',
+  'тонхаб': 'tonhub',
+  'тонспейс': 'tonspace',
+  'тонволет': 'tonwallet',
+  'телеграмкошелек': 'telegramwallet', 'телеграмволет': 'telegramwallet',
+  'телеграмвалет': 'telegramwallet',
+  // ── Lightning кошельки ──
+  'феникс': 'phoenix',
+  'бриз': 'breez',
+  'страйк': 'strike',
+  'зевс': 'zeus',
+};
+
 /** Minimum input length to allow kw.startsWith(norm) check — prevents 'mon' matching 'moneta' etc. */
-const CASH_PREFIX_MIN_LEN = 4;
+const CASH_PREFIX_MIN_LEN = 5;
+
+/** Resolve a preset key → { name, type, defaultCurrency } searching across all preset maps. */
+function resolvePresetByKey(key: string): FuzzyAccountMatch | null {
+  const bank = BANK_PRESETS.get(key);
+  if (bank) return { name: bank.name, type: 'card', defaultCurrency: bank.defaultCurrency, score: 0.97 };
+  const xch = EXCHANGE_PRESETS.get(key);
+  if (xch) return { name: xch, type: 'exchange', defaultCurrency: 'USDT', score: 0.97 };
+  const wal = WALLET_PRESETS.get(key);
+  if (wal) return { name: wal, type: 'wallet', defaultCurrency: 'USDT', score: 0.97 };
+  const ew = EWALLET_PRESETS.get(key);
+  if (ew) return { name: ew.name, type: 'wallet', defaultCurrency: ew.defaultCurrency, score: 0.97 };
+  const ton = TON_WALLET_PRESETS.get(key);
+  if (ton) return { name: ton, type: 'wallet', defaultCurrency: 'TON', score: 0.97 };
+  const ln = LIGHTNING_PRESETS.get(key);
+  if (ln) return { name: ln, type: 'wallet', defaultCurrency: 'BTC', score: 0.97 };
+  return null;
+}
 
 /**
  * Phase 2.3: Fuzzy-match user's free-text input against all known presets.
@@ -1589,16 +1746,31 @@ export function fuzzyMatchAccountName(
   const translit = transliterate(norm);
   if (norm.length < 2) return null;
 
-  // Cash check (no typeFilter restriction — cash is universal)
-  if (!typeFilter || typeFilter === 'card') {
-    for (const kw of CASH_KEYWORDS) {
-      if (
-        norm.startsWith(kw) ||
-        (norm.length >= CASH_PREFIX_MIN_LEN && kw.startsWith(norm)) || // min-len guard: prevents 'mon' matching long keywords
-        norm.includes(kw)
-      ) {
-        return { name: 'Наличные', type: 'cash', defaultCurrency: 'RUB', score: 0.88 };
+  // ── Alias fast-path: check RU_PRESET_ALIASES FIRST (before cash and fuzzy) ──
+  const aliasKey = RU_PRESET_ALIASES[norm] ?? RU_PRESET_ALIASES[translit];
+  if (aliasKey) {
+    const match = resolvePresetByKey(aliasKey);
+    if (match) {
+      // Respect typeFilter
+      if (!typeFilter || match.type === typeFilter ||
+          (typeFilter === 'card' && match.type === 'cash')) {
+        return match;
       }
+    }
+  }
+
+  // Cash check — only standalone 'cash' keyword, not when it's part of 'advcash', 'cashapp' etc.
+  // We detect: input IS 'cash', starts with 'cash ' (with space), or is a known CIS cash word.
+  if (!typeFilter || typeFilter === 'card') {
+    const isCashWord = norm === 'cash' || norm.startsWith('cash ');
+    const isCisWord = CASH_KEYWORDS.some(
+      (kw) =>
+        norm.startsWith(kw) ||
+        (norm.length >= CASH_PREFIX_MIN_LEN && kw.startsWith(norm)) ||
+        norm.includes(kw),
+    );
+    if (isCashWord || isCisWord) {
+      return { name: 'Наличные', type: 'cash', defaultCurrency: 'RUB', score: 0.88 };
     }
   }
 
