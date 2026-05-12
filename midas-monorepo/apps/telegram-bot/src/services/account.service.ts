@@ -696,3 +696,125 @@ export async function softDeleteAccount(
     },
   );
 }
+
+// ─────────────────────────────────────────────────────────────
+// softDeletePlaceholderAccount — Lazy Default (Phase LD)
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Soft-delete the onboarding placeholder account for a workspace.
+ *
+ * Called immediately after a user successfully creates their own custom account
+ * during onboarding (ac:currency → bal_skip / bal_input success path).
+ *
+ * Finds all account_sources rows where:
+ *   - is_onboarding_placeholder = TRUE
+ *   - deleted_at IS NULL          (not already soft-deleted)
+ *   - workspace_id = workspaceId  (scoped to this workspace, defense-in-depth)
+ *
+ * Also clears default_expense_account_id / default_income_account_id on the
+ * workspace if they reference the placeholder — prevents stale FK references.
+ *
+ * Idempotent: if no placeholder exists (or it was already deleted), returns 'none'.
+ *
+ * @param workspaceId - Internal workspace ULID (from trusted backend — SEC-03)
+ * @param userId      - Internal user ULID (required by withTenantTransaction)
+ * @returns 'deleted' — at least one placeholder was soft-deleted.
+ *          'none'    — no active placeholder found (already gone or never existed).
+ *
+ * SEC-03: Runs inside withTenantTransaction — RLS + explicit workspace_id filter.
+ * SEC-02: No financial amounts.
+ * SEC-12: No account names logged.
+ */
+export async function softDeletePlaceholderAccount(
+  workspaceId: string,
+  userId: string,
+): Promise<'deleted' | 'none'> {
+  return withTenantTransaction<'deleted' | 'none'>(
+    workspaceId,
+    userId,
+    async (client) => {
+      // Soft-delete all placeholder rows for this workspace in one statement.
+      // RETURNING id lets us check if anything was actually deleted.
+      const result = await client.query<{ id: string }>(
+        `UPDATE account_sources
+         SET deleted_at = NOW(), updated_at = NOW()
+         WHERE workspace_id = $1
+           AND is_onboarding_placeholder = TRUE
+           AND deleted_at IS NULL
+         RETURNING id`,
+        [workspaceId],
+      );
+
+      if ((result.rowCount ?? 0) === 0) return 'none';
+
+      // Clear any workspace default account pointers that referenced the placeholder.
+      // This is safe even if the placeholder was never set as a default.
+      const deletedIds = result.rows.map((r) => r.id);
+      for (const deletedId of deletedIds) {
+        await client.query(
+          `UPDATE workspaces
+           SET default_expense_account_id = NULL
+           WHERE id = $1 AND default_expense_account_id = $2`,
+          [workspaceId, deletedId],
+        );
+        await client.query(
+          `UPDATE workspaces
+           SET default_income_account_id = NULL
+           WHERE id = $1 AND default_income_account_id = $2`,
+          [workspaceId, deletedId],
+        );
+      }
+
+      return 'deleted';
+    },
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// activatePlaceholderAccount — Lazy Default (Phase LD)
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Activate the onboarding placeholder account (promote it to a real account).
+ *
+ * Called when the user taps "Пропустить" (ac:skip) — they chose not to create
+ * a custom account, so the Default placeholder should become their real account.
+ *
+ * Sets is_onboarding_placeholder = FALSE on all placeholder rows in the workspace.
+ * The account already has correct name ('Default'), currency ('USDT'), and
+ * initial_balance (0) — no further changes needed.
+ *
+ * Idempotent: if no placeholder exists, returns 'none'.
+ *
+ * @param workspaceId - Internal workspace ULID (from trusted backend — SEC-03)
+ * @param userId      - Internal user ULID (required by withTenantTransaction)
+ * @returns 'activated' — at least one placeholder was activated.
+ *          'none'      — no placeholder found (already activated or never existed).
+ *
+ * SEC-03: Runs inside withTenantTransaction — RLS + explicit workspace_id filter.
+ * SEC-02: No financial amounts.
+ * SEC-12: No account names logged.
+ */
+export async function activatePlaceholderAccount(
+  workspaceId: string,
+  userId: string,
+): Promise<'activated' | 'none'> {
+  return withTenantTransaction<'activated' | 'none'>(
+    workspaceId,
+    userId,
+    async (client) => {
+      const result = await client.query<{ id: string }>(
+        `UPDATE account_sources
+         SET is_onboarding_placeholder = FALSE, updated_at = NOW()
+         WHERE workspace_id = $1
+           AND is_onboarding_placeholder = TRUE
+           AND deleted_at IS NULL
+         RETURNING id`,
+        [workspaceId],
+      );
+
+      return (result.rowCount ?? 0) > 0 ? 'activated' : 'none';
+    },
+  );
+}

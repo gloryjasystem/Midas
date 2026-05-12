@@ -72,13 +72,15 @@ import {
 import {
   getAccountList,
   addAccount,
-  hasAccounts,              // Phase 1.30
-  addAccountWithCurrency,   // Phase 1.30 (used in cur_input text path)
-  addAccountReturningId,    // Phase 2.2 (used in currency callback → bal_input)
+  hasAccounts,                     // Phase 1.30
+  addAccountWithCurrency,          // Phase 1.30 (used in cur_input text path)
+  addAccountReturningId,           // Phase 2.2 (used in currency callback → bal_input)
   parseAddAccountArgs,
-  renameAccount,            // Phase 2.1
-  changeAccountCurrency,    // Phase 2.1
-  softDeleteAccount,        // Phase 2.1
+  renameAccount,                   // Phase 2.1
+  changeAccountCurrency,           // Phase 2.1
+  softDeleteAccount,               // Phase 2.1
+  softDeletePlaceholderAccount,    // Phase LD: soft-delete Default when user creates custom account
+  activatePlaceholderAccount,      // Phase LD: promote Default to real account when user skips
 } from '../services/account.service.js';
 import {
   getSettings,
@@ -641,16 +643,16 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
               await redisConnection.set(acKey, JSON.stringify({ step: 'type_pick' }), 'EX', ONBOARD_STATE_TTL_SEC);
 
             } else if (acCmd.cmd === 'skip') {
-              // Phase 1.37-UX: User skipped onboarding — clean chat.
-              // Phase 2.3: Silently create default account if user has none.
-              // Note: system_find_or_create_user already creates 'Default' (USDT) at
-              // registration, so hasAccounts() guards against double-creation only.
+              // Phase LD (Lazy Default): User skipped onboarding.
+              // The Default account was created as a placeholder at registration.
+              // Promote it to a real account by clearing is_onboarding_placeholder flag.
               await redisConnection.del(acKey);
               try {
+                await activatePlaceholderAccount(acResolved.workspaceId, acResolved.userId);
+                // Fallback: if for some reason no placeholder exists (e.g. older user),
+                // hasAccounts() guard ensures they still get a Default account.
                 const noAccounts = !(await hasAccounts(acResolved.workspaceId, acResolved.userId));
                 if (noAccounts) {
-                  // Create silent default account — user will see it in /accounts later.
-                  // Duplicate is fine if somehow called twice (ON CONFLICT DO NOTHING).
                   await addAccountWithCurrency(acResolved.workspaceId, acResolved.userId, 'Основной', 'USDT');
                 }
               } catch { /* Non-fatal — skip silently, don't block UX */ }
@@ -879,6 +881,11 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
                     buildAfterCreateKeyboard(),
                   );
                 } else {
+                  // Phase LD: custom account created — soft-delete the onboarding placeholder.
+                  // Non-fatal: if placeholder already gone or never existed, 'none' is returned.
+                  try {
+                    await softDeletePlaceholderAccount(acResolved.workspaceId, acResolved.userId);
+                  } catch { /* non-fatal — don't block onboarding UX */ }
                   // Phase 2.2: transition to bal_input step
                   const newState: AccountOnboardState = {
                     step: 'bal_input',
@@ -911,6 +918,11 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
                 } catch { /* ignore */ }
               }
               await redisConnection.del(acKey);
+              // Phase LD: user completed custom account creation (with skipped balance).
+              // Soft-delete the onboarding placeholder — only the custom account remains.
+              try {
+                await softDeletePlaceholderAccount(acResolved.workspaceId, acResolved.userId);
+              } catch { /* non-fatal */ }
               const skippedIcon = getProviderIcon(undefined, skippedType, skippedSub);
               // Activate nav keyboard: delete inline onboarding msg, send success + ReplyKeyboard
               if (acMsgId) void deleteMessage(chatId, acMsgId);
@@ -4065,6 +4077,11 @@ Midas создан, чтобы сделать учет денег максима
                 buildFinishOnboardKeyboard(),
               );
             } else {
+              // Phase LD: custom account created via free-text currency input.
+              // Soft-delete the onboarding placeholder — only the custom account remains.
+              try {
+                await softDeletePlaceholderAccount(resolved.workspaceId, resolved.userId);
+              } catch { /* non-fatal */ }
               const icon = getProviderIcon(undefined, acState.accountType ?? 'custom', acState.walletSubtype);
               // Activate nav keyboard: delete inline onboarding msg, send success + ReplyKeyboard
               const oldMsgIdCi = await getActiveMessageId(telegramUserId, chatId);
@@ -4110,6 +4127,11 @@ Midas создан, чтобы сделать учет денег максима
           try {
             const resolved = await resolveWorkspace(telegramUserId, chatId);
             await setAccountBalanceById(resolved.workspaceId, resolved.userId, acState.accountId, amount);
+            // Phase LD: balance entered — custom account fully set up.
+            // Soft-delete the onboarding placeholder (already gone after ac:currency, but idempotent).
+            try {
+              await softDeletePlaceholderAccount(resolved.workspaceId, resolved.userId);
+            } catch { /* non-fatal */ }
             // Phase 2.3: polished success screen with name, currency and balance
             const acName = acState.name ?? 'Счёт';
             const acCur  = acState.currency ?? '';

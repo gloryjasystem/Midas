@@ -404,9 +404,13 @@ async function resolveDefaultAccount(
     }
   }
 
-  // Step 2: Fall back to LIMIT 1
+  // Step 2: Fall back to LIMIT 1 — only active (non-deleted) accounts.
+  // Phase LD: AND deleted_at IS NULL is required here so that a soft-deleted
+  // onboarding placeholder (is_onboarding_placeholder = TRUE, deleted_at = NOW())
+  // is never selected as the fallback account for a transaction.
+  // Without this guard, transactions would be silently attached to a deleted account.
   const fallback = await client.query<{ id: string }>(
-    `SELECT id FROM account_sources WHERE workspace_id = $1 LIMIT 1`,
+    `SELECT id FROM account_sources WHERE workspace_id = $1 AND deleted_at IS NULL LIMIT 1`,
     [workspaceId],
   );
   if (fallback.rows.length > 0 && fallback.rows[0]) {
