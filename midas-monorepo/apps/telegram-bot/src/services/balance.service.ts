@@ -304,7 +304,14 @@ export async function getBalanceData(
       ? row.balance.toFixed(2)
       : num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-    return `<b>${name}</b>\n└ ${balanceStr} ${currency}`;
+    const isExp = Boolean(row.is_expense_default);
+    const isInc = Boolean(row.is_income_default);
+    const roleBadge = (isExp && isInc) ? ' (💸💰 основной)'
+                    : isExp            ? ' (💸 расходы)'
+                    : isInc            ? ' (💰 доходы)'
+                    : '';
+
+    return `<b>${name}</b>${roleBadge}\n└ ${balanceStr} ${currency}`;
   });
 
   // ── Currency totals — compact single line ─────────────────
