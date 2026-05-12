@@ -147,10 +147,13 @@ If no category fits, use "Другое". NEVER invent new category names.
 
 ACCOUNT_HINT RULES:
 - account_hint is the name of a specific account, exchange, wallet, or bank the user mentions as the source or destination.
-- Only include account_hint when the user explicitly names a specific place (e.g. "Binance", "PayPal", "\u0421\u0431\u0435\u0440\u0431\u0430\u043d\u043a", "MetaMask", "\u043a\u0430\u0440\u0442\u0430 \u0422\u0438\u043d\u044c\u043a\u043e\u0444\u0444").
+- Include account_hint when the user explicitly names a specific place (e.g. "Binance", "PayPal", "\u0421\u0431\u0435\u0440\u0431\u0430\u043d\u043a", "MetaMask", "\u043a\u0430\u0440\u0442\u0430 \u0422\u0438\u043d\u044c\u043a\u043e\u0444\u0444").
+- CRITICAL: If a KNOWN ACCOUNTS LIST is provided below, ANY name from that list found in the user message MUST be extracted as account_hint — even without prepositions like "с", "на", "в". Known account names take priority over item_hint interpretation.
+  Example: if "Влада Калина" is in KNOWN ACCOUNTS and user writes "Влада Калина 200 USD" → account_hint="Влада Калина", NOT item_hint.
+  Example: if "Bybit" is in KNOWN ACCOUNTS and user writes "Bybit 500 USDT" → account_hint="Bybit".
 - Do NOT include account_hint for generic phrases like "\u043a\u0430\u0440\u0442\u0430" (too vague), "\u043a\u043e\u0448\u0435\u043b\u0451\u043a" (too vague), "\u043d\u0430\u043b\u0438\u0447\u043d\u044b\u0435" (too vague).
-- Do NOT invent an account if the user does not mention one explicitly.
-- account_hint must be the literal name as used by the user (e.g. "Binance", not "Binance exchange").
+- Do NOT invent an account if the user does not mention one and it is not in the KNOWN ACCOUNTS list.
+- account_hint must be the literal name as used by the user (match closest known account name).
 
 INTENT VALUES (choose one):
 - "expense" \u2014 user spent money
@@ -304,8 +307,32 @@ Output: {"confidence":0.1}`;
 // SEC-12: raw_text is used here as transient input only — never logged
 // ─────────────────────────────────────────────────────────────
 
-export function buildUserMessage(rawText: string): string {
+/**
+ * Build the user message for Claude.
+ *
+ * @param rawText - The user's raw transaction text (SEC-12: never logged).
+ * @param accountNames - Optional list of workspace account names.
+ *   Injected as KNOWN ACCOUNTS context so Claude recognises custom
+ *   account names (e.g. "Влада Калина") without prepositions.
+ *   Only account names are passed — never IDs, balances, or system fields.
+ */
+export function buildUserMessage(rawText: string, accountNames?: string[]): string {
   // Truncate to prevent prompt injection via extremely long messages
   const truncated = rawText.slice(0, 1000);
-  return truncated;
+
+  if (!accountNames || accountNames.length === 0) {
+    return truncated;
+  }
+
+  // Build KNOWN ACCOUNTS block: safe list of names only (no financial data)
+  const accountList = accountNames
+    .slice(0, 30)                          // cap at 30 to bound token usage
+    .map((n) => `- ${n.slice(0, 60)}`)    // cap each name at 60 chars
+    .join('\n');
+
+  return (
+    `KNOWN ACCOUNTS (user's wallet/bank/account names — treat any match as account_hint):\n` +
+    `${accountList}\n\n` +
+    `Transaction text: ${truncated}`
+  );
 }

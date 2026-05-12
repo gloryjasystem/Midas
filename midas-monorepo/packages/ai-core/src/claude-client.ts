@@ -220,9 +220,12 @@ function postProcessIntentRecovery(
  * Parse a financial transaction from user's raw text using Claude Haiku.
  *
  * @param rawText - The user's message text. SEC-12: never logged inside this fn.
+ * @param accountNames - Optional list of workspace account names (names only, no IDs).
+ *   Injected as KNOWN ACCOUNTS context so Claude can recognise custom account
+ *   names (e.g. "Влада Калина") without requiring explicit prepositions.
  * @returns ParseResult discriminated union.
  */
-export async function parseTransaction(rawText: string): Promise<ParseResult> {
+export async function parseTransaction(rawText: string, accountNames?: string[]): Promise<ParseResult> {
   const client = getClient();
 
   let response: Awaited<ReturnType<typeof client.messages.create>>;
@@ -235,7 +238,7 @@ export async function parseTransaction(rawText: string): Promise<ParseResult> {
       messages: [
         {
           role: 'user',
-          content: buildUserMessage(rawText),
+          content: buildUserMessage(rawText, accountNames),
         },
       ],
     });

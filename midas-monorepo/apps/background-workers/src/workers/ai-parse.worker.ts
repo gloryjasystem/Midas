@@ -32,7 +32,7 @@ import { Worker, type Job } from 'bullmq';
 import { QUEUE_NAMES, type AiParseJobPayload, IdempotencyKeyBuilder } from '@midas/shared';
 import { parseTransaction } from '@midas/ai-core';
 import { redisConnection } from '../queues/redis.js';
-import { createDraft, resolveUserId, setDraftAccountId, getPendingDraftForUser, getAccountBalanceForPreview } from '../services/draft.service.js';
+import { createDraft, resolveUserId, setDraftAccountId, getPendingDraftForUser, getAccountBalanceForPreview, getWorkspaceAccountNames } from '../services/draft.service.js';
 import { resolveAccountFromHint } from '../services/account-resolver.service.js'; // Phase 1.31
 import { notificationsQueue } from '../queues/queue-definitions.js';
 import { ulid } from 'ulid';
@@ -288,13 +288,22 @@ async function processAiParse(job: Job<AiParseJobPayload>): Promise<void> {
 
   // ── Step 3: Parse with Claude Haiku (SEC-01) ─────────────
   // raw_text passed to parseTransaction only — never logged inside
-  const parseResult = await parseTransaction(job.data.raw_text);
+  // Phase 2.4 PR17: fetch workspace account names for AI context (non-blocking)
+  let accountNames: string[] = [];
+  try {
+    accountNames = await getWorkspaceAccountNames(workspaceId);
+  } catch {
+    // Non-fatal: AI parses without account context, balance block shows after picker
+    accountNames = [];
+  }
+  const parseResult = await parseTransaction(job.data.raw_text, accountNames);
 
   console.log('[midas:ai-parse-worker] Parse result', {
     jobId: job.id,
     workspaceId,
     status: parseResult.status,
     tokensUsed: parseResult.tokensUsed,
+    accountNamesCount: accountNames.length, // safe to log (count only, not names)
     // raw_text and parse output values deliberately excluded (SEC-12)
   });
 

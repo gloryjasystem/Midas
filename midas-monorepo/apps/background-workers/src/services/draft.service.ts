@@ -711,3 +711,32 @@ export async function getAccountBalanceForPreview(
     balance: row.balance,
   };
 }
+
+// ─────────────────────────────────────────────────────────────
+// Phase 2.4 PR17: Workspace account names for AI context
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Returns an array of active account names for the given workspace.
+ *
+ * Used to inject a KNOWN ACCOUNTS list into the Claude prompt so the AI
+ * can recognise custom account names (e.g. "Влада Калина") as account_hint
+ * even when they appear without prepositions in the user's message.
+ *
+ * SEC-01: Only account names are returned — never IDs, balances, or system fields.
+ * SEC-03: explicit workspace_id filter; excludes deleted and onboarding-placeholder rows.
+ *
+ * Returns [] if workspace has no active accounts (AI parses without context).
+ */
+export async function getWorkspaceAccountNames(workspaceId: string): Promise<string[]> {
+  const result = await pool.query<{ name: string }>(
+    `SELECT name
+     FROM account_sources
+     WHERE workspace_id = $1
+       AND deleted_at IS NULL
+       AND is_onboarding_placeholder = FALSE
+     ORDER BY name`,
+    [workspaceId],
+  );
+  return result.rows.map((r) => r.name);
+}
