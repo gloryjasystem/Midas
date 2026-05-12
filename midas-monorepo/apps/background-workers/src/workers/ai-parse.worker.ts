@@ -426,7 +426,7 @@ async function processAiParse(job: Job<AiParseJobPayload>): Promise<void> {
         inlineKeyboard = {
           inline_keyboard: [
             [{ text: `✅ Да, «${escapeHtml(resolution.accountName)}»`, callback_data: `ia:fuzzy:${resolution.accountId}:${draftId}` }],
-            [{ text: '🗂 Другой счёт', callback_data: `ia:list:${draftId}` }],
+            [{ text: '🏦 Другой счёт', callback_data: `ia:skip:${draftId}` }],
           ],
         };
         previewMsg =
@@ -442,7 +442,7 @@ async function processAiParse(job: Job<AiParseJobPayload>): Promise<void> {
           inline_keyboard: [
             [{ text: `✅ Создать «${escapeHtml(accountHint)}» (${escapeHtml(currency)})`, callback_data: `ia:create:${draftId}` }],
             [{ text: '✏️ Другое название', callback_data: `ia:rename:${draftId}` }],
-            [{ text: '🗂 Выбрать счёт', callback_data: `ia:list:${draftId}` }],
+            [{ text: '📋 Записать без счёта', callback_data: `ia:skip:${draftId}` }],
           ],
         };
         previewMsg =
