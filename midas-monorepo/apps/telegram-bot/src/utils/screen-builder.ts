@@ -1,14 +1,19 @@
 /**
- * Screen Builder Utility — Phase 1.34 / Phase 1.36-UX
+ * Screen Builder Utility — Phase 1.34 / Phase 1.36-UX / Phase 2.4
  *
  * Pure functions for building structured "app screen" card messages
  * for the Telegram bot. All messages use parse_mode:'HTML'.
  *
  * Design: one evolving screen per chat — never a pile of messages.
  *
+ * Phase 2.4: buildAccountBalanceBlock() + PreviewScreenData.accountBlock
+ *   Show the linked account name, current balance, and projected post-debit
+ *   balance on the confirm card. No floating-point math (SEC-02).
+ *
  * SEC-12: No raw user text logged. Amount values come from draft/DB,
  *         not from raw user input.
  * SEC-02: No float arithmetic. Amounts are NUMERIC strings from DB.
+ *         Balance subtraction uses string-based decimal arithmetic.
  *
  * All user-controlled values (categoryName, accountName, etc.) MUST
  * be escaped via escapeHtml() BEFORE being passed to these functions.
@@ -56,6 +61,103 @@ export function formatAmount(raw: string | number | null | undefined): string {
 }
 
 // ─────────────────────────────────────────────────────────────
+// Phase 2.4: Account Balance Block
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Data for the account debit block on the draft confirm card.
+ * All string values must be pre-escaped before being passed here.
+ * Numeric fields are NUMERIC strings from DB (::TEXT cast) — SEC-02.
+ */
+export interface AccountBalanceBlock {
+  /** Pre-escaped account name, e.g. "Bybit" */
+  accountName: string;
+  /** Account currency, e.g. "USDT" */
+  accountCurrency: string;
+  /**
+   * Current account balance as NUMERIC string (from getAccountWithBalance).
+   * Example: "15400.0000"
+   */
+  currentBalance: string;
+  /**
+   * Amount to debit. Same as parsed_amount when currencies match;
+   * otherwise account_debit_amount (from patchDraftDebitAmount — PR 5).
+   * Example: "500" or "501.5"
+   */
+  debitAmount: string;
+  /**
+   * Currency of the debit amount (usually = accountCurrency).
+   */
+  debitCurrency: string;
+  /**
+   * Transaction intent — determines sign:
+   *   expense / debt_given / transfer → subtract (balance decreases)
+   *   income  / debt_received         → add      (balance increases)
+   */
+  intent: string | null;
+}
+
+/**
+ * Add or subtract two NUMERIC strings without floating-point arithmetic.
+ *
+ * Uses BigInt arithmetic on 4-decimal-place scaled integers.
+ * Both a and b must be valid non-negative NUMERIC strings (max 4 decimal places).
+ * Returns a NUMERIC string with trailing zeros stripped.
+ *
+ * SEC-02: No floating-point — purely integer-scaled BigInt arithmetic.
+ * @internal exported only for unit testing.
+ */
+export function _numericAdd(a: string, b: string, subtract: boolean): string {
+  const toFixed4 = (s: string): string => {
+    const [int = '0', dec = ''] = s.split('.');
+    return `${int}.${dec.padEnd(4, '0').slice(0, 4)}`;
+  };
+  const [aInt, aDec] = toFixed4(a).split('.') as [string, string];
+  const [bInt, bDec] = toFixed4(b).split('.') as [string, string];
+  const aScaled = BigInt(`${aInt}${aDec}`);
+  const bScaled = BigInt(`${bInt}${bDec}`);
+  const result  = subtract ? aScaled - bScaled : aScaled + bScaled;
+
+  const sign   = result < 0n ? '-' : '';
+  const abs    = result < 0n ? -result : result;
+  const absStr = abs.toString().padStart(5, '0');
+  const intPart = absStr.slice(0, -4) || '0';
+  const decPart = absStr.slice(-4).replace(/0+$/, '');
+  return decPart ? `${sign}${intPart}.${decPart}` : `${sign}${intPart}`;
+}
+
+/**
+ * Build the account balance block for the draft confirm card.
+ *
+ * For expense / debt_given / transfer (subtract):
+ *   🏦 <b>Bybit</b> · USDT
+ *   💳 15 400 − 500 = <b>14 900 USDT</b>
+ *
+ * For income / debt_received (add):
+ *   🏦 <b>Bybit</b> · USDT
+ *   💳 15 400 + 500 = <b>15 900 USDT</b>
+ *
+ * SEC-02: uses _numericAdd() — BigInt arithmetic, no floating-point.
+ * SEC-12: account name must be pre-escaped by caller.
+ */
+export function buildAccountBalanceBlock(data: AccountBalanceBlock): string {
+  const isIncome = data.intent === 'income' || data.intent === 'debt_received';
+  const subtract = !isIncome;
+
+  const balanceAfter = _numericAdd(data.currentBalance, data.debitAmount, subtract);
+
+  const before = formatAmount(data.currentBalance);
+  const debit  = formatAmount(data.debitAmount);
+  const after  = formatAmount(balanceAfter);
+  const sign   = subtract ? '−' : '+';
+
+  return (
+    `🏦 <b>${data.accountName}</b> · ${data.accountCurrency}\n` +
+    `💳 ${before} ${sign} ${debit} = <b>${after} ${data.debitCurrency}</b>`
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
 // Preview Screen (after AI parse, before confirmation)
 // ─────────────────────────────────────────────────────────────
 
@@ -63,22 +165,39 @@ export interface PreviewScreenData {
   intent: string | null;
   amount: string | null;
   currency: string | null;
-  categoryHint: string | null;   // pre-escaped
-  accountHint: string | null;    // pre-escaped
-  itemName: string | null;       // Phase 1.35, pre-escaped
+  categoryHint: string | null;    // pre-escaped
+  accountHint: string | null;     // pre-escaped
+  itemName: string | null;        // Phase 1.35, pre-escaped
+  /** Phase 2.4: pre-built account balance block. null = no linked account. */
+  accountBlock?: AccountBalanceBlock | null;
 }
 
 /**
  * Build the transaction preview card shown before user confirms.
  *
- * Layout:
+ * Layout (no account):
  * ```
  * 💸 Расход
  *
- * ┃ 100 USDT        ← <blockquote> — нативный элемент Telegram, не переносится
+ * ┃ 100 USDT
  * ┃ ручка
  *
  * 📁 Кофе   ·   🏦 Binance
+ *
+ * Всё верно?
+ * ```
+ *
+ * Layout (with account, Phase 2.4):
+ * ```
+ * 💸 Расход
+ *
+ * ┃ 100 USDT
+ * ┃ ручка
+ *
+ * 🏦 Bybit · USDT
+ * 💳 15 400 − 100 = 15 300 USDT
+ *
+ * 📁 Кофе
  *
  * Всё верно?
  * ```
@@ -93,8 +212,6 @@ export function buildPreviewScreen(data: PreviewScreenData): string {
   ];
 
   // ── Blockquote: amount + item name ───────────────────────────
-  // <blockquote> — нативный UI-элемент Telegram (полоска слева).
-  // Никогда не переносится, одинаково выглядит на всех экранах.
   if (data.amount) {
     const amountLine = `<b>${formatAmount(data.amount)} ${data.currency ?? 'USDT'}</b>`;
     const blockContent = data.itemName
@@ -107,10 +224,17 @@ export function buildPreviewScreen(data: PreviewScreenData): string {
     lines.push('');
   }
 
-  // ── Details: category · account (middle dot — U+00B7) ────────
+  // ── Phase 2.4: Account balance block ─────────────────────────
+  if (data.accountBlock) {
+    lines.push(buildAccountBalanceBlock(data.accountBlock));
+    lines.push('');
+  }
+
+  // ── Details: category (+ legacy accountHint if no accountBlock) ──
   const details: string[] = [];
   if (data.categoryHint) details.push(`📁 ${data.categoryHint}`);
-  if (data.accountHint)  details.push(`🏦 ${data.accountHint}`);
+  // accountHint shown only when accountBlock is absent (backward compat)
+  if (!data.accountBlock && data.accountHint) details.push(`🏦 ${data.accountHint}`);
   if (details.length > 0) {
     lines.push(details.join('   ·   '));
     lines.push('');
