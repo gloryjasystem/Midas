@@ -155,13 +155,19 @@ section('1.6b — buildCurrencySearch* тексты');
 const searchPrompt     = buildCurrencySearchPromptText('Тинькофф', false);
 const searchPromptCust = buildCurrencySearchPromptText('Абв', true);
 const searchResults    = buildCurrencySearchResultsText('rub', 'Тинькофф', false);
+// 'xyz' looks like a currency code (3 latin chars) → "Не нашли в списке."
+// 'абвгд' = cyrillic only → candidate = '' (len 0) → looksLikeCode=false → generic path
 const noResults        = buildCurrencySearchNoResultsText('xyz', 'Тинькофф', false);
+const noResultsGeneric = buildCurrencySearchNoResultsText('абвгд', 'Тинькофф', false);
 
 check('Prompt содержит "Поиск валюты"',          searchPrompt.includes('Поиск валюты'),   searchPrompt.slice(0, 100));
 check('Prompt preset: «Тинькофф»',               searchPrompt.includes('«Тинькофф»'),     searchPrompt.slice(0, 120));
 check('Prompt custom: "свой счёт"',               searchPromptCust.includes('свой счёт'), searchPromptCust.slice(0, 120));
 check('Results text содержит "Найдено"',          searchResults.includes('Найдено'),       searchResults.slice(0, 100));
-check('No-results содержит "Такой валюты нет"',   noResults.includes('Такой валюты нет'), noResults.slice(0, 120));
+// code-like query (xyz) → smart hint with "Не нашли в списке."
+check('No-results (code-like): содержит «xyz»',  noResults.includes('xyz'),               noResults.slice(0, 120));
+// generic query (cyrillic only) → "Ничего не нашли"
+check('No-results (generic): содержит "Ничего не нашли"', noResultsGeneric.includes('Ничего не нашли'), noResultsGeneric.slice(0, 120));
 
 // Results keyboard
 const resKb = buildCurrencySearchResultsKeyboard(['RUB', 'USD', 'EUR'], 'ac:cur:list');
