@@ -237,7 +237,6 @@ export const BANK_PRESETS: ReadonlyMap<string, PresetInfo> = new Map([
   ['pekao',      { name: 'Pekao',         defaultCurrency: 'PLN' }],
   ['millennium', { name: 'Millennium',    defaultCurrency: 'PLN' }],
   // Switzerland / Austria
-  ['ubs',        { name: 'UBS',           defaultCurrency: 'CHF' }],
   ['csbank',     { name: 'Credit Suisse', defaultCurrency: 'CHF' }],
   ['raiffeisen', { name: 'Raiffeisen',    defaultCurrency: 'EUR' }],
   // Scandinavia
@@ -272,7 +271,6 @@ export const BANK_PRESETS: ReadonlyMap<string, PresetInfo> = new Map([
   ['piraeus',     { name: 'Piraeus Bank',  defaultCurrency: 'EUR' }],
   ['alphabank',   { name: 'Alpha Bank',    defaultCurrency: 'EUR' }],
   // UK
-  // UK
   ['barclays',    { name: 'Barclays',      defaultCurrency: 'GBP' }],
   ['hsbc',        { name: 'HSBC',          defaultCurrency: 'GBP' }],
   ['lloyds',      { name: 'Lloyds',        defaultCurrency: 'GBP' }],
@@ -300,8 +298,8 @@ export const BANK_PRESETS: ReadonlyMap<string, PresetInfo> = new Map([
   ['discover',    { name: 'Discover',      defaultCurrency: 'USD' }],
   ['chime',       { name: 'Chime',         defaultCurrency: 'USD' }],
   ['sofi',        { name: 'SoFi',          defaultCurrency: 'USD' }],
-  ['cashapp',     { name: 'Cash App',      defaultCurrency: 'USD' }],
-  ['venmo',       { name: 'Venmo',         defaultCurrency: 'USD' }],
+  // NOTE: CashApp and Venmo moved to EWALLET_PRESETS (payment services, not banks)
+
   // Canada
   ['rbc',         { name: 'RBC',           defaultCurrency: 'CAD' }],
   ['tdcanada',    { name: 'TD Canada',     defaultCurrency: 'CAD' }],
@@ -336,7 +334,8 @@ export const BANK_PRESETS: ReadonlyMap<string, PresetInfo> = new Map([
   ['dbs',         { name: 'DBS',           defaultCurrency: 'SGD' }],
   ['ocbc',        { name: 'OCBC',          defaultCurrency: 'SGD' }],
   ['uob',         { name: 'UOB',           defaultCurrency: 'SGD' }],
-  ['grabpay',     { name: 'GrabPay',       defaultCurrency: 'SGD' }],
+  // NOTE: GrabPay moved to EWALLET_PRESETS (mobile payment wallet, not a bank)
+
   // Middle East
   ['emiratesnbd', { name: 'Emirates NBD',  defaultCurrency: 'AED' }],
   ['fab',         { name: 'FAB',           defaultCurrency: 'AED' }],
@@ -346,10 +345,10 @@ export const BANK_PRESETS: ReadonlyMap<string, PresetInfo> = new Map([
   ['nubank',      { name: 'Nubank',        defaultCurrency: 'BRL' }],
   ['itau',        { name: 'Itaú',          defaultCurrency: 'BRL' }],
   ['bradesco',    { name: 'Bradesco',      defaultCurrency: 'BRL' }],
-  ['mercadopago', { name: 'Mercado Pago',  defaultCurrency: 'BRL' }],
+  // NOTE: Mercado Pago and Nequi moved to EWALLET_PRESETS (payment services, not banks)
   ['bbvamx',      { name: 'BBVA Mexico',   defaultCurrency: 'MXN' }],
   ['bancolombia', { name: 'Bancolombia',   defaultCurrency: 'COP' }],
-  ['nequi',       { name: 'Nequi',         defaultCurrency: 'COP' }],
+
   // ── Part 1: Payment systems (type: card) ──
   ['visa',       { name: 'Visa',          defaultCurrency: 'USD' }],
   ['mastercard', { name: 'Mastercard',    defaultCurrency: 'USD' }],
@@ -517,21 +516,32 @@ export const EWALLET_PRESETS: ReadonlyMap<string, { name: string; defaultCurrenc
   ['perfectmoney', { name: 'Perfect Money',    defaultCurrency: 'USD' }],
   ['capitalist',   { name: 'Capitalist',       defaultCurrency: 'USD' }],
   ['epayments',    { name: 'ePayments',        defaultCurrency: 'USD' }],
+  // UZB mobile payment
+  ['click',        { name: 'Click',            defaultCurrency: 'UZS' }],
+  // SEA mobile payment wallets
+  ['grabpay',      { name: 'GrabPay',          defaultCurrency: 'SGD' }],
+  // LatAm payment services (not banks)
+  ['mercadopago',  { name: 'Mercado Pago',     defaultCurrency: 'BRL' }],
+  ['nequi',        { name: 'Nequi',            defaultCurrency: 'COP' }],
+  // USA peer-to-peer / payment services (not banks)
+  ['cashapp',      { name: 'Cash App',         defaultCurrency: 'USD' }],
+  ['venmo',        { name: 'Venmo',            defaultCurrency: 'USD' }],
+  ['zelle',        { name: 'Zelle',            defaultCurrency: 'USD' }],
   // International e-wallets & payment services
-  ['paypal',       { name: 'PayPal',          defaultCurrency: 'USD' }],
-  ['revolut',      { name: 'Revolut',         defaultCurrency: 'EUR' }],
-  ['wise',         { name: 'Wise',            defaultCurrency: 'EUR' }],
-  ['skrill',       { name: 'Skrill',          defaultCurrency: 'EUR' }],
-  ['neteller',     { name: 'Neteller',        defaultCurrency: 'USD' }],
-  ['payoneer',     { name: 'Payoneer',        defaultCurrency: 'USD' }],
-  ['paysera',      { name: 'Paysera',         defaultCurrency: 'EUR' }],
-  ['alipay',       { name: 'Alipay',          defaultCurrency: 'CNY' }],
-  ['wechatpay',    { name: 'WeChat Pay',      defaultCurrency: 'CNY' }],
-  ['paytm',        { name: 'Paytm',           defaultCurrency: 'INR' }],
-  ['gcash',        { name: 'GCash',           defaultCurrency: 'PHP' }],
-  ['dana',         { name: 'DANA',            defaultCurrency: 'IDR' }],
-  ['ovo',          { name: 'OVO',             defaultCurrency: 'IDR' }],
-  ['stripe',       { name: 'Stripe',          defaultCurrency: 'USD' }],
+  ['paypal',       { name: 'PayPal',           defaultCurrency: 'USD' }],
+  ['revolut',      { name: 'Revolut',          defaultCurrency: 'EUR' }],
+  ['wise',         { name: 'Wise',             defaultCurrency: 'EUR' }],
+  ['skrill',       { name: 'Skrill',           defaultCurrency: 'EUR' }],
+  ['neteller',     { name: 'Neteller',         defaultCurrency: 'USD' }],
+  ['payoneer',     { name: 'Payoneer',         defaultCurrency: 'USD' }],
+  ['paysera',      { name: 'Paysera',          defaultCurrency: 'EUR' }],
+  ['alipay',       { name: 'Alipay',           defaultCurrency: 'CNY' }],
+  ['wechatpay',    { name: 'WeChat Pay',       defaultCurrency: 'CNY' }],
+  ['paytm',        { name: 'Paytm',            defaultCurrency: 'INR' }],
+  ['gcash',        { name: 'GCash',            defaultCurrency: 'PHP' }],
+  ['dana',         { name: 'DANA',             defaultCurrency: 'IDR' }],
+  ['ovo',          { name: 'OVO',              defaultCurrency: 'IDR' }],
+  ['stripe',       { name: 'Stripe',           defaultCurrency: 'USD' }],
 ]);
 
 // ─────────────────────────────────────────────────────────────
@@ -1709,6 +1719,20 @@ const RU_PRESET_ALIASES: Record<string, string> = {
   'алипей': 'alipay',
   'вичатпей': 'wechatpay', 'вичат': 'wechatpay',
   'пейтм': 'paytm',
+  // USA payment services
+  'кэшапп': 'cashapp', 'кешапп': 'cashapp', 'кэш апп': 'cashapp',
+  'cashapp': 'cashapp',
+  'венмо': 'venmo',
+  'venmo': 'venmo',
+  'зелл': 'zelle', 'зелле': 'zelle',
+  'zelle': 'zelle',
+  // SEA / LatAm / UZB
+  'грабпей': 'grabpay', 'grabpay': 'grabpay',
+  'меркадопаго': 'mercadopago', 'меркадо': 'mercadopago',
+  'mercadopago': 'mercadopago',
+  'неки': 'nequi', 'nequi': 'nequi',
+  'клик': 'click', 'clickuz': 'click',
+
   // ── TON кошельки ──
   'тонкипер': 'tonkeeper',
   'тонхаб': 'tonhub',
