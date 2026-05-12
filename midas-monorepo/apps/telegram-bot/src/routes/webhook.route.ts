@@ -207,8 +207,12 @@ import {
   parseInlineAccountCallback,        // Phase 1.31
   RENAME_PROMPT,                     // Phase 1.31
   type InlineAccountState,           // Phase 1.31
-  buildAccountPickerV2Keyboard,      // Phase 2.4 PR9: V2 account picker keyboard
+  buildAccountPickerV2Keyboard,      // Phase 2.4 PR9: V2 account picker keyboard (auto-show on parse)
   ACCOUNT_PICKER_V2_TEXT,            // Phase 2.4 PR9: picker header text
+  buildAccountPickerForDraft,        // Phase 2.4 PR11: full picker (✓ + type emoji + back btn)
+  ACCOUNT_PICKER_SCREEN_TEXT,        // Phase 2.4 PR11: full picker header text
+  ACCOUNT_PICKER_EMPTY_TEXT,         // Phase 2.4 PR11: empty-state text for no-account workspaces
+  type AccountPickerFullEntry,       // Phase 2.4 PR11: rich entry type
 } from '../services/account-inline-keyboard.service.js';
 import {
   getWorkspaceAccountsForInline,     // Phase 1.31
@@ -1364,7 +1368,7 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
               request.log.info({ msg: '[midas:bot:webhook] ia:pk: account picked', workspaceId: iaResolved.workspaceId });
             }
 
-          // ── Phase 2.4: ia:delink — user tapped "🔄 Сменить счёт" ─────────
+          // ── Phase 2.4 PR11: ia:delink — user tapped "🔄 Сменить счёт" ────
           } else if (iaCmd.cmd === 'delink') {
             // Delink: set account_id = NULL on the draft (patchDraftAccount with null).
             await patchDraftAccount(iaResolved.workspaceId, iaResolved.userId, iaCmd.draftId, null);
@@ -1377,19 +1381,27 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
             const allAccounts = await getWorkspaceAccountsWithBalances(
               iaResolved.workspaceId, iaResolved.userId, delinkIntent,
             );
-            const pickerEntries = toAccountPickerEntries(allAccounts).map((e) => ({
-              ...e,
-              name: escapeHtml(e.name),
+
+            // PR 11: build rich picker entries (type emoji + ✓ marker + ◀️ Назад)
+            const fullPickerEntries: AccountPickerFullEntry[] = allAccounts.map((acc) => ({
+              id:       acc.id,
+              name:     escapeHtml(acc.name),
+              currency: acc.currency,
+              type:     acc.type,
+              balance:  acc.balance,
             }));
 
             if (iaMsgId) {
+              const pickerText = fullPickerEntries.length > 0
+                ? ACCOUNT_PICKER_SCREEN_TEXT
+                : ACCOUNT_PICKER_EMPTY_TEXT;
               void editMessageText(
                 chatId, iaMsgId,
-                ACCOUNT_PICKER_V2_TEXT,
-                buildAccountPickerV2Keyboard(pickerEntries, iaCmd.draftId),
+                pickerText,
+                buildAccountPickerForDraft(iaCmd.draftId, fullPickerEntries, null),
               );
             }
-            request.log.info({ msg: '[midas:bot:webhook] ia:delink: account delinked', workspaceId: iaResolved.workspaceId });
+            request.log.info({ msg: '[midas:bot:webhook] ia:delink: account delinked → full picker shown', workspaceId: iaResolved.workspaceId });
           }
         } catch (err: unknown) {
           const errorClass = err instanceof Error ? err.constructor.name : 'UnknownError';
