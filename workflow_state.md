@@ -1,7 +1,7 @@
 # WORKFLOW_STATE.MD — Диспетчер задач ИИ-агента Midas
 
 > **Тип:** MUTABLE — кратковременная память агента. Обновляется на каждом шаге работы.
-> **Обновлён:** 2026-05-12 15:05 (UTC+3)
+> **Обновлён:** 2026-05-12 20:27 (UTC+3)
 
 ---
 
@@ -9,13 +9,13 @@
 
 | Параметр | Значение |
 |---|---|
-| **PHASE** | `2 — Advanced UX & Account Management` |
-| **STEP** | `Phase LD++ — Default Account Roles — ПОЛНОСТЬЮ ЗАВЕРШЕНА + ТЕСТЫ АКТУАЛИЗИРОВАНЫ` |
-| **AGENT STATUS** | `STABLE. Все 6 шагов Phase LD++ завершены и задеплоены. smoke-test-master-roadmap.mjs: 76/76 ✅ (исправлена устаревшая assert). smoke-test-lazy-default.mjs: 39/39 ✅. tsc --noEmit: 0 ошибок. Prod онлайн. workflow_state.md актуализирован.` |
+| **PHASE** | `2.4 — Account-Aware Draft Card` |
+| **STEP** | `PR 2 — MERGED ✅. Следующий: PR 3 — расширить DraftFields в clarification.service.ts` |
+| **AGENT STATUS** | `ACTIVE. Phase 2.4 PR 2 выполнен. getAccountWithBalance() + getWorkspaceAccountsWithBalances() + AccountWithBalance interface добавлены в account.service.ts. TypeScript typecheck 0 ошибок. GitHub PR #2 создан и слит в main (squash). Ветка feature/phase-2.4-pr2-ts-types удалена после мержа.` |
 | **DEPLOYMENT** | `Railway (spirited-happiness project)` — `Midas` bot service + `background-workers` service + `Postgres` + `Redis` |
-| **LAST COMPLETED** | `workflow_state.md актуализирован (2026-05-12 15:05). Тесты: master-roadmap 76/76 ✅, lazy-default 39/39 ✅. Phase LD++ ЗАДЕПЛОЕНА. Исправлен устаревший тест buildCurrencySearchNoResultsText.` |
+| **LAST COMPLETED** | `Phase 2.4 PR 2 — getAccountWithBalance + getWorkspaceAccountsWithBalances (+ AccountWithBalance interface) добавлены в account.service.ts. tsc 0 ошибок. GitHub PR #2 merged squash 7cc8528 → main.` |
 | **BLOCKER** | None. |
-| **NEXT ACTION** | Дальнейшие опции: (A) смок-тест ролей 💸/💰 через Telegram вручную, (B) обновить D.4 success screen чтобы показывать роль при создании счёта, (C) начать следующую фазу по roadmap. |
+| **NEXT ACTION** | PR 3 — clarification.service.ts: расширить DraftFields (добавить account_id, account_debit_amount, account_debit_currency), обновить SQL-запрос в getDraftFields(). |
 
 
 ---
@@ -81,7 +81,8 @@
 | Master Roadmap Ph.4 — Deploy | ✅ ONLINE | Git commit `35c92e0` (`feat(onboard): no-match screen, cur-search, flags, nav-arrows, button-free success [master_roadmap]`). Railway auto-deploy: Midas ● Online, background-workers ● Online. Логи: clean start, Redis connected, нет ошибок. |
 | Master Roadmap Ph.5 — Fuzzy Fix | ✅ DEPLOYED | `account-onboard-keyboard.service.ts` (MODIFY): добавлено фонетическое/транслитерационное matching для коротких строк (e.g. «виза»→Visa, «сбер»→Sberbank). Список банков переработан: удалены дубли, добавлены региональные банки СНГ. Deployed to Railway. |
 | **Phase LD — Lazy Default Account Onboarding** | ✅ DEPLOYED | **Цель:** новые пользователи не получают оба счёта (Default + кастомный). **DB:** `migrations/1779500000000_onboarding-placeholder-flag.js` — колонка `is_onboarding_placeholder BOOLEAN NOT NULL DEFAULT FALSE` + partial index `idx_account_sources_onboarding_placeholder` + `system_find_or_create_user` обновлена (помечает Default как `TRUE`). **Services:** `account.service.ts` — `softDeletePlaceholderAccount()` (Scenario A: кастомный счёт создан → Default soft-deleted) + `activatePlaceholderAccount()` (Scenario B: пропустить → Default активирован). **Route:** `webhook.route.ts` — 5 точек подключения: `ac:skip`, `ac:currency`, `bal_skip`, `cur_input`, `bal_input`. **Security:** `draft-confirmation.service.ts` — `resolveDefaultAccount` LIMIT 1 fallback + `AND deleted_at IS NULL` (транзакции не крепятся к удалённым счетам). **Tests:** `smoke-test-lazy-default.mjs` — **39/39 PASS** против production DB. Commit `27cfb85`. |
-| **Phase LD++ — Default Account Roles** | ✅ DEPLOYED | **Цель:** пользователи могут назначить счёт «основным для расходов» (💸) и «основным для доходов» (💰) прямо из карточки счёта. **DB:** миграций нет — использованы существующие колонки `workspaces.default_expense_account_id` + `default_income_account_id` (добавлены в Phase 1.35). **Migration:** `packages/database/migrations/1779600000000_workspace-default-account-roles.js` — FK constraints + partial indexes. **Services:** `account.service.ts` — `getWorkspaceDefaultAccounts()`, `getAccountRoles()`, `setDefaultExpenseAccount()`, `setDefaultIncomeAccount()`, `clearDefaultExpenseAccount()`, `clearDefaultIncomeAccount()`. `balance.service.ts` — LEFT JOIN workspaces, маркеры 💸/💰/💸💰 в accountLines. **UI:** `balance-keyboard.service.ts` — кнопки ⚪/🟢 (set/clear expense/income), `BalanceCallbackCmd` расширен (`se`, `si`, `ce`, `cl`). **Route:** `webhook.route.ts` — 5 call sites обновлены (getAccountRoles), 4 новых handler (`bl:se`, `bl:si`, `bl:ce`, `bl:cl`). **Tests:** `smoke-test-lazy-default.mjs` 39/39 ✅, `smoke-test-master-roadmap.mjs` 76/76 ✅, tsc 0 ошибок. **Deployment:** Railway production, автодеплой из `main`. |
+| **Phase LD++ — Default Account Roles** | ✅ DEPLOYED | **Цель:** пользователи могут назначить счёт «основным для расходов» (💸) и «основным для доходов» (💰) прямо из карточки счёта. **DB:** миграций нет — использованы существующие колонки `workspaces.default_expense_account_id` + `default_income_account_id` (добавлены в Phase 1.35). **Migration:** `packages/database/migrations/1779600000000_workspace-default-account-roles.js` — FK constraints + partial indexes. **Services:** `account.service.ts` — `getWorkspaceDefaultAccounts()`, `getAccountRoles()`, `setDefaultExpenseAccount()`, `setDefaultIncomeAccount()`, `clearDefaultExpenseAccount()`, `clearDefaultIncomeAccount()`. `balance.service.ts` — LEFT JOIN workspaces, маркеры 💸/💰/💸💰 в accountLines. **UI:** `balance-keyboard.service.ts` — кнопки ⚪/🟢 (set/clear expense/income), `BalanceCallbackCmd` расширен (сmd: `se`, `si`, `ce`, `cl`). **Route:** `webhook.route.ts` — 5 call sites обновлены (getAccountRoles), 4 новых handler (`bl:se`, `bl:si`, `bl:ce`, `bl:cl`). **Tests:** `smoke-test-lazy-default.mjs` 39/39 ✅, `smoke-test-master-roadmap.mjs` 76/76 ✅, tsc 0 ошибок. **Deployment:** Railway production, автодеплой из `main`. |
+| **Phase 2.4 — Account-Aware Draft Card** | 🟡 IN PROGRESS | **PR 1:** миграция `1779700000000_account-debit-fields.js` — MERGED ✅. **PR 2:** `account.service.ts` — `AccountWithBalance` interface + `getAccountWithBalance()` + `getWorkspaceAccountsWithBalances()` — MERGED ✅ (PR #2, commit 7cc8528). **Следующий:** PR 3 — расширить DraftFields в clarification.service.ts. |
 
 
 ---
@@ -223,66 +224,100 @@ Replace the flat "Счетов пока нет." empty-state with a guided inter
 
 ---
 
-## 8. ФАЙЛЫ ДЛЯ ЧТЕНИЯ В НОВОМ ЧАТЕ (Production context)
+## 8. ФАЙЛЫ ДЛЯ ЧТЕНИЯ В НОВОМ ЧАТЕ (Phase 2.4 context)
 
-**⚡ ТЕКУЩИЙ КОНТЕКСТ: Phase LD++ — ЗАВЕРШЕНА. СЛЕДУЮЩАЯ ФАЗА НЕ ОПРЕДЕЛЕНА.**
+**⚡ ТЕКУЩИЙ КОНТЕКСТ: Phase 2.4 — Account-Aware Draft Card — ПЛАН ГОТОВ, РЕАЛИЗАЦИЯ НЕ НАЧАТА.**
 
-**Файлы текущей реализации Phase LD++:**
+**ОБЯЗАТЕЛЬНО прочитать в новом чате:**
 ```
-apps/telegram-bot/src/services/account.service.ts        ← getAccountRoles(), set/clear expense/income
-apps/telegram-bot/src/services/balance.service.ts        ← LEFT JOIN workspaces, маркеры 💸/💰
-apps/telegram-bot/src/services/balance-keyboard.service.ts ← кнопки ⚪/🟢, BalanceCallbackCmd se/si/ce/cl
-apps/telegram-bot/src/routes/webhook.route.ts            ← handlers bl:se/bl:si/bl:ce/bl:cl
-packages/database/migrations/1779600000000_workspace-default-account-roles.js ← FK + indexes
-```
-
-**Тесты:**
-```
-apps/telegram-bot/smoke-test-master-roadmap.mjs   ← 76/76 ✅ (обновлён, buildCurrencySearchNoResultsText фикс)
-packages/database/smoke-test-lazy-default.mjs     ← 39/39 ✅
+apps/telegram-bot/src/utils/screen-builder.ts              ← buildPreviewScreen, buildConfirmedScreen, buildConfirmKeyboard, buildPostConfirmKeyboard
+apps/telegram-bot/src/routes/webhook.route.ts              ← confirmPreview(), approve/reject handlers, callback router
+apps/telegram-bot/src/services/account.service.ts          ← getWorkspaceAccountsForInline, getAccountById, setDraftAccountId, getWorkspaceDefaultAccounts
+apps/telegram-bot/src/services/clarification.service.ts    ← getDraftFields, DraftFields type, validateAmountString
+apps/telegram-bot/src/services/account-inline-keyboard.service.ts ← buildAccountPickerForDraft (новая), callback namespace ia:
+apps/background-workers/src/workers/confirmation.worker.ts ← approveDraft, confirmed card building
+apps/background-workers/src/utils/screen-builder.ts        ← buildConfirmedScreen (bg-workers version)
 ```
 
-**Полезно для контекста:**
+**Тесты (запустить в начале для верификации baseline):**
 ```
-docs/product-roadmap.md                           ← утверждённый план развития
-apps/background-workers/src/services/draft-confirmation.service.ts ← resolveDefaultAccount логика
+node apps/telegram-bot/smoke-test-master-roadmap.mjs   → 76/76 ✅
+node packages/database/smoke-test-lazy-default.mjs     → 39/39 ✅
+npx tsc --noEmit -p apps/telegram-bot/tsconfig.json   → 0 ошибок
+npx tsc --noEmit -p apps/background-workers/tsconfig.json → 0 ошибок
 ```
 
-**НЕ ЧИТАТЬ (не нужны для новой фазы):**
+**Полный план реализации:**
 ```
-apps/background-workers/src/workers/ai-parse.worker.ts
+C:\Users\secvency\.gemini\antigravity\brain\7517ec39-fd86-4359-816b-639eeaa6df79\account_debit_ux_plan.md
+```
+
+**НЕ ЧИТАТЬ (не нужны для Phase 2.4):**
+```
 packages/ai-core/src/claude-client.ts
-packages/ai-core/src/schemas.ts
+packages/ai-core/src/prompts.ts
 packages/database/src/db.ts
+apps/telegram-bot/src/services/report.service.ts
+apps/telegram-bot/src/services/transaction-list.service.ts
 ```
 
 ---
 
 ## 9. ПРОМПТ ДЛЯ СТАРТА НОВОГО ЧАТА
 
-> ⚡ Фазы 1.1–1.40 + 2.0–2.3 + Master Roadmap + Phase LD + Phase LD++ — ЗАВЕРШЕНЫ И ЗАДЕПЛОЕНЫ.
-> Следующая фаза не определена. Ожидание указаний владельца.
->
-> КОНТЕКСТ ПРОЕКТА:
-> Midas DEPLOYED на Railway (project: spirited-happiness, env: production). Стабилен.
-> MCP servers: Railway, GitHub, Postgres, Filesystem — все активны.
-> Auto-deploy: push to `main` → GitHub → Railway строит Midas + background-workers.
->
-> ТЕКУЩИЕ ИНТЕГРАЦИИ:
-> 💸 Expense role toggle: `bl:se` (set) / `bl:ce` (clear) → `setDefaultExpenseAccount()` / `clearDefaultExpenseAccount()`
-> 💰 Income role toggle:  `bl:si` (set) / `bl:cl` (clear) → `setDefaultIncomeAccount()` / `clearDefaultIncomeAccount()`
-> Кнопки ⚪/🟢 отображаются динамически через `getAccountRoles(workspaceId, accountId)`.
->
-> ТЕСТЫ (актуальные):
-> `node apps/telegram-bot/smoke-test-master-roadmap.mjs` → 76/76 ✅
-> `node packages/database/smoke-test-lazy-default.mjs`   → 39/39 ✅
-> `npx tsc --noEmit -p apps/telegram-bot/tsconfig.json`  → 0 ошибок
->
-> КЛЮЧЕВЫЕ ПРАВИЛА:
-> - Callback namespace: `bl:se/si/ce/cl`. Конфликтов НЕТ.
-> - DB migrations: `1779600000000_workspace-default-account-roles.js` (уже применена в проде).
-> - `withTenantTransaction` во всех мутациях (SEC-03).
-> - Не трогать project_config.md.
+```
+⚡ Фазы 1.1–1.40 + 2.0–2.3 + Master Roadmap + Phase LD + Phase LD++ — ЗАВЕРШЕНЫ И ЗАДЕПЛОЕНЫ.
+Фаза 2.4 — Account-Aware Draft Card — ПЛАН ГОТОВ, начинаем реализацию.
+
+КОНТЕКСТ ПРОЕКТА:
+Midas DEPLOYED на Railway (project: spirited-happiness, env: production). Стабилен.
+MCP servers: Railway, GitHub, Postgres, Filesystem — все активны.
+Auto-deploy: push to `main` → GitHub → Railway строит Midas + background-workers.
+
+ЧТО НУЖНО РЕАЛИЗОВАТЬ (Phase 2.4):
+Добавить отображение счёта списания в карточку черновика транзакции с математикой баланса:
+  - Черновик показывает: «🏦 Bybit USD» + «💳 15 400 − 10 000 = 5 400 USD»
+  - Кнопка «🔄 Сменить счёт» → пикер всех счетов пользователя с балансами
+  - Кросс-валюта: кнопка «✏️ Указать сумму в RUB» → перехват текста → пересчёт
+  - Confirmed card: «Итог: 15 400 − 10 000 = 5 400 USD» (без кнопок Баланс/Отчёт)
+
+ПОЛНЫЙ ПЛАН: C:\Users\secvency\.gemini\antigravity\brain\7517ec39-fd86-4359-816b-639eeaa6df79\account_debit_ux_plan.md
+
+ПЛАН РАЗБИТ НА 16 АТОМАРНЫХ PR:
+PR 1  — Миграция БД: account_debit_amount, account_debit_currency в transaction_drafts + transactions
+PR 2  — account.service.ts: getAccountWithBalance(), getWorkspaceAccountsWithBalances()
+PR 3  — clarification.service.ts: расширить DraftFields (account_id, account_debit_amount, account_debit_currency)
+PR 4  — clarification.service.ts: patchDraftDebitAmount() — новая функция
+PR 5  — utils/decimal.ts (НОВЫЙ): calcBalanceAfter(), calcRate() — BigInt arithmetic
+PR 6  — screen-builder.ts (оба apps): buildPreviewScreen — новые поля accountName/Balance/DebitAmount
+PR 7  — screen-builder.ts: buildConfirmKeyboard — новая сигнатура (BREAKING: обновить все вызовы атомарно)
+PR 8  — screen-builder.ts: buildPostConfirmKeyboard — убрать кнопки Баланс/Отчёт
+PR 9  — webhook.route.ts: confirmPreview() — подтягивает счёт по priority chain
+PR 10 — webhook.route.ts: 3 callback-маршрута (draft:acct:*, draft:acct:pick:*, draft:acct:back:*)
+PR 11 — account-inline-keyboard.service.ts: buildAccountPickerForDraft()
+PR 12 — webhook.route.ts: кросс-валюта (draft:acct:xfx:*, Redis midas:xfx:ptr:*, text intercept)
+PR 13 — screen-builder.ts (оба apps): buildConfirmedScreen — новый блок «Итог"
+PR 14 — confirmation.worker.ts: snapshot balance_before, balance_after
+PR 15 — ai-parse.worker.ts: встроить дефолтный счёт в initial draft card
+PR 16 — smoke-test-phase-acct-draft.mjs: 6 сценариев тестирования
+
+CТАРТ: PR 1 (миграция БД) — самый безопасный первый шаг.
+
+КЛЮЧЕВЫЕ ПРАВИЛА:
+- Callback namespace: draft:acct:* — конфликтов с существующими ia:/bl:/ac:/* НЕТ
+- Redis prefix: midas:xfx:ptr:{userId}:{chatId} — новый, не пересекается с существующими
+- PR 7 (buildConfirmKeyboard) — единственный breaking change: все вызовы обновить в одном коммите
+- buildPostConfirmKeyboard: убрать строку с [💰 Баланс][📊 Отчёт] — они в ReplyKeyboard
+- Финансовая математика: ТОЛЬКО BigInt/NUMERIC, никаких float (SEC-02)
+- Все мутации через withTenantTransaction (SEC-03)
+- Проверка account_id принадлежит workspace перед setDraftAccountId (SEC-01)
+- Не трогать project_config.md
+
+ТЕСТЫ BASELINE (запустить в начале):
+`node apps/telegram-bot/smoke-test-master-roadmap.mjs`  → 76/76 ✅
+`node packages/database/smoke-test-lazy-default.mjs`    → 39/39 ✅
+`npx tsc --noEmit -p apps/telegram-bot/tsconfig.json`  → 0 ошибок
+```
 
 
 ## 10. ИСТОРИЯ ДЕЙСТВИЙ (СЖАТАЯ)
@@ -407,7 +442,9 @@ packages/database/src/db.ts
 | 2026-05-11 16:33 | **master_roadmap Phase 2 — Webhook FSM.** `webhook.route.ts`: `name_input` → no-match screen при fuzzy null. `ac:cus:save` → isCustomName=true → cur_pick. `ac:cus:keep` → name_input retry. `ac:cur:search` → cur_search step. `ac:cur:list` → возврат к списку. `cur_search` text interceptor → searchCurrencies → результаты или no-results. 3 success-screens button-free `{ inline_keyboard: [] }`. `chooseCurKeyboard()` module-level. Все callback_data ≤64 байт. tsc 0 ошибок. |
 | 2026-05-11 16:43 | **master_roadmap Phase 3 — Smoke Tests.** `smoke-test-master-roadmap.mjs` (NEW): 70 проверок, запуск `node apps/telegram-bot/smoke-test-master-roadmap.mjs` (против скомпилированного dist/). Покрыты все 14 сценариев. Результат: **70/70 ✅ / 0 ❌**. |
 | 2026-05-11 16:44 | **master_roadmap Phase 4 — Deploy.** Git commit `35c92e0` `feat(onboard): no-match screen, cur-search, flags, nav-arrows, button-free success [master_roadmap]`. Push → Railway auto-deploy. Status: Midas ● Online, background-workers ● Online. Deploy logs: clean start, Redis connected, no errors. |
-| 2026-05-12 15:05 | **workflow_state.md актуализирован. Тесты запущены.** `smoke-test-master-roadmap.mjs`: исправлен устаревший assert для `buildCurrencySearchNoResultsText` (функция была улучшена в Phase LD++: если запрос похож на код валюты — показывает умный хинт вместо генеричного сообщения). Итог: 76/76 ✅ (70 было, +1 заменён, +1 добавлен для generic path). `smoke-test-lazy-default.mjs`: 39/39 ✅. `tsc --noEmit`: 0 ошибок. Phase LD++ полностью подтверждена. | Спроектирована система двух ролей счёта: «основной для расходов» (💸) и «основной для доходов» (💰). **UI выбор:** карточка счёта — F.3 кружки (⚪/🟢), список баланса — Вариант 2 (текстовый тег `· расходы / · доходы / · расходы и доходы`). **D.4 success screen:** 4 сценария (первый счёт / оба defaults / один default / нет defaults) с блоком «Основные счета: 💸 Расходы → [name] / 💰 Доходы → [name / не установлен]». **DB:** миграций НЕТ — используются существующие колонки `workspaces.default_expense_account_id` + `default_income_account_id`. **Новые callback:** `bl:se` (set_expense), `bl:si` (set_income), `bl:ce` (clear_expense), `bl:cl` (clear_income) — конфликтов НЕТ. **Файлы:** 4 файла (account.service.ts, balance.service.ts, balance-keyboard.service.ts, webhook.route.ts). **10 атомарных шагов** определены. Код НЕ изменён. Полный план: `C:\Users\secvency\.gemini\antigravity\brain\eb073719-769d-4973-a087-eb6d1a99901a\default_account_plan.md`. |
+| 2026-05-12 15:05 | **workflow_state.md актуализирован. Тесты запущены.** `smoke-test-master-roadmap.mjs`: исправлен устаревший assert для `buildCurrencySearchNoResultsText`. Итог: 76/76 ✅. `smoke-test-lazy-default.mjs`: 39/39 ✅. `tsc --noEmit`: 0 ошибок. Phase LD++ полностью подтверждена. |
+| 2026-05-12 19:35 | **Phase 2.4 PR 2 - v������� � ������.** `account.service.ts`: �������� `AccountWithBalance` interface + `getAccountWithBalance()` + `getWorkspaceAccountsWithBalances()`. tsc 0 ������. GitHub PR #2 merged squash � main (commit 7cc8528). |
+| 2026-05-12 17:27 | **Phase 2.4 — UX Design сессия и планирование.** Спроектированы: черновик + математика баланса («🏦 Bybit USD» + «💳 15 400 − 10 000 = 5 400 USD»), пикер счетов (кнопка «🔄 Сменить счёт»), кросс-валюта (ввод суммы конвертации), confirmed card без кнопок Баланс/Отчёт. UX-изменения ia:list/ia:back из текущего чата ОТМЕНЕНЫ (кодовая база возвращена в stable). 16 атомарных PR спроектированы. Анализ конфликтов: 1 breaking change (PR 7 buildConfirmKeyboard), 1 новый Redis-префикс (midas:xfx:ptr). Полный план: `account_debit_ux_plan.md`. workflow_state.md обновлён. |
 
 
 ---
