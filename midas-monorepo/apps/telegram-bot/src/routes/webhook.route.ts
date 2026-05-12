@@ -2991,7 +2991,7 @@ Midas создан, чтобы сделать учет денег максима
             if (detail) {
               void upsertBotMessage(
                 telegramUserId, chatId,
-                `✅ Валюта изменена на <b>${escapeHtml(code)}</b>.\\n\\n` + formatAccountDetailText(detail),
+                `✅ Валюта изменена на <b>${escapeHtml(code)}</b>.\n\n` + formatAccountDetailText(detail),
                 buildAccountActionsKeyboard(blState.accountId),
               );
             }

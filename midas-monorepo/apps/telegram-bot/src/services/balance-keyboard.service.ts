@@ -276,13 +276,20 @@ export const BALANCE_EMPTY_TEXT =
 
 /**
  * Format a NUMERIC string as a short balance display.
- * "1234.5000" → "1,234.50"
- * "0.0000" → "0.00"
+ * Uses ru-RU locale for space as thousands separator to avoid confusion 
+ * with decimal comma/period. Drops decimal zeroes for whole numbers.
+ * "1234.50" → "1 234,50"
+ * "2000.00" → "2 000"
  */
 function formatBalanceShort(numStr: string): string {
   const num = parseFloat(numStr);
   if (isNaN(num)) return numStr;
-  return num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  
+  const isWhole = num % 1 === 0;
+  return num.toLocaleString('ru-RU', { 
+    minimumFractionDigits: isWhole ? 0 : 2, 
+    maximumFractionDigits: 6 
+  });
 }
 
 /**
