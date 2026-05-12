@@ -32,7 +32,7 @@ import { Worker, type Job } from 'bullmq';
 import { QUEUE_NAMES, type AiParseJobPayload, IdempotencyKeyBuilder } from '@midas/shared';
 import { parseTransaction } from '@midas/ai-core';
 import { redisConnection } from '../queues/redis.js';
-import { createDraft, resolveUserId, setDraftAccountId, getPendingDraftForUser } from '../services/draft.service.js';
+import { createDraft, resolveUserId, setDraftAccountId, getPendingDraftForUser, getAccountBalanceForPreview } from '../services/draft.service.js';
 import { resolveAccountFromHint } from '../services/account-resolver.service.js'; // Phase 1.31
 import { notificationsQueue } from '../queues/queue-definitions.js';
 import { ulid } from 'ulid';
@@ -45,6 +45,7 @@ import {
   buildCurrencyClarScreen,
   buildGatePausedPreview,
   escapeHtml,
+  type AccountBalanceBlock,
 } from '../utils/screen-builder.js';
 
 // ─────────────────────────────────────────────────────────────
@@ -416,8 +417,41 @@ async function processAiParse(job: Job<AiParseJobPayload>): Promise<void> {
         } catch {
           // Non-fatal: confirmation worker will fall back to default account
         }
+
+        // Phase 2.4 PR15: Fetch account balance for preview card
+        let accountBlock: AccountBalanceBlock | null = null;
+        try {
+          const acctData = await getAccountBalanceForPreview(workspaceId, resolution.accountId);
+          if (acctData && aiData?.amount) {
+            // Debit amount in account currency:
+            // For same-currency: use tx amount; for XFX: we don't know yet at parse time
+            // so we show tx amount as proxy (XFX debit confirmed later via ia:xfx flow)
+            const isSameCurrency = !aiData.currency || aiData.currency === acctData.accountCurrency;
+            accountBlock = {
+              accountName:     escapeHtml(acctData.accountName),
+              accountCurrency: acctData.accountCurrency,
+              currentBalance:  acctData.balance,
+              debitAmount:     aiData.amount,  // tx amount (XFX debit unknown at parse time)
+              debitCurrency:   isSameCurrency ? acctData.accountCurrency : (aiData.currency ?? acctData.accountCurrency),
+              intent:          aiData?.intent ?? null,
+            };
+          }
+        } catch {
+          // Non-fatal: preview shows without balance block
+        }
+
+        const richPreviewWithBalance = buildPreviewScreen({
+          intent:       aiData?.intent ?? null,
+          amount:       aiData?.amount ?? null,
+          currency:     aiData?.currency ?? null,
+          categoryHint: aiData?.category_hint ?? null,
+          accountHint:  null, // accountBlock replaces accountHint
+          itemName:     aiData?.item_hint ?? null,
+          accountBlock,
+        });
+
         inlineKeyboard = buildConfirmKeyboard(draftId);
-        previewMsg = richPreview;
+        previewMsg = richPreviewWithBalance;
         console.log('[midas:ai-parse-worker] Phase 1.31: exact account match', {
           workspaceId, draftId,
         });
