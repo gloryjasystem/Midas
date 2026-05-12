@@ -2943,7 +2943,7 @@ Midas создан, чтобы сделать учет денег максима
               if (detail) {
                 void upsertBotMessage(
                   telegramUserId, chatId,
-                  `✅ Счёт переименован.\\n\\n` + formatAccountDetailText(detail),
+                  `✅ Счёт переименован.\n\n` + formatAccountDetailText(detail),
                   buildAccountActionsKeyboard(blState.accountId),
                 );
               }

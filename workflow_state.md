@@ -1,7 +1,7 @@
 # WORKFLOW_STATE.MD — Диспетчер задач ИИ-агента Midas
 
 > **Тип:** MUTABLE — кратковременная память агента. Обновляется на каждом шаге работы.
-> **Обновлён:** 2026-05-11 19:52 (UTC+3)
+> **Обновлён:** 2026-05-12 10:34 (UTC+3)
 
 ---
 
@@ -10,12 +10,12 @@
 | Параметр | Значение |
 |---|---|
 | **PHASE** | `2 — Advanced UX & Account Management` |
-| **STEP** | `Master Roadmap — Onboarding Input-First UX (Fuzzy Fix DEPLOYED, SMOKE ✅)` |
-| **AGENT STATUS** | `DEPLOYED — master_roadmap Phase 1+2: input-first onboarding, flag-based currency picker (🇷🇺🇺🇸₿Ξ), no-match screen, fuzzy currency search, button-free success screen, phonetic bank fuzzy matching` |
+| **STEP** | `Phase LD (Lazy Default) — Onboarding Placeholder Strategy DEPLOYED ✅` |
+| **AGENT STATUS** | `DEPLOYED — Phase LD: lazy-default placeholder account strategy. Новые пользователи не получают "лишний" Default счёт. Scenario A (кастомный счёт) и Scenario B (пропуск) работают корректно. 39/39 smoke tests PASS.` |
 | **DEPLOYMENT** | `Railway (spirited-happiness project)` — `Midas` bot service + `background-workers` service + `Postgres` + `Redis` |
-| **LAST COMPLETED** | `master_roadmap Phases 1–4: (Phase 1) CURRENCY_FLAGS registry 40+ currencies. (Phase 2) webhook.route.ts FSM. (Phase 3) 70/70 smoke tests PASS via smoke-test-master-roadmap.mjs. (Phase 4) Git commit 35c92e0, Railway deploy. (Fuzzy Fix) added phonetic matching support for short strings (e.g. виза/visa) and deployed to Railway.` |
+| **LAST COMPLETED** | `Phase LD: Lazy Default Account Onboarding (commit 27cfb85). Миграция is_onboarding_placeholder. softDeletePlaceholderAccount + activatePlaceholderAccount. 5 точек в webhook.route.ts. resolveDefaultAccount fallback guard. 39/39 smoke tests PASS против production.` |
 | **BLOCKER** | None. |
-| **NEXT ACTION** | Ручной smoke test в Telegram (@midaswallet_bot). Затем — следующая фаза по product-roadmap.md. |
+| **NEXT ACTION** | Ручной smoke test в Telegram (@midaswallet_bot): Scenario A (создать кастомный счёт → /balance показывает только его) и Scenario B (пропустить → /balance показывает только Default). |
 
 
 ---
@@ -79,6 +79,8 @@
 | Master Roadmap Ph.2 — Webhook FSM | ✅ DEPLOYED | `webhook.route.ts`: (1) `name_input` при fuzzy null → `buildNoMatchText`+`buildNoMatchKeyboard`, шаг `name_confirm_custom`. (2) `ac:cus:save` → `pendingName` как `isCustomName=true` → `cur_pick`. (3) `ac:cus:keep` → `name_input` retry. (4) `ac:cur:search` → `cur_search` шаг + поисковый промпт. (5) `ac:cur:list` → возврат к пагинированному списку. (6) `cur_search` text interceptor → `searchCurrencies` → результаты/no-results. (7) 3 success-screens: `{ inline_keyboard: [] }` (без кнопок). `chooseCurKeyboard()` — module-level helper. Все callback_data ≤64 байт. Commit `35c92e0`. |
 | Master Roadmap Ph.3 — Smoke Tests | ✅ 70/70 | `smoke-test-master-roadmap.mjs` (NEW, запуск против `dist/`): 70 проверок, 14 секций. Покрыты: флаги валют, nav-row 2 стрелки, buildCurrencyPickerText 3 ветки, поиск fuzzy+translit, no-match text+kb, buildCurrencySearch*, сценарии 3.1/3.2/3.4/3.5/3.6, контракт button-free success. Результат: **70/70 ✅ / 0 ❌**. |
 | Master Roadmap Ph.4 — Deploy | ✅ ONLINE | Git commit `35c92e0` (`feat(onboard): no-match screen, cur-search, flags, nav-arrows, button-free success [master_roadmap]`). Railway auto-deploy: Midas ● Online, background-workers ● Online. Логи: clean start, Redis connected, нет ошибок. |
+| Master Roadmap Ph.5 — Fuzzy Fix | ✅ DEPLOYED | `account-onboard-keyboard.service.ts` (MODIFY): добавлено фонетическое/транслитерационное matching для коротких строк (e.g. «виза»→Visa, «сбер»→Sberbank). Список банков переработан: удалены дубли, добавлены региональные банки СНГ. Deployed to Railway. |
+| **Phase LD — Lazy Default Account Onboarding** | ✅ DEPLOYED | **Цель:** новые пользователи не получают оба счёта (Default + кастомный). **DB:** `migrations/1779500000000_onboarding-placeholder-flag.js` — колонка `is_onboarding_placeholder BOOLEAN NOT NULL DEFAULT FALSE` + partial index `idx_account_sources_onboarding_placeholder` + `system_find_or_create_user` обновлена (помечает Default как `TRUE`). **Services:** `account.service.ts` — `softDeletePlaceholderAccount()` (Scenario A: кастомный счёт создан → Default soft-deleted) + `activatePlaceholderAccount()` (Scenario B: пропустить → Default активирован). **Route:** `webhook.route.ts` — 5 точек подключения: `ac:skip`, `ac:currency`, `bal_skip`, `cur_input`, `bal_input`. **Security:** `draft-confirmation.service.ts` — `resolveDefaultAccount` LIMIT 1 fallback + `AND deleted_at IS NULL` (транзакции не крепятся к удалённым счетам). **Tests:** `smoke-test-lazy-default.mjs` — **39/39 PASS** против production DB. Commit `27cfb85`. |
 
 
 ---
