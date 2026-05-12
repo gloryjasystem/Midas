@@ -1,23 +1,32 @@
 /**
- * Account Inline Keyboard Service — Phase 1.31
+ * Account Inline Keyboard Service — Phase 1.31 / Phase 2.4
  *
  * Builds Telegram InlineKeyboardMarkup for inline account creation/selection
  * during the transaction confirmation flow.
  *
  * Callback_data namespace: "ia:"
  *
- *   ia:create:{draftId}         → create account with AI-suggested name/currency (35 bytes max)
- *   ia:skip:{draftId}           → proceed without account — use workspace default (34 bytes max)
- *   ia:use:{accountId}:{draftId}→ use existing account                           (60 bytes max)
- *   ia:fuzzy:{accountId}:{draftId} → confirm fuzzy-matched account               (63 bytes max)
- *   ia:rename:{draftId}         → enter custom name via text (36 bytes max)
+ *   Phase 1.31 (account creation sub-flow):
+ *   ia:create:{draftId}            → create account with AI-suggested name/currency
+ *   ia:skip:{draftId}              → proceed without account — use workspace default
+ *   ia:use:{accountId}:{draftId}   → use existing account (Scenario Г picker)
+ *   ia:fuzzy:{accountId}:{draftId} → confirm fuzzy-matched account
+ *   ia:rename:{draftId}            → enter custom name via text
  *
- * Byte budget (all ≤ 64):
- *   "ia:create:" = 10 + 26 (ULID) = 36 bytes
- *   "ia:skip:"   = 8  + 26        = 34 bytes
- *   "ia:use:"    = 7  + 26 + 1 + 26 = 60 bytes  ← MAX for ia:use
- *   "ia:fuzzy:"  = 9  + 26 + 1 + 26 = 62 bytes  ← safe
- *   "ia:rename:" = 10 + 26         = 36 bytes
+ *   Phase 2.4 (account-aware draft card picker):
+ *   ia:acc:pick:{accountId}:{draftId} → user selected account from V2 picker
+ *
+ * Byte budget (all ≤ 64 bytes):
+ *   "ia:create:"       = 10 + 26 (ULID)        = 36 bytes
+ *   "ia:skip:"         = 8  + 26               = 34 bytes
+ *   "ia:use:"          = 7  + 26 + 1 + 26      = 60 bytes
+ *   "ia:fuzzy:"        = 9  + 26 + 1 + 26      = 62 bytes
+ *   "ia:rename:"       = 10 + 26               = 36 bytes
+ *   "ia:acc:pick:"     = 12 + 26 + 1 + 26      = 65 bytes  ← WARN: 65! Use ia:pk: instead
+ *
+ * BYTE BUDGET AUDIT (Phase 2.4):
+ *   "ia:pk:" = 6 + 26 + 1 + 26 = 59 bytes ≤ 64 ✓
+ *   (ia:acc:pick exceeds 64 bytes; shortened to ia:pk for safety)
  *
  * All values ≤ 64 bytes. No user-provided data enters callback_data.
  *
@@ -58,7 +67,11 @@ export type InlineAccountCmd =
   | { cmd: 'skip';   draftId: string }
   | { cmd: 'use';    accountId: string; draftId: string }
   | { cmd: 'fuzzy';  accountId: string; draftId: string }
-  | { cmd: 'rename'; draftId: string };
+  | { cmd: 'rename'; draftId: string }
+  /** Phase 2.4: user selected account from V2 picker (ia:pk:{accountId}:{draftId}) */
+  | { cmd: 'pick';   accountId: string; draftId: string }
+  /** Phase 2.4: user tapped "🔄 Сменить счёт" — delinks current account (ia:pk:delink:{draftId}) */
+  | { cmd: 'delink'; draftId: string };
 
 /**
  * Parse and validate an inline account creation callback_data string.
@@ -107,6 +120,25 @@ export function parseInlineAccountCallback(data: string): InlineAccountCmd | nul
     const draftId   = parts[3] ?? '';
     if (!ULID_RE.test(accountId) || !ULID_RE.test(draftId)) return null;
     return { cmd: 'fuzzy', accountId, draftId };
+  }
+
+  // Phase 2.4: ia:pk:{accountId}:{draftId}
+  // «ia:pk:delink:{draftId}» — delink current account (change button)
+  // «ia:pk:{accountId}:{draftId}» — pick specific account
+  // \"ia:pk:\" = 6 + 26 + 1 + 26 = 59 bytes ≤ 64 ✓
+  if (sub === 'pk' && parts.length === 4) {
+    const seg2 = parts[2] ?? '';
+    const seg3 = parts[3] ?? '';
+
+    // delink: ia:pk:delink:{draftId}
+    if (seg2 === 'delink') {
+      if (!ULID_RE.test(seg3)) return null;
+      return { cmd: 'delink', draftId: seg3 };
+    }
+
+    // pick: ia:pk:{accountId}:{draftId}
+    if (!ULID_RE.test(seg2) || !ULID_RE.test(seg3)) return null;
+    return { cmd: 'pick', accountId: seg2, draftId: seg3 };
   }
 
   return null;
@@ -206,3 +238,99 @@ export const ACCOUNT_PICKER_TEXT = '📝 Транзакция распознан
  * Prompt for custom account name input (rename sub-flow).
  */
 export const RENAME_PROMPT = '✏️ Как назовём счёт?';
+
+// ─────────────────────────────────────────────────────────────
+// Phase 2.4 — Account Picker V2 (Account-Aware Draft Card)
+// ─────────────────────────────────────────────────────────────
+
+/** Minimal account shape required by buildAccountPickerV2Keyboard. */
+export interface AccountPickerEntry {
+  id: string;
+  name: string;     // pre-escaped by caller
+  currency: string;
+  balance: string;  // NUMERIC string from DB (::TEXT), e.g. "15400.0000"
+}
+
+/**
+ * Account picker text shown above the keyboard.
+ * Displayed when the user has not yet selected an account for this draft.
+ */
+export const ACCOUNT_PICKER_V2_TEXT =
+  '🏦 <b>С какого счёта списать?</b>';
+
+/**
+ * Text shown when an account has already been selected and we render
+ * the debit confirmation block (account name + balance math).
+ */
+export const ACCOUNT_DEBIT_CONFIRM_TEXT =
+  '<i>Выберите другой счёт или подтвердите транзакцию.</i>';
+
+/**
+ * Build the Phase 2.4 account picker keyboard.
+ *
+ * Shows up to 8 accounts, each as a single button:
+ *   [🏦 Bybit · 15 400 USDT]
+ *
+ * Callback: ia:pk:{accountId}:{draftId}  (59 bytes ≤ 64 ✓)
+ *
+ * Layout rules:
+ *   - One account per row (full width → maximum tap surface on mobile).
+ *   - Max 8 accounts — keeps keyboard under ~10 rows.
+ *   - Balance stripped of trailing zeros via formatAmount (imported internally).
+ *   - Last row: [📝 Без счёта] — links to ia:skip for backward compat.
+ *
+ * @param accounts - Array of AccountPickerEntry (max 8 used, rest ignored)
+ * @param draftId  - ULID of the current draft
+ *
+ * SEC-01: Only system ULIDs in callback_data — account names never embedded.
+ */
+export function buildAccountPickerV2Keyboard(
+  accounts: AccountPickerEntry[],
+  draftId: string,
+): InlineKeyboardMarkup {
+  const rows = accounts.slice(0, 8).map((acc) => {
+    // Strip trailing zeros from balance for display: 15400.0000 → 15400
+    const balDisplay = stripTrailingZeros(acc.balance);
+    return [{
+      text: `🏦 ${acc.name} · ${balDisplay} ${acc.currency}`,
+      callback_data: `ia:pk:${acc.id}:${draftId}`,
+    }];
+  });
+
+  // "Записать без счёта" — always last
+  rows.push([{ text: '📝 Без счёта', callback_data: `ia:skip:${draftId}` }]);
+
+  return { inline_keyboard: rows };
+}
+
+/**
+ * Build the keyboard shown when an account HAS been selected on the draft card.
+ * Replaces the picker with a single "change" button.
+ *
+ * Layout:
+ *   Row 1: [🔄 Сменить счёт]   ← delinks current account, re-renders picker
+ *
+ * The delink triggers patchDraftAccount(null) (PR 4) and then re-shows
+ * buildAccountPickerV2Keyboard.
+ *
+ * @param draftId - ULID of the current draft
+ *
+ * SEC-01: only system ULID in callback_data.
+ */
+export function buildAccountSelectedKeyboard(
+  draftId: string,
+): InlineKeyboardMarkup {
+  return {
+    inline_keyboard: [
+      [{ text: '🔄 Сменить счёт', callback_data: `ia:pk:delink:${draftId}` }],
+    ],
+  };
+}
+
+// ─ internal helper ───────────────────────────────────────────────────
+/** Strip trailing decimal zeros: "15400.0000" → "15400", "100.50" → "100.5" */
+function stripTrailingZeros(s: string): string {
+  if (!s.includes('.')) return s;
+  return s.replace(/\.?0+$/, '');
+}
+
