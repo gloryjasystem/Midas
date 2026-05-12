@@ -1,5 +1,5 @@
 /**
- * Account Service — Phase 1.14 + Phase 1.17 + Phase 1.24 + Phase 1.30
+ * Account Service — Phase 1.14 + Phase 1.17 + Phase 1.24 + Phase 1.30 + Phase LD++
  *
  * Phase 1.14: Read-only list of account_sources for a workspace.
  * Phase 1.17: addAccount() — strict-format write path for /add_account command.
@@ -666,24 +666,148 @@ export async function getWorkspaceDefaultAccount(
 }
 
 // ─────────────────────────────────────────────────────────────
-// getWorkspaceActiveAccounts — Phase LD+ (D.4 portfolio line)
+// getWorkspaceDefaultAccounts — Phase LD++ (D.4 success screen)
 // ─────────────────────────────────────────────────────────────
 
+/**
+ * Minimal account info returned for each default slot.
+ * Both fields are the same shape; null means "no default set".
+ */
+export interface DefaultAccountSlot {
+  id: string;
+  name: string;
+  currency: string;
+}
+
+/**
+ * Result of getWorkspaceDefaultAccounts().
+ *
+ * expense      — the current default expense account (null if not set or deleted).
+ * income       — the current default income account  (null if not set or deleted).
+ * activeCount  — number of non-deleted account_sources rows in the workspace.
+ *                Used by D.4 to decide isFirst (activeCount <= 1 → Scenario 1).
+ */
+export interface WorkspaceDefaultAccounts {
+  expense: DefaultAccountSlot | null;
+  income:  DefaultAccountSlot | null;
+  activeCount: number;
+}
+
+/**
+ * Returns both default account slots (expense + income) for the workspace
+ * in a single JOIN query, plus the total count of active accounts.
+ *
+ * Replaces getWorkspaceDefaultAccount() in the D.4 success screen so all four
+ * scenario branches (isFirst / both / one / none) can be rendered correctly.
+ *
+ * getWorkspaceDefaultAccount() is preserved for backward compatibility with
+ * the existing first-account success screen code.
+ *
+ * SQL strategy:
+ *   FROM workspaces w
+ *   LEFT JOIN account_sources ea ON ea.id = w.default_expense_account_id AND ea.deleted_at IS NULL
+ *   LEFT JOIN account_sources ia ON ia.id = w.default_income_account_id  AND ia.deleted_at IS NULL
+ *   + subquery COUNT(*) of active accounts
+ *   WHERE w.id = $1
+ *
+ * SEC-03: withTenantTransaction (RLS enforced) + explicit WHERE w.id = $1.
+ * SEC-12: Account names NOT logged.
+ */
+export async function getWorkspaceDefaultAccounts(
+  workspaceId: string,
+  userId: string,
+): Promise<WorkspaceDefaultAccounts> {
+  return withTenantTransaction<WorkspaceDefaultAccounts>(
+    workspaceId,
+    userId,
+    async (client) => {
+      const res = await client.query<{
+        ea_id:       string | null;
+        ea_name:     string | null;
+        ea_currency: string | null;
+        ia_id:       string | null;
+        ia_name:     string | null;
+        ia_currency: string | null;
+        active_count: string;
+      }>(
+        `SELECT
+           ea.id       AS ea_id,
+           ea.name     AS ea_name,
+           ea.currency AS ea_currency,
+           ia.id       AS ia_id,
+           ia.name     AS ia_name,
+           ia.currency AS ia_currency,
+           (SELECT COUNT(*)::text
+            FROM account_sources
+            WHERE workspace_id = $1
+              AND deleted_at IS NULL) AS active_count
+         FROM workspaces w
+         LEFT JOIN account_sources ea
+           ON ea.id = w.default_expense_account_id
+          AND ea.deleted_at IS NULL
+         LEFT JOIN account_sources ia
+           ON ia.id = w.default_income_account_id
+          AND ia.deleted_at IS NULL
+         WHERE w.id = $1
+         LIMIT 1`,
+        [workspaceId],
+      );
+
+      const row = res.rows[0];
+      // Workspace not found — return safe empty state
+      if (!row) {
+        return { expense: null, income: null, activeCount: 0 };
+      }
+
+      const expense: DefaultAccountSlot | null =
+        row.ea_id
+          ? { id: row.ea_id, name: row.ea_name ?? '', currency: row.ea_currency ?? '' }
+          : null;
+
+      const income: DefaultAccountSlot | null =
+        row.ia_id
+          ? { id: row.ia_id, name: row.ia_name ?? '', currency: row.ia_currency ?? '' }
+          : null;
+
+      return {
+        expense,
+        income,
+        activeCount: parseInt(row.active_count ?? '0', 10),
+      };
+    },
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// getWorkspaceActiveAccounts — Phase LD+ / LD++ (D.4 portfolio line)
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Phase LD++: extended with isExpenseDefault / isIncomeDefault flags.
+ * These are computed by comparing each account id against the workspace
+ * default_expense_account_id / default_income_account_id columns.
+ */
 export interface ActiveAccountSummary {
   id: string;
   name: string;
   currency: string;
   type: string;
+  /** true if this account is the workspace default for expenses */
+  isExpenseDefault: boolean;
+  /** true if this account is the workspace default for incomes */
+  isIncomeDefault: boolean;
 }
 
 /**
- * Returns all non-deleted accounts for the workspace.
+ * Returns all non-deleted accounts for the workspace, with role flags.
  * Ordered by created_at ASC so portfolio line is stable (oldest first).
  *
- * Used by D.4 hybrid success screen to render the "📂 ..." portfolio line
- * after every account addition (2nd, 3rd, etc.).
+ * Phase LD++: SQL extended with LEFT JOIN workspaces to compute
+ * isExpenseDefault / isIncomeDefault for each row.
  *
- * SEC-03: withTenantTransaction (RLS enforced).
+ * Used by D.4 hybrid success screen to render portfolio lines with role tags.
+ *
+ * SEC-03: withTenantTransaction (RLS enforced) + explicit workspace_id.
  */
 export async function getWorkspaceActiveAccounts(
   workspaceId: string,
@@ -698,19 +822,94 @@ export async function getWorkspaceActiveAccounts(
         name: string;
         currency: string;
         type: string;
+        is_expense_default: boolean;
+        is_income_default: boolean;
       }>(
-        `SELECT id, name, currency, type
-         FROM account_sources
-         WHERE workspace_id = $1 AND deleted_at IS NULL
-         ORDER BY created_at ASC`,
+        // LEFT JOIN workspaces to read both default FK columns in one pass.
+        // Defense-in-depth: explicit a.workspace_id = $1 alongside RLS.
+        `SELECT
+           a.id,
+           a.name,
+           a.currency,
+           a.type,
+           (a.id = w.default_expense_account_id) AS is_expense_default,
+           (a.id = w.default_income_account_id)  AS is_income_default
+         FROM account_sources a
+         LEFT JOIN workspaces w ON w.id = a.workspace_id
+         WHERE a.workspace_id = $1
+           AND a.deleted_at IS NULL
+         ORDER BY a.created_at ASC`,
         [workspaceId],
       );
       return res.rows.map((r) => ({
-        id:       r.id,
-        name:     r.name,
-        currency: r.currency,
-        type:     r.type,
+        id:               r.id,
+        name:             r.name,
+        currency:         r.currency,
+        type:             r.type,
+        isExpenseDefault: Boolean(r.is_expense_default),
+        isIncomeDefault:  Boolean(r.is_income_default),
       }));
+    },
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// getAccountRoles — Phase LD++ (account card role flags)
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Role flags for a single account.
+ * Used by the account detail card (F.3 ⚪/🟢 buttons).
+ */
+export interface AccountRoleFlags {
+  isExpenseDefault: boolean;
+  isIncomeDefault:  boolean;
+}
+
+/**
+ * Returns the expense/income role flags for a single account.
+ *
+ * Called by renderAccountCard() in webhook.route.ts before building
+ * buildAccountActionsKeyboard(id, roles) so the ⚪/🟢 buttons are correct.
+ *
+ * Implementation: SELECT two boolean expressions directly in SQL
+ * (id = w.default_expense_account_id) to avoid two round-trips.
+ *
+ * Returns { isExpenseDefault: false, isIncomeDefault: false } if the account
+ * does not exist in the workspace (safe default — caller guards via account lookup).
+ *
+ * SEC-03: withTenantTransaction (RLS enforced) + explicit workspace_id filter.
+ * SEC-12: Account id NOT logged (ULIDs are not PII but kept consistent).
+ */
+export async function getAccountRoles(
+  workspaceId: string,
+  userId: string,
+  accountId: string,
+): Promise<AccountRoleFlags> {
+  return withTenantTransaction<AccountRoleFlags>(
+    workspaceId,
+    userId,
+    async (client) => {
+      const res = await client.query<{
+        is_expense: boolean;
+        is_income: boolean;
+      }>(
+        `SELECT
+           (a.id = w.default_expense_account_id) AS is_expense,
+           (a.id = w.default_income_account_id)  AS is_income
+         FROM account_sources a
+         LEFT JOIN workspaces w ON w.id = a.workspace_id
+         WHERE a.id = $1
+           AND a.workspace_id = $2
+           AND a.deleted_at IS NULL`,
+        [accountId, workspaceId],
+      );
+      const row = res.rows[0];
+      if (!row) return { isExpenseDefault: false, isIncomeDefault: false };
+      return {
+        isExpenseDefault: Boolean(row.is_expense),
+        isIncomeDefault:  Boolean(row.is_income),
+      };
     },
   );
 }
@@ -954,4 +1153,146 @@ export async function activatePlaceholderAccount(
       return (result.rowCount ?? 0) > 0 ? 'activated' : 'none';
     },
   );
+}
+
+// ─────────────────────────────────────────────────────────────
+// Default account role mutations — Phase LD++
+// ─────────────────────────────────────────────────────────────
+//
+// Business rules:
+//   - SET expense:   UPDATE workspaces SET default_expense_account_id = $id WHERE id = $wid
+//   - CLEAR expense: UPDATE workspaces SET default_expense_account_id = NULL WHERE id = $wid
+//   - SET income:    UPDATE workspaces SET default_income_account_id  = $id  WHERE id = $wid
+//   - CLEAR income:  UPDATE workspaces SET default_income_account_id  = NULL WHERE id = $wid
+//
+// SET is idempotent: one UPDATE unconditionally overwrites the FK.
+// The previous holder automatically loses the role (no separate UPDATE needed).
+// One account CAN be both expense AND income default simultaneously.
+//
+// Pre-flight: each SET function first verifies the account exists and belongs
+// to the workspace (not deleted) to prevent ULID poisoning (SEC-03).
+//
+// SEC-03: withTenantTransaction (RLS) + explicit workspace_id checks.
+// SEC-12: Account ids NOT logged.
+
+/**
+ * Set the workspace's default expense account.
+ *
+ * Any previous expense-default holder automatically loses the role
+ * (single UPDATE on workspaces). Idempotent — setting the same account twice
+ * is safe.
+ *
+ * @returns 'ok'         — FK updated.
+ *          'not_found'  — accountId does not exist / not in this workspace / deleted.
+ */
+export async function setDefaultExpenseAccount(
+  workspaceId: string,
+  userId: string,
+  accountId: string,
+): Promise<'ok' | 'not_found'> {
+  return withTenantTransaction<'ok' | 'not_found'>(
+    workspaceId,
+    userId,
+    async (client) => {
+      // Pre-flight: verify the account belongs to this workspace and is not deleted.
+      const check = await client.query<{ id: string }>(
+        `SELECT id FROM account_sources
+         WHERE id = $1 AND workspace_id = $2 AND deleted_at IS NULL`,
+        [accountId, workspaceId],
+      );
+      if (check.rows.length === 0) return 'not_found';
+
+      await client.query(
+        `UPDATE workspaces
+         SET default_expense_account_id = $1
+         WHERE id = $2`,
+        [accountId, workspaceId],
+      );
+      return 'ok';
+    },
+  );
+}
+
+/**
+ * Set the workspace's default income account.
+ *
+ * @returns 'ok' | 'not_found' — same semantics as setDefaultExpenseAccount.
+ */
+export async function setDefaultIncomeAccount(
+  workspaceId: string,
+  userId: string,
+  accountId: string,
+): Promise<'ok' | 'not_found'> {
+  return withTenantTransaction<'ok' | 'not_found'>(
+    workspaceId,
+    userId,
+    async (client) => {
+      const check = await client.query<{ id: string }>(
+        `SELECT id FROM account_sources
+         WHERE id = $1 AND workspace_id = $2 AND deleted_at IS NULL`,
+        [accountId, workspaceId],
+      );
+      if (check.rows.length === 0) return 'not_found';
+
+      await client.query(
+        `UPDATE workspaces
+         SET default_income_account_id = $1
+         WHERE id = $2`,
+        [accountId, workspaceId],
+      );
+      return 'ok';
+    },
+  );
+}
+
+/**
+ * Clear the workspace's default expense account (set to NULL).
+ *
+ * Idempotent — calling when already NULL is safe.
+ *
+ * @returns 'ok' always (workspace always exists for authenticated user).
+ */
+export async function clearDefaultExpenseAccount(
+  workspaceId: string,
+  userId: string,
+): Promise<'ok'> {
+  await withTenantTransaction<void>(
+    workspaceId,
+    userId,
+    async (client) => {
+      await client.query(
+        `UPDATE workspaces
+         SET default_expense_account_id = NULL
+         WHERE id = $1`,
+        [workspaceId],
+      );
+    },
+  );
+  return 'ok';
+}
+
+/**
+ * Clear the workspace's default income account (set to NULL).
+ *
+ * Idempotent — calling when already NULL is safe.
+ *
+ * @returns 'ok' always.
+ */
+export async function clearDefaultIncomeAccount(
+  workspaceId: string,
+  userId: string,
+): Promise<'ok'> {
+  await withTenantTransaction<void>(
+    workspaceId,
+    userId,
+    async (client) => {
+      await client.query(
+        `UPDATE workspaces
+         SET default_income_account_id = NULL
+         WHERE id = $1`,
+        [workspaceId],
+      );
+    },
+  );
+  return 'ok';
 }

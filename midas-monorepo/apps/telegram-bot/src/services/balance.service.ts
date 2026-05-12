@@ -59,6 +59,10 @@ interface AccountBalanceRow {
   transfer_sum: { toFixed: (dp: number) => string }; // Decimal
   /** Phase 1.27: transactions excluded due to base_currency ≠ account.currency */
   mismatch_count: string;
+  /** Phase LD++: true if this account is workspace default for expenses */
+  is_expense_default: boolean;
+  /** Phase LD++: true if this account is workspace default for incomes */
+  is_income_default: boolean;
 }
 
 /** Row from the currency totals query. */
@@ -112,8 +116,14 @@ const PER_ACCOUNT_SQL = `
       WHEN t.base_currency IS NOT NULL
        AND t.base_currency != a.currency
        AND t.transaction_intent != 'transfer'
-      THEN 1 END) AS mismatch_count
+      THEN 1 END) AS mismatch_count,
+    -- Phase LD++: role flags — computed by comparing account id against workspace FK columns.
+    -- LEFT JOIN workspaces w is safe: workspace always exists for RLS-isolated tenant query.
+    (a.id = w.default_expense_account_id) AS is_expense_default,
+    (a.id = w.default_income_account_id)  AS is_income_default
   FROM account_sources a
+  -- Phase LD++: LEFT JOIN workspaces to read default FK columns without extra query.
+  LEFT JOIN workspaces w ON w.id = a.workspace_id
   -- D6: all-time (no date filter)
   -- Phase 1.29: AND t.deleted_at IS NULL in the JOIN ON clause — NOT in a WHERE.
   --   WHERE deleted_at IS NULL would silently convert LEFT JOIN to INNER JOIN,
@@ -124,7 +134,8 @@ const PER_ACCOUNT_SQL = `
    AND t.deleted_at IS NULL   -- Phase 1.29: exclude soft-deleted from balance sum
   WHERE a.workspace_id = $1  -- explicit workspace filter (SEC-03)
     AND a.deleted_at IS NULL   -- Phase 2.1: hide soft-deleted accounts
-  GROUP BY a.id, a.name, a.type, a.currency, a.initial_balance
+  GROUP BY a.id, a.name, a.type, a.currency, a.initial_balance,
+           w.default_expense_account_id, w.default_income_account_id
   ORDER BY a.currency, a.name
 `;
 
@@ -223,6 +234,10 @@ export interface BalanceDataRow {
   type: string;
   currency: string;
   balance: string;
+  /** Phase LD++: true if this account is workspace default for expenses */
+  isExpenseDefault: boolean;
+  /** Phase LD++: true if this account is workspace default for incomes */
+  isIncomeDefault: boolean;
 }
 
 /** Structured result from getBalanceData(). */
@@ -263,11 +278,13 @@ export async function getBalanceData(
 
   // ── Build structured rows for keyboard ────────────────────────
   const accountRows: BalanceDataRow[] = accounts.map((row) => ({
-    account_id: row.account_id,
-    name: row.name,
-    type: row.type,
-    currency: row.currency,
-    balance: row.balance.toFixed(2),
+    account_id:       row.account_id,
+    name:             row.name,
+    type:             row.type,
+    currency:         row.currency,
+    balance:          row.balance.toFixed(2),
+    isExpenseDefault: Boolean(row.is_expense_default),
+    isIncomeDefault:  Boolean(row.is_income_default),
   }));
 
   // ── Empty workspace ─────────────────────────────────────────
@@ -278,7 +295,7 @@ export async function getBalanceData(
     };
   }
 
-  // ── Per-account lines (Variant 2: Clean List — no type label, no noise) ──
+  // ── Per-account lines (Phase LD++: role markers 💸/💰/💸💰 appended to name) ──
   const accountLines = accounts.map((row) => {
     const name = escapeHtml(row.name);
     const currency = escapeHtml(row.currency);
@@ -287,7 +304,16 @@ export async function getBalanceData(
       ? row.balance.toFixed(2)
       : num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-    return `<b>${name}</b>\n└ ${balanceStr} ${currency}`;
+    // Role badge: shown inline after name so the user sees at a glance which
+    // account is the default for expenses (💸), incomes (💰), or both (💸💰).
+    const isExp = Boolean(row.is_expense_default);
+    const isInc = Boolean(row.is_income_default);
+    const roleBadge = (isExp && isInc) ? ' 💸💰'
+                    : isExp            ? ' 💸'
+                    : isInc            ? ' 💰'
+                    : '';
+
+    return `<b>${name}${roleBadge}</b>\n└ ${balanceStr} ${currency}`;
   });
 
   // ── Currency totals — compact single line ─────────────────

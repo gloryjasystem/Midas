@@ -83,6 +83,11 @@ import {
   activatePlaceholderAccount,      // Phase LD: promote Default to real account when user skips
   getWorkspaceDefaultAccount,      // Phase LD+: fetch real default account for success screen
   getWorkspaceActiveAccounts,      // Phase LD+: fetch all accounts for D.4 portfolio line
+  getAccountRoles,                 // Phase LD++: role flags for account card
+  setDefaultExpenseAccount,        // Phase LD++: set expense default
+  setDefaultIncomeAccount,         // Phase LD++: set income default
+  clearDefaultExpenseAccount,      // Phase LD++: clear expense default
+  clearDefaultIncomeAccount,       // Phase LD++: clear income default
 } from '../services/account.service.js';
 import {
   getSettings,
@@ -2683,10 +2688,12 @@ Midas создан, чтобы сделать учет денег максима
             if (!detail) {
               await upsertBotMessage(telegramUserId, chatId, '⚠️ Счёт не найден.');
             } else {
+              // Phase LD++: fetch role flags for circle-toggle buttons
+              const roles = await getAccountRoles(blResolved.workspaceId, blResolved.userId, blCmd.accountId);
               await upsertBotMessage(
                 telegramUserId, chatId,
-                formatAccountDetailText(detail),
-                buildAccountActionsKeyboard(blCmd.accountId),
+                formatAccountDetailText(detail, roles),
+                buildAccountActionsKeyboard(blCmd.accountId, roles),
               );
             }
 
@@ -2733,10 +2740,12 @@ Midas создан, чтобы сделать учет денег максима
                 await redisConnection.del(blKey);
                 const detail = await getAccountDetail(blResolved.workspaceId, blResolved.userId, state.accountId);
                 if (detail) {
+                  // Phase LD++: roles must be fetched AFTER currency change to reflect new state
+                  const roles = await getAccountRoles(blResolved.workspaceId, blResolved.userId, state.accountId);
                   await upsertBotMessage(
                     telegramUserId, chatId,
-                    `✅ Валюта изменена на <b>${escapeHtml(blCmd.code)}</b>.\n\n` + formatAccountDetailText(detail),
-                    buildAccountActionsKeyboard(state.accountId),
+                    `✅ Валюта изменена на <b>${escapeHtml(blCmd.code)}</b>.\n\n` + formatAccountDetailText(detail, roles),
+                    buildAccountActionsKeyboard(state.accountId, roles),
                   );
                 }
               }
@@ -2778,6 +2787,67 @@ Midas создан, чтобы сделать учет денег максима
               '✅ Счёт удалён.\n\n' + text,
               buildBalanceListKeyboard(accounts as BalanceAccountRow[]),
             );
+
+          // ── Phase LD++: default account role toggles ──────────────
+          } else if (blCmd.cmd === 'set_expense') {
+            const result = await setDefaultExpenseAccount(blResolved.workspaceId, blResolved.userId, blCmd.accountId);
+            if (result === 'not_found') {
+              await answerCallbackQuery(cq.id, '⚠️ Счёт не найден');
+            } else {
+              const detail = await getAccountDetail(blResolved.workspaceId, blResolved.userId, blCmd.accountId);
+              const roles = await getAccountRoles(blResolved.workspaceId, blResolved.userId, blCmd.accountId);
+              if (detail) {
+                await upsertBotMessage(
+                  telegramUserId, chatId,
+                  formatAccountDetailText(detail, roles),
+                  buildAccountActionsKeyboard(blCmd.accountId, roles),
+                );
+              }
+              await answerCallbackQuery(cq.id, '💸 Основной счёт расходов установлен');
+            }
+
+          } else if (blCmd.cmd === 'set_income') {
+            const result = await setDefaultIncomeAccount(blResolved.workspaceId, blResolved.userId, blCmd.accountId);
+            if (result === 'not_found') {
+              await answerCallbackQuery(cq.id, '⚠️ Счёт не найден');
+            } else {
+              const detail = await getAccountDetail(blResolved.workspaceId, blResolved.userId, blCmd.accountId);
+              const roles = await getAccountRoles(blResolved.workspaceId, blResolved.userId, blCmd.accountId);
+              if (detail) {
+                await upsertBotMessage(
+                  telegramUserId, chatId,
+                  formatAccountDetailText(detail, roles),
+                  buildAccountActionsKeyboard(blCmd.accountId, roles),
+                );
+              }
+              await answerCallbackQuery(cq.id, '💰 Основной счёт доходов установлен');
+            }
+
+          } else if (blCmd.cmd === 'clear_expense') {
+            await clearDefaultExpenseAccount(blResolved.workspaceId, blResolved.userId);
+            const detail = await getAccountDetail(blResolved.workspaceId, blResolved.userId, blCmd.accountId);
+            const roles = await getAccountRoles(blResolved.workspaceId, blResolved.userId, blCmd.accountId);
+            if (detail) {
+              await upsertBotMessage(
+                telegramUserId, chatId,
+                formatAccountDetailText(detail, roles),
+                buildAccountActionsKeyboard(blCmd.accountId, roles),
+              );
+            }
+            await answerCallbackQuery(cq.id, '💸 Роль расходов снята');
+
+          } else if (blCmd.cmd === 'clear_income') {
+            await clearDefaultIncomeAccount(blResolved.workspaceId, blResolved.userId);
+            const detail = await getAccountDetail(blResolved.workspaceId, blResolved.userId, blCmd.accountId);
+            const roles = await getAccountRoles(blResolved.workspaceId, blResolved.userId, blCmd.accountId);
+            if (detail) {
+              await upsertBotMessage(
+                telegramUserId, chatId,
+                formatAccountDetailText(detail, roles),
+                buildAccountActionsKeyboard(blCmd.accountId, roles),
+              );
+            }
+            await answerCallbackQuery(cq.id, '💰 Роль доходов снята');
 
           } else if (blCmd.cmd === 'close') {
             // Remove inline keyboard — close balance screen
@@ -3055,10 +3125,12 @@ Midas создан, чтобы сделать учет денег максима
             } else {
               const detail = await getAccountDetail(blResolved.workspaceId, blResolved.userId, blState.accountId);
               if (detail) {
+                // Phase LD++: fetch roles after rename to reflect current state
+                const roles = await getAccountRoles(blResolved.workspaceId, blResolved.userId, blState.accountId);
                 void upsertBotMessage(
                   telegramUserId, chatId,
-                  `✅ Счёт переименован.\n\n` + formatAccountDetailText(detail),
-                  buildAccountActionsKeyboard(blState.accountId),
+                  `✅ Счёт переименован.\n\n` + formatAccountDetailText(detail, roles),
+                  buildAccountActionsKeyboard(blState.accountId, roles),
                 );
               }
             }
@@ -3080,10 +3152,12 @@ Midas создан, чтобы сделать учет денег максима
             } else {
               const detail = await getAccountDetail(blResolved.workspaceId, blResolved.userId, blState.accountId);
               if (detail) {
+                // Phase LD++: fetch roles after balance sync
+                const roles = await getAccountRoles(blResolved.workspaceId, blResolved.userId, blState.accountId);
                 void upsertBotMessage(
                   telegramUserId, chatId,
-                  `✅ Баланс обновлён.\n\n` + formatAccountDetailText(detail),
-                  buildAccountActionsKeyboard(blState.accountId),
+                  `✅ Баланс обновлён.\n\n` + formatAccountDetailText(detail, roles),
+                  buildAccountActionsKeyboard(blState.accountId, roles),
                 );
               }
             }
@@ -3102,10 +3176,12 @@ Midas создан, чтобы сделать учет денег максима
             await redisConnection.del(blStateKey);
             const detail = await getAccountDetail(blResolved.workspaceId, blResolved.userId, blState.accountId);
             if (detail) {
+              // Phase LD++: fetch roles after currency change
+              const roles = await getAccountRoles(blResolved.workspaceId, blResolved.userId, blState.accountId);
               void upsertBotMessage(
                 telegramUserId, chatId,
-                `✅ Валюта изменена на <b>${escapeHtml(code)}</b>.\n\n` + formatAccountDetailText(detail),
-                buildAccountActionsKeyboard(blState.accountId),
+                `✅ Валюта изменена на <b>${escapeHtml(code)}</b>.\n\n` + formatAccountDetailText(detail, roles),
+                buildAccountActionsKeyboard(blState.accountId, roles),
               );
             }
           }

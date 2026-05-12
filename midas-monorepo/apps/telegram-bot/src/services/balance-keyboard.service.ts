@@ -1,5 +1,5 @@
 /**
- * Balance Keyboard Service — Phase 2.1
+ * Balance Keyboard Service — Phase 2.1 / Phase LD++
  *
  * Builds Telegram InlineKeyboardMarkup objects for the account management
  * dashboard inside the /balance flow.
@@ -16,6 +16,10 @@
  *   bl:d:{id}     → delete request              (5 + 26 = 31 bytes)
  *   bl:dc:{id}    → delete confirm              (6 + 26 = 32 bytes)
  *   bl:back       → back to balance list        (7 bytes)
+ *   bl:se:{id}    → set default EXPENSE account (6 + 26 = 32 bytes)  Phase LD++
+ *   bl:si:{id}    → set default INCOME  account (6 + 26 = 32 bytes)  Phase LD++
+ *   bl:ce:{id}    → clear default EXPENSE       (6 + 26 = 32 bytes)  Phase LD++
+ *   bl:cl:{id}    → clear default INCOME        (6 + 26 = 32 bytes)  Phase LD++
  *
  * All values ≤ 33 bytes — safely within Telegram 64-byte limit.
  * No user-provided data enters callback_data.
@@ -47,7 +51,12 @@ export type BalanceCallbackCmd =
   | { cmd: 'delete'; accountId: string }
   | { cmd: 'delete_confirm'; accountId: string }
   | { cmd: 'back' }
-  | { cmd: 'close' };
+  | { cmd: 'close' }
+  // Phase LD++: default account role toggles
+  | { cmd: 'set_expense';   accountId: string }
+  | { cmd: 'set_income';    accountId: string }
+  | { cmd: 'clear_expense'; accountId: string }
+  | { cmd: 'clear_income';  accountId: string };
 
 // ─────────────────────────────────────────────────────────────
 // Parser — SEC-01 allowlist
@@ -88,6 +97,11 @@ export function parseBalanceCallback(data: string): BalanceCallbackCmd | null {
   if (sub === 'sb') return { cmd: 'set_balance', accountId };
   if (sub === 'd') return { cmd: 'delete', accountId };
   if (sub === 'dc') return { cmd: 'delete_confirm', accountId };
+  // Phase LD++: default account role toggles
+  if (sub === 'se') return { cmd: 'set_expense',   accountId };
+  if (sub === 'si') return { cmd: 'set_income',    accountId };
+  if (sub === 'ce') return { cmd: 'clear_expense', accountId };
+  if (sub === 'cl') return { cmd: 'clear_income',  accountId };
 
   return null;
 }
@@ -103,6 +117,10 @@ export interface BalanceAccountRow {
   type: string;
   currency: string;
   balance: string;
+  /** Phase LD++: true if this account is workspace default for expenses */
+  isExpenseDefault: boolean;
+  /** Phase LD++: true if this account is workspace default for incomes */
+  isIncomeDefault: boolean;
 }
 
 /** Full account detail for the account card view. */
@@ -153,16 +171,54 @@ export function buildBalanceListKeyboard(accounts: BalanceAccountRow[]): InlineK
 }
 
 /**
- * Build the account actions keyboard (detail view).
+ * Role flags for buildAccountActionsKeyboard().
+ * Phase LD++: controls which circle-toggle buttons are shown.
  */
-export function buildAccountActionsKeyboard(accountId: string): InlineKeyboardMarkup {
+export interface AccountRoleState {
+  isExpenseDefault: boolean;
+  isIncomeDefault:  boolean;
+}
+
+/**
+ * Build the account actions keyboard (detail view).
+ *
+ * Phase LD++: adds two circle-toggle rows for expense/income default roles.
+ *   💸 Расходы: ⚪ (not set) → tap → bl:se:{id} (set_expense)
+ *   💸 Расходы: 🟢 (is set)  → tap → bl:ce:{id} (clear_expense)
+ *   💰 Доходы:  ⚪ (not set) → tap → bl:si:{id} (set_income)
+ *   💰 Доходы:  🟢 (is set)  → tap → bl:cl:{id} (clear_income)
+ *
+ * @param accountId - ULID of the account being viewed
+ * @param roles     - current role state (from getAccountRoles() or BalanceDataRow)
+ */
+export function buildAccountActionsKeyboard(
+  accountId: string,
+  roles: AccountRoleState = { isExpenseDefault: false, isIncomeDefault: false },
+): InlineKeyboardMarkup {
+  // Circle-toggle buttons: 🟢 = active (tap to clear), ⚪ = inactive (tap to set)
+  const expenseLabel = roles.isExpenseDefault
+    ? '💸 Расходы: 🟢 (убрать)'
+    : '💸 Расходы: ⚪ (назначить)';
+  const expenseCb = roles.isExpenseDefault
+    ? `bl:ce:${accountId}`
+    : `bl:se:${accountId}`;
+
+  const incomeLabel = roles.isIncomeDefault
+    ? '💰 Доходы: 🟢 (убрать)'
+    : '💰 Доходы: ⚪ (назначить)';
+  const incomeCb = roles.isIncomeDefault
+    ? `bl:cl:${accountId}`
+    : `bl:si:${accountId}`;
+
   return {
     inline_keyboard: [
-      [{ text: '✏️ Переименовать', callback_data: `bl:rn:${accountId}` }],
-      [{ text: '💱 Изменить валюту', callback_data: `bl:cv:${accountId}` }],
+      [{ text: expenseLabel, callback_data: expenseCb }],
+      [{ text: incomeLabel,  callback_data: incomeCb  }],
+      [{ text: '✏️ Переименовать',      callback_data: `bl:rn:${accountId}` }],
+      [{ text: '💱 Изменить валюту',    callback_data: `bl:cv:${accountId}` }],
       [{ text: '🔄 Установить баланс', callback_data: `bl:sb:${accountId}` }],
-      [{ text: '🗑 Удалить', callback_data: `bl:d:${accountId}` }],
-      [{ text: '◀️ Назад', callback_data: 'bl:back' }],
+      [{ text: '🗑 Удалить',           callback_data: `bl:d:${accountId}`  }],
+      [{ text: '◀️ Назад',             callback_data: 'bl:back'            }],
     ],
   };
 }
@@ -244,8 +300,14 @@ export function buildBalanceCryptoCurrencyKeyboard(): InlineKeyboardMarkup {
 
 /**
  * Format account detail card text.
+ *
+ * Phase LD++: shows role badges (💸 / 💰 / 💸💰) after account name
+ * when the account is set as a workspace default.
  */
-export function formatAccountDetailText(acc: AccountDetail): string {
+export function formatAccountDetailText(
+  acc: AccountDetail,
+  roles?: AccountRoleState,
+): string {
   const name = escapeHtml(acc.name);
   const typeLabel = TYPE_LABELS[acc.type] ?? acc.type;
   const currency = escapeHtml(acc.currency);
@@ -253,13 +315,23 @@ export function formatAccountDetailText(acc: AccountDetail): string {
   const txCount = escapeHtml(acc.tx_count);
   const created = formatDate(acc.created_at);
 
+  // Phase LD++: role status line
+  const isExp = roles?.isExpenseDefault ?? false;
+  const isInc = roles?.isIncomeDefault  ?? false;
+  const roleLine = (isExp || isInc)
+    ? `\n🏷 Роль: ${ isExp && isInc ? '💸 Расходы · 💰 Доходы'
+                 : isExp             ? '💸 Расходы'
+                 :                     '💰 Доходы'}`
+    : '';
+
   return (
     `🏦 <b>${name}</b>\n\n` +
     `📊 Тип: ${escapeHtml(typeLabel)}\n` +
     `💱 Валюта: ${currency}\n` +
     `💰 Баланс: <b>${balance} ${currency}</b>\n` +
     `📝 Транзакций: ${txCount}\n` +
-    `📅 Создан: ${created}`
+    `📅 Создан: ${created}` +
+    roleLine
   );
 }
 
