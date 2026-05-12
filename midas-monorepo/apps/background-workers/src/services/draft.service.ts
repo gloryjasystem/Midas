@@ -740,3 +740,60 @@ export async function getWorkspaceAccountNames(workspaceId: string): Promise<str
   );
   return result.rows.map((r) => r.name);
 }
+
+// ─────────────────────────────────────────────────────────────
+// Phase 2.4 PR17: Workspace accounts for worker-side picker
+// ─────────────────────────────────────────────────────────────
+
+export interface WorkspaceAccountEntry {
+  id: string;
+  name: string;
+  currency: string;
+  balance: string; // NUMERIC string
+}
+
+/**
+ * Returns all active workspace accounts with current balances.
+ *
+ * Used by ai-parse.worker.ts to build the account picker keyboard directly,
+ * without going through the telegram-bot service layer.
+ *
+ * Balance formula: same D1-D3 as getAccountBalanceForPreview.
+ * SEC-01: returns only names + IDs (no sensitive financial metadata beyond balance).
+ * SEC-03: workspace_id filter; excludes deleted + onboarding-placeholder rows.
+ *
+ * Returns [] if workspace has no active accounts.
+ */
+export async function getWorkspaceAccountsForPicker(
+  workspaceId: string,
+): Promise<WorkspaceAccountEntry[]> {
+  const result = await pool.query<WorkspaceAccountEntry>(
+    `SELECT
+       a.id,
+       a.name,
+       a.currency,
+       (
+         a.initial_balance
+         + COALESCE(SUM(CASE
+             WHEN t.transaction_intent IN ('income', 'debt_received')
+              AND t.base_currency = a.currency
+             THEN t.base_amount END), 0)
+         - COALESCE(SUM(CASE
+             WHEN t.transaction_intent IN ('expense', 'debt_given')
+              AND t.base_currency = a.currency
+             THEN t.base_amount END), 0)
+       )::TEXT AS balance
+     FROM account_sources a
+     LEFT JOIN transactions t
+       ON t.account_id = a.id
+      AND t.workspace_id = $1
+      AND t.deleted_at IS NULL
+     WHERE a.workspace_id = $1
+       AND a.deleted_at IS NULL
+       AND a.is_onboarding_placeholder = FALSE
+     GROUP BY a.id, a.name, a.currency, a.initial_balance
+     ORDER BY a.name`,
+    [workspaceId],
+  );
+  return result.rows;
+}

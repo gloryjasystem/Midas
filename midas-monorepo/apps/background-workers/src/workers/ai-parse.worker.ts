@@ -32,7 +32,7 @@ import { Worker, type Job } from 'bullmq';
 import { QUEUE_NAMES, type AiParseJobPayload, IdempotencyKeyBuilder } from '@midas/shared';
 import { parseTransaction } from '@midas/ai-core';
 import { redisConnection } from '../queues/redis.js';
-import { createDraft, resolveUserId, setDraftAccountId, getPendingDraftForUser, getAccountBalanceForPreview, getWorkspaceAccountNames } from '../services/draft.service.js';
+import { createDraft, resolveUserId, setDraftAccountId, getPendingDraftForUser, getAccountBalanceForPreview, getWorkspaceAccountNames, getWorkspaceAccountsForPicker, type WorkspaceAccountEntry } from '../services/draft.service.js';
 import { resolveAccountFromHint } from '../services/account-resolver.service.js'; // Phase 1.31
 import { notificationsQueue } from '../queues/queue-definitions.js';
 import { ulid } from 'ulid';
@@ -496,9 +496,40 @@ async function processAiParse(job: Job<AiParseJobPayload>): Promise<void> {
         });
       }
     } else {
-      // No account_hint — standard approve/reject keyboard
-      inlineKeyboard = buildConfirmKeyboard(draftId);
-      previewMsg = richPreview;
+      // No account_hint from AI — show account picker if workspace has accounts.
+      // Phase 2.4 PR17: always ask user to link an account before confirming.
+      let pickerAccounts: WorkspaceAccountEntry[] = [];
+      try {
+        pickerAccounts = await getWorkspaceAccountsForPicker(workspaceId);
+      } catch {
+        pickerAccounts = [];
+      }
+
+      if (pickerAccounts.length > 0) {
+        // Build picker: one row per account + "Без счёта" last row
+        const intent = aiData?.intent ?? null;
+        const pickerHeader = (intent === 'income' || intent === 'debt_received')
+          ? '\uD83C\uDFE6 <b>\u041D\u0430 \u043A\u0430\u043A\u043E\u0439 \u0441\u0447\u0451\u0442 \u0437\u0430\u0447\u0438\u0441\u043B\u0438\u0442\u044C?</b>'
+          : '\uD83C\uDFE6 <b>\u0421 \u043A\u0430\u043A\u043E\u0433\u043e \u0441\u0447\u0451\u0442\u0430 \u0441\u043F\u0438\u0441\u0430\u0442\u044C?</b>';
+
+        const pickerRows = pickerAccounts.slice(0, 8).map((acc) => {
+          // Strip trailing zeros: 15400.0000 → 15400
+          const balDisplay = acc.balance.replace(/\.?0+$/, '') || '0';
+          return [{ text: `\uD83C\uDFE6 ${acc.name} \u00B7 ${balDisplay} ${acc.currency}`, callback_data: `ia:pk:${acc.id}:${draftId}` }];
+        });
+        pickerRows.push([{ text: '\uD83D\uDCDD \u0411\u0435\u0437 \u0441\u0447\u0451\u0442\u0430', callback_data: `ia:skip:${draftId}` }]);
+
+        inlineKeyboard = { inline_keyboard: pickerRows };
+        previewMsg = richPreview + '\n\n' + pickerHeader;
+
+        console.log('[midas:ai-parse-worker] No account_hint — showing picker', {
+          workspaceId, draftId, accountCount: pickerAccounts.length,
+        });
+      } else {
+        // No accounts in workspace — plain confirm card.
+        inlineKeyboard = buildConfirmKeyboard(draftId);
+        previewMsg = richPreview;
+      }
     }
 
     // Phase 1.37-UX: Check if a previous "Не понял" card exists and should be deleted.
