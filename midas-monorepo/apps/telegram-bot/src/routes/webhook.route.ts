@@ -1291,8 +1291,11 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
           if (txCmd.cmd === 'cancel') {
             if (txMsgId) void editMessageText(chatId, txMsgId, '📋 Закрыто.', { inline_keyboard: [] });
           } else if (txCmd.cmd === 'close') {
-            // Remove keyboard — clean close of transaction panel
-            if (txMsgId) void editMessageText(chatId, txMsgId, '📋 <b>Транзакции</b>\n\nЗакрыто. Нажмите кнопку ниже, чтобы открыть снова.', { inline_keyboard: [] });
+            // Clean close of transaction panel - delete message
+            if (txMsgId) {
+              const { deleteMessage } = await import('../services/telegram-api.js');
+              void deleteMessage(chatId, txMsgId);
+            }
           } else if (txCmd.cmd === 'list') {
             const [items, total, stats] = await Promise.all([
               getTransactionList(txResolved.workspaceId, txResolved.userId, txCmd.page, txCmd.filter),
@@ -2811,10 +2814,11 @@ Midas создан, чтобы сделать учет денег максима
             }
 
           } else if (blCmd.cmd === 'close') {
-            // Remove inline keyboard — close balance screen
+            // Clean close of balance screen - delete message
             const msgId = cq.message ? String(cq.message.message_id) : null;
             if (msgId) {
-              void editMessageText(chatId, msgId, '💰 <b>Баланс счетов</b>\n\nЗакрыто. Нажмите кнопку ниже, чтобы открыть снова.', EMPTY_KEYBOARD);
+              const { deleteMessage } = await import('../services/telegram-api.js');
+              void deleteMessage(chatId, msgId);
             }
           }
         } catch (err: unknown) {
