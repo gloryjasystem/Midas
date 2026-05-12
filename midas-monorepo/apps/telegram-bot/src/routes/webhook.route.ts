@@ -646,12 +646,17 @@ async function confirmPreview(
   });
 }
 
+
 /**
- * Phase 1.38: Send the confirm preview card AND store message_id in Redis
- * so the confirmation worker can EDIT the card in-place (preview → confirmed).
- * Without this, approve sends a NEW message and the old preview card stays visible.
+ * Phase 2.4 PR10: Show draft preview (or V2 account picker first).
  *
- * Always awaited — stores the preview msg_id before returning.
+ * Decision tree:
+ *   1. Draft has account_id already                  → preview with balance block.
+ *   2. No account_id AND workspace has ≥1 accounts  → V2 picker first; ia:pk shows preview next.
+ *   3. No account_id AND no accounts (new user)      → plain preview.
+ *
+ * msgId always stored in Redis/DB so confirm worker can edit card in-place.
+ * SEC-02: no float math. SEC-12: names not logged.
  */
 async function sendAndStorePreview(
   telegramUserId: string,
@@ -661,6 +666,44 @@ async function sendAndStorePreview(
   draftId: string,
   prefixText?: string, // optional prefix (e.g. account creation label)
 ): Promise<void> {
+  // ── Phase 2.4: Picker vs Preview decision ─────────────────────────────
+  const draft = await getDraftFields(workspaceId, userId, draftId);
+
+  if (draft && !draft.account_id) {
+    // No account linked yet — check if workspace has real (non-placeholder) accounts.
+    const accounts = await getWorkspaceAccountsWithBalances(workspaceId, userId, draft.parsed_intent);
+    if (accounts.length > 0) {
+      // Workspace has accounts → show V2 picker first.
+      const pickerEntries = toAccountPickerEntries(accounts).map((e) => ({
+        ...e,
+        name: escapeHtml(e.name),
+      }));
+      const pickerText = prefixText
+        ? `${prefixText}\n\n${ACCOUNT_PICKER_V2_TEXT}`
+        : ACCOUNT_PICKER_V2_TEXT;
+      const pickerMsgId = await upsertBotMessage(
+        telegramUserId,
+        chatId,
+        pickerText,
+        buildAccountPickerV2Keyboard(pickerEntries, draftId),
+      );
+      // Store picker msgId — ia:pk handler (PR9) will editMessageText → preview.
+      if (pickerMsgId) {
+        try {
+          await redisConnection.set(`midas:preview:${draftId}`, pickerMsgId, 'EX', 3600);
+          void pool.query(
+            `UPDATE transaction_drafts
+             SET preview_message_id = $1, preview_chat_id = $2, updated_at = NOW()
+             WHERE id = $3 AND workspace_id = $4`,
+            [pickerMsgId, chatId, draftId, workspaceId],
+          ).catch(() => {/* non-fatal */ });
+        } catch { /* non-fatal */ }
+      }
+      return; // picker sent — ia:pk handler continues the flow.
+    }
+  }
+
+  // ── Standard path: preview with (optional) account balance block ──────
   const previewText = await confirmPreview(workspaceId, userId, draftId);
   const fullText = prefixText ? `${prefixText}\n\n${previewText}` : previewText;
   const msgId = await upsertBotMessage(
@@ -669,12 +712,10 @@ async function sendAndStorePreview(
     fullText,
     confirmKb(draftId),
   );
-  // Store for confirmation worker to edit in-place (preview → confirmed)
   if (msgId) {
     try {
-      // Phase 1.39: Redis TTL increased to 3600s (1h to match draft TTL)
+      // Phase 1.39: TTL = 3600s to match draft TTL.
       await redisConnection.set(`midas:preview:${draftId}`, msgId, 'EX', 3600);
-      // Phase 1.39: DB persistence (durable fallback after Redis TTL)
       void pool.query(
         `UPDATE transaction_drafts
          SET preview_message_id = $1, preview_chat_id = $2, updated_at = NOW()
@@ -684,6 +725,7 @@ async function sendAndStorePreview(
     } catch { /* non-fatal */ }
   }
 }
+
 
 
 const webhookRoute: FastifyPluginAsync = async (fastify) => {
