@@ -10,12 +10,12 @@
 | Параметр | Значение |
 |---|---|
 | **PHASE** | `2.4 — Account-Aware Draft Card` |
-| **STEP** | `PR 16 — E2E FINALIZE ✅. Phase 2.4 ПОЛНОСТЬЮ ЗАВЕРШЕНА (PR 1–16). Все 16 PR смержены в main.` |
-| **AGENT STATUS** | `DONE. Phase 2.4 PR 16 выполнен. E2E верификация: tsc 0 ошибок (telegram-bot + background-workers). 76/76 smoke. 27/27 PR15 smoke. DB schema: все 8 Phase 2.4 колонок на месте. GitHub PR #16 merged → main.` |
-| **DEPLOYMENT** | `Railway (spirited-happiness project)` — `Midas` ✅ Online · `background-workers` ✅ Online · `Postgres` ✅ · `Redis` ✅. Phase 2.4 PR16 deployed. Health: https://midas-production-f4f1.up.railway.app/health → {"status":"ok"} |
-| **LAST COMPLETED** | `Phase 2.4 COMPLETE — PR 1–16 merged + deployed to Railway production. tsc 0 ошибок. 103/103 smoke. Health OK.` |
+| **STEP** | `Phase 2.4 — Account Picker UX Hotfixes ✅.` |
+| **AGENT STATUS** | `DONE. Исправлен баг отсутствия пикера и тихой XFX конвертации. E2E верификация: tsc 0 ошибок. 103/103 smoke.` |
+| **DEPLOYMENT** | `Railway (spirited-happiness project)` — `Midas` ✅ Online · `background-workers` ✅ Online · `Postgres` ✅ · `Redis` ✅. Phase 2.4 hotfixes deployed. Health: https://midas-production-f4f1.up.railway.app/health → {"status":"ok"} |
+| **LAST COMPLETED** | `Phase 2.4 Hotfixes COMPLETE — PR 1–16 merged + UX fixes deployed to Railway production. tsc 0 ошибок. 103/103 smoke. Health OK.` |
 | **BLOCKER** | None. |
-| **NEXT ACTION** | E2E тестирование в продакшне: 1) отправить транзакцию боту → проверить preview balance block; 2) XFX flow (ia:xfx) → проверить debit amount; 3) подтвердить транзакцию → проверить Итог block. |
+| **NEXT ACTION** | Проверка продакшна после деплоя Railway на сценариях "купил [товар] за [сумма] [валюта]" и "заработал [сумма]". Пикер должен появляться всегда, если счета существуют. |
 
 
 ---
@@ -445,6 +445,7 @@ CТАРТ: PR 1 (миграция БД) — самый безопасный пе
 | 2026-05-12 15:05 | **workflow_state.md актуализирован. Тесты запущены.** `smoke-test-master-roadmap.mjs`: исправлен устаревший assert для `buildCurrencySearchNoResultsText`. Итог: 76/76 ✅. `smoke-test-lazy-default.mjs`: 39/39 ✅. `tsc --noEmit`: 0 ошибок. Phase LD++ полностью подтверждена. |
 | 2026-05-12 19:35 | **Phase 2.4 PR 2 - v������� � ������.** `account.service.ts`: �������� `AccountWithBalance` interface + `getAccountWithBalance()` + `getWorkspaceAccountsWithBalances()`. tsc 0 ������. GitHub PR #2 merged squash � main (commit 7cc8528). |
 | 2026-05-12 17:27 | **Phase 2.4 — UX Design сессия и планирование.** Спроектированы: черновик + математика баланса («🏦 Bybit USD» + «💳 15 400 − 10 000 = 5 400 USD»), пикер счетов (кнопка «🔄 Сменить счёт»), кросс-валюта (ввод суммы конвертации), confirmed card без кнопок Баланс/Отчёт. UX-изменения ia:list/ia:back из текущего чата ОТМЕНЕНЫ (кодовая база возвращена в stable). 16 атомарных PR спроектированы. Анализ конфликтов: 1 breaking change (PR 7 buildConfirmKeyboard), 1 новый Redis-префикс (midas:xfx:ptr). Полный план: `account_debit_ux_plan.md`. workflow_state.md обновлён. |
+| 2026-05-12 21:00 | **Phase 2.4 — Account Picker UX Hotfixes.** Исправление критического бага отсутствия пикера при AI parse без account_hint. В `ai-parse.worker.ts` добавлен принудительный показ пикера. В `draft.service.ts` добавлена `getWorkspaceAccountsForPicker` для воркера. В `draft-confirmation.service.ts` добавлена защита (`accountWasExplicitlyChosen`) от тихой автоконвертации XFX при несовпадении валюты дефолтного счета. Внедрены intent-aware тексты (доход/расход) для пикера счетов в `account-inline-keyboard.service.ts`. Все 103/103 smoke-теста прошли. |
 
 
 ---

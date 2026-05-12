@@ -613,14 +613,7 @@ interface ConfirmPreviewResult {
   hasCrossAmount: boolean;
 }
 
-// Returns preview text or fallback if draft is not found.
-async function confirmPreview(
-  workspaceId: string,
-  userId: string,
-  draftId: string,
-): Promise<string> {
-  return (await confirmPreviewFull(workspaceId, userId, draftId)).text;
-}
+
 
 /**
  * Full preview build: text + keyboard metadata.
@@ -656,15 +649,18 @@ async function confirmPreviewFull(
       isCrossCurrency = !!draft.parsed_currency && acct.currency !== draft.parsed_currency;
       hasCrossAmount  = !!draft.account_debit_amount;
 
-      // Debit amount: use explicit cross-currency override if set, else parsed_amount.
-      const debitAmount   = draft.account_debit_amount ?? draft.parsed_amount ?? '0';
-      const debitCurrency = draft.account_debit_currency ?? acct.currency;
+      // Debit amount: if cross-currency, debitAmount is account_debit_amount (null if not set).
+      // If same currency, debitAmount is just parsed_amount.
+      const debitAmount = isCrossCurrency ? draft.account_debit_amount : draft.parsed_amount;
+      
       accountBlock = {
         accountName:     escapeHtml(acct.name),
         accountCurrency: acct.currency,
         currentBalance:  acct.balance,
-        debitAmount,
-        debitCurrency,
+        debitAmount:     debitAmount,
+        debitCurrency:   acct.currency,
+        txAmount:        draft.parsed_amount ?? '0',
+        txCurrency:      draft.parsed_currency ?? 'USD',
         intent:          draft.parsed_intent,
       };
     }
@@ -720,47 +716,47 @@ async function sendAndStorePreview(
   const draft = await getDraftFields(workspaceId, userId, draftId);
 
   if (draft && !draft.account_id) {
-    // No account linked yet — check if workspace has real (non-placeholder) accounts.
+    // No account linked yet — FORCE account picker
     const accounts = await getWorkspaceAccountsWithBalances(workspaceId, userId, draft.parsed_intent);
-    if (accounts.length > 0) {
-      // Workspace has accounts → show V2 picker first.
-      const pickerEntries = toAccountPickerEntries(accounts).map((e) => ({
-        ...e,
-        name: escapeHtml(e.name),
-      }));
-      const pickerText = prefixText
-        ? `${prefixText}\n\n${getPickerV2Text(draft.parsed_intent)}`
-        : getPickerV2Text(draft.parsed_intent);
-      const pickerMsgId = await upsertBotMessage(
-        telegramUserId,
-        chatId,
-        pickerText,
-        buildAccountPickerV2Keyboard(pickerEntries, draftId),
-      );
-      // Store picker msgId — ia:pk handler (PR9) will editMessageText → preview.
-      if (pickerMsgId) {
-        try {
-          await redisConnection.set(`midas:preview:${draftId}`, pickerMsgId, 'EX', 3600);
-          void pool.query(
-            `UPDATE transaction_drafts
-             SET preview_message_id = $1, preview_chat_id = $2, updated_at = NOW()
-             WHERE id = $3 AND workspace_id = $4`,
-            [pickerMsgId, chatId, draftId, workspaceId],
-          ).catch(() => {/* non-fatal */ });
-        } catch { /* non-fatal */ }
-      }
-      return; // picker sent — ia:pk handler continues the flow.
+    const pickerEntries = toAccountPickerEntries(accounts).map((e) => ({
+      ...e,
+      name: escapeHtml(e.name),
+    }));
+    const pickerText = prefixText
+      ? `${prefixText}\n\n${getPickerV2Text(draft.parsed_intent)}`
+      : getPickerV2Text(draft.parsed_intent);
+    
+    const textToSend = accounts.length > 0 ? pickerText : ACCOUNT_PICKER_EMPTY_TEXT;
+
+    const pickerMsgId = await upsertBotMessage(
+      telegramUserId,
+      chatId,
+      textToSend,
+      buildAccountPickerV2Keyboard(pickerEntries, draftId),
+    );
+    // Store picker msgId — ia:pk handler (PR9) will editMessageText → preview.
+    if (pickerMsgId) {
+      try {
+        await redisConnection.set(`midas:preview:${draftId}`, pickerMsgId, 'EX', 3600);
+        void pool.query(
+          `UPDATE transaction_drafts
+           SET preview_message_id = $1, preview_chat_id = $2, updated_at = NOW()
+           WHERE id = $3 AND workspace_id = $4`,
+          [pickerMsgId, chatId, draftId, workspaceId],
+        ).catch(() => {/* non-fatal */ });
+      } catch { /* non-fatal */ }
     }
+    return; // picker sent — ia:pk handler continues the flow.
   }
 
   // ── Standard path: preview with (optional) account balance block ──────
-  const previewText = await confirmPreview(workspaceId, userId, draftId);
-  const fullText = prefixText ? `${prefixText}\n\n${previewText}` : previewText;
+  const res = await confirmPreviewFull(workspaceId, userId, draftId);
+  const fullText = prefixText ? `${prefixText}\n\n${res.text}` : res.text;
   const msgId = await upsertBotMessage(
     telegramUserId,
     chatId,
     fullText,
-    confirmKb(draftId),
+    confirmKbForDraft(draftId, res),
   );
   if (msgId) {
     try {
@@ -1318,8 +1314,8 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
             // draft-confirmation.service will use the default account fallback.
             await redisConnection.del(inlineAccountKey(iaCmd.draftId));
             if (iaMsgId) {
-              const previewText = await confirmPreview(iaResolved.workspaceId, iaResolved.userId, iaCmd.draftId);
-              void editMessageText(chatId, iaMsgId, previewText, confirmKb(iaCmd.draftId));
+              const previewRes = await confirmPreviewFull(iaResolved.workspaceId, iaResolved.userId, iaCmd.draftId);
+              void editMessageText(chatId, iaMsgId, previewRes.text, confirmKbForDraft(iaCmd.draftId, previewRes));
               try { await redisConnection.set(`midas:preview:${iaCmd.draftId}`, iaMsgId, 'EX', 3600); } catch { /* non-fatal */ }
             }
 
@@ -1361,8 +1357,8 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
             }
             const label = createRes === 'duplicate' ? `⚠️ Счёт уже существует.` : `✅ Счёт <b>${escapeHtml(createName)}</b> (${escapeHtml(createCurrency)}) создан!`;
             if (iaMsgId) {
-              const previewText = await confirmPreview(iaResolved.workspaceId, iaResolved.userId, iaCmd.draftId);
-              void editMessageText(chatId, iaMsgId, `${label}\n\n${previewText}`, confirmKb(iaCmd.draftId));
+              const previewRes = await confirmPreviewFull(iaResolved.workspaceId, iaResolved.userId, iaCmd.draftId);
+              void editMessageText(chatId, iaMsgId, `${label}\n\n${previewRes.text}`, confirmKbForDraft(iaCmd.draftId, previewRes));
               try { await redisConnection.set(`midas:preview:${iaCmd.draftId}`, iaMsgId, 'EX', 3600); } catch { /* non-fatal */ }
             }
             request.log.info({ msg: '[midas:bot:webhook] ia: account created inline', workspaceId: iaResolved.workspaceId });
@@ -1382,11 +1378,11 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
               await setDraftAccountId(iaResolved.workspaceId, iaResolved.userId, iaCmd.draftId, acct.id);
               await redisConnection.del(inlineAccountKey(iaCmd.draftId));
               if (iaMsgId) {
-                const previewText = await confirmPreview(iaResolved.workspaceId, iaResolved.userId, iaCmd.draftId);
+                const previewRes = await confirmPreviewFull(iaResolved.workspaceId, iaResolved.userId, iaCmd.draftId);
                 void editMessageText(
                   chatId, iaMsgId,
-                  `✅ Счёт <b>${escapeHtml(acct.name)}</b> выбран.\n\n${previewText}`,
-                  confirmKb(iaCmd.draftId),
+                  `✅ Счёт <b>${escapeHtml(acct.name)}</b> выбран.\n\n${previewRes.text}`,
+                  confirmKbForDraft(iaCmd.draftId, previewRes),
                 );
                 try { await redisConnection.set(`midas:preview:${iaCmd.draftId}`, iaMsgId, 'EX', 3600); } catch { /* non-fatal */ }
               }
@@ -2770,8 +2766,8 @@ Midas создан, чтобы сделать учет денег максима
             );
             if (intentResult.status === 'ready') {
               if (clarMsgId) {
-                const previewText = await confirmPreview(clarResolved.workspaceId, clarResolved.userId, intentDraftId);
-                void editMessageText(chatId, clarMsgId, previewText, confirmKb(intentDraftId));
+                const previewRes = await confirmPreviewFull(clarResolved.workspaceId, clarResolved.userId, intentDraftId);
+                void editMessageText(chatId, clarMsgId, previewRes.text, confirmKbForDraft(intentDraftId, previewRes));
                 try { await redisConnection.set(`midas:preview:${intentDraftId}`, clarMsgId, 'EX', 3600); } catch { /* non-fatal */ }
               }
             } else if (intentResult.status === 'still_needs' && intentResult.field === 'amount') {
@@ -2798,8 +2794,8 @@ Midas создан, чтобы сделать учет денег максима
             );
             if (catResult.status === 'ready') {
               if (clarMsgId) {
-                const previewText = await confirmPreview(clarResolved.workspaceId, clarResolved.userId, catDraftId);
-                void editMessageText(chatId, clarMsgId, previewText, confirmKb(catDraftId));
+                const previewRes = await confirmPreviewFull(clarResolved.workspaceId, clarResolved.userId, catDraftId);
+                void editMessageText(chatId, clarMsgId, previewRes.text, confirmKbForDraft(catDraftId, previewRes));
                 try { await redisConnection.set(`midas:preview:${catDraftId}`, clarMsgId, 'EX', 3600); } catch { /* non-fatal */ }
               }
             } else {
@@ -2820,8 +2816,8 @@ Midas создан, чтобы сделать учет денег максима
             );
             if (nocatResult.status === 'ready') {
               if (clarMsgId) {
-                const previewText = await confirmPreview(clarResolved.workspaceId, clarResolved.userId, nocatDraftId);
-                void editMessageText(chatId, clarMsgId, previewText, confirmKb(nocatDraftId));
+                const previewRes = await confirmPreviewFull(clarResolved.workspaceId, clarResolved.userId, nocatDraftId);
+                void editMessageText(chatId, clarMsgId, previewRes.text, confirmKbForDraft(nocatDraftId, previewRes));
                 try { await redisConnection.set(`midas:preview:${nocatDraftId}`, clarMsgId, 'EX', 3600); } catch { /* non-fatal */ }
               }
             } else {
@@ -4325,12 +4321,12 @@ Midas создан, чтобы сделать учет денег максима
               const label = createRes === 'duplicate'
                 ? `⚠️ Счёт <b>${escapeHtml(trimmedName)}</b> уже существует.`
                 : `✅ Счёт <b>${escapeHtml(trimmedName)}</b> (${escapeHtml(iaState.currency)}) создан!`;
-              const previewText = await confirmPreview(resolved.workspaceId, resolved.userId, activeDraftId);
+              const previewRes = await confirmPreviewFull(resolved.workspaceId, resolved.userId, activeDraftId);
               void upsertBotMessage(
                 telegramUserId,
                 chatId,
-                `${label}\n\n${previewText}`,
-                confirmKb(activeDraftId),
+                `${label}\n\n${previewRes.text}`,
+                confirmKbForDraft(activeDraftId, previewRes),
               );
               request.log.info({ msg: '[midas:bot:webhook] ia: account created via text rename', workspaceId: resolved.workspaceId });
             } catch (err: unknown) {

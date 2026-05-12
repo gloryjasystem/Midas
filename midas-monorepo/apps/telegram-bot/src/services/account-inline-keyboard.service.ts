@@ -323,8 +323,8 @@ export function buildAccountPickerV2Keyboard(
     }];
   });
 
-  // "Записать без счёта" — always last
-  rows.push([{ text: '📝 Без счёта', callback_data: `ia:skip:${draftId}` }]);
+  // Phase 2.4: Mandatory account selection - replace "Без счёта" with "Создать счёт"
+  rows.push([{ text: '➕ Создать счёт', callback_data: `ia:rename:${draftId}` }]);
 
   return { inline_keyboard: rows };
 }
@@ -497,6 +497,9 @@ export function buildAccountPickerForDraft(
     }];
   });
 
+  // Phase 2.4: Create account option in full picker
+  rows.push([{ text: '➕ Создать счёт', callback_data: `ia:rename:${draftId}` }]);
+
   // Always-last: back button (delinks current account, redisplays picker or card)
   rows.push([{ text: '◀️ Назад', callback_data: `ia:pk:delink:${draftId}` }]);
 
@@ -523,6 +526,6 @@ export const ACCOUNT_PICKER_SCREEN_TEXT =
  * Text shown above the full picker screen when the workspace has no accounts.
  */
 export const ACCOUNT_PICKER_EMPTY_TEXT =
-  '🔄 <b>Выберите счёт</b>\n\nУ вас пока нет счетов.\nСоздайте счёт в разделе 💰 Баланс.';
+  '🔄 <b>Выберите счёт</b>\n\nУ вас пока нет счетов.\nНажмите «Создать счёт» ниже:';
 
 
