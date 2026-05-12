@@ -175,6 +175,7 @@ import {
   buildCurrencyPickerText,           // Phase 2.3: context-aware currency picker header
   buildBalancePromptText,            // Phase 2.3: context-aware balance prompt
   getProviderIcon,                   // Phase 2.3: provider emoji for success screen
+  PROVIDER_ICONS,                    // Phase LD+: D.4 portfolio name-based icon lookup
   capitalizeFirst,                   // Phase 2.3: auto-capitalize user input
   // master_roadmap: no-match screen + currency search
   buildNoMatchText,                  // master_roadmap 1.7
@@ -417,39 +418,65 @@ function lastSuccessMsgKey(telegramUserId: string, chatId: string): string {
 }
 
 /**
+ * Resolve the best emoji icon for an account based on its NAME (fuzzy match
+ * against PROVIDER_ICONS keys) or fallback keyword detection.
+ *
+ * Used in portfolio lines because all accounts in DB have type='manual' —
+ * the semantic type (cash / card / exchange / wallet) is only available at
+ * creation time in AccountOnboardState, not persisted to account_sources.
+ */
+function getIconByName(name: string, providerIconsMap: ReadonlyMap<string, string>): string {
+  const lower = name.toLowerCase();
+  // 1. Direct provider key match (binance, tinkoff, ledger …)
+  for (const [key, icon] of providerIconsMap) {
+    if (lower.includes(key)) return icon;
+  }
+  // 2. Keyword heuristics for common Russian account names
+  if (/наличн|кэш|cash|нал\b/.test(lower)) return '💵';
+  if (/крипто|crypto|биржа|exchange|бирж/.test(lower)) return '🔄';
+  if (/кошел|wallet/.test(lower)) return '👛';
+  if (/карт|card|банк|bank/.test(lower)) return '💳';
+  // 3. Generic fallback
+  return '💳';
+}
+
+/**
  * Build the D.4 "Гибрид" account-added success message text.
  *
  * Used when user adds their 2nd, 3rd, … N-th account.
- * Always deletes previous success card first, then sends this.
+ * Previous success card is deleted before this is sent.
  *
  * Format:
  *   ✅ Счёт добавлен
  *
- *   {icon} {name} · {currency} · {balance}    (balance omitted if undefined)
+ *   {icon} {name} · {currency}[ · {balance}]
  *
  *   Напишите операцию — «продукты 800» или «зарплата 45 000».
  *   Midas распознает сумму, тип и категорию автоматически.
  *
- *   📂 {icon1} {name1} · {cur1}   {icon2} {name2} · {cur2} …
+ *   Все счета:
+ *   {icon1} {name1} · {cur1}
+ *   {icon2} {name2} · {cur2}
+ *   …
  */
 function buildAccountAddedD4Text(
   newIcon: string,
   newName: string,
   newCurrency: string,
   newBalance: number | string | undefined,
-  portfolio: Array<{ name: string; currency: string; type: string; walletSubtype?: string }>,
-  getIcon: (type: string, sub?: string) => string,
+  portfolio: Array<{ name: string; currency: string; type: string }>,
+  providerIconsMap: ReadonlyMap<string, string>,
 ): string {
   const balPart = newBalance !== undefined ? ` · ${newBalance} ${newCurrency}` : '';
-  const portfolioLine = portfolio
-    .map((a) => `${getIcon(a.type, a.walletSubtype)} ${a.name} · ${a.currency}`)
-    .join('   ');
+  const portfolioLines = portfolio
+    .map((a) => `${getIconByName(a.name, providerIconsMap)} ${a.name} · ${a.currency}`)
+    .join('\n');
   return (
     `✅ Счёт добавлен\n\n` +
     `${newIcon} <b>${newName}</b> · ${newCurrency}${balPart}\n\n` +
     `Напишите операцию — «продукты 800» или «зарплата 45 000».\n` +
     `Midas распознает сумму, тип и категорию автоматически.\n\n` +
-    `📂 ${portfolioLine}`
+    `<b>Все счета:</b>\n${portfolioLines}`
   );
 }
 
@@ -984,7 +1011,7 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
               const portfolio = await getWorkspaceActiveAccounts(acResolved.workspaceId, acResolved.userId).catch(() => []);
               const d4Text = buildAccountAddedD4Text(
                 skippedIcon, escapeHtml(skippedName), skippedCur, undefined, portfolio,
-                (t, s) => getProviderIcon(undefined, t, s),
+                PROVIDER_ICONS,
               );
               const newSuccessId = await sendMessageWithReplyKeyboard(chatId, d4Text, buildMainMenuKeyboard());
               if (newSuccessId) void redisConnection.set(lastSuccessMsgKey(telegramUserId, chatId), newSuccessId, 'EX', LAST_SUCCESS_MSG_TTL_SEC);
@@ -4178,7 +4205,7 @@ Midas создан, чтобы сделать учет денег максима
                 const portfolioCi = await getWorkspaceActiveAccounts(resolved.workspaceId, resolved.userId).catch(() => []);
                 const d4TextCi = buildAccountAddedD4Text(
                   icon, escapeHtml(accountName), escapeHtml(rawCode), undefined, portfolioCi,
-                  (t, s) => getProviderIcon(undefined, t, s),
+                  PROVIDER_ICONS,
                 );
                 const newSuccessIdCi = await sendMessageWithReplyKeyboard(chatId, d4TextCi, buildMainMenuKeyboard());
                 if (newSuccessIdCi) void redisConnection.set(lastSuccessMsgKey(telegramUserId, chatId), newSuccessIdCi, 'EX', LAST_SUCCESS_MSG_TTL_SEC);
@@ -4250,7 +4277,7 @@ Midas создан, чтобы сделать учет денег максима
               const portfolioBi = await getWorkspaceActiveAccounts(resolved.workspaceId, resolved.userId).catch(() => []);
               const d4TextBi = buildAccountAddedD4Text(
                 icon, escapeHtml(acName), escapeHtml(acCur), amount, portfolioBi,
-                (t, s) => getProviderIcon(undefined, t, s),
+                PROVIDER_ICONS,
               );
               const newSuccessIdBi = await sendMessageWithReplyKeyboard(chatId, d4TextBi, buildMainMenuKeyboard());
               if (newSuccessIdBi) void redisConnection.set(lastSuccessMsgKey(telegramUserId, chatId), newSuccessIdBi, 'EX', LAST_SUCCESS_MSG_TTL_SEC);

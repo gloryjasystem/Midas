@@ -674,7 +674,6 @@ export interface ActiveAccountSummary {
   name: string;
   currency: string;
   type: string;
-  walletSubtype?: string;
 }
 
 /**
@@ -699,20 +698,18 @@ export async function getWorkspaceActiveAccounts(
         name: string;
         currency: string;
         type: string;
-        wallet_subtype: string | null;
       }>(
-        `SELECT id, name, currency, type, wallet_subtype
+        `SELECT id, name, currency, type
          FROM account_sources
          WHERE workspace_id = $1 AND deleted_at IS NULL
          ORDER BY created_at ASC`,
         [workspaceId],
       );
       return res.rows.map((r) => ({
-        id:            r.id,
-        name:          r.name,
-        currency:      r.currency,
-        type:          r.type,
-        walletSubtype: r.wallet_subtype ?? undefined,
+        id:       r.id,
+        name:     r.name,
+        currency: r.currency,
+        type:     r.type,
       }));
     },
   );
