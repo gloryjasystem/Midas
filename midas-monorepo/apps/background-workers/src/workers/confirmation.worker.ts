@@ -147,6 +147,12 @@ async function processConfirmation(job: Job<CallbackConfirmJobPayload>): Promise
         accountName: result.accountName,
         itemName: result.itemName,
         transactionTime: result.transactionTime, // Phase 1.36-UX: timestamp on card
+        // Phase 2.4 PR13: balance snapshot — powers the "Итог" block
+        accountCurrency: result.accountCurrency,
+        balanceBefore:   result.balanceBefore,
+        balanceAfter:    result.balanceAfter,
+        debitAmount:     result.debitAmount,
+        debitCurrency:   result.debitCurrency,
       });
       inlineKeyboardJson = JSON.stringify(
         buildPostConfirmKeyboard(result.transactionId),
@@ -179,6 +185,12 @@ async function processConfirmation(job: Job<CallbackConfirmJobPayload>): Promise
             categoryName: approvedCard.categoryName,
             accountName: approvedCard.accountName,
             itemName: approvedCard.itemName,
+            // Phase 2.4 PR13: pass balance snapshot if available (old cards may not have it)
+            accountCurrency: approvedCard.accountCurrency ?? null,
+            balanceBefore:   approvedCard.balanceBefore ?? null,
+            balanceAfter:    approvedCard.balanceAfter ?? null,
+            debitAmount:     approvedCard.debitAmount ?? null,
+            debitCurrency:   approvedCard.debitCurrency ?? null,
           });
           inlineKeyboardJson = JSON.stringify(buildPostConfirmKeyboard(approvedCard.transactionId));
           break;

@@ -37,13 +37,19 @@ export type ConfirmActionResult =
       outcome: 'approved';
       transactionId: string;
       // Phase 1.34: display data for rich post-confirmation card
-      amount: string;           // NUMERIC string from DB (SEC-02)
+      amount: string;           // NUMERIC string from DB (SEC-02) — tx amount
       currency: string;         // e.g. 'USDT'
       categoryName: string;     // resolved name or fallback
       accountName: string;      // resolved name or fallback
       intent: string;           // transaction_intent
       itemName: string | null;  // Phase 1.35: item/product/merchant name
       transactionTime: string;  // ISO string
+      // Phase 2.4 PR13: balance snapshot for "Итог" block
+      accountCurrency: string | null;    // account currency (may differ from tx currency)
+      balanceBefore: string | null;      // balance BEFORE transaction (NUMERIC string)
+      balanceAfter: string | null;       // balance AFTER transaction (NUMERIC string)
+      debitAmount: string | null;        // cross-currency debit amount in account currency
+      debitCurrency: string | null;      // currency of debitAmount
     }
   | { outcome: 'rejected' }
   | {
@@ -58,6 +64,12 @@ export type ConfirmActionResult =
         accountName: string;
         intent: string;
         itemName: string | null;
+        // Phase 2.4 PR13: balance snapshot (may be null if tx is old)
+        accountCurrency?: string | null;
+        balanceBefore?: string | null;
+        balanceAfter?: string | null;
+        debitAmount?: string | null;
+        debitCurrency?: string | null;
       };
     }
   | { outcome: 'not_found' }
@@ -105,10 +117,13 @@ export async function approveDraft(
       parsed_category_hint: string | null; // Phase 1.35
       item_name: string | null;            // Phase 1.35
       account_id: string | null;          // Phase 1.31: set by ia: callback before approval
+      account_debit_amount: string | null; // Phase 2.4 PR12: cross-currency override
+      account_debit_currency: string | null; // Phase 2.4 PR12
       expires_at: string;
     }>(
       `SELECT id, workspace_id, status, parsed_amount, parsed_currency, parsed_intent,
-              parsed_account_hint, parsed_category_hint, item_name, account_id, expires_at
+              parsed_account_hint, parsed_category_hint, item_name, account_id,
+              account_debit_amount, account_debit_currency, expires_at
        FROM transaction_drafts
        WHERE id = $1 AND workspace_id = $2
        FOR UPDATE SKIP LOCKED`,
@@ -279,15 +294,55 @@ export async function approveDraft(
     });
 
     // Phase 1.34: Fetch display names for rich post-confirmation card.
-    // These are read-only lookups — no business logic change.
     const catNameResult = await client.query<{ name: string }>(
       `SELECT name FROM categories WHERE id = $1 AND workspace_id = $2`,
       [categoryId, workspaceId],
     );
-    const acctNameResult = await client.query<{ name: string }>(
-      `SELECT name FROM account_sources WHERE id = $1 AND workspace_id = $2`,
+    const acctDataResult = await client.query<{ name: string; currency: string }>(
+      `SELECT name, currency FROM account_sources WHERE id = $1 AND workspace_id = $2`,
       [accountId, workspaceId],
     );
+    const acctData     = acctDataResult.rows[0];
+    const acctName     = acctData?.name ?? 'Счёт';
+    const acctCurrency = acctData?.currency ?? currency;
+
+    // Phase 2.4 PR13: fetch balance AFTER transaction using the same formula as balance.service.ts.
+    // We compute it inline (no view dependency) with the same D1-D3 sign rules.
+    // IMPORTANT: this query runs AFTER INSERT, so the newly created transaction IS included.
+    // balanceBefore = numericReverse(balanceAfter, debitAmount, isIncome).
+    // SEC-02: All arithmetic in PostgreSQL NUMERIC — no JS float.
+    const balanceSnapResult = await client.query<{ balance: string }>(
+      `SELECT (
+         a.initial_balance
+         + COALESCE(SUM(CASE WHEN t.transaction_intent = 'income'        AND t.base_currency = a.currency THEN t.base_amount END), 0)
+         + COALESCE(SUM(CASE WHEN t.transaction_intent = 'debt_received' AND t.base_currency = a.currency THEN t.base_amount END), 0)
+         - COALESCE(SUM(CASE WHEN t.transaction_intent = 'expense'       AND t.base_currency = a.currency THEN t.base_amount END), 0)
+         - COALESCE(SUM(CASE WHEN t.transaction_intent = 'debt_given'    AND t.base_currency = a.currency THEN t.base_amount END), 0)
+       )::TEXT AS balance
+       FROM account_sources a
+       LEFT JOIN transactions t
+         ON t.account_id = a.id
+        AND t.workspace_id = $1
+        AND t.deleted_at IS NULL
+       WHERE a.id = $2 AND a.workspace_id = $1
+       GROUP BY a.id, a.initial_balance`,
+      [workspaceId, accountId],
+    );
+    const balanceAfterRaw   = balanceSnapResult.rows[0]?.balance ?? null;
+    const acctCurrencyFinal = acctCurrency;
+
+    // Debit amount in account currency: explicit xfx override or tx amount (same currency).
+    const debitAmountRaw = draft.account_debit_amount ?? amountStr;
+
+    // Compute balanceBefore by reversing the balance step.
+    // SEC-02: BigInt arithmetic via numericReverse() helper below.
+    let balanceBeforeRaw: string | null = null;
+    if (balanceAfterRaw !== null) {
+      try {
+        const isIncome = draft.parsed_intent === 'income' || draft.parsed_intent === 'debt_received';
+        balanceBeforeRaw = numericReverse(balanceAfterRaw, debitAmountRaw, isIncome);
+      } catch { /* non-fatal: balanceBefore stays null */ }
+    }
 
     return {
       outcome: 'approved',
@@ -295,12 +350,53 @@ export async function approveDraft(
       amount: amountStr,  // String-coerced Decimal (SEC-02)
       currency,
       categoryName: catNameResult.rows[0]?.name ?? 'Другое',
-      accountName: acctNameResult.rows[0]?.name ?? 'Счёт',
+      accountName: acctName,
       intent: draft.parsed_intent,  // Validated non-null at Step 5
       itemName: draft.item_name ?? null,  // Phase 1.35
       transactionTime: new Date().toISOString(),
+      // Phase 2.4 PR13: balance snapshot
+      accountCurrency: acctCurrencyFinal,
+      balanceBefore: balanceBeforeRaw,
+      balanceAfter:  balanceAfterRaw,
+      debitAmount:   draft.account_debit_amount ? String(draft.account_debit_amount) : null,
+      debitCurrency: draft.account_debit_currency ?? null,
     };
   });
+}
+
+
+/**
+ * Phase 2.4 PR13: Reverse a balance arithmetic step.
+ * If the transaction SUBTRACTED debit → balanceBefore = balanceAfter + debit.
+ * If the transaction ADDED debit     → balanceBefore = balanceAfter - debit.
+ *
+ * SEC-02: BigInt scaled arithmetic (same as _numericAdd in screen-builder).
+ * @internal
+ */
+function numericReverse(balanceAfter: string, debit: string, wasIncome: boolean): string {
+  const toFixed4 = (s: string): string => {
+    const neg = s.startsWith('-');
+    const abs = neg ? s.slice(1) : s;
+    const [int = '0', dec = ''] = abs.split('.');
+    return `${neg ? '-' : ''}${int}.${dec.padEnd(4, '0').slice(0, 4)}`;
+  };
+  const parseScaled = (s: string): bigint => {
+    const neg = s.startsWith('-');
+    const abs = neg ? s.slice(1) : s;
+    const [int = '0', dec = ''] = toFixed4(abs).split('.');
+    return neg ? -BigInt(`${int}${dec}`) : BigInt(`${int}${dec}`);
+  };
+  const afterScaled = parseScaled(balanceAfter);
+  const debitScaled = parseScaled(debit);
+  // Reverse: income added debit, so before = after - debit.
+  //          expense subtracted debit, so before = after + debit.
+  const resultScaled = wasIncome ? afterScaled - debitScaled : afterScaled + debitScaled;
+  const sign   = resultScaled < 0n ? '-' : '';
+  const abs    = resultScaled < 0n ? -resultScaled : resultScaled;
+  const absStr = abs.toString().padStart(5, '0');
+  const intPart = absStr.slice(0, -4) || '0';
+  const decPart = absStr.slice(-4).replace(/0+$/, '');
+  return decPart ? `${sign}${intPart}.${decPart}` : `${sign}${intPart}`;
 }
 
 // ─────────────────────────────────────────────────────────────
