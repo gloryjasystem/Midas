@@ -1080,13 +1080,16 @@ export function buildSuccessScreenText(
   const balanceLine = balance
     ? ` · ${balance}`
     : '';
+  // Dedup: if name already ends with the currency (e.g. "Наличные CHF"), don't repeat it.
+  const nameEndsWithCur = name.trimEnd().endsWith(currency);
+  const currencyPart = nameEndsWithCur ? '' : ` · ${currency}`;
   return (
     `✅ <b>Готово. Можно начинать.</b>\n\n` +
     `Запишите первую операцию — просто напишите \n` +
     `что потратили или получили:\n` +
     `<i>«кофе 350» · «зарплата 5000» · «перевод Максу 200»</i>\n\n` +
     `Midas распознает сумму, тип и категорию автоматически.\n\n` +
-    `<b>Счёт по умолчанию:</b> ${icon} ${name} · ${currency}${balanceLine}\n` +
+    `<b>Счёт по умолчанию:</b> ${icon} ${name}${currencyPart}${balanceLine}\n` +
     `<i>Добавить карты и биржи → 🏦 Баланс</i>`
   );
 }

@@ -242,10 +242,24 @@ section('3.6 scenario — Наличные (нет экрана имени)');
 
 const cashCurrencyHeader = buildCurrencyPickerText('Наличные', false);
 const successCash        = buildSuccessScreenText('Наличные RUB', 'RUB', undefined, '💵');
+const successCashChf     = buildSuccessScreenText('Наличные CHF', 'CHF', '1500', '💵');
+const successCashRub     = buildSuccessScreenText('Наличные RUB', 'RUB', '5000', '💵');
 
 check('cash currency header существует', cashCurrencyHeader.length > 0);
 check('cash success: "Наличные RUB"',    successCash.includes('Наличные RUB'));
 check('cash success: "RUB"',             successCash.includes('RUB'));
+
+// Regression: CHF must NOT appear twice ("Наличные CHF · CHF" is a bug)
+check('cash BUG: "Наличные CHF" НЕ дублирует CHF', !successCashChf.includes('CHF · CHF'),
+  successCashChf.slice(successCashChf.indexOf('Счёт по умолчанию')));
+check('cash BUG: баланс 1500 присутствует', successCashChf.includes('1500'));
+check('cash BUG: "Наличные RUB" НЕ дублирует RUB', !successCashRub.includes('RUB · RUB'));
+
+// Normal accounts: currency must still appear after "·"
+const successNormal = buildSuccessScreenText('Тинькофф', 'RUB', undefined, '🏦');
+check('normal account: "Тинькофф · RUB" корректен', successNormal.includes('Тинькофф · RUB'));
+const successBinance = buildSuccessScreenText('Binance', 'USDT', undefined, '💱');
+check('exchange account: "Binance · USDT" корректен', successBinance.includes('Binance · USDT'));
 
 // ─── TEST 2.7 — Проверить что buildFinishOnboardKeyboard не нужна ─
 section('2.7 — Success screen не требует кнопок (контракт)');
