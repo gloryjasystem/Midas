@@ -1652,6 +1652,11 @@ const RU_PRESET_ALIASES: Record<string, string> = {
   // ── Биржи (Exchanges) ──
   'бинанс': 'binance', 'байнанс': 'binance',
   'байбит': 'bybit', 'бибит': 'bybit',
+  // EN aliases for exchanges that also have wallet variants (Bybit Web3, OKX Wallet, Uniswap Wallet)
+  // Ensures alias fast-path fires under filter=wallet → early exit → no cross-category match
+  'bybit': 'bybit',
+  'okx': 'okx',
+  'uniswap': 'uniswap',
   'окс': 'okx',
   'кракен': 'kraken',
   'кукоин': 'kucoin',
@@ -1756,6 +1761,9 @@ export function fuzzyMatchAccountName(
           (typeFilter === 'card' && match.type === 'cash')) {
         return match;
       }
+      // Alias found but wrong category: stop here — do NOT fall through to Levenshtein.
+      // This prevents cross-category false positives (e.g. "бинанс" matching ANZ under filter=card).
+      return null;
     }
   }
 

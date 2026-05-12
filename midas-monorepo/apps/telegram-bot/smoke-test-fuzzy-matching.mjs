@@ -257,22 +257,78 @@ console.log('──────────────────────�
 // typeFilter: exchange — должно находить только биржи
 test('binance (filter=exchange) → type=exchange', () => assertType('binance', 'exchange', 'exchange'));
 test('bybit (filter=exchange) → type=exchange', () => assertType('bybit', 'exchange', 'exchange'));
+test('бинанс (filter=exchange) → Binance', () => assertMatch('бинанс', 'Binance', 'exchange'));
+test('байбит (filter=exchange) → Bybit', () => assertMatch('байбит', 'Bybit', 'exchange'));
+test('кракен (filter=exchange) → Kraken', () => assertMatch('кракен', 'Kraken', 'exchange'));
+test('эксмо (filter=exchange) → EXMO', () => assertMatch('эксмо', 'EXMO', 'exchange'));
+
 // typeFilter: card — должно находить только банки
 test('visa (filter=card) → type=card', () => assertType('visa', 'card', 'card'));
 test('tinkoff (filter=card) → type=card', () => assertType('tinkoff', 'card', 'card'));
+test('виза (filter=card) → Visa', () => assertMatch('виза', 'Visa', 'card'));
+test('тинькофф (filter=card) → Тинькофф', () => assertMatch('тинькофф', 'Тинькофф', 'card'));
+test('сбер (filter=card) → Сбербанк', () => assertMatch('сбер', 'Сбербанк', 'card'));
+test('моно (filter=card) → Монобанк', () => assertMatch('моно', 'Монобанк', 'card'));
+test('каспи (filter=card) → Kaspi Bank', () => assertMatch('каспи', 'Kaspi Bank', 'card'));
+
 // typeFilter: wallet — должно находить только кошельки
 test('metamask (filter=wallet) → type=wallet', () => assertType('metamask', 'wallet', 'wallet'));
 test('phantom (filter=wallet) → type=wallet', () => assertType('phantom', 'wallet', 'wallet'));
+test('метамаск (filter=wallet) → MetaMask', () => assertMatch('метамаск', 'MetaMask', 'wallet'));
+test('фантом (filter=wallet) → Phantom', () => assertMatch('фантом', 'Phantom', 'wallet'));
+test('леджер (filter=wallet) → Ledger', () => assertMatch('леджер', 'Ledger', 'wallet'));
+test('трезор (filter=wallet) → Trezor', () => assertMatch('трезор', 'Trezor', 'wallet'));
+test('киви (filter=wallet) → QIWI', () => assertMatch('киви', 'QIWI', 'wallet'));
+test('юмани (filter=wallet) → ЮМoney', () => assertMatch('юмани', 'ЮМoney', 'wallet'));
+test('феникс (filter=wallet) → Phoenix', () => assertMatch('феникс', 'Phoenix', 'wallet'));
+test('тонкипер (filter=wallet) → Tonkeeper', () => assertMatch('тонкипер', 'Tonkeeper', 'wallet'));
 
-// typeFilter изоляция: binance НЕ должно матчить под filter=card
+// ── КЛЮЧЕВАЯ ИЗОЛЯЦИЯ: кросс-категориальные пары ──────────────────
+// Банки НЕ должны матчить в контексте биржи и кошелька
+test('виза под filter=exchange → null (не биржа)', () => assertNoMatch('виза', 'exchange'));
+test('виза под filter=wallet → null (не кошелёк)', () => assertNoMatch('виза', 'wallet'));
+test('тинькофф под filter=exchange → null (не биржа)', () => assertNoMatch('тинькофф', 'exchange'));
+test('тинькофф под filter=wallet → null (не кошелёк)', () => assertNoMatch('тинькофф', 'wallet'));
+test('сбер под filter=exchange → null', () => assertNoMatch('сбер', 'exchange'));
+test('сбер под filter=wallet → null', () => assertNoMatch('сбер', 'wallet'));
+test('моно под filter=exchange → null', () => assertNoMatch('моно', 'exchange'));
+test('моно под filter=wallet → null', () => assertNoMatch('моно', 'wallet'));
+test('revolut под filter=exchange → null', () => assertNoMatch('revolut', 'exchange'));
+test('revolut под filter=wallet → null', () => assertNoMatch('revolut', 'wallet'));
+
+// Биржи НЕ должны матчить в контексте банка или кошелька
 test('binance под filter=card → null (не банк)', () => assertNoMatch('binance', 'card'));
-test('metamask под filter=card → null (не банк)', () => assertNoMatch('metamask', 'card'));
-test('tinkoff под filter=exchange → null (не биржа)', () => assertNoMatch('tinkoff', 'exchange'));
-test('visa под filter=exchange → null (не биржа)', () => assertNoMatch('visa', 'exchange'));
-test('visa под filter=wallet → null (не кошелёк)', () => assertNoMatch('visa', 'wallet'));
+test('binance под filter=wallet → null (не кошелёк)', () => assertNoMatch('binance', 'wallet'));
+test('бинанс под filter=card → null', () => assertNoMatch('бинанс', 'card'));
+test('бинанс под filter=wallet → null', () => assertNoMatch('бинанс', 'wallet'));
 test('kraken под filter=card → null (не банк)', () => assertNoMatch('kraken', 'card'));
+test('kraken под filter=wallet → null', () => assertNoMatch('kraken', 'wallet'));
+test('bybit под filter=card → null', () => assertNoMatch('bybit', 'card'));
+test('bybit под filter=wallet → null', () => assertNoMatch('bybit', 'wallet'));
+test('эксмо под filter=card → null', () => assertNoMatch('эксмо', 'card'));
+test('эксмо под filter=wallet → null', () => assertNoMatch('эксмо', 'wallet'));
+
+// Кошельки НЕ должны матчить в контексте банка или биржи
+test('metamask под filter=card → null (не банк)', () => assertNoMatch('metamask', 'card'));
+test('metamask под filter=exchange → null (не биржа)', () => assertNoMatch('metamask', 'exchange'));
+test('метамаск под filter=card → null', () => assertNoMatch('метамаск', 'card'));
+test('метамаск под filter=exchange → null', () => assertNoMatch('метамаск', 'exchange'));
 test('ledger под filter=card → null (не банк)', () => assertNoMatch('ledger', 'card'));
 test('ledger под filter=exchange → null (не биржа)', () => assertNoMatch('ledger', 'exchange'));
+test('леджер под filter=card → null', () => assertNoMatch('леджер', 'card'));
+test('леджер под filter=exchange → null', () => assertNoMatch('леджер', 'exchange'));
+test('phantom под filter=card → null', () => assertNoMatch('phantom', 'card'));
+test('phantom под filter=exchange → null', () => assertNoMatch('phantom', 'exchange'));
+test('феникс под filter=card → null (Lightning ≠ банк)', () => assertNoMatch('феникс', 'card'));
+test('феникс под filter=exchange → null (Lightning ≠ биржа)', () => assertNoMatch('феникс', 'exchange'));
+test('тонкипер под filter=card → null (TON ≠ банк)', () => assertNoMatch('тонкипер', 'card'));
+test('тонкипер под filter=exchange → null (TON ≠ биржа)', () => assertNoMatch('тонкипер', 'exchange'));
+
+// E-кошельки (QIWI, WebMoney) НЕ должны матчить в контексте банка или биржи
+test('киви под filter=card → null (QIWI ≠ банк)', () => assertNoMatch('киви', 'card'));
+test('киви под filter=exchange → null (QIWI ≠ биржа)', () => assertNoMatch('киви', 'exchange'));
+test('юмани под filter=card → null', () => assertNoMatch('юмани', 'card'));
+test('юмани под filter=exchange → null', () => assertNoMatch('юмани', 'exchange'));
 
 // ═════════════════════════════════════════════════════════════
 console.log('\n════════════════════════════════════════════════════════════');
