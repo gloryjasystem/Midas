@@ -688,8 +688,19 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
       const callbackData = cq.data ?? '';
 
       // Phase 1.33: Sync active message pointer — the callback's message IS the active UI.
+      // Phase LD++: DO NOT set active message pointer for FLOATING CARDS.
+      // If we do, clicking main menu buttons (like "Баланс") will edit/delete the floating card!
       if (cq.message) {
-        void setActiveMessageId(telegramUserId, chatId, String(cq.message.message_id));
+        const isFloatingCard =
+          callbackData.startsWith('approve:') ||
+          callbackData.startsWith('reject:') ||
+          callbackData.startsWith('ia:') ||
+          callbackData.startsWith('clar:') ||
+          callbackData.startsWith('ed:');
+
+        if (!isFloatingCard) {
+          void setActiveMessageId(telegramUserId, chatId, String(cq.message.message_id));
+        }
       }
 
       // ── Phase 1.30: account onboarding callbacks (prefix "ac:") ────
