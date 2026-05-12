@@ -208,9 +208,9 @@ import {
   RENAME_PROMPT,                     // Phase 1.31
   type InlineAccountState,           // Phase 1.31
   buildAccountPickerV2Keyboard,      // Phase 2.4 PR9: V2 account picker keyboard (auto-show on parse)
-  ACCOUNT_PICKER_V2_TEXT,            // Phase 2.4 PR9: picker header text
+  getPickerV2Text,                   // Phase 2.4 PR17: intent-aware picker header text
   buildAccountPickerForDraft,        // Phase 2.4 PR11: full picker (✓ + type emoji + back btn)
-  ACCOUNT_PICKER_SCREEN_TEXT,        // Phase 2.4 PR11: full picker header text
+  getPickerScreenText,               // Phase 2.4 PR17: intent-aware full picker header text
   ACCOUNT_PICKER_EMPTY_TEXT,         // Phase 2.4 PR11: empty-state text for no-account workspaces
   type AccountPickerFullEntry,       // Phase 2.4 PR11: rich entry type
   buildCrossCurrencyInputText,       // Phase 2.4 PR12: xfx input screen text
@@ -729,8 +729,8 @@ async function sendAndStorePreview(
         name: escapeHtml(e.name),
       }));
       const pickerText = prefixText
-        ? `${prefixText}\n\n${ACCOUNT_PICKER_V2_TEXT}`
-        : ACCOUNT_PICKER_V2_TEXT;
+        ? `${prefixText}\n\n${getPickerV2Text(draft.parsed_intent)}`
+        : getPickerV2Text(draft.parsed_intent);
       const pickerMsgId = await upsertBotMessage(
         telegramUserId,
         chatId,
@@ -1439,7 +1439,7 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
 
             if (iaMsgId) {
               const pickerText = fullPickerEntries.length > 0
-                ? ACCOUNT_PICKER_SCREEN_TEXT
+                ? getPickerScreenText(delinkIntent)
                 : ACCOUNT_PICKER_EMPTY_TEXT;
               void editMessageText(
                 chatId, iaMsgId,

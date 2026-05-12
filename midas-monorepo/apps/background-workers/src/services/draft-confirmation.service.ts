@@ -221,6 +221,8 @@ export async function approveDraft(
     // Phase 1.35: Fall back to workspace default account by intent.
     // Otherwise fall back to workspace first account source or create a Default.
     let accountId: string;
+    let accountWasExplicitlyChosen = false; // Phase 2.4 PR17: track if user picked the account
+
     if (draft.account_id) {
       // Phase 1.31: account was resolved inline by user via ia: callback.
       const acctCheck = await client.query<{ id: string }>(
@@ -229,6 +231,7 @@ export async function approveDraft(
       );
       if (acctCheck.rows.length > 0) {
         accountId = draft.account_id;
+        accountWasExplicitlyChosen = true;
       } else {
         // IDOR guard: account not in workspace — fall back to default
         accountId = await resolveDefaultAccount(client, workspaceId, currency, draft.parsed_intent);
@@ -236,6 +239,28 @@ export async function approveDraft(
     } else {
       // Phase 1.35: Use workspace default account by intent.
       accountId = await resolveDefaultAccount(client, workspaceId, currency, draft.parsed_intent);
+    }
+
+    // Phase 2.4 PR17: Fetch the resolved account's currency.
+    // When account was auto-resolved (not explicitly chosen) and its currency ≠ tx currency,
+    // we do NOT record a cross-currency entry — user did not confirm debit amount.
+    // Keep base_currency = tx currency so the Итог block remains accurate.
+    const resolvedAcctRow = await client.query<{ currency: string }>(
+      `SELECT currency FROM account_sources WHERE id = $1`,
+      [accountId],
+    );
+    const resolvedAcctCurrency = resolvedAcctRow.rows[0]?.currency ?? currency;
+    const accountCurrencyMismatch = resolvedAcctCurrency !== currency;
+    // If mismatch AND user didn't explicitly choose account AND no debit override set →
+    // treat as same-currency: base_currency = tx currency.
+    // This prevents "200 USD → карта Амира RUB → Итог: -200 RUB" confusion.
+    if (accountCurrencyMismatch && !accountWasExplicitlyChosen) {
+      console.warn('[midas:draft-confirmation] Auto-resolved account currency mismatch', {
+        draftId, workspaceId,
+        txCurrency: currency,
+        accountCurrency: resolvedAcctCurrency,
+        // No names/amounts logged (SEC-12)
+      });
     }
 
     // ── Phase 2.4 PR14: Compute XFX rate fields ───────────────────────────────

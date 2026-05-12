@@ -270,11 +270,19 @@ export interface AccountPickerEntry {
 }
 
 /**
- * Account picker text shown above the keyboard.
- * Displayed when the user has not yet selected an account for this draft.
+ * Returns intent-aware picker header text for the V2 picker.
+ * income/debt_received → "На какой счёт зачислить?"
+ * expense/debt_given/transfer/null → "С какого счёта списать?"
  */
-export const ACCOUNT_PICKER_V2_TEXT =
-  '🏦 <b>С какого счёта списать?</b>';
+export function getPickerV2Text(intent: string | null): string {
+  if (intent === 'income' || intent === 'debt_received') {
+    return '🏦 <b>На какой счёт зачислить?</b>';
+  }
+  return '🏦 <b>С какого счёта списать?</b>';
+}
+
+/** @deprecated use getPickerV2Text(intent) */
+export const ACCOUNT_PICKER_V2_TEXT = '🏦 <b>С какого счёта списать?</b>';
 
 /**
  * Text shown when an account has already been selected and we render
@@ -496,9 +504,18 @@ export function buildAccountPickerForDraft(
 }
 
 /**
- * Text shown above the full picker screen.
- * Used when user taps "🔄 Сменить счёт" or "➕ Выбрать счёт" on the draft card.
+ * Returns intent-aware picker header for the full picker screen.
+ * income/debt_received → "На какой счёт зачислить?"
+ * expense/... → "С какого счёта будет списана транзакция?"
  */
+export function getPickerScreenText(intent: string | null): string {
+  if (intent === 'income' || intent === 'debt_received') {
+    return '🔄 <b>Выберите счёт</b>\n\nНа какой счёт зачислить?';
+  }
+  return '🔄 <b>Выберите счёт</b>\n\nС какого счёта будет списана транзакция?';
+}
+
+/** @deprecated use getPickerScreenText(intent) */
 export const ACCOUNT_PICKER_SCREEN_TEXT =
   '🔄 <b>Выберите счёт</b>\n\nС какого счёта будет списана транзакция?';
 
