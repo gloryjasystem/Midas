@@ -171,9 +171,8 @@ export const BANK_PRESETS: ReadonlyMap<string, PresetInfo> = new Map([
   ['eurasian',    { name: 'Евразийский банк',  defaultCurrency: 'KZT' }],
   ['rbk',         { name: 'Bank RBK',         defaultCurrency: 'KZT' }],
   ['atfbank',     { name: 'АТФБанк',          defaultCurrency: 'KZT' }],
-  // Uzbekistan
+  // Uzbekistan — banks only; Click (payment system) is in EWALLET_PRESETS
   ['kapital',    { name: 'Kapitalbank',   defaultCurrency: 'UZS' }],
-  ['click',      { name: 'Click',         defaultCurrency: 'UZS' }],
   ['asaka',       { name: 'Asaka Bank',       defaultCurrency: 'UZS' }],
   ['ipoteka',     { name: 'Ipoteka Bank',     defaultCurrency: 'UZS' }],
   ['hamkor',      { name: 'Hamkorbank',       defaultCurrency: 'UZS' }],
@@ -224,18 +223,6 @@ export const BANK_PRESETS: ReadonlyMap<string, PresetInfo> = new Map([
   ['unicredit',   { name: 'UniCredit',    defaultCurrency: 'EUR' }],
   ['bnlita',      { name: 'BNL',          defaultCurrency: 'EUR' }],
   ['mediobanca',  { name: 'Mediobanca',   defaultCurrency: 'EUR' }],
-  // UK
-  ['barclays',   { name: 'Barclays',      defaultCurrency: 'GBP' }],
-  ['hsbc',       { name: 'HSBC',          defaultCurrency: 'GBP' }],
-  ['lloyds',     { name: 'Lloyds',        defaultCurrency: 'GBP' }],
-  ['monzo',      { name: 'Monzo',         defaultCurrency: 'GBP' }],
-  ['starling',   { name: 'Starling',      defaultCurrency: 'GBP' }],
-  ['natwest',    { name: 'NatWest',       defaultCurrency: 'GBP' }],
-  // Poland
-  ['pko',        { name: 'PKO BP',        defaultCurrency: 'PLN' }],
-  ['mbank',      { name: 'mBank',         defaultCurrency: 'PLN' }],
-  ['pekao',      { name: 'Pekao',         defaultCurrency: 'PLN' }],
-  ['millennium', { name: 'Millennium',    defaultCurrency: 'PLN' }],
   // Switzerland / Austria
   ['csbank',     { name: 'Credit Suisse', defaultCurrency: 'CHF' }],
   ['raiffeisen', { name: 'Raiffeisen',    defaultCurrency: 'EUR' }],
