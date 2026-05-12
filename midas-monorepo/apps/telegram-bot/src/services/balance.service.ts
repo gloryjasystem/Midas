@@ -295,7 +295,7 @@ export async function getBalanceData(
     };
   }
 
-  // ── Per-account lines (Phase LD++: role markers 💸/💰/💸💰 appended to name) ──
+  // ── Per-account lines ─────────────────────────────────────
   const accountLines = accounts.map((row) => {
     const name = escapeHtml(row.name);
     const currency = escapeHtml(row.currency);
@@ -304,16 +304,7 @@ export async function getBalanceData(
       ? row.balance.toFixed(2)
       : num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-    // Role badge: shown inline after name so the user sees at a glance which
-    // account is the default for expenses (💸), incomes (💰), or both (💸💰).
-    const isExp = Boolean(row.is_expense_default);
-    const isInc = Boolean(row.is_income_default);
-    const roleBadge = (isExp && isInc) ? ' 💸💰'
-                    : isExp            ? ' 💸'
-                    : isInc            ? ' 💰'
-                    : '';
-
-    return `<b>${name}${roleBadge}</b>\n└ ${balanceStr} ${currency}`;
+    return `<b>${name}</b>\n└ ${balanceStr} ${currency}`;
   });
 
   // ── Currency totals — compact single line ─────────────────

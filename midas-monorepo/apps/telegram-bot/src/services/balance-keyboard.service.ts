@@ -147,16 +147,27 @@ const TYPE_LABELS: Record<string, string> = {
 
 /**
  * Build the main balance list keyboard.
- * One button per account (name + balance) + [➕ Добавить счёт].
+ * One button per account (name · balance CURRENCY [· роль]) + [➕ Добавить счёт].
+ *
+ * Phase LD++: role tags written directly into the button text (Вариант 2).
+ *   "Тинькофф · 15 400 RUB · расходы"
+ *   "Наличные · 2 120 PLN · доходы"
+ *   "Binance · 850 USDT · расходы и доходы"
+ *   "Wallet · 0 ETH"            (no role — no tag)
  */
 export function buildBalanceListKeyboard(accounts: BalanceAccountRow[]): InlineKeyboardMarkup {
   // Account rows (tappable to view detail)
-  const accountRows = accounts.map((acc) => [
-    {
-      text: `${acc.name} · ${formatBalanceShort(acc.balance)} ${acc.currency}`,
+  const accountRows = accounts.map((acc) => {
+    // Role tag appended inline — fintech convention: short, lowercase
+    const roleTag = (acc.isExpenseDefault && acc.isIncomeDefault) ? ' · расходы и доходы'
+                  : acc.isExpenseDefault                          ? ' · расходы'
+                  : acc.isIncomeDefault                           ? ' · доходы'
+                  : '';
+    return [{
+      text: `${acc.name} · ${formatBalanceShort(acc.balance)} ${acc.currency}${roleTag}`,
       callback_data: `bl:v:${acc.account_id}`,
-    },
-  ]);
+    }];
+  });
 
   return {
     inline_keyboard: [
