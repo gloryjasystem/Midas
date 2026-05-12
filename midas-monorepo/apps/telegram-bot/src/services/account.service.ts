@@ -666,6 +666,59 @@ export async function getWorkspaceDefaultAccount(
 }
 
 // ─────────────────────────────────────────────────────────────
+// getWorkspaceActiveAccounts — Phase LD+ (D.4 portfolio line)
+// ─────────────────────────────────────────────────────────────
+
+export interface ActiveAccountSummary {
+  id: string;
+  name: string;
+  currency: string;
+  type: string;
+  walletSubtype?: string;
+}
+
+/**
+ * Returns all non-deleted accounts for the workspace.
+ * Ordered by created_at ASC so portfolio line is stable (oldest first).
+ *
+ * Used by D.4 hybrid success screen to render the "📂 ..." portfolio line
+ * after every account addition (2nd, 3rd, etc.).
+ *
+ * SEC-03: withTenantTransaction (RLS enforced).
+ */
+export async function getWorkspaceActiveAccounts(
+  workspaceId: string,
+  userId: string,
+): Promise<ActiveAccountSummary[]> {
+  return withTenantTransaction<ActiveAccountSummary[]>(
+    workspaceId,
+    userId,
+    async (client) => {
+      const res = await client.query<{
+        id: string;
+        name: string;
+        currency: string;
+        type: string;
+        wallet_subtype: string | null;
+      }>(
+        `SELECT id, name, currency, type, wallet_subtype
+         FROM account_sources
+         WHERE workspace_id = $1 AND deleted_at IS NULL
+         ORDER BY created_at ASC`,
+        [workspaceId],
+      );
+      return res.rows.map((r) => ({
+        id:            r.id,
+        name:          r.name,
+        currency:      r.currency,
+        type:          r.type,
+        walletSubtype: r.wallet_subtype ?? undefined,
+      }));
+    },
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
 // renameAccount — Phase 2.1
 // ─────────────────────────────────────────────────────────────
 
