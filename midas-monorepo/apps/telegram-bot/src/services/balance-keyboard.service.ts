@@ -166,10 +166,10 @@ const TYPE_LABELS: Record<string, string> = {
 export function buildBalanceListKeyboard(accounts: BalanceAccountRow[]): InlineKeyboardMarkup {
   // Account rows (tappable to view detail)
   const accountRows = accounts.map((acc) => {
-    // Role tag appended inline — fintech convention: short, lowercase
-    const roleTag = (acc.isExpenseDefault && acc.isIncomeDefault) ? ' · расходы и доходы'
-                  : acc.isExpenseDefault                          ? ' · расходы'
-                  : acc.isIncomeDefault                           ? ' · доходы'
+    // Role tag appended inline — strictly enclosed in parentheses with emojis
+    const roleTag = (acc.isExpenseDefault && acc.isIncomeDefault) ? ' (💸💰 основной)'
+                  : acc.isExpenseDefault                          ? ' (💸 расходы)'
+                  : acc.isIncomeDefault                           ? ' (💰 доходы)'
                   : '';
     return [{
       text: `${acc.name} · ${formatBalanceShort(acc.balance)} ${acc.currency}${roleTag}`,
@@ -339,7 +339,7 @@ export function formatAccountDetailText(
   const isExp = roles?.isExpenseDefault ?? false;
   const isInc = roles?.isIncomeDefault  ?? false;
   const roleLine = (isExp || isInc)
-    ? `\n🏷 Роль: ${ isExp && isInc ? '💸 Расходы · 💰 Доходы'
+    ? `\n🏷 Роль: ${ isExp && isInc ? '💸💰 Основной'
                  : isExp             ? '💸 Расходы'
                  :                     '💰 Доходы'}`
     : '';
