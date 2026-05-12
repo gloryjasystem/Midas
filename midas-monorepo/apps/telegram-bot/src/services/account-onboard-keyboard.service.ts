@@ -598,29 +598,68 @@ export function getCurrencyFlag(code: string): string {
  * Used by searchCurrencies() for fuzzy matching.
  */
 export const CURRENCY_NAMES: Record<string, string> = {
-  RUB: 'рубль рублей ruble russia', USD: 'доллар dollar usa america',
-  EUR: 'евро euro europe', UAH: 'гривна гривень hryvnia ukraine',
-  GBP: 'фунт pound sterling britain uk', PLN: 'злотый zloty poland',
-  CHF: 'франк franc switzerland', KZT: 'тенге tenge kazakhstan',
-  BYN: 'беларусь belrus ruble', GEL: 'лари lari georgia',
-  CZK: 'крона koruna czech', TRY: 'лира lira turkey',
-  AED: 'дирхам dirham uae dubai', CNY: 'юань yuan china renminbi',
-  JPY: 'иена yen japan', KRW: 'вон won korea',
-  INR: 'рупия rupee india', BRL: 'реал real brazil',
-  MXN: 'песо peso mexico', CAD: 'канадский доллар canada',
-  AUD: 'австралийский доллар australia', SEK: 'крона krone sweden',
-  NOK: 'крона krone norway', DKK: 'крона krone denmark',
-  SGD: 'доллар dollar singapore', HKD: 'гонконг hong kong',
-  BTC: 'биткоин bitcoin btc', ETH: 'эфириум эфир ethereum ether',
-  USDT: 'тезер tether stablecoin usdt', SOL: 'солана solana',
-  TON: 'тон telegram ton', BNB: 'бинанс binance bnb',
-  USDC: 'юсдс usdc stablecoin', XRP: 'рипл ripple xrp',
-  TRX: 'трон tron trx', DOGE: 'додж dogecoin doge',
-  ADA: 'кардано cardano ada', DOT: 'полкадот polkadot dot',
-  AVAX: 'авалянч avalanche avax', NEAR: 'нир near protocol',
-  ATOM: 'козм cosmos atom', LTC: 'лайткоин litecoin ltc',
-  MATIC: 'матик polygon matic', DAI: 'дай dai stablecoin',
-  NOT: 'нотоин notcoin not', DOGS: 'dogs meme token',
+  // Fiat — RU + UK + EN variants incl. short/colloquial forms
+  RUB: 'рубль рубл рубли рублей рублях руб ruble rub russia',
+  USD: 'доллар долл долары dollar usd usa america',
+  EUR: 'евро eur euro europe',
+  UAH: 'гривна гривня гривень гривень грн hryvnia uah ukraine',
+  GBP: 'фунт фунтов pound sterling gbp britain uk',
+  PLN: 'злотый злот zloty pln poland',
+  CHF: 'франк franc switzerland chf swiss',
+  KZT: 'тенге tenge kzt kazakhstan',
+  BYN: 'белорусский рубль беларусь byn belarusian ruble',
+  GEL: 'лари lari gel georgia грузия',
+  CZK: 'крона koruna czk czech чехия',
+  TRY: 'лира lira try turkey турция',
+  AED: 'дирхам dirham aed uae dubai эмираты',
+  CNY: 'юань yuan cny china renminbi китай',
+  JPY: 'иена иен йена yen jpy japan япония',
+  KRW: 'вон won krw korea корея',
+  INR: 'рупия rupee inr india индия',
+  BRL: 'реал real brl brazil бразилия',
+  MXN: 'песо peso mxn mexico мексика',
+  CAD: 'канадский доллар canadian dollar cad canada канада',
+  AUD: 'австралийский доллар australian dollar aud australia австралия',
+  SEK: 'крона krone sek sweden швеция',
+  NOK: 'крона krone nok norway норвегия',
+  DKK: 'крона krone dkk denmark дания',
+  HUF: 'форинт forint huf hungary венгрия',
+  RON: 'лей leu ron romania румыния',
+  UZS: 'сум sum uzs uzbekistan узбекистан',
+  SGD: 'сингапурский доллар singapore dollar sgd singapore',
+  HKD: 'гонконгский доллар hong kong hkd',
+  ZAR: 'рэнд rand zar south africa юар',
+  THB: 'бат baht thb thailand таиланд',
+  PHP: 'песо peso php philippines филиппины',
+  IDR: 'рупия rupiah idr indonesia индонезия',
+  MYR: 'ринггит ringgit myr malaysia малайзия',
+  SAR: 'риял riyal sar saudi arabia саудовская',
+  QAR: 'катарский риял riyal qar qatar катар',
+  AMD: 'драм dram amd armenia армения',
+  AZN: 'манат manat azn azerbaijan азербайджан',
+  MDL: 'молдавский лей leu mdl moldova молдова',
+  BGN: 'болгарский лев lev bgn bulgaria болгария',
+  // Crypto — full names + tickers + colloquial RU forms
+  BTC: 'биткоин биток битка bitcoin btc',
+  ETH: 'эфириум эфир эфира ethereum ether eth',
+  USDT: 'тезер usdt tether stablecoin',
+  SOL: 'солана solana sol',
+  TON: 'тон тончик telegram ton',
+  BNB: 'бинанс binance bnb',
+  USDC: 'юсдс usdc stablecoin',
+  XRP: 'рипл ripple xrp',
+  TRX: 'трон tron trx',
+  DOGE: 'додж dogecoin doge',
+  ADA: 'кардано cardano ada',
+  DOT: 'полкадот polkadot dot',
+  AVAX: 'авалянч avalanche avax',
+  NEAR: 'нир near protocol',
+  ATOM: 'козм cosmos atom',
+  LTC: 'лайткоин litecoin ltc',
+  MATIC: 'матик polygon matic',
+  DAI: 'дай dai stablecoin',
+  NOT: 'нотоин notcoin not',
+  DOGS: 'dogs meme token',
 };
 
 
@@ -1917,35 +1956,57 @@ function translitCurrency(s: string): string {
 }
 
 /**
- * master_roadmap 1.6: Search currencies by free-text query.
- * Checks: exact code match, code starts-with, name contains, transliteration.
- * Returns up to 9 matches.
+ * master_roadmap 1.6+: Search currencies by free-text query.
  *
- * @param query  User-typed search text
- * @param pool   Array of currency codes to search within
+ * Matching priority (higher = better):
+ *   100 — exact code match  (rub → RUB)
+ *    90 — code prefix       (bt  → BTC)
+ *    80 — name token prefix (рубл → RUB via "рубль")
+ *    70 — name includes     (иена → JPY)
+ *    60 — code includes
+ *    50 — fuzzy: Levenshtein ≤1 on any name token of length ≥3
+ *           (руп → RUB because "руб" ~ "руп" dist=1)
+ *
+ * Case-insensitive. Accepts Cyrillic (auto-transliterated).
+ * Returns up to 9 matches sorted by score.
  */
 export function searchCurrencies(query: string, pool: string[]): string[] {
-  const q = query.toLowerCase().trim();
+  const q  = query.toLowerCase().trim();
   const qt = translitCurrency(q);
   if (q.length === 0) return [];
 
   const scored: Array<{ code: string; score: number }> = [];
 
   for (const code of pool) {
-    const codeLow = code.toLowerCase();
+    const codeLow    = code.toLowerCase();
     const nameTokens = (CURRENCY_NAMES[code] ?? '').toLowerCase();
+    const tokens     = nameTokens.split(' ').filter(Boolean);
     let score = 0;
 
+    // 1. Exact code
     if (codeLow === q || codeLow === qt) {
       score = 100;
+    // 2. Code prefix
     } else if (codeLow.startsWith(q) || codeLow.startsWith(qt)) {
       score = 90;
-    } else if (nameTokens.split(' ').some((t) => t.startsWith(q) || t.startsWith(qt))) {
+    // 3. Name token prefix (Cyrillic or transliterated)
+    } else if (tokens.some((t) => t.startsWith(q) || t.startsWith(qt))) {
       score = 80;
+    // 4. Name substring
     } else if (nameTokens.includes(q) || nameTokens.includes(qt)) {
       score = 70;
+    // 5. Code substring
     } else if (codeLow.includes(q)) {
       score = 60;
+    // 6. Fuzzy: Levenshtein ≤ 1 on any token of similar length (≥3 chars)
+    } else if (q.length >= 3) {
+      const hasFuzzy = tokens.some((t) => {
+        // Only compare tokens close in length to avoid false positives
+        if (Math.abs(t.length - q.length) > 2) return false;
+        return levenshtein(q, t.slice(0, q.length + 1)) <= 1
+          || levenshtein(qt, t.slice(0, qt.length + 1)) <= 1;
+      });
+      if (hasFuzzy) score = 50;
     }
 
     if (score > 0) scored.push({ code, score });
@@ -1958,30 +2019,72 @@ export function searchCurrencies(query: string, pool: string[]): string[] {
 }
 
 /**
- * master_roadmap 1.6: Prompt text for currency search mode.
- * Shown when user taps '\uD83D\uDD0D Найти валюту'.
+ * Returns context-aware copy for the currency search screen.
+ *
+ * Fintech convention (Binance/OKX/Bybit RU):
+ *   "Актив"  → crypto (exchange, crypto/TON/Lightning wallet)
+ *   "Валюта" → fiat   (card, cash, e-wallet)
+ *
+ * Examples are tuned per account type: exchanges show crypto tickers
+ * plus common fiat on-ramp pairs (UAH/USD available on WhiteBIT, Bybit).
  */
-export function buildCurrencySearchPromptText(name: string, isCustom: boolean): string {
+function getCurrencySearchContext(
+  accountType?: 'card' | 'cash' | 'exchange' | 'wallet' | 'custom',
+  walletSubtype?: WalletSubtype,
+): { label: string; examples: string } {
+  if (accountType === 'exchange') {
+    return { label: 'актива', examples: 'USDT, BTC, ETH, SOL, UAH' };
+  }
+  if (accountType === 'wallet') {
+    if (walletSubtype === 'ewallet') return { label: 'валюты', examples: 'USD, EUR, RUB, KZT, GBP' };
+    if (walletSubtype === 'ton')       return { label: 'актива', examples: 'TON, USDT, NOT' };
+    if (walletSubtype === 'lightning') return { label: 'актива', examples: 'BTC, SATS' };
+    return { label: 'актива', examples: 'BTC, ETH, USDT, SOL, TON' };
+  }
+  if (accountType === 'cash') return { label: 'валюты', examples: 'RUB, USD, EUR, KZT, GEL' };
+  if (accountType === 'card') return { label: 'валюты', examples: 'RUB, USD, EUR, UAH, KZT' };
+  return { label: 'валюты', examples: 'USD, EUR, RUB, BTC, USDT' };
+}
+
+/**
+ * master_roadmap 1.6: Prompt text for currency search mode.
+ * Now context-aware: different title and examples per account type.
+ */
+export function buildCurrencySearchPromptText(
+  name: string,
+  isCustom: boolean,
+  accountType?: 'card' | 'cash' | 'exchange' | 'wallet' | 'custom',
+  walletSubtype?: WalletSubtype,
+): string {
+  const { label, examples } = getCurrencySearchContext(accountType, walletSubtype);
   const nameBlock = name
     ? (isCustom ? `<blockquote>${name}  \u00b7  свой счёт</blockquote>\n` : `<blockquote>«${name}»</blockquote>\n`)
     : '';
   return (
-    `\uD83D\uDD0D <b>Поиск валюты</b>\n` +
+    `🔍 <b>Поиск ${label}</b>\n` +
     nameBlock +
     `Введите код или название:\n` +
-    `<blockquote>Например: rub, евро, dollar, btc</blockquote>`
+    `<blockquote>Например: ${examples}</blockquote>`
   );
 }
 
 /**
  * master_roadmap 1.6: Header text for currency search results.
+ * Context-aware to match the prompt.
  */
-export function buildCurrencySearchResultsText(query: string, name: string, isCustom: boolean): string {
+export function buildCurrencySearchResultsText(
+  query: string,
+  name: string,
+  isCustom: boolean,
+  accountType?: 'card' | 'cash' | 'exchange' | 'wallet' | 'custom',
+  walletSubtype?: WalletSubtype,
+): string {
+  const { label } = getCurrencySearchContext(accountType, walletSubtype);
   const nameBlock = name
     ? (isCustom ? `<blockquote>${name}  \u00b7  свой счёт</blockquote>\n` : `<blockquote>«${name}»</blockquote>\n`)
     : '';
   return (
-    `\uD83D\uDD0D По запросу «${query}»\n` +
+    `🔍 Поиск ${label}: «${query}»\n` +
     nameBlock +
     `Найдено:`
   );
@@ -2012,7 +2115,9 @@ export function buildCurrencySearchResultsKeyboard(
 }
 
 /**
- * master_roadmap 1.6: Text shown when currency search returns no results.
+ * master_roadmap 1.6+: Text shown when currency search returns no results.
+ * If the query looks like a valid currency code (2-6 latin letters),
+ * we offer the user to use it directly without showing generic hints.
  */
 export function buildCurrencySearchNoResultsText(
   query: string,
@@ -2022,13 +2127,41 @@ export function buildCurrencySearchNoResultsText(
   const nameBlock = name
     ? (isCustom ? `<blockquote>${name}  \u00b7  свой счёт</blockquote>\n` : `<blockquote>«${name}»</blockquote>\n`)
     : '';
+  const candidate = query.trim().toUpperCase().replace(/[^A-Z]/g, '');
+  const looksLikeCode = candidate.length >= 2 && candidate.length <= 6;
+  if (looksLikeCode) {
+    return (
+      `🔍 По запросу «${query}»\n` +
+      nameBlock +
+      `Не нашли в списке.\n\n` +
+      `Если <b>${candidate}</b> — правильный код, можно использовать его напрямую.\n` +
+      `Или попробуйте другое написание.`
+    );
+  }
   return (
-    `\uD83D\uDD0D По запросу «${query}»\n` +
+    `🔍 По запросу «${query}»\n` +
     nameBlock +
-    `Такой валюты нет в списке.\n` +
-    `Попробуйте другой запрос:\n` +
-    `<blockquote>Например: rub, usd, eur, btc</blockquote>`
+    `Ничего не нашли. Попробуйте иначе:\n` +
+    `<blockquote>Например: рубль, dollar, BTC, евро</blockquote>`
   );
+}
+
+/**
+ * Keyboard for no-results screen.
+ * If the query looks like a valid code → shows a "Use CODE" button.
+ */
+export function buildCurrencySearchNoResultsKeyboard(
+  query: string,
+  backCb = 'ac:cur:list',
+): { inline_keyboard: Array<Array<{ text: string; callback_data: string }>> } {
+  const candidate = query.trim().toUpperCase().replace(/[^A-Z]/g, '');
+  const looksLikeCode = candidate.length >= 2 && candidate.length <= 6;
+  const rows: Array<Array<{ text: string; callback_data: string }>> = [];
+  if (looksLikeCode) {
+    rows.push([{ text: `✅ Использовать ${candidate}`, callback_data: `ac:cur:${candidate}` }]);
+  }
+  rows.push([{ text: '◀️ Вернуться к списку', callback_data: backCb }]);
+  return { inline_keyboard: rows };
 }
 
 // ─────────────────────────────────────────────────────────────

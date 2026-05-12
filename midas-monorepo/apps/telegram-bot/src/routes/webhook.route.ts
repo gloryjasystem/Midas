@@ -181,6 +181,7 @@ import {
   buildCurrencySearchResultsText,    // master_roadmap 1.6
   buildCurrencySearchResultsKeyboard,// master_roadmap 1.6
   buildCurrencySearchNoResultsText,  // master_roadmap 1.6
+  buildCurrencySearchNoResultsKeyboard, // master_roadmap 1.6+
   searchCurrencies as searchCurrenciesOnboard, // master_roadmap 1.6
   FIAT_CURRENCY_PRESETS,             // master_roadmap: currency pool helper
   CRYPTO_CURRENCY_PRESETS,           // master_roadmap: currency pool helper
@@ -1005,7 +1006,7 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
                 const isCustomCs = sCs.isCustomName === true;
                 if (acMsgId) void editMessageText(
                   chatId, acMsgId,
-                  buildCurrencySearchPromptText(sCs.name ?? '', isCustomCs),
+                  buildCurrencySearchPromptText(sCs.name ?? '', isCustomCs, sCs.accountType, sCs.walletSubtype),
                   { inline_keyboard: [[{ text: '◀️ Вернуться к списку', callback_data: 'ac:cur:list' }]] },
                 );
               }
@@ -4038,12 +4039,12 @@ Midas создан, чтобы сделать учет денег максима
             void upsertBotMessage(
               telegramUserId, chatId,
               buildCurrencySearchNoResultsText(query, acNamePool, isCustomPool),
-              { inline_keyboard: [[{ text: '◀️ Вернуться к списку', callback_data: 'ac:cur:list' }]] },
+              buildCurrencySearchNoResultsKeyboard(query, 'ac:cur:list'),
             );
           } else {
             void upsertBotMessage(
               telegramUserId, chatId,
-              buildCurrencySearchResultsText(query, acNamePool, isCustomPool),
+              buildCurrencySearchResultsText(query, acNamePool, isCustomPool, acState.accountType, acState.walletSubtype),
               buildCurrencySearchResultsKeyboard(matches, 'ac:cur:list'),
             );
           }
