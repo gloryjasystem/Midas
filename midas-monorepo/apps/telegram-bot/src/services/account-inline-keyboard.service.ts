@@ -327,10 +327,103 @@ export function buildAccountSelectedKeyboard(
   };
 }
 
+
 // ─ internal helper ───────────────────────────────────────────────────
 /** Strip trailing decimal zeros: "15400.0000" → "15400", "100.50" → "100.5" */
 function stripTrailingZeros(s: string): string {
   if (!s.includes('.')) return s;
   return s.replace(/\.?0+$/, '');
 }
+
+// ─────────────────────────────────────────────────────────────
+// Phase 2.4 PR 11 — Full Account Picker for Draft Card
+// ─────────────────────────────────────────────────────────────
+
+/** Minimal rich account shape used by buildAccountPickerForDraft. */
+export interface AccountPickerFullEntry {
+  id: string;
+  name: string;     // pre-escaped HTML by caller
+  currency: string;
+  type: string;     // DB enum: 'manual' | 'crypto_read_only' | 'bank_sync'
+  balance: string;  // NUMERIC string, e.g. "15400.0000"
+}
+
+/**
+ * Resolve an emoji for the account type:
+ *   bank_sync       → 🏦
+ *   crypto_read_only → 💎
+ *   manual + crypto currency (BTC/ETH/USDT/SOL/TON…) → 💎
+ *   manual + USD/EUR/RUB/… → 💵 (cash feel) if name contains cash hint, else 💳
+ */
+function accountTypeEmoji(type: string, currency: string, name: string): string {
+  if (type === 'bank_sync') return '🏦';
+  if (type === 'crypto_read_only') return '💎';
+  // manual — heuristic by currency
+  const CRYPTO_CURRENCIES = new Set(['BTC', 'ETH', 'USDT', 'USDC', 'SOL', 'TON', 'BNB', 'XRP', 'ADA', 'DOT']);
+  if (CRYPTO_CURRENCIES.has(currency.toUpperCase())) return '💎';
+  // cash heuristic (Russian word «Наличные», «Кошелёк», «Cash»)
+  const nameLower = name.toLowerCase();
+  if (nameLower.includes('налич') || nameLower.includes('cash') || nameLower.includes('кошел')) return '💵';
+  return '🏦';
+}
+
+/**
+ * Phase 2.4 PR 11 — Full account picker shown on the separate picker screen.
+ *
+ * Design (from account_debit_ux_plan.md):
+ *   [ ✓ 🏦 Bybit USD · 15 400 ]   ← current account
+ *   [    🏦 Bybit USDT · 2 100 ]
+ *   [    💳 Тинькофф · 80 000 RUB ]
+ *   [    💵 Наличные USD · 500 ]
+ *   [    💎 Kraken ETH · 2.45 ]
+ *   [         ◀️ Назад         ]   ← bottom row
+ *
+ * When accounts array is empty:
+ *   [         ◀️ Назад         ]
+ * (text will inform the user via message, not keyboard)
+ *
+ * Callback formats:
+ *   ia:pk:{accountId}:{draftId}  — select account  (59 bytes ≤ 64 ✓)
+ *   ia:pk:delink:{draftId}       — back / cancel    (37 bytes ≤ 64 ✓)
+ *
+ * @param draftId          - ULID of the draft being configured
+ * @param accounts         - Sorted list (default first). Max 8 shown.
+ * @param currentAccountId - Currently selected account id, or null
+ *
+ * SEC-01: account names / user data are NOT embedded in callback_data.
+ */
+export function buildAccountPickerForDraft(
+  draftId: string,
+  accounts: AccountPickerFullEntry[],
+  currentAccountId: string | null,
+): InlineKeyboardMarkup {
+  const rows = accounts.slice(0, 8).map((acc) => {
+    const emoji  = accountTypeEmoji(acc.type, acc.currency, acc.name);
+    const bal    = stripTrailingZeros(acc.balance);
+    const check  = acc.id === currentAccountId ? '✓ ' : '   ';
+    return [{
+      text: `${check}${emoji} ${acc.name} · ${bal} ${acc.currency}`,
+      callback_data: `ia:pk:${acc.id}:${draftId}`,
+    }];
+  });
+
+  // Always-last: back button (delinks current account, redisplays picker or card)
+  rows.push([{ text: '◀️ Назад', callback_data: `ia:pk:delink:${draftId}` }]);
+
+  return { inline_keyboard: rows };
+}
+
+/**
+ * Text shown above the full picker screen.
+ * Used when user taps "🔄 Сменить счёт" or "➕ Выбрать счёт" on the draft card.
+ */
+export const ACCOUNT_PICKER_SCREEN_TEXT =
+  '🔄 <b>Выберите счёт</b>\n\nС какого счёта будет списана транзакция?';
+
+/**
+ * Text shown above the full picker screen when the workspace has no accounts.
+ */
+export const ACCOUNT_PICKER_EMPTY_TEXT =
+  '🔄 <b>Выберите счёт</b>\n\nУ вас пока нет счетов.\nСоздайте счёт в разделе 💰 Баланс.';
+
 
