@@ -3793,6 +3793,13 @@ Midas создан, чтобы сделать учет денег максима
       const clarIntKey = clarStateKey(telegramUserId, chatId);
       const clarIntState = await redisConnection.get(clarIntKey);
       if (clarIntState) {
+        // Phase LD++: Delete active UI when interacting with a transaction draft
+        const amId = await getActiveMessageId(telegramUserId, chatId);
+        if (amId) {
+          void deleteMessage(chatId, amId);
+          void clearActiveMessageId(telegramUserId, chatId);
+        }
+
         // clarIntState format: "{draftId}:amt"
         const colonPos = clarIntState.indexOf(':');
         const clarDraftId = colonPos === -1 ? clarIntState : clarIntState.slice(0, colonPos);
@@ -3990,6 +3997,13 @@ Midas создан, чтобы сделать учет денег максима
       const iaPointerKey = `midas:ia:ptr:${telegramUserId}:${chatId}`;
       const activeDraftId = await redisConnection.get(iaPointerKey);
       if (activeDraftId) {
+        // Phase LD++: Delete active UI when interacting with a transaction draft
+        const amId = await getActiveMessageId(telegramUserId, chatId);
+        if (amId) {
+          void deleteMessage(chatId, amId);
+          void clearActiveMessageId(telegramUserId, chatId);
+        }
+
         const iaRaw = await redisConnection.get(inlineAccountKey(activeDraftId));
         if (iaRaw) {
           let iaState: InlineAccountState;
