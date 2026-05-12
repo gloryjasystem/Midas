@@ -217,6 +217,26 @@ test('адвкэш → AdvCash', () => assertMatch('адвкэш', 'AdvCash'));
 test('alipay → Alipay', () => assertMatch('alipay', 'Alipay'));
 test('алипей → Alipay', () => assertMatch('алипей', 'Alipay'));
 test('stripe → Stripe', () => assertMatch('stripe', 'Stripe'));
+// PayPal, Revolut, Wise — теперь в EWALLET (не в банках)
+test('paypal → PayPal', () => assertMatch('paypal', 'PayPal'));
+test('payp → PayPal (partial alias)', () => assertMatch('payp', 'PayPal'));
+test('пейпал → PayPal', () => assertMatch('пейпал', 'PayPal'));
+test('пайпал → PayPal', () => assertMatch('пайпал', 'PayPal'));
+test('paypal (filter=wallet) → PayPal', () => assertMatch('paypal', 'PayPal', 'wallet'));
+test('пейпал (filter=wallet) → PayPal', () => assertMatch('пейпал', 'PayPal', 'wallet'));
+test('revolut → Revolut', () => assertMatch('revolut', 'Revolut'));
+test('револют → Revolut', () => assertMatch('револют', 'Revolut'));
+test('revolut (filter=wallet) → Revolut', () => assertMatch('revolut', 'Revolut', 'wallet'));
+test('wise → Wise', () => assertMatch('wise', 'Wise'));
+test('вайз → Wise', () => assertMatch('вайз', 'Wise'));
+test('wise (filter=wallet) → Wise', () => assertMatch('wise', 'Wise', 'wallet'));
+// Изоляция: PayPal/Revolut/Wise НЕ должны матчить под filter=card (они не банки)
+test('paypal под filter=card → null (не банк)', () => assertNoMatch('paypal', 'card'));
+test('revolut под filter=card → null (не банк)', () => assertNoMatch('revolut', 'card'));
+test('wise под filter=card → null (не банк)', () => assertNoMatch('wise', 'card'));
+test('пейпал под filter=card → null', () => assertNoMatch('пейпал', 'card'));
+test('paypal под filter=exchange → null', () => assertNoMatch('paypal', 'exchange'));
+
 
 // ═════════════════════════════════════════════════════════════
 console.log('\n════════════════════════════════════════════════════════════');
@@ -294,7 +314,9 @@ test('сбер под filter=wallet → null', () => assertNoMatch('сбер', '
 test('моно под filter=exchange → null', () => assertNoMatch('моно', 'exchange'));
 test('моно под filter=wallet → null', () => assertNoMatch('моно', 'wallet'));
 test('revolut под filter=exchange → null', () => assertNoMatch('revolut', 'exchange'));
-test('revolut под filter=wallet → null', () => assertNoMatch('revolut', 'wallet'));
+// revolut теперь EWALLET — должен находиться под filter=wallet
+test('revolut под filter=wallet → Revolut (ewallet)', () => assertMatch('revolut', 'Revolut', 'wallet'));
+
 
 // Биржи НЕ должны матчить в контексте банка или кошелька
 test('binance под filter=card → null (не банк)', () => assertNoMatch('binance', 'card'));

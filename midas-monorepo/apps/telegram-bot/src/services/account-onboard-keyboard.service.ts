@@ -350,10 +350,6 @@ export const BANK_PRESETS: ReadonlyMap<string, PresetInfo> = new Map([
   ['bbvamx',      { name: 'BBVA Mexico',   defaultCurrency: 'MXN' }],
   ['bancolombia', { name: 'Bancolombia',   defaultCurrency: 'COP' }],
   ['nequi',       { name: 'Nequi',         defaultCurrency: 'COP' }],
-  // International / Online
-  ['revolut',    { name: 'Revolut',       defaultCurrency: 'EUR' }],
-  ['wise',       { name: 'Wise',          defaultCurrency: 'EUR' }],
-  ['paypal',     { name: 'PayPal',        defaultCurrency: 'USD' }],
   // ── Part 1: Payment systems (type: card) ──
   ['visa',       { name: 'Visa',          defaultCurrency: 'USD' }],
   ['mastercard', { name: 'Mastercard',    defaultCurrency: 'USD' }],
@@ -521,18 +517,21 @@ export const EWALLET_PRESETS: ReadonlyMap<string, { name: string; defaultCurrenc
   ['perfectmoney', { name: 'Perfect Money',    defaultCurrency: 'USD' }],
   ['capitalist',   { name: 'Capitalist',       defaultCurrency: 'USD' }],
   ['epayments',    { name: 'ePayments',        defaultCurrency: 'USD' }],
-  // International e-wallets
-  ['skrill',       { name: 'Skrill',           defaultCurrency: 'EUR' }],
-  ['neteller',     { name: 'Neteller',         defaultCurrency: 'USD' }],
-  ['payoneer',     { name: 'Payoneer',         defaultCurrency: 'USD' }],
-  ['paysera',      { name: 'Paysera',          defaultCurrency: 'EUR' }],
-  ['alipay',       { name: 'Alipay',           defaultCurrency: 'CNY' }],
-  ['wechatpay',    { name: 'WeChat Pay',       defaultCurrency: 'CNY' }],
-  ['paytm',        { name: 'Paytm',            defaultCurrency: 'INR' }],
-  ['gcash',        { name: 'GCash',            defaultCurrency: 'PHP' }],
-  ['dana',         { name: 'DANA',             defaultCurrency: 'IDR' }],
-  ['ovo',          { name: 'OVO',              defaultCurrency: 'IDR' }],
-  ['stripe',       { name: 'Stripe',           defaultCurrency: 'USD' }],
+  // International e-wallets & payment services
+  ['paypal',       { name: 'PayPal',          defaultCurrency: 'USD' }],
+  ['revolut',      { name: 'Revolut',         defaultCurrency: 'EUR' }],
+  ['wise',         { name: 'Wise',            defaultCurrency: 'EUR' }],
+  ['skrill',       { name: 'Skrill',          defaultCurrency: 'EUR' }],
+  ['neteller',     { name: 'Neteller',        defaultCurrency: 'USD' }],
+  ['payoneer',     { name: 'Payoneer',        defaultCurrency: 'USD' }],
+  ['paysera',      { name: 'Paysera',         defaultCurrency: 'EUR' }],
+  ['alipay',       { name: 'Alipay',          defaultCurrency: 'CNY' }],
+  ['wechatpay',    { name: 'WeChat Pay',      defaultCurrency: 'CNY' }],
+  ['paytm',        { name: 'Paytm',           defaultCurrency: 'INR' }],
+  ['gcash',        { name: 'GCash',           defaultCurrency: 'PHP' }],
+  ['dana',         { name: 'DANA',            defaultCurrency: 'IDR' }],
+  ['ovo',          { name: 'OVO',             defaultCurrency: 'IDR' }],
+  ['stripe',       { name: 'Stripe',          defaultCurrency: 'USD' }],
 ]);
 
 // ─────────────────────────────────────────────────────────────
@@ -1646,10 +1645,16 @@ const RU_PRESET_ALIASES: Record<string, string> = {
   'центркредит': 'centercredit',
   'евразийский': 'eurasian', 'евразийскийбанк': 'eurasian',
   'атфбанк': 'atfbank',
-  // ── Онлайн-банки ──
+  // ── Платёжные сервисы / E-кошельки ──
   'революст': 'revolut', 'революты': 'revolut', 'револют': 'revolut',
+  'револ': 'revolut',
+  // EN keys needed so fast-path fires and prevents Levenshtein cross-match (wise → Visa)
+  'revolut': 'revolut',
+  'wise': 'wise',
+  'paypal': 'paypal',
   'вайз': 'wise',
-  'пейпал': 'paypal', 'пайпал': 'paypal',
+  'пейпал': 'paypal', 'пайпал': 'paypal', 'пейп': 'paypal',
+  'payp': 'paypal',   // partial: "payp" → PayPal
   'н26': 'n26',
   'монзо': 'monzo',
   // ── Биржи (Exchanges) ──
