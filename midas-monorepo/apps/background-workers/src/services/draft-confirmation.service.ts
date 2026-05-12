@@ -37,13 +37,19 @@ export type ConfirmActionResult =
       outcome: 'approved';
       transactionId: string;
       // Phase 1.34: display data for rich post-confirmation card
-      amount: string;           // NUMERIC string from DB (SEC-02)
+      amount: string;           // NUMERIC string from DB (SEC-02) — tx amount
       currency: string;         // e.g. 'USDT'
       categoryName: string;     // resolved name or fallback
       accountName: string;      // resolved name or fallback
       intent: string;           // transaction_intent
       itemName: string | null;  // Phase 1.35: item/product/merchant name
       transactionTime: string;  // ISO string
+      // Phase 2.4 PR13: balance snapshot for "Итог" block
+      accountCurrency: string | null;    // account currency (may differ from tx currency)
+      balanceBefore: string | null;      // balance BEFORE transaction (NUMERIC string)
+      balanceAfter: string | null;       // balance AFTER transaction (NUMERIC string)
+      debitAmount: string | null;        // cross-currency debit amount in account currency
+      debitCurrency: string | null;      // currency of debitAmount
     }
   | { outcome: 'rejected' }
   | {
@@ -58,6 +64,12 @@ export type ConfirmActionResult =
         accountName: string;
         intent: string;
         itemName: string | null;
+        // Phase 2.4 PR13: balance snapshot (may be null if tx is old)
+        accountCurrency?: string | null;
+        balanceBefore?: string | null;
+        balanceAfter?: string | null;
+        debitAmount?: string | null;
+        debitCurrency?: string | null;
       };
     }
   | { outcome: 'not_found' }
@@ -105,10 +117,13 @@ export async function approveDraft(
       parsed_category_hint: string | null; // Phase 1.35
       item_name: string | null;            // Phase 1.35
       account_id: string | null;          // Phase 1.31: set by ia: callback before approval
+      account_debit_amount: string | null; // Phase 2.4 PR12: cross-currency override
+      account_debit_currency: string | null; // Phase 2.4 PR12
       expires_at: string;
     }>(
       `SELECT id, workspace_id, status, parsed_amount, parsed_currency, parsed_intent,
-              parsed_account_hint, parsed_category_hint, item_name, account_id, expires_at
+              parsed_account_hint, parsed_category_hint, item_name, account_id,
+              account_debit_amount, account_debit_currency, expires_at
        FROM transaction_drafts
        WHERE id = $1 AND workspace_id = $2
        FOR UPDATE SKIP LOCKED`,
@@ -223,6 +238,29 @@ export async function approveDraft(
       accountId = await resolveDefaultAccount(client, workspaceId, currency, draft.parsed_intent);
     }
 
+    // ── Phase 2.4 PR14: Compute XFX rate fields ───────────────────────────────
+    // If account_debit_amount is set AND account_debit_currency ≠ tx currency,
+    // this is a cross-currency (XFX) transaction.
+    // We compute:
+    //   exchange_rate = debitAmount / txAmount (as NUMERIC, 4 decimal places)
+    //   base_amount   = debitAmount  (the actual money that left the account)
+    //   base_currency = accountCurrency
+    //   rate_source   = 'user'  (amount provided by user, not from a rate API)
+    //
+    // For same-currency transactions: keep Phase 1.6-B 1:1 logic.
+    // SEC-02: All arithmetic in PostgreSQL NUMERIC via ROUND($N::NUMERIC / $M::NUMERIC, 4).
+    const debitAmtStr = draft.account_debit_amount ? String(draft.account_debit_amount) : null;
+    const debitCurStr = draft.account_debit_currency ?? null;
+    const isXfx = debitAmtStr !== null && debitCurStr !== null && debitCurStr !== currency;
+
+    // Fetch account currency for base_currency in XFX case.
+    // Use debitCurStr directly — it was validated by the CHECK constraint on draft write.
+    const baseCurrency = isXfx ? debitCurStr : currency;
+    const baseAmount   = isXfx ? debitAmtStr : amountStr;
+    // exchange_rate computed in SQL to keep NUMERIC precision (SEC-02).
+    // For 1:1 we pass the literal 1; for XFX we pass it as a ratio expression.
+    // Use parameterized SQL fragment per case to avoid float intermediate values.
+
     await client.query(
       `INSERT INTO transactions (
         id,
@@ -239,36 +277,50 @@ export async function approveDraft(
         transaction_time,
         transaction_intent,
         rate_source,
+        account_debit_amount,
+        account_debit_currency,
         created_at
       ) VALUES (
         $1, $2,
-        $3::NUMERIC,        -- original_amount from draft.parsed_amount (SEC-02: no float)
-        $4,
-        1::NUMERIC,         -- exchange_rate = 1:1 (Phase 1.6-B; multi-currency Phase 2)
-        $5,
-        $3::NUMERIC,        -- base_amount = original_amount (same currency, Phase 1.6-B)
-        $6,                 -- category_id (Phase 1.35: from resolver)
-        $7,                 -- account_id
-        $8,                 -- draft_id (UNIQUE FK)
-        $9,                 -- item_name (Phase 1.35)
+        $3::NUMERIC,                 -- original_amount (tx amount in tx currency)
+        $4,                          -- currency (tx currency, AI-parsed or ws default)
+        CASE
+          WHEN $11::BOOLEAN           -- isXfx flag
+          THEN ROUND($12::NUMERIC / NULLIF($3::NUMERIC, 0), 4)  -- debitAmt / txAmt
+          ELSE 1::NUMERIC             -- Phase 1.6-B: 1:1 for same-currency
+        END,
+        $5,                          -- base_currency
+        $13::NUMERIC,                -- base_amount (debitAmt for XFX, txAmt otherwise)
+        $6,                          -- category_id
+        $7,                          -- account_id
+        $8,                          -- draft_id (UNIQUE FK)
+        $9,                          -- item_name (Phase 1.35)
         NOW(),
-        $10,                -- transaction_intent (Phase 1.8-A: explicit, no default)
-        'none',             -- rate_source: Phase 1.6-B placeholder (ADR-009 Phase 2)
+        $10,                         -- transaction_intent (non-NULL, validated at Step 5)
+        CASE WHEN $11::BOOLEAN THEN 'user' ELSE 'none' END,  -- rate_source
+        CASE WHEN $14::TEXT IS NOT NULL THEN $14::NUMERIC ELSE NULL END,  -- account_debit_amount
+        $15,                         -- account_debit_currency
         NOW()
       )`,
       [
-        transactionId,              // $1 — ULID (ADR-004, SEC-01: not from AI)
-        workspaceId,                // $2 — SEC-03: from backend session
-        amountStr,                  // $3 — String-coerced from Decimal (SEC-02: no float)
-        currency,                   // $4 — transaction currency (AI-parsed or workspace default)
-        currency,                   // $5 — base_currency MUST equal currency (Phase 1.6-B: 1:1 rate, no conversion)
-        categoryId,                 // $6 — Phase 1.35: from resolver pipeline
+        transactionId,              // $1  — ULID (ADR-004, SEC-01)
+        workspaceId,                // $2  — SEC-03: from backend session
+        amountStr,                  // $3  — tx amount (NUMERIC string)
+        currency,                   // $4  — tx currency
+        baseCurrency,               // $5  — base_currency (acct currency for XFX)
+        categoryId,                 // $6  — Phase 1.35
         accountId,                  // $7
         draftId,                    // $8
-        draft.item_name ?? null,    // $9 — Phase 1.35: item/product/merchant name
-        draft.parsed_intent,        // $10 — Phase 1.8-A: non-NULL validated in Step 5
+        draft.item_name ?? null,    // $9  — Phase 1.35
+        draft.parsed_intent,        // $10 — Phase 1.8-A
+        isXfx,                      // $11 — XFX flag (boolean)
+        debitAmtStr ?? amountStr,   // $12 — debitAmt for rate calc (fallback to txAmt)
+        baseAmount,                 // $13 — base_amount
+        debitAmtStr,                // $14 — account_debit_amount (NULL for same-currency)
+        debitCurStr,                // $15 — account_debit_currency (NULL for same-currency)
       ],
     );
+
 
     console.log('[midas:draft-confirmation] Draft approved and Transaction created', {
       draftId,
@@ -279,15 +331,55 @@ export async function approveDraft(
     });
 
     // Phase 1.34: Fetch display names for rich post-confirmation card.
-    // These are read-only lookups — no business logic change.
     const catNameResult = await client.query<{ name: string }>(
       `SELECT name FROM categories WHERE id = $1 AND workspace_id = $2`,
       [categoryId, workspaceId],
     );
-    const acctNameResult = await client.query<{ name: string }>(
-      `SELECT name FROM account_sources WHERE id = $1 AND workspace_id = $2`,
+    const acctDataResult = await client.query<{ name: string; currency: string }>(
+      `SELECT name, currency FROM account_sources WHERE id = $1 AND workspace_id = $2`,
       [accountId, workspaceId],
     );
+    const acctData     = acctDataResult.rows[0];
+    const acctName     = acctData?.name ?? 'Счёт';
+    const acctCurrency = acctData?.currency ?? currency;
+
+    // Phase 2.4 PR13: fetch balance AFTER transaction using the same formula as balance.service.ts.
+    // We compute it inline (no view dependency) with the same D1-D3 sign rules.
+    // IMPORTANT: this query runs AFTER INSERT, so the newly created transaction IS included.
+    // balanceBefore = numericReverse(balanceAfter, debitAmount, isIncome).
+    // SEC-02: All arithmetic in PostgreSQL NUMERIC — no JS float.
+    const balanceSnapResult = await client.query<{ balance: string }>(
+      `SELECT (
+         a.initial_balance
+         + COALESCE(SUM(CASE WHEN t.transaction_intent = 'income'        AND t.base_currency = a.currency THEN t.base_amount END), 0)
+         + COALESCE(SUM(CASE WHEN t.transaction_intent = 'debt_received' AND t.base_currency = a.currency THEN t.base_amount END), 0)
+         - COALESCE(SUM(CASE WHEN t.transaction_intent = 'expense'       AND t.base_currency = a.currency THEN t.base_amount END), 0)
+         - COALESCE(SUM(CASE WHEN t.transaction_intent = 'debt_given'    AND t.base_currency = a.currency THEN t.base_amount END), 0)
+       )::TEXT AS balance
+       FROM account_sources a
+       LEFT JOIN transactions t
+         ON t.account_id = a.id
+        AND t.workspace_id = $1
+        AND t.deleted_at IS NULL
+       WHERE a.id = $2 AND a.workspace_id = $1
+       GROUP BY a.id, a.initial_balance`,
+      [workspaceId, accountId],
+    );
+    const balanceAfterRaw   = balanceSnapResult.rows[0]?.balance ?? null;
+    const acctCurrencyFinal = acctCurrency;
+
+    // Debit amount in account currency: explicit xfx override or tx amount (same currency).
+    const debitAmountRaw = draft.account_debit_amount ?? amountStr;
+
+    // Compute balanceBefore by reversing the balance step.
+    // SEC-02: BigInt arithmetic via numericReverse() helper below.
+    let balanceBeforeRaw: string | null = null;
+    if (balanceAfterRaw !== null) {
+      try {
+        const isIncome = draft.parsed_intent === 'income' || draft.parsed_intent === 'debt_received';
+        balanceBeforeRaw = numericReverse(balanceAfterRaw, debitAmountRaw, isIncome);
+      } catch { /* non-fatal: balanceBefore stays null */ }
+    }
 
     return {
       outcome: 'approved',
@@ -295,12 +387,53 @@ export async function approveDraft(
       amount: amountStr,  // String-coerced Decimal (SEC-02)
       currency,
       categoryName: catNameResult.rows[0]?.name ?? 'Другое',
-      accountName: acctNameResult.rows[0]?.name ?? 'Счёт',
+      accountName: acctName,
       intent: draft.parsed_intent,  // Validated non-null at Step 5
       itemName: draft.item_name ?? null,  // Phase 1.35
       transactionTime: new Date().toISOString(),
+      // Phase 2.4 PR13: balance snapshot
+      accountCurrency: acctCurrencyFinal,
+      balanceBefore: balanceBeforeRaw,
+      balanceAfter:  balanceAfterRaw,
+      debitAmount:   draft.account_debit_amount ? String(draft.account_debit_amount) : null,
+      debitCurrency: draft.account_debit_currency ?? null,
     };
   });
+}
+
+
+/**
+ * Phase 2.4 PR13: Reverse a balance arithmetic step.
+ * If the transaction SUBTRACTED debit → balanceBefore = balanceAfter + debit.
+ * If the transaction ADDED debit     → balanceBefore = balanceAfter - debit.
+ *
+ * SEC-02: BigInt scaled arithmetic (same as _numericAdd in screen-builder).
+ * @internal
+ */
+function numericReverse(balanceAfter: string, debit: string, wasIncome: boolean): string {
+  const toFixed4 = (s: string): string => {
+    const neg = s.startsWith('-');
+    const abs = neg ? s.slice(1) : s;
+    const [int = '0', dec = ''] = abs.split('.');
+    return `${neg ? '-' : ''}${int}.${dec.padEnd(4, '0').slice(0, 4)}`;
+  };
+  const parseScaled = (s: string): bigint => {
+    const neg = s.startsWith('-');
+    const abs = neg ? s.slice(1) : s;
+    const [int = '0', dec = ''] = toFixed4(abs).split('.');
+    return neg ? -BigInt(`${int}${dec}`) : BigInt(`${int}${dec}`);
+  };
+  const afterScaled = parseScaled(balanceAfter);
+  const debitScaled = parseScaled(debit);
+  // Reverse: income added debit, so before = after - debit.
+  //          expense subtracted debit, so before = after + debit.
+  const resultScaled = wasIncome ? afterScaled - debitScaled : afterScaled + debitScaled;
+  const sign   = resultScaled < 0n ? '-' : '';
+  const abs    = resultScaled < 0n ? -resultScaled : resultScaled;
+  const absStr = abs.toString().padStart(5, '0');
+  const intPart = absStr.slice(0, -4) || '0';
+  const decPart = absStr.slice(-4).replace(/0+$/, '');
+  return decPart ? `${sign}${intPart}.${decPart}` : `${sign}${intPart}`;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -456,6 +589,10 @@ export async function fetchApprovedTransactionCard(
   accountName: string;
   intent: string;
   itemName: string | null;
+  // Phase 2.4 PR14: account snapshot fields
+  accountCurrency: string | null;
+  debitAmount: string | null;
+  debitCurrency: string | null;
 } | null> {
   return withTenantTransaction(workspaceId, userId, async (client) => {
     const txResult = await client.query<{
@@ -466,9 +603,12 @@ export async function fetchApprovedTransactionCard(
       item_name: string | null;
       category_id: string | null;
       account_id: string | null;
+      account_debit_amount: string | null;   // Phase 2.4 PR14
+      account_debit_currency: string | null; // Phase 2.4 PR14
     }>(
       `SELECT t.id, t.original_amount, t.currency, t.transaction_intent, t.item_name,
-              t.category_id, t.account_id
+              t.category_id, t.account_id,
+              t.account_debit_amount, t.account_debit_currency
        FROM transactions t
        JOIN transaction_drafts d ON d.id = t.draft_id
        WHERE t.draft_id = $1 AND d.workspace_id = $2
@@ -483,8 +623,8 @@ export async function fetchApprovedTransactionCard(
       `SELECT name FROM categories WHERE id = $1 AND workspace_id = $2`,
       [tx.category_id, workspaceId],
     );
-    const acctResult = await client.query<{ name: string }>(
-      `SELECT name FROM account_sources WHERE id = $1 AND workspace_id = $2`,
+    const acctResult = await client.query<{ name: string; currency: string }>(
+      `SELECT name, currency FROM account_sources WHERE id = $1 AND workspace_id = $2`,
       [tx.account_id, workspaceId],
     );
 
@@ -497,6 +637,10 @@ export async function fetchApprovedTransactionCard(
       accountName: acctResult.rows[0]?.name ?? 'Счёт',
       intent: tx.transaction_intent,
       itemName: tx.item_name ?? null,
+      // Phase 2.4 PR14: account snapshot
+      accountCurrency: acctResult.rows[0]?.currency ?? null,
+      debitAmount:   tx.account_debit_amount ? String(tx.account_debit_amount) : null,
+      debitCurrency: tx.account_debit_currency ?? null,
     };
   });
 }
