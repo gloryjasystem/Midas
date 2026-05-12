@@ -1295,6 +1295,7 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
             if (txMsgId) {
               const { deleteMessage } = await import('../services/telegram-api.js');
               void deleteMessage(chatId, txMsgId);
+              await redisConnection.del(`midas:empty_tx_msg:${chatId}`).catch(() => {});
             }
           } else if (txCmd.cmd === 'list') {
             const [items, total, stats] = await Promise.all([
@@ -3047,8 +3048,11 @@ Midas создан, чтобы сделать учет денег максима
           getMonthMiniStats(resolved.workspaceId, resolved.userId),
         ]);
         if (total === 0) {
-          void upsertBotMessage(telegramUserId, chatId,
-            '📋 <b>Транзакции</b>\n\nТранзакций пока нет.');
+          const emptyMsgId = await upsertBotMessage(telegramUserId, chatId,
+            '📋 <b>Транзакции</b>\n\nТранзакций пока нет.', EMPTY_KEYBOARD);
+          if (emptyMsgId) {
+            await redisConnection.set(`midas:empty_tx_msg:${chatId}`, emptyMsgId, 'EX', 86400);
+          }
         } else {
           const totalPages = Math.max(1, Math.ceil(total / TX_PAGE_SIZE));
           const header = formatTxListHeader(stats, 'a');
@@ -4675,6 +4679,14 @@ Midas создан, чтобы сделать учет денег максима
       raw_text: message.text, // MUST NOT be logged (SEC-12)
       receivedAt,
     };
+
+    // Phase LD++: If the user had the "empty transactions" screen open,
+    // delete it now to keep the chat clean as they are initiating a new transaction.
+    const emptyMsgId = await redisConnection.get(`midas:empty_tx_msg:${chatId}`).catch(() => null);
+    if (emptyMsgId) {
+      void deleteMessage(chatId, emptyMsgId);
+      await redisConnection.del(`midas:empty_tx_msg:${chatId}`).catch(() => {});
+    }
 
     await webhookIngestionQueue.add(QUEUE_NAMES.WEBHOOK_INGESTION, payload, {
       jobId: idempotencyKey,
