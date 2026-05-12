@@ -1,5 +1,5 @@
 /**
- * Clarification Service — Phase 1.32
+ * Clarification Service — Phase 1.32 + Phase 2.4
  *
  * Patch functions for needs_clarification TransactionDraft records.
  * Called by webhook.route.ts when the user responds to a clarification question.
@@ -12,8 +12,13 @@
  * State machine: needs_clarification → pending_user (when all required fields present)
  * Priority: amount → intent → category (determines which field to ask about next)
  *
+ * Phase 2.4: DraftFields extended with account_id, account_debit_amount,
+ *   account_debit_currency. getDraftFields() SQL updated accordingly.
+ *   These fields drive the Account-Aware Draft Card (PR 6, PR 9, PR 11).
+ *
  * SEC-01: intent validated against canonical enum; categoryId validated against DB.
  * SEC-02: amountStr validated against NUMERIC regex before any DB write.
+ *         account_debit_amount returned as TEXT via ::TEXT cast (NUMERIC precision).
  * SEC-03: All DB operations use withTenantTransaction for RLS isolation.
  * SEC-12: Raw text inputs NOT logged.
  */
@@ -255,13 +260,35 @@ export type DraftFields = {
   item_name: string | null;
   parsed_category_hint: string | null;
   category_id: string | null;
+  // ── Phase 2.4: Account-Aware Draft Card fields ──────────────────────────
+  /** FK to account_sources. Null = no account explicitly linked yet. */
+  account_id: string | null;
+  /**
+   * Explicit debit amount in the account's currency.
+   * Null = same as parsed_amount (no cross-currency override).
+   * Stored as NUMERIC in DB; returned as TEXT string via ::TEXT cast (SEC-02).
+   */
+  account_debit_amount: string | null;
+  /**
+   * Currency of account_debit_amount (e.g. 'RUB').
+   * Null when account_debit_amount is null.
+   */
+  account_debit_currency: string | null;
 };
 
 /**
- * Fetch lightweight draft fields for the edit sub-menu.
+ * Fetch lightweight draft fields for the edit sub-menu and draft card rendering.
  * Returns null if not found, expired, or in wrong state.
  *
+ * Phase 2.4: Returns account_id, account_debit_amount, account_debit_currency
+ * in addition to the Phase 1.35 fields. These are used by:
+ *   - confirmPreview() (PR 9) to build the Account-Aware math block
+ *   - buildAccountPickerForDraft() caller (PR 11) to know current account
+ *
+ * account_debit_amount is cast to TEXT to preserve NUMERIC precision (SEC-02).
+ *
  * SEC-03: withTenantTransaction enforces RLS.
+ * SEC-12: Account names NOT logged (only IDs are fetched here).
  */
 export async function getDraftFields(
   workspaceId: string,
@@ -271,7 +298,10 @@ export async function getDraftFields(
   return withTenantTransaction(workspaceId, userId, async (client) => {
     const result = await client.query<DraftFields>(
       `SELECT id, status, parsed_intent, parsed_amount::TEXT AS parsed_amount, parsed_currency,
-              item_name, parsed_category_hint, category_id
+              item_name, parsed_category_hint, category_id,
+              account_id,
+              account_debit_amount::TEXT AS account_debit_amount,
+              account_debit_currency
        FROM transaction_drafts
        WHERE id = $1 AND workspace_id = $2
          AND status IN ('pending_user','needs_clarification')
