@@ -1185,10 +1185,17 @@ export async function activatePlaceholderAccount(
  * @returns 'ok'         — FK updated.
  *          'not_found'  — accountId does not exist / not in this workspace / deleted.
  */
-export async function setDefaultExpenseAccount(
+/**
+ * Set the role for an account. Used for cyclical role toggling.
+ *
+ * @param role 'none' | 'expense' | 'income' | 'main'
+ * @returns 'ok' | 'not_found'
+ */
+export async function setAccountRole(
   workspaceId: string,
   userId: string,
   accountId: string,
+  role: 'none' | 'expense' | 'income' | 'main',
 ): Promise<'ok' | 'not_found'> {
   return withTenantTransaction<'ok' | 'not_found'>(
     workspaceId,
@@ -1202,97 +1209,38 @@ export async function setDefaultExpenseAccount(
       );
       if (check.rows.length === 0) return 'not_found';
 
+      const wRes = await client.query<{ default_expense_account_id: string | null; default_income_account_id: string | null }>(
+        `SELECT default_expense_account_id, default_income_account_id FROM workspaces WHERE id = $1`,
+        [workspaceId],
+      );
+      const w = wRes.rows[0];
+      if (!w) return 'not_found';
+
+      let newExp = w.default_expense_account_id;
+      let newInc = w.default_income_account_id;
+
+      if (role === 'none') {
+        if (newExp === accountId) newExp = null;
+        if (newInc === accountId) newInc = null;
+      } else if (role === 'expense') {
+        newExp = accountId;
+        if (newInc === accountId) newInc = null;
+      } else if (role === 'income') {
+        newInc = accountId;
+        if (newExp === accountId) newExp = null;
+      } else if (role === 'main') {
+        newExp = accountId;
+        newInc = accountId;
+      }
+
       await client.query(
         `UPDATE workspaces
-         SET default_expense_account_id = $1
-         WHERE id = $2`,
-        [accountId, workspaceId],
+         SET default_expense_account_id = $2,
+             default_income_account_id = $3
+         WHERE id = $1`,
+        [workspaceId, newExp, newInc],
       );
       return 'ok';
     },
   );
-}
-
-/**
- * Set the workspace's default income account.
- *
- * @returns 'ok' | 'not_found' — same semantics as setDefaultExpenseAccount.
- */
-export async function setDefaultIncomeAccount(
-  workspaceId: string,
-  userId: string,
-  accountId: string,
-): Promise<'ok' | 'not_found'> {
-  return withTenantTransaction<'ok' | 'not_found'>(
-    workspaceId,
-    userId,
-    async (client) => {
-      const check = await client.query<{ id: string }>(
-        `SELECT id FROM account_sources
-         WHERE id = $1 AND workspace_id = $2 AND deleted_at IS NULL`,
-        [accountId, workspaceId],
-      );
-      if (check.rows.length === 0) return 'not_found';
-
-      await client.query(
-        `UPDATE workspaces
-         SET default_income_account_id = $1
-         WHERE id = $2`,
-        [accountId, workspaceId],
-      );
-      return 'ok';
-    },
-  );
-}
-
-/**
- * Clear the workspace's default expense account (set to NULL).
- *
- * Idempotent — calling when already NULL is safe.
- *
- * @returns 'ok' always (workspace always exists for authenticated user).
- */
-export async function clearDefaultExpenseAccount(
-  workspaceId: string,
-  userId: string,
-): Promise<'ok'> {
-  await withTenantTransaction<void>(
-    workspaceId,
-    userId,
-    async (client) => {
-      await client.query(
-        `UPDATE workspaces
-         SET default_expense_account_id = NULL
-         WHERE id = $1`,
-        [workspaceId],
-      );
-    },
-  );
-  return 'ok';
-}
-
-/**
- * Clear the workspace's default income account (set to NULL).
- *
- * Idempotent — calling when already NULL is safe.
- *
- * @returns 'ok' always.
- */
-export async function clearDefaultIncomeAccount(
-  workspaceId: string,
-  userId: string,
-): Promise<'ok'> {
-  await withTenantTransaction<void>(
-    workspaceId,
-    userId,
-    async (client) => {
-      await client.query(
-        `UPDATE workspaces
-         SET default_income_account_id = NULL
-         WHERE id = $1`,
-        [workspaceId],
-      );
-    },
-  );
-  return 'ok';
 }

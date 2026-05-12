@@ -52,11 +52,8 @@ export type BalanceCallbackCmd =
   | { cmd: 'delete_confirm'; accountId: string }
   | { cmd: 'back' }
   | { cmd: 'close' }
-  // Phase LD++: default account role toggles
-  | { cmd: 'set_expense';   accountId: string }
-  | { cmd: 'set_income';    accountId: string }
-  | { cmd: 'clear_expense'; accountId: string }
-  | { cmd: 'clear_income';  accountId: string };
+  // Phase LD++: default account role toggles (cyclical)
+  | { cmd: 'set_role'; role: 'none' | 'expense' | 'income' | 'main'; accountId: string };
 
 // ─────────────────────────────────────────────────────────────
 // Parser — SEC-01 allowlist
@@ -86,6 +83,22 @@ export function parseBalanceCallback(data: string): BalanceCallbackCmd | null {
     return { cmd: 'currency_set', code };
   }
 
+  // bl:sr:{role_code}:{id} — set role
+  if (sub === 'sr') {
+    const roleCode = parts[2] ?? '';
+    const accountId = parts[3] ?? '';
+    if (accountId.length === 0) return null;
+    
+    let role: 'none' | 'expense' | 'income' | 'main';
+    if (roleCode === 'n') role = 'none';
+    else if (roleCode === 'e') role = 'expense';
+    else if (roleCode === 'i') role = 'income';
+    else if (roleCode === 'm') role = 'main';
+    else return null;
+
+    return { cmd: 'set_role', role, accountId };
+  }
+
   // All remaining commands require a valid account ID
   const accountId = parts[2] ?? '';
   if (accountId.length === 0) return null;
@@ -97,11 +110,6 @@ export function parseBalanceCallback(data: string): BalanceCallbackCmd | null {
   if (sub === 'sb') return { cmd: 'set_balance', accountId };
   if (sub === 'd') return { cmd: 'delete', accountId };
   if (sub === 'dc') return { cmd: 'delete_confirm', accountId };
-  // Phase LD++: default account role toggles
-  if (sub === 'se') return { cmd: 'set_expense',   accountId };
-  if (sub === 'si') return { cmd: 'set_income',    accountId };
-  if (sub === 'ce') return { cmd: 'clear_expense', accountId };
-  if (sub === 'cl') return { cmd: 'clear_income',  accountId };
 
   return null;
 }
@@ -193,38 +201,39 @@ export interface AccountRoleState {
 /**
  * Build the account actions keyboard (detail view).
  *
- * Phase LD++: adds two circle-toggle rows for expense/income default roles.
- *   💸 Расходы: ⚪ (not set) → tap → bl:se:{id} (set_expense)
- *   💸 Расходы: 🟢 (is set)  → tap → bl:ce:{id} (clear_expense)
- *   💰 Доходы:  ⚪ (not set) → tap → bl:si:{id} (set_income)
- *   💰 Доходы:  🟢 (is set)  → tap → bl:cl:{id} (clear_income)
+ * Phase LD++: a single cyclical button for role assignment.
+ *   Обычный -> Расходы -> Доходы -> Основной -> Обычный
  *
  * @param accountId - ULID of the account being viewed
- * @param roles     - current role state (from getAccountRoles() or BalanceDataRow)
+ * @param roles     - current role state
  */
 export function buildAccountActionsKeyboard(
   accountId: string,
   roles: AccountRoleState = { isExpenseDefault: false, isIncomeDefault: false },
 ): InlineKeyboardMarkup {
-  // Circle-toggle buttons: 🟢 = active (tap to clear), ⚪ = inactive (tap to set)
-  const expenseLabel = roles.isExpenseDefault
-    ? '💸 Расходы: 🟢 (убрать)'
-    : '💸 Расходы: ⚪ (назначить)';
-  const expenseCb = roles.isExpenseDefault
-    ? `bl:ce:${accountId}`
-    : `bl:se:${accountId}`;
+  const isExp = roles.isExpenseDefault;
+  const isInc = roles.isIncomeDefault;
 
-  const incomeLabel = roles.isIncomeDefault
-    ? '💰 Доходы: 🟢 (убрать)'
-    : '💰 Доходы: ⚪ (назначить)';
-  const incomeCb = roles.isIncomeDefault
-    ? `bl:cl:${accountId}`
-    : `bl:si:${accountId}`;
+  let roleLabel = '';
+  let nextRoleCode = '';
+
+  if (isExp && isInc) {
+    roleLabel = '🏷 Роль: 💸💰 Основной';
+    nextRoleCode = 'n'; // next is none (Обычный)
+  } else if (isExp) {
+    roleLabel = '🏷 Роль: 💸 Расходы';
+    nextRoleCode = 'i'; // next is income (Доходы)
+  } else if (isInc) {
+    roleLabel = '🏷 Роль: 💰 Доходы';
+    nextRoleCode = 'm'; // next is main (Основной)
+  } else {
+    roleLabel = '🏷 Роль: Обычный счёт';
+    nextRoleCode = 'e'; // next is expense (Расходы)
+  }
 
   return {
     inline_keyboard: [
-      [{ text: expenseLabel, callback_data: expenseCb }],
-      [{ text: incomeLabel,  callback_data: incomeCb  }],
+      [{ text: roleLabel, callback_data: `bl:sr:${nextRoleCode}:${accountId}` }],
       [{ text: '✏️ Переименовать',      callback_data: `bl:rn:${accountId}` }],
       [{ text: '💱 Изменить валюту',    callback_data: `bl:cv:${accountId}` }],
       [{ text: '🔄 Установить баланс', callback_data: `bl:sb:${accountId}` }],

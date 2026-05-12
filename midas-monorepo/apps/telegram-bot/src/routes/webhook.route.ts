@@ -84,10 +84,7 @@ import {
   getWorkspaceDefaultAccount,      // Phase LD+: fetch real default account for success screen
   getWorkspaceActiveAccounts,      // Phase LD+: fetch all accounts for D.4 portfolio line
   getAccountRoles,                 // Phase LD++: role flags for account card
-  setDefaultExpenseAccount,        // Phase LD++: set expense default
-  setDefaultIncomeAccount,         // Phase LD++: set income default
-  clearDefaultExpenseAccount,      // Phase LD++: clear expense default
-  clearDefaultIncomeAccount,       // Phase LD++: clear income default
+  setAccountRole,                  // Phase LD++: set cyclical role
 } from '../services/account.service.js';
 import {
   getSettings,
@@ -2788,9 +2785,9 @@ Midas создан, чтобы сделать учет денег максима
               buildBalanceListKeyboard(accounts as BalanceAccountRow[]),
             );
 
-          // ── Phase LD++: default account role toggles ──────────────
-          } else if (blCmd.cmd === 'set_expense') {
-            const result = await setDefaultExpenseAccount(blResolved.workspaceId, blResolved.userId, blCmd.accountId);
+          // ── Phase LD++: default account role toggles (cyclical) ───
+          } else if (blCmd.cmd === 'set_role') {
+            const result = await setAccountRole(blResolved.workspaceId, blResolved.userId, blCmd.accountId, blCmd.role);
             if (result === 'not_found') {
               await answerCallbackQuery(cq.id, '⚠️ Счёт не найден');
             } else {
@@ -2803,51 +2800,15 @@ Midas создан, чтобы сделать учет денег максима
                   buildAccountActionsKeyboard(blCmd.accountId, roles),
                 );
               }
-              await answerCallbackQuery(cq.id, '💸 Основной счёт расходов установлен');
+              // Toast message based on new role
+              let toastMsg = 'Обычный счёт установлен';
+              if (blCmd.role === 'expense') toastMsg = '💸 Назначен только для расходов';
+              if (blCmd.role === 'income') toastMsg = '💰 Назначен только для доходов';
+              if (blCmd.role === 'main') toastMsg = '💸💰 Счёт назначен основным';
+              if (blCmd.role === 'none') toastMsg = 'Счёт стал обычным';
+              
+              await answerCallbackQuery(cq.id, toastMsg);
             }
-
-          } else if (blCmd.cmd === 'set_income') {
-            const result = await setDefaultIncomeAccount(blResolved.workspaceId, blResolved.userId, blCmd.accountId);
-            if (result === 'not_found') {
-              await answerCallbackQuery(cq.id, '⚠️ Счёт не найден');
-            } else {
-              const detail = await getAccountDetail(blResolved.workspaceId, blResolved.userId, blCmd.accountId);
-              const roles = await getAccountRoles(blResolved.workspaceId, blResolved.userId, blCmd.accountId);
-              if (detail) {
-                await upsertBotMessage(
-                  telegramUserId, chatId,
-                  formatAccountDetailText(detail, roles),
-                  buildAccountActionsKeyboard(blCmd.accountId, roles),
-                );
-              }
-              await answerCallbackQuery(cq.id, '💰 Основной счёт доходов установлен');
-            }
-
-          } else if (blCmd.cmd === 'clear_expense') {
-            await clearDefaultExpenseAccount(blResolved.workspaceId, blResolved.userId);
-            const detail = await getAccountDetail(blResolved.workspaceId, blResolved.userId, blCmd.accountId);
-            const roles = await getAccountRoles(blResolved.workspaceId, blResolved.userId, blCmd.accountId);
-            if (detail) {
-              await upsertBotMessage(
-                telegramUserId, chatId,
-                formatAccountDetailText(detail, roles),
-                buildAccountActionsKeyboard(blCmd.accountId, roles),
-              );
-            }
-            await answerCallbackQuery(cq.id, '💸 Роль расходов снята');
-
-          } else if (blCmd.cmd === 'clear_income') {
-            await clearDefaultIncomeAccount(blResolved.workspaceId, blResolved.userId);
-            const detail = await getAccountDetail(blResolved.workspaceId, blResolved.userId, blCmd.accountId);
-            const roles = await getAccountRoles(blResolved.workspaceId, blResolved.userId, blCmd.accountId);
-            if (detail) {
-              await upsertBotMessage(
-                telegramUserId, chatId,
-                formatAccountDetailText(detail, roles),
-                buildAccountActionsKeyboard(blCmd.accountId, roles),
-              );
-            }
-            await answerCallbackQuery(cq.id, '💰 Роль доходов снята');
 
           } else if (blCmd.cmd === 'close') {
             // Remove inline keyboard — close balance screen
