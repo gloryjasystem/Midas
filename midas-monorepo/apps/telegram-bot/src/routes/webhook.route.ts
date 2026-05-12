@@ -4691,11 +4691,19 @@ Midas создан, чтобы сделать учет денег максима
       receivedAt,
     };
 
-    // Phase LD++: If the user had the "empty transactions" screen open,
-    // delete it now to keep the chat clean as they are initiating a new transaction.
+    // Phase LD++: When the user initiates a free-text transaction, delete the current Active UI
+    // (Balance, Transactions, Settings, Report, empty_tx_msg, etc.) to prevent chat clutter
+    // before the AI draft or clarification card appears.
+    const amId = await getActiveMessageId(telegramUserId, chatId);
+    if (amId) {
+      void deleteMessage(chatId, amId);
+      void clearActiveMessageId(telegramUserId, chatId);
+    }
+    
+    // Also clean up the explicit empty_tx_msg key just in case
     const emptyMsgId = await redisConnection.get(`midas:empty_tx_msg:${chatId}`).catch(() => null);
     if (emptyMsgId) {
-      void deleteMessage(chatId, emptyMsgId);
+      if (emptyMsgId !== amId) void deleteMessage(chatId, emptyMsgId);
       await redisConnection.del(`midas:empty_tx_msg:${chatId}`).catch(() => {});
     }
 
