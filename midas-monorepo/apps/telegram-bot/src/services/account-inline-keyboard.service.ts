@@ -68,10 +68,14 @@ export type InlineAccountCmd =
   | { cmd: 'use';    accountId: string; draftId: string }
   | { cmd: 'fuzzy';  accountId: string; draftId: string }
   | { cmd: 'rename'; draftId: string }
-  /** Phase 2.4: user selected account from V2 picker (ia:pk:{accountId}:{draftId}) */
+  /** Phase 2.4 PR9: user selected account from V2 picker (ia:pk:{accountId}:{draftId}) */
   | { cmd: 'pick';   accountId: string; draftId: string }
-  /** Phase 2.4: user tapped "🔄 Сменить счёт" — delinks current account (ia:pk:delink:{draftId}) */
-  | { cmd: 'delink'; draftId: string };
+  /** Phase 2.4 PR9: user tapped "🔄 Сменить счёт" — delinks current account (ia:pk:delink:{draftId}) */
+  | { cmd: 'delink'; draftId: string }
+  /** Phase 2.4 PR12: user tapped "✏️ Указать сумму в {currency}" — cross-currency input (ia:xfx:{draftId}) */
+  | { cmd: 'xfx';     draftId: string }
+  /** Phase 2.4 PR12: user tapped "◀️ Назад" on cross-currency input screen (ia:xfx:back:{draftId}) */
+  | { cmd: 'xfx_back'; draftId: string };
 
 /**
  * Parse and validate an inline account creation callback_data string.
@@ -83,6 +87,10 @@ export type InlineAccountCmd =
  *   ia:use:{ULID}:{ULID}
  *   ia:fuzzy:{ULID}:{ULID}
  *   ia:rename:{ULID}
+ *   ia:pk:{ULID}:{ULID}           Phase 2.4 PR9
+ *   ia:pk:delink:{ULID}           Phase 2.4 PR9
+ *   ia:xfx:{ULID}                 Phase 2.4 PR12
+ *   ia:xfx:back:{ULID}            Phase 2.4 PR12
  */
 export function parseInlineAccountCallback(data: string): InlineAccountCmd | null {
   if (!data.startsWith('ia:')) return null;
@@ -122,23 +130,33 @@ export function parseInlineAccountCallback(data: string): InlineAccountCmd | nul
     return { cmd: 'fuzzy', accountId, draftId };
   }
 
-  // Phase 2.4: ia:pk:{accountId}:{draftId}
-  // «ia:pk:delink:{draftId}» — delink current account (change button)
-  // «ia:pk:{accountId}:{draftId}» — pick specific account
-  // \"ia:pk:\" = 6 + 26 + 1 + 26 = 59 bytes ≤ 64 ✓
+  // Phase 2.4 PR9: ia:pk:{accountId}:{draftId} or ia:pk:delink:{draftId}
+  // "ia:pk:" = 6 + 26 + 1 + 26 = 59 bytes ≤ 64 ✓
   if (sub === 'pk' && parts.length === 4) {
     const seg2 = parts[2] ?? '';
     const seg3 = parts[3] ?? '';
-
-    // delink: ia:pk:delink:{draftId}
     if (seg2 === 'delink') {
       if (!ULID_RE.test(seg3)) return null;
       return { cmd: 'delink', draftId: seg3 };
     }
-
-    // pick: ia:pk:{accountId}:{draftId}
     if (!ULID_RE.test(seg2) || !ULID_RE.test(seg3)) return null;
     return { cmd: 'pick', accountId: seg2, draftId: seg3 };
+  }
+
+  // Phase 2.4 PR12: ia:xfx:{draftId}  (cross-currency input trigger)
+  // "ia:xfx:" = 8 + 26 = 34 bytes ≤ 64 ✓
+  if (sub === 'xfx' && parts.length === 3) {
+    const draftId = parts[2] ?? '';
+    if (!ULID_RE.test(draftId)) return null;
+    return { cmd: 'xfx', draftId };
+  }
+
+  // Phase 2.4 PR12: ia:xfx:back:{draftId}  (cancel cross-currency input)
+  // "ia:xfx:back:" = 13 + 26 = 39 bytes ≤ 64 ✓
+  if (sub === 'xfx' && parts.length === 4 && (parts[2] ?? '') === 'back') {
+    const draftId = parts[3] ?? '';
+    if (!ULID_RE.test(draftId)) return null;
+    return { cmd: 'xfx_back', draftId };
   }
 
   return null;
@@ -326,8 +344,72 @@ export function buildAccountSelectedKeyboard(
     ],
   };
 }
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase 2.4 PR 12 — Cross-currency input screen
+// ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * Build the cross-currency amount-input screen text.
+ *
+ * Shown when user taps "✏️ Указать/Изменить сумму в {accountCurrency}".
+ * Format:
+ *   🔁 Конвертация валют
+ *
+ *   Транзакция: {txAmount} {txCurrency}
+ *   Счёт: {accountName} ({accountCurrency})
+ *
+ *   Сколько {accountCurrency} фактически списано?
+ *
+ *   ┃ Например: 920 000
+ *
+ * SEC-12: accountName may contain user-provided text — must be pre-escaped by caller.
+ */
+export function buildCrossCurrencyInputText(
+  txAmount: string,
+  txCurrency: string,
+  accountName: string,   // pre-escaped HTML
+  accountCurrency: string,
+  example: string = '920 000',
+): string {
+  return (
+    `🔁 <b>Конвертация валют</b>\n\n` +
+    `Транзакция: <b>${txAmount} ${txCurrency}</b>\n` +
+    `Счёт: <b>${accountName}</b> (${accountCurrency})\n\n` +
+    `Сколько <b>${accountCurrency}</b> фактически списано?\n\n` +
+    `<blockquote>Например: ${example}</blockquote>`
+  );
+}
 
+/**
+ * Keyboard for the cross-currency input screen — just a ◀️ Назад button.
+ *
+ * Callback: ia:xfx:back:{draftId}  (39 bytes ≤ 64 ✓)
+ */
+export function buildCrossCurrencyInputKeyboard(draftId: string): InlineKeyboardMarkup {
+  return {
+    inline_keyboard: [
+      [{ text: '◀️ Назад', callback_data: `ia:xfx:back:${draftId}` }],
+    ],
+  };
+}
+
+/**
+ * Build the "✏️ Указать сумму в {currency}" button text.
+ * Returned as a string so screen-builder.ts / webhook.route.ts can use it.
+ *
+ * Two variants:
+ *   – hasCrossAmount = false → «✏️ Указать сумму в RUB»
+ *   – hasCrossAmount = true  → «✏️ Изменить сумму в RUB»
+ */
+export function xfxButtonLabel(currency: string, hasCrossAmount: boolean): string {
+  const verb = hasCrossAmount ? 'Изменить' : 'Указать';
+  return `✏️ ${verb} сумму в ${currency}`;
+}
+
+/** Redis key for the cross-currency input pointer. TTL: 600 s. */
+export function xfxRedisKey(userId: string, chatId: string): string {
+  return `midas:xfx:ptr:${userId}:${chatId}`;
+}
 // ─ internal helper ───────────────────────────────────────────────────
 /** Strip trailing decimal zeros: "15400.0000" → "15400", "100.50" → "100.5" */
 function stripTrailingZeros(s: string): string {

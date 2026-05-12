@@ -580,25 +580,57 @@ export function buildNavKeyboard(): InlineKeyboard {
 }
 
 /**
- * Build the standard approve/reject confirmation keyboard.
+ * Build the approve/reject confirmation keyboard.
  *
  * Row 1: [✅  Подтвердить]             ← Primary — полная ширина
  * Row 2: [✏️ Изменить] [✖️ Отмена]   ← Secondary (neutral emoji, not red ❌)
+ * Row 3: [🔄 Сменить счёт: {name}]   ← if account supplied (Phase 2.4 PR12)
+ *     OR [➕ Выбрать счёт]            ← if no account
+ * Row 4: [✏️ Указать/Изменить сумму в {cur}] ← only for cross-currency (Phase 2.4 PR12)
  *
- * Подтверждение и отмена никогда не стоят рядом (anti-pattern).
+ * @param draftId  - ULID of the draft
+ * @param account  - {id, name, currency} of linked account, or null if none (Phase 2.4)
+ * @param xfx      - cross-currency params, or null if same-currency (Phase 2.4)
+ *
+ * SEC-01: account.id is a system ULID; name never goes into callback_data.
  */
-export function buildConfirmKeyboard(draftId: string): InlineKeyboard {
-  return {
-    inline_keyboard: [
-      [
-        { text: '✅  Подтвердить', callback_data: `approve:${draftId}` },
-      ],
-      [
-        { text: '✏️ Изменить', callback_data: `draft:edit:${draftId}` },
-        { text: '✖️ Отмена',   callback_data: `reject:${draftId}` },
-      ],
+export function buildConfirmKeyboard(
+  draftId: string,
+  account?: { id: string; name: string; currency: string } | null,
+  xfx?: { hasCrossAmount: boolean } | null,
+): InlineKeyboard {
+  const rows: Array<Array<{ text: string; callback_data: string }>> = [
+    [{ text: '✅  Подтвердить', callback_data: `approve:${draftId}` }],
+    [
+      { text: '✏️ Изменить', callback_data: `draft:edit:${draftId}` },
+      { text: '✖️ Отмена',   callback_data: `reject:${draftId}` },
     ],
-  };
+  ];
+
+  // Phase 2.4 PR12: account row
+  if (account) {
+    rows.push([{
+      text: `🔄 Сменить счёт: ${account.name}`,
+      callback_data: `ia:pk:delink:${draftId}`,
+    }]);
+  } else if (account === null) {
+    // Explicit null = no account linked yet → show "Выбрать счёт"
+    rows.push([{
+      text: '➕ Выбрать счёт',
+      callback_data: `ia:pk:delink:${draftId}`,
+    }]);
+  }
+  // account === undefined → callers that don't pass account (backward compat) → no account row
+
+  // Phase 2.4 PR12: cross-currency row (only when account is linked)
+  if (account && xfx) {
+    const label = xfx.hasCrossAmount
+      ? `✏️ Изменить сумму в ${account.currency}`
+      : `✏️ Указать сумму в ${account.currency}`;
+    rows.push([{ text: label, callback_data: `ia:xfx:${draftId}` }]);
+  }
+
+  return { inline_keyboard: rows };
 }
 
 // ─────────────────────────────────────────────────────────────
