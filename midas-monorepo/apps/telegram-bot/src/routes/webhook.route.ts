@@ -207,12 +207,17 @@ import {
   parseInlineAccountCallback,        // Phase 1.31
   RENAME_PROMPT,                     // Phase 1.31
   type InlineAccountState,           // Phase 1.31
+  buildAccountPickerV2Keyboard,      // Phase 2.4 PR9: V2 account picker keyboard
+  ACCOUNT_PICKER_V2_TEXT,            // Phase 2.4 PR9: picker header text
 } from '../services/account-inline-keyboard.service.js';
 import {
   getWorkspaceAccountsForInline,     // Phase 1.31
   getAccountById,                    // Phase 1.31
   getDraftAccountHint,               // Phase 1.31
   setDraftAccountId,                 // Phase 1.31
+  getWorkspaceAccountsWithBalances,  // Phase 2.4 PR9: account picker data source
+  toAccountPickerEntries,            // Phase 2.4 PR9: AccountWithBalance[] adapter
+  getAccountWithBalance,             // Phase 2.4 PR9: single account + balance for math block
 } from '../services/account.service.js';
 import {
   patchDraftAmount,                  // Phase 1.32
@@ -222,6 +227,7 @@ import {
   getDraftFields,                    // Phase 1.35
   patchDraftCurrency,                // Phase 1.35
   validateCurrencyCode,              // Phase 1.35
+  patchDraftAccount,                 // Phase 2.4 PR9: delink (null) / relink account on draft
 } from '../services/clarification.service.js';
 import {
   upsertBotMessage,                  // Phase 1.33
@@ -234,11 +240,12 @@ import {
 import { callbackConfirmQueue } from '../queues/callback-confirm-queue.js';
 import {
   buildPreviewScreen,
-  buildMainMenuKeyboard,   // Phase 1.36-UX: persistent bottom nav keyboard
-  NAV_BTN_BALANCE,         // Phase 1.36-UX: button text intercept constants
-  NAV_BTN_REPORT,          // Phase 1.36-UX
-  NAV_BTN_SETTINGS,        // Phase 1.36-UX
-  NAV_BTN_TRANSACTIONS,    // Phase 2.0
+  type AccountBalanceBlock,        // Phase 2.4 PR9: data type for balance block
+  buildMainMenuKeyboard,           // Phase 1.36-UX: persistent bottom nav keyboard
+  NAV_BTN_BALANCE,                 // Phase 1.36-UX: button text intercept constants
+  NAV_BTN_REPORT,                  // Phase 1.36-UX
+  NAV_BTN_SETTINGS,                // Phase 1.36-UX
+  NAV_BTN_TRANSACTIONS,            // Phase 2.0
 } from '../utils/screen-builder.js'; // Phase 1.35
 import {
   getTransactionList,
@@ -596,7 +603,7 @@ function extractAmountFromText(input: string): string | null {
   return validateAmountString(num);
 }
 
-// Phase 1.35: Build preview card from draft data.
+// Phase 2.4: Build preview card from draft data including account balance block.
 // Returns preview text or fallback if draft is not found.
 async function confirmPreview(
   workspaceId: string,
@@ -605,13 +612,37 @@ async function confirmPreview(
 ): Promise<string> {
   const draft = await getDraftFields(workspaceId, userId, draftId);
   if (!draft) return '📝 Готово. Подтвердите или отклоните транзакцию:';
+
+  // ── Phase 2.4: Account balance block ─────────────────────────────────
+  // If draft has a linked account, fetch it and build the math block.
+  // SEC-02: No float arithmetic — all amounts are NUMERIC strings passed
+  //         to buildAccountBalanceBlock() which uses BigInt arithmetic.
+  let accountBlock: AccountBalanceBlock | null = null;
+  if (draft.account_id) {
+    const acct = await getAccountWithBalance(workspaceId, userId, draft.account_id);
+    if (acct) {
+      // Debit amount: use explicit cross-currency override if set, else parsed_amount.
+      const debitAmount   = draft.account_debit_amount ?? draft.parsed_amount ?? '0';
+      const debitCurrency = draft.account_debit_currency ?? acct.currency;
+      accountBlock = {
+        accountName:     escapeHtml(acct.name),
+        accountCurrency: acct.currency,
+        currentBalance:  acct.balance,
+        debitAmount,
+        debitCurrency,
+        intent:          draft.parsed_intent,
+      };
+    }
+  }
+
   return buildPreviewScreen({
-    intent: draft.parsed_intent,
-    amount: draft.parsed_amount,
-    currency: draft.parsed_currency,
-    categoryHint: draft.parsed_category_hint,
-    accountHint: null,
-    itemName: draft.item_name,
+    intent:       draft.parsed_intent,
+    amount:       draft.parsed_amount,
+    currency:     draft.parsed_currency,
+    categoryHint: draft.parsed_category_hint ? escapeHtml(draft.parsed_category_hint) : null,
+    accountHint:  null,
+    itemName:     draft.item_name ? escapeHtml(draft.item_name) : null,
+    accountBlock,
   });
 }
 
@@ -1269,6 +1300,54 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
               }
               request.log.info({ msg: '[midas:bot:webhook] ia: account selected', workspaceId: iaResolved.workspaceId });
             }
+
+          // ── Phase 2.4: ia:pk — user picked account from V2 picker ────────
+          } else if (iaCmd.cmd === 'pick') {
+            // SEC-01: IDOR guard — validate accountId belongs to this workspace.
+            const pickedAcct = await getAccountById(iaResolved.workspaceId, iaResolved.userId, iaCmd.accountId);
+            if (!pickedAcct) {
+              if (iaMsgId) void editMessageText(
+                chatId, iaMsgId,
+                '⚠️ Счёт не найден. Попробуйте ещё раз.',
+                { inline_keyboard: [] },
+              );
+            } else {
+              // Link account to draft, then re-render preview with balance block.
+              await setDraftAccountId(iaResolved.workspaceId, iaResolved.userId, iaCmd.draftId, pickedAcct.id);
+              if (iaMsgId) {
+                const previewText = await confirmPreview(iaResolved.workspaceId, iaResolved.userId, iaCmd.draftId);
+                void editMessageText(chatId, iaMsgId, previewText, confirmKb(iaCmd.draftId));
+                try { await redisConnection.set(`midas:preview:${iaCmd.draftId}`, iaMsgId, 'EX', 3600); } catch { /* non-fatal */ }
+              }
+              request.log.info({ msg: '[midas:bot:webhook] ia:pk: account picked', workspaceId: iaResolved.workspaceId });
+            }
+
+          // ── Phase 2.4: ia:delink — user tapped "🔄 Сменить счёт" ─────────
+          } else if (iaCmd.cmd === 'delink') {
+            // Delink: set account_id = NULL on the draft (patchDraftAccount with null).
+            await patchDraftAccount(iaResolved.workspaceId, iaResolved.userId, iaCmd.draftId, null);
+
+            // Fetch current draft to determine intent for sort priority.
+            const delinkDraft = await getDraftFields(iaResolved.workspaceId, iaResolved.userId, iaCmd.draftId);
+            const delinkIntent = delinkDraft?.parsed_intent ?? null;
+
+            // Fetch all workspace accounts with balances for the picker.
+            const allAccounts = await getWorkspaceAccountsWithBalances(
+              iaResolved.workspaceId, iaResolved.userId, delinkIntent,
+            );
+            const pickerEntries = toAccountPickerEntries(allAccounts).map((e) => ({
+              ...e,
+              name: escapeHtml(e.name),
+            }));
+
+            if (iaMsgId) {
+              void editMessageText(
+                chatId, iaMsgId,
+                ACCOUNT_PICKER_V2_TEXT,
+                buildAccountPickerV2Keyboard(pickerEntries, iaCmd.draftId),
+              );
+            }
+            request.log.info({ msg: '[midas:bot:webhook] ia:delink: account delinked', workspaceId: iaResolved.workspaceId });
           }
         } catch (err: unknown) {
           const errorClass = err instanceof Error ? err.constructor.name : 'UnknownError';
