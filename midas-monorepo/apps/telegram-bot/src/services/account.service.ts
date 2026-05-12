@@ -511,6 +511,17 @@ export async function addAccountWithCurrency(
          RETURNING id`,
         [accountId, workspaceId, name, currency],
       );
+      if ((result.rowCount ?? 0) > 0) {
+        // Atomically set default account pointers on the workspace only if unset.
+        // This ensures the FIRST created account becomes the default — never overwritten.
+        await client.query(
+          `UPDATE workspaces
+           SET default_expense_account_id = COALESCE(default_expense_account_id, $1),
+               default_income_account_id  = COALESCE(default_income_account_id,  $1)
+           WHERE id = $2`,
+          [accountId, workspaceId],
+        );
+      }
       return result.rowCount ?? 0;
     },
   );
@@ -570,12 +581,88 @@ export async function addAccountReturningId(
          RETURNING id`,
         [accountId, workspaceId, name, currency],
       );
+      if ((result.rowCount ?? 0) > 0) {
+        // Atomically set default account pointers on the workspace only if unset.
+        // This ensures the FIRST created account becomes the default — never overwritten.
+        await client.query(
+          `UPDATE workspaces
+           SET default_expense_account_id = COALESCE(default_expense_account_id, $1),
+               default_income_account_id  = COALESCE(default_income_account_id,  $1)
+           WHERE id = $2`,
+          [accountId, workspaceId],
+        );
+      }
       return result.rowCount ?? 0;
     },
   );
 
   if (rowsInserted === 0) return { status: 'duplicate' };
   return { status: 'created', accountId };
+}
+
+// ─────────────────────────────────────────────────────────────
+// getWorkspaceDefaultAccount — Phase LD+
+// ─────────────────────────────────────────────────────────────
+
+export interface WorkspaceDefaultAccountInfo {
+  accountId: string;
+  name: string;
+  currency: string;
+  type: string;
+  /** true if only 1 active account exists (first-time onboarding) */
+  isFirst: boolean;
+}
+
+/**
+ * Returns the workspace's real default expense account with display fields.
+ * Also returns isFirst=true when only 1 active account exists.
+ *
+ * Used by success screens so they ALWAYS show the TRUE default account
+ * (set on first creation via COALESCE) — not the most recently created one.
+ *
+ * SEC-03: withTenantTransaction (RLS enforced).
+ */
+export async function getWorkspaceDefaultAccount(
+  workspaceId: string,
+  userId: string,
+): Promise<WorkspaceDefaultAccountInfo | null> {
+  return withTenantTransaction<WorkspaceDefaultAccountInfo | null>(
+    workspaceId,
+    userId,
+    async (client) => {
+      const res = await client.query<{
+        acc_id: string | null;
+        name: string | null;
+        currency: string | null;
+        type: string | null;
+        active_count: string;
+      }>(
+        `SELECT
+           a.id       AS acc_id,
+           a.name,
+           a.currency,
+           a.type,
+           (SELECT COUNT(*)::INT FROM account_sources
+            WHERE workspace_id = $1 AND deleted_at IS NULL) AS active_count
+         FROM workspaces w
+         LEFT JOIN account_sources a
+           ON a.id = w.default_expense_account_id
+          AND a.deleted_at IS NULL
+         WHERE w.id = $1
+         LIMIT 1`,
+        [workspaceId],
+      );
+      const row = res.rows[0];
+      if (!row || !row.acc_id) return null;
+      return {
+        accountId: row.acc_id,
+        name:      row.name ?? '',
+        currency:  row.currency ?? '',
+        type:      row.type ?? 'manual',
+        isFirst:   Number(row.active_count) <= 1,
+      };
+    },
+  );
 }
 
 // ─────────────────────────────────────────────────────────────

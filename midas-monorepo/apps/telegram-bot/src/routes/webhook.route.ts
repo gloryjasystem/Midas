@@ -81,6 +81,7 @@ import {
   softDeleteAccount,               // Phase 2.1
   softDeletePlaceholderAccount,    // Phase LD: soft-delete Default when user creates custom account
   activatePlaceholderAccount,      // Phase LD: promote Default to real account when user skips
+  getWorkspaceDefaultAccount,      // Phase LD+: fetch real default account for success screen
 } from '../services/account.service.js';
 import {
   getSettings,
@@ -925,14 +926,31 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
                 await softDeletePlaceholderAccount(acResolved.workspaceId, acResolved.userId);
               } catch { /* non-fatal */ }
               const skippedIcon = getProviderIcon(undefined, skippedType, skippedSub);
+              // Phase LD+: fetch the REAL default account (first created = workspace default)
+              const defBal = await getWorkspaceDefaultAccount(acResolved.workspaceId, acResolved.userId).catch(() => null);
               // Activate nav keyboard: delete inline onboarding msg, send success + ReplyKeyboard
               if (acMsgId) void deleteMessage(chatId, acMsgId);
               await clearActiveMessageId(telegramUserId, chatId);
-              void sendMessageWithReplyKeyboard(
-                chatId,
-                buildSuccessScreenText(escapeHtml(skippedName), skippedCur, undefined, skippedIcon),
-                buildMainMenuKeyboard(),
-              );
+              if (defBal && !defBal.isFirst) {
+                // User already had accounts — skip the full onboarding screen
+                const addedIcon = getProviderIcon(undefined, skippedType, skippedSub);
+                void sendMessageWithReplyKeyboard(
+                  chatId,
+                  `✅ Счёт <b>${escapeHtml(skippedName)}</b> (${skippedCur}) добавлен.\n\n` +
+                  `Счёт по умолчанию: ${addedIcon} <b>${escapeHtml(defBal.name)}</b> · ${defBal.currency}`,
+                  buildMainMenuKeyboard(),
+                );
+              } else {
+                // First account — full onboarding success screen
+                const defIcon = defBal ? getProviderIcon(undefined, defBal.type, undefined) : skippedIcon;
+                const defName = defBal?.name ?? skippedName;
+                const defCur  = defBal?.currency ?? skippedCur;
+                void sendMessageWithReplyKeyboard(
+                  chatId,
+                  buildSuccessScreenText(escapeHtml(defName), defCur, undefined, defIcon),
+                  buildMainMenuKeyboard(),
+                );
+              }
 
             } else if (acCmd.cmd === 'bank_page') {
               // Phase 2.2: paginate bank picker
@@ -4084,15 +4102,32 @@ Midas создан, чтобы сделать учет денег максима
                 await softDeletePlaceholderAccount(resolved.workspaceId, resolved.userId);
               } catch { /* non-fatal */ }
               const icon = getProviderIcon(undefined, acState.accountType ?? 'custom', acState.walletSubtype);
+              // Phase LD+: fetch the REAL default account for the success screen
+              const defCi = await getWorkspaceDefaultAccount(resolved.workspaceId, resolved.userId).catch(() => null);
               // Activate nav keyboard: delete inline onboarding msg, send success + ReplyKeyboard
               const oldMsgIdCi = await getActiveMessageId(telegramUserId, chatId);
               if (oldMsgIdCi) void deleteMessage(chatId, oldMsgIdCi);
               await clearActiveMessageId(telegramUserId, chatId);
-              void sendMessageWithReplyKeyboard(
-                chatId,
-                buildSuccessScreenText(escapeHtml(accountName), escapeHtml(rawCode), undefined, icon),
-                buildMainMenuKeyboard(),
-              );
+              if (defCi && !defCi.isFirst) {
+                // Already had accounts — compact "added" confirmation
+                const defIconCi = getProviderIcon(undefined, defCi.type, undefined);
+                void sendMessageWithReplyKeyboard(
+                  chatId,
+                  `✅ Счёт <b>${escapeHtml(accountName)}</b> (${escapeHtml(rawCode)}) добавлен.\n\n` +
+                  `Счёт по умолчанию: ${defIconCi} <b>${escapeHtml(defCi.name)}</b> · ${defCi.currency}`,
+                  buildMainMenuKeyboard(),
+                );
+              } else {
+                // First account — full onboarding success screen
+                const defIconCi = defCi ? getProviderIcon(undefined, defCi.type, undefined) : icon;
+                const defNameCi = defCi?.name ?? accountName;
+                const defCurCi  = defCi?.currency ?? rawCode;
+                void sendMessageWithReplyKeyboard(
+                  chatId,
+                  buildSuccessScreenText(escapeHtml(defNameCi), escapeHtml(defCurCi), undefined, defIconCi),
+                  buildMainMenuKeyboard(),
+                );
+              }
               request.log.info({ msg: '[midas:bot:webhook] ac: account created via custom currency text', workspaceId: resolved.workspaceId });
             }
           } catch (err: unknown) {
@@ -4133,7 +4168,8 @@ Midas создан, чтобы сделать учет денег максима
             try {
               await softDeletePlaceholderAccount(resolved.workspaceId, resolved.userId);
             } catch { /* non-fatal */ }
-            // Phase 2.3: polished success screen with name, currency and balance
+            // Phase LD+: fetch the REAL default account for the success screen
+            const defBi = await getWorkspaceDefaultAccount(resolved.workspaceId, resolved.userId).catch(() => null);
             const acName = acState.name ?? 'Счёт';
             const acCur  = acState.currency ?? '';
             const icon   = getProviderIcon(undefined, acState.accountType ?? 'custom', acState.walletSubtype);
@@ -4141,11 +4177,26 @@ Midas создан, чтобы сделать учет денег максима
             const oldMsgIdBal = await getActiveMessageId(telegramUserId, chatId);
             if (oldMsgIdBal) void deleteMessage(chatId, oldMsgIdBal);
             await clearActiveMessageId(telegramUserId, chatId);
-            void sendMessageWithReplyKeyboard(
-              chatId,
-              buildSuccessScreenText(escapeHtml(acName), escapeHtml(acCur), amount, icon),
-              buildMainMenuKeyboard(),
-            );
+            if (defBi && !defBi.isFirst) {
+              // Already had accounts — compact "added" confirmation
+              const defIconBi = getProviderIcon(undefined, defBi.type, undefined);
+              void sendMessageWithReplyKeyboard(
+                chatId,
+                `✅ Счёт <b>${escapeHtml(acName)}</b> (${escapeHtml(acCur)}) добавлен, баланс: ${amount}.\n\n` +
+                `Счёт по умолчанию: ${defIconBi} <b>${escapeHtml(defBi.name)}</b> · ${defBi.currency}`,
+                buildMainMenuKeyboard(),
+              );
+            } else {
+              // First account — full onboarding success screen with balance
+              const defIconBi = defBi ? getProviderIcon(undefined, defBi.type, undefined) : icon;
+              const defNameBi = defBi?.name ?? acName;
+              const defCurBi  = defBi?.currency ?? acCur;
+              void sendMessageWithReplyKeyboard(
+                chatId,
+                buildSuccessScreenText(escapeHtml(defNameBi), escapeHtml(defCurBi), amount, defIconBi),
+                buildMainMenuKeyboard(),
+              );
+            }
             request.log.info({ msg: '[midas:bot:webhook] ac: balance set via onboarding', workspaceId: resolved.workspaceId });
           } catch (err: unknown) {
             const errorClass = err instanceof Error ? err.constructor.name : 'UnknownError';
