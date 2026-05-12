@@ -1522,37 +1522,47 @@ function levenshtein(a: string, b: string): number {
   return prev[b.length]!;
 }
 
+/** Phonetic normalization to handle common Cyrillic -> Latin transliteration quirks */
+function phoneticNormalize(s: string): string {
+  return s.replace(/z/g, 's').replace(/k/g, 'c').replace(/y/g, 'i').replace(/j/g, 'i').replace(/w/g, 'v');
+}
+
 /**
  * Compute match score (0–1) between user input and a preset key/name.
- * Checks: exact → substring → prefix → Levenshtein.
+ * Checks: exact → substring → prefix → Levenshtein, with phonetic enhancements.
  */
 function computeScore(norm: string, translit: string, key: string, nameLower: string): number {
-  // Exact
-  if (norm === key || translit === key) return 1.0;
-  // Key contains input (min 3 chars to avoid noise)
-  if (norm.length >= 3 && key.includes(norm)) return 0.92;
-  if (translit.length >= 3 && key.includes(translit)) return 0.90;
-  // Name contains input
-  if (norm.length >= 3 && nameLower.includes(norm)) return 0.87;
-  if (translit.length >= 3 && nameLower.includes(translit)) return 0.85;
-  // Input contains key
-  if (key.length >= 3 && norm.includes(key)) return 0.82;
-  // Prefix match
-  if (norm.length >= 3 && key.startsWith(norm)) return 0.80;
-  if (translit.length >= 3 && key.startsWith(translit)) return 0.78;
-  if (key.length >= 3 && norm.startsWith(key)) return 0.75;
-  // Levenshtein (only for inputs ≥ 3 chars to avoid false positives)
-  if (norm.length >= 3) {
-    const d = levenshtein(norm, key);
-    const s = 1 - d / Math.max(norm.length, key.length);
-    if (s > FUZZY_THRESHOLD) return s;
-    if (translit !== norm) {
-      const dt = levenshtein(translit, key);
-      const st = 1 - dt / Math.max(translit.length, key.length);
-      if (st > FUZZY_THRESHOLD) return st;
+  let best = 0;
+
+  const check = (a: string, b: string, weight = 1.0) => {
+    if (!a || !b) return;
+    if (a === b) { if (1.0 * weight > best) best = 1.0 * weight; return; }
+    if (a.length >= 3 && b.includes(a)) { if (0.90 * weight > best) best = 0.90 * weight; }
+    if (a.length >= 3 && b.startsWith(a)) { if (0.80 * weight > best) best = 0.80 * weight; }
+    if (a.length >= 3 && a.includes(b)) { if (0.80 * weight > best) best = 0.80 * weight; }
+    
+    if (a.length >= 3) {
+      const d = levenshtein(a, b);
+      const s = 1 - d / Math.max(a.length, b.length);
+      if (s * weight > best) best = s * weight;
     }
+  };
+
+  check(norm, key, 1.0);
+  check(translit, key, 0.95);
+  check(norm, nameLower, 0.95);
+  check(translit, nameLower, 0.90);
+  
+  const pt = phoneticNormalize(translit);
+  const pk = phoneticNormalize(key);
+  const pn = phoneticNormalize(nameLower);
+  
+  if (pt !== translit || pk !== key || pn !== nameLower) {
+    check(pt, pk, 0.90);
+    check(pt, pn, 0.85);
   }
-  return 0;
+
+  return best;
 }
 
 /** Cash keyword patterns (RU/UK/EN). */

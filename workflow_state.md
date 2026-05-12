@@ -10,10 +10,10 @@
 | Параметр | Значение |
 |---|---|
 | **PHASE** | `2 — Advanced UX & Account Management` |
-| **STEP** | `Master Roadmap — Onboarding Input-First UX (DEPLOYED, SMOKE ✅)` |
-| **AGENT STATUS** | `DEPLOYED — master_roadmap Phase 1+2: input-first onboarding, flag-based currency picker (🇷🇺🇺🇸₿Ξ), no-match screen, fuzzy currency search, button-free success screen` |
+| **STEP** | `Master Roadmap — Onboarding Input-First UX (Fuzzy Fix DEPLOYED, SMOKE ✅)` |
+| **AGENT STATUS** | `DEPLOYED — master_roadmap Phase 1+2: input-first onboarding, flag-based currency picker (🇷🇺🇺🇸₿Ξ), no-match screen, fuzzy currency search, button-free success screen, phonetic bank fuzzy matching` |
 | **DEPLOYMENT** | `Railway (spirited-happiness project)` — `Midas` bot service + `background-workers` service + `Postgres` + `Redis` |
-| **LAST COMPLETED** | `master_roadmap Phases 1–4: (Phase 1) CURRENCY_FLAGS registry 40+ currencies, getCurrencyFlag(), buildPaginatedPicker() 2-arrow nav, buildCurrencyPickerText(name,isCustom), 🔍 Найти валюту button in both pickers, searchCurrencies() fuzzy+translit, buildNoMatchText/buildNoMatchKeyboard. (Phase 2) webhook.route.ts FSM: no-match on fuzzy null → cus_save/cus_keep, cur_search callback, cur_list callback, cur_search text interceptor → searchCurrencies, button-free success screens. (Phase 3) 70/70 smoke tests PASS via smoke-test-master-roadmap.mjs. (Phase 4) Git commit 35c92e0, Railway deploy — Midas+background-workers both Online.` |
+| **LAST COMPLETED** | `master_roadmap Phases 1–4: (Phase 1) CURRENCY_FLAGS registry 40+ currencies. (Phase 2) webhook.route.ts FSM. (Phase 3) 70/70 smoke tests PASS via smoke-test-master-roadmap.mjs. (Phase 4) Git commit 35c92e0, Railway deploy. (Fuzzy Fix) added phonetic matching support for short strings (e.g. виза/visa) and deployed to Railway.` |
 | **BLOCKER** | None. |
 | **NEXT ACTION** | Ручной smoke test в Telegram (@midaswallet_bot). Затем — следующая фаза по product-roadmap.md. |
 
