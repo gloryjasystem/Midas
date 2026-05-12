@@ -213,6 +213,9 @@ import {
   ACCOUNT_PICKER_SCREEN_TEXT,        // Phase 2.4 PR11: full picker header text
   ACCOUNT_PICKER_EMPTY_TEXT,         // Phase 2.4 PR11: empty-state text for no-account workspaces
   type AccountPickerFullEntry,       // Phase 2.4 PR11: rich entry type
+  buildCrossCurrencyInputText,       // Phase 2.4 PR12: xfx input screen text
+  buildCrossCurrencyInputKeyboard,   // Phase 2.4 PR12: xfx input screen keyboard
+  xfxRedisKey,                       // Phase 2.4 PR12: Redis key helper (midas:xfx:ptr:{uid}:{cid})
 } from '../services/account-inline-keyboard.service.js';
 import {
   getWorkspaceAccountsForInline,     // Phase 1.31
@@ -244,6 +247,7 @@ import {
 import { callbackConfirmQueue } from '../queues/callback-confirm-queue.js';
 import {
   buildPreviewScreen,
+  buildConfirmKeyboard,            // Phase 2.4 PR12: extended with account + xfx rows
   type AccountBalanceBlock,        // Phase 2.4 PR9: data type for balance block
   buildMainMenuKeyboard,           // Phase 1.36-UX: persistent bottom nav keyboard
   NAV_BTN_BALANCE,                 // Phase 1.36-UX: button text intercept constants
@@ -551,24 +555,14 @@ function normalizeCurrencyInput(raw: string): string | null {
   return null;
 }
 
-// Centralised so all confirm screens include the edit button.
-// Phase 1.36-UX: Layout aligned with screen-builder.ts buildConfirmKeyboard:
-//   Row 1: [✅ Подтвердить] — full-width primary action
-//   Row 2: [✏️ Изменить] [✖️ Отмена] — secondary actions, consistent emoji weight
-function confirmKb(draftId: string) {
-  return {
-    inline_keyboard: [
-      [
-        // Primary action — full width, maximum tap surface
-        { text: '✅  Подтвердить', callback_data: `approve:${draftId}` },
-      ],
-      [
-        // Secondary: pencil + neutral X (not red ❌ — avoids alarming UX)
-        { text: '✏️ Изменить', callback_data: `draft:edit:${draftId}` },
-        { text: '✖️ Отмена', callback_data: `reject:${draftId}` },
-      ],
-    ],
-  };
+// Phase 2.4 PR12: confirmKb now delegates to buildConfirmKeyboard (account + xfx aware).
+// Callers that don't pass account/xfx get the same plain keyboard as before.
+function confirmKb(
+  draftId: string,
+  account?: { id: string; name: string; currency: string } | null,
+  xfx?: { hasCrossAmount: boolean } | null,
+) {
+  return buildConfirmKeyboard(draftId, account, xfx);
 }
 
 /** master_roadmap: pick currency keyboard based on account type + wallet sub-type. */
@@ -608,23 +602,60 @@ function extractAmountFromText(input: string): string | null {
 }
 
 // Phase 2.4: Build preview card from draft data including account balance block.
+// Phase 2.4 PR12: full preview result — text + keyboard metadata
+interface ConfirmPreviewResult {
+  text: string;
+  /** Linked account for buildConfirmKeyboard, or null if no account. */
+  account: { id: string; name: string; currency: string } | null;
+  /** True when account currency differs from tx currency (cross-currency). */
+  isCrossCurrency: boolean;
+  /** True when account_debit_amount is already set on the draft. */
+  hasCrossAmount: boolean;
+}
+
 // Returns preview text or fallback if draft is not found.
 async function confirmPreview(
   workspaceId: string,
   userId: string,
   draftId: string,
 ): Promise<string> {
+  return (await confirmPreviewFull(workspaceId, userId, draftId)).text;
+}
+
+/**
+ * Full preview build: text + keyboard metadata.
+ * Used internally by ia:pk pick handler and ia:xfx flow (PR12).
+ */
+async function confirmPreviewFull(
+  workspaceId: string,
+  userId: string,
+  draftId: string,
+): Promise<ConfirmPreviewResult> {
   const draft = await getDraftFields(workspaceId, userId, draftId);
-  if (!draft) return '📝 Готово. Подтвердите или отклоните транзакцию:';
+  if (!draft) {
+    return {
+      text: '📝 Готово. Подтвердите или отклоните транзакцию:',
+      account: null,
+      isCrossCurrency: false,
+      hasCrossAmount: false,
+    };
+  }
 
   // ── Phase 2.4: Account balance block ─────────────────────────────────
-  // If draft has a linked account, fetch it and build the math block.
-  // SEC-02: No float arithmetic — all amounts are NUMERIC strings passed
-  //         to buildAccountBalanceBlock() which uses BigInt arithmetic.
   let accountBlock: AccountBalanceBlock | null = null;
+  let linkedAccount: { id: string; name: string; currency: string } | null = null;
+  let isCrossCurrency = false;
+  let hasCrossAmount  = false;
+
   if (draft.account_id) {
     const acct = await getAccountWithBalance(workspaceId, userId, draft.account_id);
     if (acct) {
+      linkedAccount = { id: acct.id, name: escapeHtml(acct.name), currency: acct.currency };
+
+      // Cross-currency: account currency differs from tx currency
+      isCrossCurrency = !!draft.parsed_currency && acct.currency !== draft.parsed_currency;
+      hasCrossAmount  = !!draft.account_debit_amount;
+
       // Debit amount: use explicit cross-currency override if set, else parsed_amount.
       const debitAmount   = draft.account_debit_amount ?? draft.parsed_amount ?? '0';
       const debitCurrency = draft.account_debit_currency ?? acct.currency;
@@ -639,7 +670,7 @@ async function confirmPreview(
     }
   }
 
-  return buildPreviewScreen({
+  const text = buildPreviewScreen({
     intent:       draft.parsed_intent,
     amount:       draft.parsed_amount,
     currency:     draft.parsed_currency,
@@ -648,7 +679,22 @@ async function confirmPreview(
     itemName:     draft.item_name ? escapeHtml(draft.item_name) : null,
     accountBlock,
   });
+
+  return { text, account: linkedAccount, isCrossCurrency, hasCrossAmount };
 }
+
+/**
+ * Build the correct InlineKeyboard for a draft preview card.
+ * Reads account + cross-currency state directly from confirmPreviewFull result.
+ */
+function confirmKbForDraft(draftId: string, res: ConfirmPreviewResult) {
+  const xfx = res.isCrossCurrency
+    ? { hasCrossAmount: res.hasCrossAmount }
+    : null;
+  return confirmKb(draftId, res.account, xfx);
+}
+
+
 
 
 /**
@@ -1347,7 +1393,7 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
               request.log.info({ msg: '[midas:bot:webhook] ia: account selected', workspaceId: iaResolved.workspaceId });
             }
 
-          // ── Phase 2.4: ia:pk — user picked account from V2 picker ────────
+          // ── Phase 2.4: ia:pk — user picked account from V2/full picker ──
           } else if (iaCmd.cmd === 'pick') {
             // SEC-01: IDOR guard — validate accountId belongs to this workspace.
             const pickedAcct = await getAccountById(iaResolved.workspaceId, iaResolved.userId, iaCmd.accountId);
@@ -1358,11 +1404,11 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
                 { inline_keyboard: [] },
               );
             } else {
-              // Link account to draft, then re-render preview with balance block.
+              // Link account to draft, then re-render preview with account row + xfx button.
               await setDraftAccountId(iaResolved.workspaceId, iaResolved.userId, iaCmd.draftId, pickedAcct.id);
               if (iaMsgId) {
-                const previewText = await confirmPreview(iaResolved.workspaceId, iaResolved.userId, iaCmd.draftId);
-                void editMessageText(chatId, iaMsgId, previewText, confirmKb(iaCmd.draftId));
+                const previewRes = await confirmPreviewFull(iaResolved.workspaceId, iaResolved.userId, iaCmd.draftId);
+                void editMessageText(chatId, iaMsgId, previewRes.text, confirmKbForDraft(iaCmd.draftId, previewRes));
                 try { await redisConnection.set(`midas:preview:${iaCmd.draftId}`, iaMsgId, 'EX', 3600); } catch { /* non-fatal */ }
               }
               request.log.info({ msg: '[midas:bot:webhook] ia:pk: account picked', workspaceId: iaResolved.workspaceId });
@@ -1402,7 +1448,44 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
               );
             }
             request.log.info({ msg: '[midas:bot:webhook] ia:delink: account delinked → full picker shown', workspaceId: iaResolved.workspaceId });
+
+          // ── Phase 2.4 PR12: ia:xfx — user tapped "✏️ Указать сумму в {cur}" ──
+          } else if (iaCmd.cmd === 'xfx') {
+            // Save the cross-currency input pointer in Redis so the next free-text
+            // message from this user/chat is captured as the debit amount.
+            const xfxKey = xfxRedisKey(iaResolved.userId, chatId);
+            try { await redisConnection.set(xfxKey, iaCmd.draftId, 'EX', 600); } catch { /* non-fatal */ }
+
+            // Show the cross-currency input screen.
+            const xfxDraft = await getDraftFields(iaResolved.workspaceId, iaResolved.userId, iaCmd.draftId);
+            if (iaMsgId && xfxDraft?.account_id) {
+              const acct = await getAccountWithBalance(iaResolved.workspaceId, iaResolved.userId, xfxDraft.account_id);
+              if (acct) {
+                const xfxText = buildCrossCurrencyInputText(
+                  xfxDraft.parsed_amount ?? '?',
+                  xfxDraft.parsed_currency ?? '?',
+                  escapeHtml(acct.name),
+                  acct.currency,
+                );
+                void editMessageText(chatId, iaMsgId, xfxText, buildCrossCurrencyInputKeyboard(iaCmd.draftId));
+              }
+            }
+            request.log.info({ msg: '[midas:bot:webhook] ia:xfx: cross-currency input screen shown', workspaceId: iaResolved.workspaceId });
+
+          // ── Phase 2.4 PR12: ia:xfx_back — user tapped "◀️ Назад" on xfx screen ──
+          } else if (iaCmd.cmd === 'xfx_back') {
+            // Delete the Redis pointer so free-text returns to normal flow.
+            const xfxKey = xfxRedisKey(iaResolved.userId, chatId);
+            try { await redisConnection.del(xfxKey); } catch { /* non-fatal */ }
+
+            // Restore the draft card preview.
+            if (iaMsgId) {
+              const previewRes = await confirmPreviewFull(iaResolved.workspaceId, iaResolved.userId, iaCmd.draftId);
+              void editMessageText(chatId, iaMsgId, previewRes.text, confirmKbForDraft(iaCmd.draftId, previewRes));
+            }
+            request.log.info({ msg: '[midas:bot:webhook] ia:xfx:back: cross-currency input cancelled', workspaceId: iaResolved.workspaceId });
           }
+
         } catch (err: unknown) {
           const errorClass = err instanceof Error ? err.constructor.name : 'UnknownError';
           request.log.error({ msg: '[midas:bot:webhook] ia: callback failed', callbackId: cq.id, errorClass });
@@ -3917,11 +4000,94 @@ Midas создан, чтобы сделать учет денег максима
       }
     }
 
+    // ── Step 5f-xfx: Phase 2.4 PR12 — cross-currency debit amount intercept ──
+    // If user is in the xfx input state (tapped "✏️ Указать сумму"), intercept
+    // their next text message as the cross-currency debit amount.
+    // Runs BEFORE clarification-intercept and AI parse.
+    if (!commandToken) {
+      let xfxResolved: { workspaceId: string; userId: string } | null = null;
+      // Redis key pattern: midas:xfx:ptr:{internalUserId}:{chatId}
+      // We don't know internalUserId yet, so use KEYS wildcard on chatId.
+      const xfxCandidateKey = `midas:xfx:ptr:*:${chatId}`;
+      const xfxKeys = await redisConnection.keys(xfxCandidateKey).catch(() => [] as string[]);
+      const xfxPointerKey = xfxKeys[0] ?? null;
+
+      if (xfxPointerKey) {
+        const xfxDraftId = await redisConnection.get(xfxPointerKey).catch(() => null);
+        if (xfxDraftId && /^[0-9A-Z]{26}$/.test(xfxDraftId) && message.text) {
+          try {
+            xfxResolved = await resolveWorkspace(telegramUserId, chatId);
+          } catch { /* workspace not found — fall through */ }
+
+          if (xfxResolved) {
+            // Validate amount (SEC-02: no float, use validateAmountString)
+            const { validateAmountString } = await import('../services/clarification.service.js');
+            const rawInput = message.text.trim().replace(/[,\s]/g, '');  // "920 000" → "920000"
+            const validAmount = validateAmountString(rawInput);
+
+            if (!validAmount) {
+              // Invalid — prompt user again, don't consume the intercept
+              void upsertBotMessage(telegramUserId, chatId,
+                '⚠️ Не понял сумму. Напиши числом, например: <code>920000</code>',
+              );
+              await reply.status(200).send({ ok: true });
+              return;
+            }
+
+            // Fetch draft to get account currency
+            const xfxDraft = await getDraftFields(xfxResolved.workspaceId, xfxResolved.userId, xfxDraftId);
+            const xfxAcct  = xfxDraft?.account_id
+              ? await getAccountWithBalance(xfxResolved.workspaceId, xfxResolved.userId, xfxDraft.account_id)
+              : null;
+
+            if (!xfxDraft || !xfxAcct) {
+              // Draft or account gone — clear intercept and fall through
+              await redisConnection.del(xfxPointerKey).catch(() => {/* non-fatal */});
+            } else {
+              // Save the debit amount
+              const { patchDraftDebitAmount } = await import('../services/clarification.service.js');
+              const patchRes = await patchDraftDebitAmount(
+                xfxResolved.workspaceId, xfxResolved.userId, xfxDraftId,
+                validAmount, xfxAcct.currency,
+              );
+
+              // Clear the intercept key regardless of patch result
+              await redisConnection.del(xfxPointerKey).catch(() => {/* non-fatal */});
+
+              if (patchRes.status !== 'ready') {
+                void upsertBotMessage(telegramUserId, chatId,
+                  '⚠️ Не удалось сохранить сумму. Попробуй ещё раз.',
+                );
+                await reply.status(200).send({ ok: true });
+                return;
+              }
+
+              // Restore preview card with updated math block + xfx button
+              const previewMsgId = await redisConnection.get(`midas:preview:${xfxDraftId}`).catch(() => null);
+              if (previewMsgId) {
+                const previewRes = await confirmPreviewFull(xfxResolved.workspaceId, xfxResolved.userId, xfxDraftId);
+                void editMessageText(chatId, previewMsgId, previewRes.text, confirmKbForDraft(xfxDraftId, previewRes));
+              } else {
+                // Fallback: send new message if card not in Redis
+                const previewRes = await confirmPreviewFull(xfxResolved.workspaceId, xfxResolved.userId, xfxDraftId);
+                void upsertBotMessage(telegramUserId, chatId, previewRes.text, confirmKbForDraft(xfxDraftId, previewRes));
+              }
+
+              request.log.info({ msg: '[midas:bot:webhook] xfx: debit amount saved', workspaceId: xfxResolved.workspaceId });
+              await reply.status(200).send({ ok: true });
+              return;
+            }
+          }
+        }
+      }
+    }
+
     // ── Step 5f-clar: Phase 1.32 — clarification amount text intercept ────
     // If user is in the midas:clar: state (bot asked «Сколько?»), intercept
     // their next text message as the new amount.
     // Runs BEFORE ia: intercept, BEFORE ac: onboarding, BEFORE edit, BEFORE AI parse.
     if (!commandToken) {
+
 
       const clarIntKey = clarStateKey(telegramUserId, chatId);
       const clarIntState = await redisConnection.get(clarIntKey);

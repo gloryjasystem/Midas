@@ -10,12 +10,12 @@
 | Параметр | Значение |
 |---|---|
 | **PHASE** | `2.4 — Account-Aware Draft Card` |
-| **STEP** | `PR 2 — MERGED ✅. Следующий: PR 3 — расширить DraftFields в clarification.service.ts` |
-| **AGENT STATUS** | `ACTIVE. Phase 2.4 PR 2 выполнен. getAccountWithBalance() + getWorkspaceAccountsWithBalances() + AccountWithBalance interface добавлены в account.service.ts. TypeScript typecheck 0 ошибок. GitHub PR #2 создан и слит в main (squash). Ветка feature/phase-2.4-pr2-ts-types удалена после мержа.` |
-| **DEPLOYMENT** | `Railway (spirited-happiness project)` — `Midas` bot service + `background-workers` service + `Postgres` + `Redis` |
-| **LAST COMPLETED** | `Phase 2.4 PR 2 — getAccountWithBalance + getWorkspaceAccountsWithBalances (+ AccountWithBalance interface) добавлены в account.service.ts. tsc 0 ошибок. GitHub PR #2 merged squash 7cc8528 → main.` |
+| **STEP** | `PR 10 — MERGED ✅. ✨ Phase 2.4 ПОЛНОСТЬЮ ЗАВЕРШЕНА (PR 1–10). Все 10 PR смержены в main. Деплой готов к запуску.` |
+| **AGENT STATUS** | `DONE. Phase 2.4 PR 10 выполнен. sendAndStorePreview() обновлён: авто-пикер V2 при AI parse (draft.account_id=null И accounts>0). tsc 0 ошибок. GitHub PR #10 merged squash 0ec7337 → main.` |
+| **DEPLOYMENT** | `Railway (spirited-happiness project)` — `Midas` ✅ Online · `background-workers` ✅ Online · `Postgres` ✅ · `Redis` ✅. Phase 2.4 build deployed 2026-05-12T17:23 UTC. Health: https://midas-production-f4f1.up.railway.app/health → {"status":"ok"} |
+| **LAST COMPLETED** | `Phase 2.4 COMPLETE — PR 1–10 merged, deployed to Railway production. tsc 0 ошибок. 76/76 smoke. Health OK.` |
 | **BLOCKER** | None. |
-| **NEXT ACTION** | PR 3 — clarification.service.ts: расширить DraftFields (добавить account_id, account_debit_amount, account_debit_currency), обновить SQL-запрос в getDraftFields(). |
+| **NEXT ACTION** | E2E тестирование в продакшне: 1) отправить транзакцию боту → проверить picker V2; 2) выбрать счёт → проверить balance math block; 3) сменить счёт → проверить ia:delink → picker. |
 
 
 ---
@@ -443,7 +443,7 @@ CТАРТ: PR 1 (миграция БД) — самый безопасный пе
 | 2026-05-11 16:43 | **master_roadmap Phase 3 — Smoke Tests.** `smoke-test-master-roadmap.mjs` (NEW): 70 проверок, запуск `node apps/telegram-bot/smoke-test-master-roadmap.mjs` (против скомпилированного dist/). Покрыты все 14 сценариев. Результат: **70/70 ✅ / 0 ❌**. |
 | 2026-05-11 16:44 | **master_roadmap Phase 4 — Deploy.** Git commit `35c92e0` `feat(onboard): no-match screen, cur-search, flags, nav-arrows, button-free success [master_roadmap]`. Push → Railway auto-deploy. Status: Midas ● Online, background-workers ● Online. Deploy logs: clean start, Redis connected, no errors. |
 | 2026-05-12 15:05 | **workflow_state.md актуализирован. Тесты запущены.** `smoke-test-master-roadmap.mjs`: исправлен устаревший assert для `buildCurrencySearchNoResultsText`. Итог: 76/76 ✅. `smoke-test-lazy-default.mjs`: 39/39 ✅. `tsc --noEmit`: 0 ошибок. Phase LD++ полностью подтверждена. |
-| 2026-05-12 19:35 | **Phase 2.4 PR 2 - v������� � ������.** `account.service.ts`: �������� `AccountWithBalance` interface + `getAccountWithBalance()` + `getWorkspaceAccountsWithBalances()`. tsc 0 ������. GitHub PR #2 merged squash � main (commit 7cc8528). |
+| 2026-05-12 19:35 | **Phase 2.4 PR 2 - v������� � ������.** `account.service.ts`: �������� `AccountWithBalance` interface + `getAccountWithBalance()` + `getWorkspaceAccountsWithBalances()`. tsc 0 ������. GitHub PR #2 merged squash � main (commit 7cc8528). |
 | 2026-05-12 17:27 | **Phase 2.4 — UX Design сессия и планирование.** Спроектированы: черновик + математика баланса («🏦 Bybit USD» + «💳 15 400 − 10 000 = 5 400 USD»), пикер счетов (кнопка «🔄 Сменить счёт»), кросс-валюта (ввод суммы конвертации), confirmed card без кнопок Баланс/Отчёт. UX-изменения ia:list/ia:back из текущего чата ОТМЕНЕНЫ (кодовая база возвращена в stable). 16 атомарных PR спроектированы. Анализ конфликтов: 1 breaking change (PR 7 buildConfirmKeyboard), 1 новый Redis-префикс (midas:xfx:ptr). Полный план: `account_debit_ux_plan.md`. workflow_state.md обновлён. |
 
 
