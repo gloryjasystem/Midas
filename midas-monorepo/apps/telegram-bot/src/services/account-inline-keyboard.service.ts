@@ -55,8 +55,7 @@ const ULID_RE = /^[0-9A-Z]{26}$/;
 
 export type InlineAccountCmd =
   | { cmd: 'create'; draftId: string }
-  | { cmd: 'list';   draftId: string }
-  | { cmd: 'back';   draftId: string }
+  | { cmd: 'skip';   draftId: string }
   | { cmd: 'use';    accountId: string; draftId: string }
   | { cmd: 'fuzzy';  accountId: string; draftId: string }
   | { cmd: 'rename'; draftId: string };
@@ -67,8 +66,7 @@ export type InlineAccountCmd =
  *
  * Valid formats:
  *   ia:create:{ULID}
- *   ia:list:{ULID}
- *   ia:back:{ULID}
+ *   ia:skip:{ULID}
  *   ia:use:{ULID}:{ULID}
  *   ia:fuzzy:{ULID}:{ULID}
  *   ia:rename:{ULID}
@@ -85,16 +83,10 @@ export function parseInlineAccountCallback(data: string): InlineAccountCmd | nul
     return { cmd: 'create', draftId };
   }
 
-  if (sub === 'list' && parts.length === 3) {
+  if (sub === 'skip' && parts.length === 3) {
     const draftId = parts[2] ?? '';
     if (!ULID_RE.test(draftId)) return null;
-    return { cmd: 'list', draftId };
-  }
-
-  if (sub === 'back' && parts.length === 3) {
-    const draftId = parts[2] ?? '';
-    if (!ULID_RE.test(draftId)) return null;
-    return { cmd: 'back', draftId };
+    return { cmd: 'skip', draftId };
   }
 
   if (sub === 'rename' && parts.length === 3) {
@@ -137,7 +129,7 @@ export function buildNoMatchKeyboard(
     inline_keyboard: [
       [{ text: `✅ Создать «${suggestedName}» (${currency})`, callback_data: `ia:create:${draftId}` }],
       [{ text: '✏️ Другое название',                          callback_data: `ia:rename:${draftId}` }],
-      [{ text: '🗂 Выбрать счёт',                             callback_data: `ia:list:${draftId}` }],
+      [{ text: '📋 Записать без счёта',                       callback_data: `ia:skip:${draftId}` }],
     ],
   };
 }
@@ -154,7 +146,7 @@ export function buildFuzzyMatchKeyboard(
   return {
     inline_keyboard: [
       [{ text: `✅ Да, «${matchedName}»`, callback_data: `ia:fuzzy:${accountId}:${draftId}` }],
-      [{ text: '🗂 Другой счёт',          callback_data: `ia:list:${draftId}` }],
+      [{ text: '🏦 Другой счёт',          callback_data: `ia:skip:${draftId}` }],
     ],
   };
 }
@@ -168,13 +160,13 @@ export function buildAccountPickerKeyboard(
   draftId: string,
   accounts: Array<{ id: string; name: string; currency: string }>,
 ): InlineKeyboardMarkup {
-  const rows = accounts.slice(0, 90).map((acc) => [
+  const rows = accounts.slice(0, 6).map((acc) => [
     {
       text: `🏦 ${acc.name} (${acc.currency})`,
       callback_data: `ia:use:${acc.id}:${draftId}`,
     },
   ]);
-  rows.push([{ text: '◀️ Назад', callback_data: `ia:back:${draftId}` }]);
+  rows.push([{ text: '📋 Без счёта', callback_data: `ia:skip:${draftId}` }]);
   return { inline_keyboard: rows };
 }
 
@@ -210,4 +202,7 @@ export function fuzzyMatchText(hintName: string, matchedName: string): string {
  */
 export const ACCOUNT_PICKER_TEXT = '📝 Транзакция распознана.\nС какого счёта?';
 
-
+/**
+ * Prompt for custom account name input (rename sub-flow).
+ */
+export const RENAME_PROMPT = '✏️ Как назовём счёт?';
