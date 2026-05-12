@@ -15,12 +15,13 @@
  * Phase 2.4: DraftFields extended with account_id, account_debit_amount,
  *   account_debit_currency. getDraftFields() SQL updated accordingly.
  *   These fields drive the Account-Aware Draft Card (PR 6, PR 9, PR 11).
- *   patchDraftAccount() — user tapped an account picker button (ia:acc:* or ia:acc:pick:*)
+ *   patchDraftAccount()      — user tapped an account picker button (ia:acc:pick:*)
+ *   patchDraftDebitAmount()  — user entered cross-currency debit amount (ia:acc:xfx:*)
  *
  * SEC-01: intent validated against canonical enum; categoryId validated against DB.
  *         accountId validated against account_sources (IDOR guard — PR 4).
  * SEC-02: amountStr validated against NUMERIC regex before any DB write.
- *         account_debit_amount returned as TEXT via ::TEXT cast (NUMERIC precision).
+ *         account_debit_amount written as $val::NUMERIC (read back as ::TEXT — PR 3).
  * SEC-03: All DB operations use withTenantTransaction for RLS isolation.
  * SEC-12: Raw text inputs NOT logged. Account names never logged.
  */
@@ -450,6 +451,118 @@ export async function patchDraftAccount(
            updated_at = NOW()
        WHERE id = $2 AND workspace_id = $3`,
       [accountId, draftId, workspaceId],
+    );
+
+    return { status: 'ready', draftId };
+  });
+}
+
+// ─────────────────────────────────────────────────────────────
+// patchDraftDebitAmount — Phase 2.4 Account-Aware Draft Card (PR 5)
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Patch account_debit_amount and account_debit_currency on a draft.
+ *
+ * Used in the cross-currency scenario: when the linked account's currency
+ * differs from the transaction's parsed_currency, the user enters an explicit
+ * debit amount in the account's currency.
+ *
+ * Example: transaction is 500 USD (parsed_amount='500', parsed_currency='USD'),
+ * account is Bybit USDT — user enters '501.5' USDT as the debit amount.
+ * Stored as: account_debit_amount='501.5', account_debit_currency='USDT'.
+ *
+ * Both fields are written atomically in a single UPDATE.
+ * Passing amountStr=null + currency=null clears both fields (reset the override).
+ * Passing a non-null amountStr without currency (or vice-versa) is rejected as
+ * invalid_input — the two fields are inseparable.
+ *
+ * NUMERIC precision: amountStr is written as $val::NUMERIC to Postgres.
+ * On read it is returned as TEXT via getDraftFields() (::TEXT cast, PR 3).
+ * No floating-point math ever occurs in the service layer (SEC-02).
+ *
+ * @param workspaceId - Internal workspace ULID (trusted backend, SEC-03)
+ * @param userId      - Internal user ULID (required by withTenantTransaction)
+ * @param draftId     - ULID of the draft to patch
+ * @param amountStr   - Validated NUMERIC string (e.g. '501.5'), or null to clear
+ * @param currency    - Validated currency code (e.g. 'USDT'), or null to clear
+ *
+ * @returns 'ready'         — fields patched successfully
+ * @returns 'not_found'     — draft not found or expired
+ * @returns 'wrong_state'   — draft not in pending_user or needs_clarification
+ * @returns 'invalid_input' — amountStr/currency mismatch (one null, one non-null)
+ *                            or amountStr/currency fail validation
+ *
+ * SEC-02: amountStr validated by validateAmountString() before any DB write.
+ *         currency validated by validateCurrencyCode() before any DB write.
+ *         amountStr written as $val::NUMERIC (not TEXT) for DB-level precision.
+ * SEC-03: withTenantTransaction enforces RLS + explicit workspace_id filter.
+ * SEC-12: No values logged.
+ */
+
+export type PatchDebitAmountResult =
+  | PatchDraftResult
+  | { status: 'invalid_input'; reason: 'amount_currency_mismatch' | 'invalid_amount' | 'invalid_currency' };
+
+export async function patchDraftDebitAmount(
+  workspaceId: string,
+  userId: string,
+  draftId: string,
+  amountStr: string | null,
+  currency: string | null,
+): Promise<PatchDebitAmountResult> {
+  // ── Input validation (SEC-02 / SEC-01) ────────────────────────────────────
+
+  // Both must be null together (clear) or both non-null (set).
+  const bothNull = amountStr === null && currency === null;
+  const bothSet = amountStr !== null && currency !== null;
+  if (!bothNull && !bothSet) {
+    return { status: 'invalid_input', reason: 'amount_currency_mismatch' };
+  }
+
+  let validatedAmount: string | null = null;
+  let validatedCurrency: string | null = null;
+
+  if (bothSet) {
+    // Validate amount (SEC-02)
+    validatedAmount = validateAmountString(amountStr!);
+    if (validatedAmount === null) {
+      return { status: 'invalid_input', reason: 'invalid_amount' };
+    }
+    // Validate currency (SEC-01)
+    validatedCurrency = validateCurrencyCode(currency!);
+    if (validatedCurrency === null) {
+      return { status: 'invalid_input', reason: 'invalid_currency' };
+    }
+  }
+
+  // ── DB write ───────────────────────────────────────────────────
+  return withTenantTransaction(workspaceId, userId, async (client) => {
+    const row = await client.query<{ id: string; status: string; expires_at: string }>(
+      `SELECT id, status, expires_at
+       FROM transaction_drafts
+       WHERE id = $1 AND workspace_id = $2
+       FOR UPDATE SKIP LOCKED`,
+      [draftId, workspaceId],
+    );
+
+    if (row.rows.length === 0) return { status: 'not_found' };
+    const draft = row.rows[0];
+    if (!draft) return { status: 'not_found' };
+    if (!['pending_user', 'needs_clarification'].includes(draft.status)) {
+      return { status: 'wrong_state' };
+    }
+    if (new Date(draft.expires_at) <= new Date()) return { status: 'not_found' };
+
+    // Write amount as ::NUMERIC for DB-level precision (SEC-02).
+    // NULL is written as-is (clears the column).
+    await client.query(
+      `UPDATE transaction_drafts
+       SET account_debit_amount   = $1::NUMERIC,
+           account_debit_currency = $2,
+           updated_at             = NOW()
+       WHERE id = $3 AND workspace_id = $4`,
+      [validatedAmount, validatedCurrency, draftId, workspaceId],
     );
 
     return { status: 'ready', draftId };
