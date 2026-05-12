@@ -1244,8 +1244,8 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
             }
             request.log.info({ msg: '[midas:bot:webhook] ia: account created inline', workspaceId: iaResolved.workspaceId });
 
-          } else {
-            // iaCmd.cmd === 'use' | 'fuzzy' — user selected an existing account.
+          } else if (iaCmd.cmd === 'use' || iaCmd.cmd === 'fuzzy') {
+            // user selected an existing account.
             // SEC-01: Validate accountId belongs to this workspace before using.
             const acct = await getAccountById(iaResolved.workspaceId, iaResolved.userId, iaCmd.accountId);
             if (!acct) {
