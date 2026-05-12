@@ -1,5 +1,5 @@
 /**
- * Account Service — Phase 1.14 + Phase 1.17 + Phase 1.24 + Phase 1.30 + Phase LD++
+ * Account Service — Phase 1.14 + Phase 1.17 + Phase 1.24 + Phase 1.30 + Phase LD++ + Phase 2.4
  *
  * Phase 1.14: Read-only list of account_sources for a workspace.
  * Phase 1.17: addAccount() — strict-format write path for /add_account command.
@@ -9,6 +9,9 @@
  * Phase 1.30: hasAccounts() — lightweight count query for empty-state detection.
  *             addAccountWithCurrency() — like addAccount() but accepts explicit
  *             currency for the guided onboarding flow (overrides workspace default).
+ * Phase 2.4: getAccountWithBalance() — single account with computed current balance.
+ *            getWorkspaceAccountsWithBalances() — all accounts with balances,
+ *            default account first, for the Account Picker keyboard.
  *
  * Scope:
  *   - getAccountList(): read-only, flat list sorted by type, name.
@@ -1029,6 +1032,234 @@ export async function softDeleteAccount(
       );
 
       return 'ok';
+    },
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// getAccountWithBalance — Phase 2.4 (Account-Aware Draft Card)
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Account row extended with the computed current balance.
+ *
+ * balance is the all-time net balance of the account:
+ *   initial_balance
+ *   + SUM(income transactions)
+ *   - SUM(expense transactions)
+ *   (using the signed formula from balance.service.ts)
+ *
+ * Returned as a string to preserve NUMERIC precision (SEC-02).
+ * NULL means the account has no transactions yet — caller should display
+ * initial_balance (which is also returned as a string).
+ */
+export interface AccountWithBalance {
+  id: string;
+  name: string;
+  currency: string;
+  type: string;
+  /** Computed current balance as a NUMERIC string (e.g. "15400.0000"). */
+  balance: string;
+  /** True if this is the workspace default expense account. */
+  isExpenseDefault: boolean;
+  /** True if this is the workspace default income account. */
+  isIncomeDefault: boolean;
+}
+
+/**
+ * Fetch a single account with its computed current balance.
+ *
+ * Balance formula (mirrors balance.service.ts — single source of truth):
+ *   initial_balance
+ *   + SUM(CASE WHEN intent IN ('income','debt_received') THEN base_amount ELSE -base_amount END)
+ *   WHERE deleted_at IS NULL AND account_id = $accountId
+ *
+ * Returns null if the account does not exist in the workspace or is deleted.
+ *
+ * Used by confirmPreview() (PR 9) to show the math block in the draft card.
+ *
+ * SEC-01: accountId validated against workspace (explicit workspace_id filter).
+ * SEC-02: balance computed in SQL NUMERIC — no float arithmetic.
+ * SEC-03: withTenantTransaction (RLS enforced) + explicit workspace_id.
+ * SEC-12: Account names NOT logged.
+ *
+ * @param workspaceId - Internal workspace ULID
+ * @param userId      - Internal user ULID (required by withTenantTransaction)
+ * @param accountId   - Account ULID (pre-validated via IDOR guard in caller)
+ */
+export async function getAccountWithBalance(
+  workspaceId: string,
+  userId: string,
+  accountId: string,
+): Promise<AccountWithBalance | null> {
+  return withTenantTransaction<AccountWithBalance | null>(
+    workspaceId,
+    userId,
+    async (client) => {
+      const res = await client.query<{
+        id: string;
+        name: string;
+        currency: string;
+        type: string;
+        balance: string;
+        is_expense_default: boolean;
+        is_income_default: boolean;
+      }>(
+        `SELECT
+           a.id,
+           a.name,
+           a.currency,
+           a.type,
+           (
+             a.initial_balance
+             + COALESCE(
+                 SUM(
+                   CASE
+                     WHEN t.transaction_intent IN ('income', 'debt_received')
+                       THEN t.base_amount
+                     ELSE -t.base_amount
+                   END
+                 ),
+                 0
+               )
+           )::TEXT AS balance,
+           (a.id = w.default_expense_account_id) AS is_expense_default,
+           (a.id = w.default_income_account_id)  AS is_income_default
+         FROM account_sources a
+         LEFT JOIN transactions t
+           ON t.account_id = a.id
+          AND t.base_currency = a.currency
+          AND t.deleted_at IS NULL
+         LEFT JOIN workspaces w
+           ON w.id = a.workspace_id
+         WHERE a.id = $1
+           AND a.workspace_id = $2
+           AND a.deleted_at IS NULL
+         GROUP BY a.id, a.name, a.currency, a.type, a.initial_balance,
+                  w.default_expense_account_id, w.default_income_account_id`,
+        [accountId, workspaceId],
+      );
+
+      const row = res.rows[0];
+      if (!row) return null;
+
+      return {
+        id:               row.id,
+        name:             row.name,
+        currency:         row.currency,
+        type:             row.type,
+        balance:          row.balance,
+        isExpenseDefault: Boolean(row.is_expense_default),
+        isIncomeDefault:  Boolean(row.is_income_default),
+      };
+    },
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// getWorkspaceAccountsWithBalances — Phase 2.4 (Account Picker)
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Fetch all active accounts for the workspace with computed current balances.
+ *
+ * Ordering:
+ *   1. Default expense account first (if intent === 'expense' | 'debt_given' | 'transfer').
+ *   2. Default income account first  (if intent === 'income' | 'debt_received').
+ *   3. Remaining accounts sorted by name ASC.
+ *
+ * This is the data source for buildAccountPickerForDraft() (PR 11).
+ *
+ * Balance formula: identical to getAccountWithBalance() — mirrors balance.service.ts.
+ *
+ * intent is used ONLY for sort priority — it does NOT filter accounts.
+ * All accounts are returned regardless of intent so the user can pick any.
+ *
+ * Returns an empty array if the workspace has no active accounts.
+ *
+ * SEC-02: balance computed in SQL NUMERIC — no float arithmetic.
+ * SEC-03: withTenantTransaction (RLS enforced) + explicit workspace_id.
+ * SEC-12: Account names NOT logged.
+ *
+ * @param workspaceId - Internal workspace ULID
+ * @param userId      - Internal user ULID
+ * @param intent      - Transaction intent (used for sort priority only)
+ */
+export async function getWorkspaceAccountsWithBalances(
+  workspaceId: string,
+  userId: string,
+  intent: string | null,
+): Promise<AccountWithBalance[]> {
+  return withTenantTransaction<AccountWithBalance[]>(
+    workspaceId,
+    userId,
+    async (client) => {
+      // Determine which default FK column to sort first.
+      // expense/debt_given/transfer → prioritise expense default.
+      // income/debt_received       → prioritise income default.
+      // null / unknown             → no priority (sort by name).
+      const incomeIntents = new Set(['income', 'debt_received']);
+      const sortByIncome = intent !== null && incomeIntents.has(intent);
+
+      const res = await client.query<{
+        id: string;
+        name: string;
+        currency: string;
+        type: string;
+        balance: string;
+        is_expense_default: boolean;
+        is_income_default: boolean;
+      }>(
+        `SELECT
+           a.id,
+           a.name,
+           a.currency,
+           a.type,
+           (
+             a.initial_balance
+             + COALESCE(
+                 SUM(
+                   CASE
+                     WHEN t.transaction_intent IN ('income', 'debt_received')
+                       THEN t.base_amount
+                     ELSE -t.base_amount
+                   END
+                 ),
+                 0
+               )
+           )::TEXT AS balance,
+           (a.id = w.default_expense_account_id) AS is_expense_default,
+           (a.id = w.default_income_account_id)  AS is_income_default
+         FROM account_sources a
+         LEFT JOIN transactions t
+           ON t.account_id = a.id
+          AND t.base_currency = a.currency
+          AND t.deleted_at IS NULL
+         LEFT JOIN workspaces w
+           ON w.id = a.workspace_id
+         WHERE a.workspace_id = $1
+           AND a.deleted_at IS NULL
+         GROUP BY a.id, a.name, a.currency, a.type, a.initial_balance,
+                  w.default_expense_account_id, w.default_income_account_id
+         ORDER BY
+           CASE
+             WHEN $2 AND (a.id = w.default_income_account_id)  THEN 0
+             WHEN NOT $2 AND (a.id = w.default_expense_account_id) THEN 0
+             ELSE 1
+           END ASC,
+           a.name ASC`,
+        [workspaceId, sortByIncome],
+      );
+
+      return res.rows.map((row) => ({
+        id:               row.id,
+        name:             row.name,
+        currency:         row.currency,
+        type:             row.type,
+        balance:          row.balance,
+        isExpenseDefault: Boolean(row.is_expense_default),
+        isIncomeDefault:  Boolean(row.is_income_default),
+      }));
     },
   );
 }
