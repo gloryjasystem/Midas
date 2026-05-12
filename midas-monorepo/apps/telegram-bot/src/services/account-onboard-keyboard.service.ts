@@ -1482,10 +1482,14 @@ export const BAL_INPUT_PROMPT =
 
 /**
  * Context-aware balance prompt — shows name · CURRENCY in blockquote.
+ * Dedup: if name already ends with the currency (e.g. "Наличные PLN"),
+ * the currency suffix is omitted to avoid "Наличные PLN · PLN".
  */
 export function buildBalancePromptText(name: string, currency: string): string {
+  const nameEndsWithCur = name.trimEnd().toUpperCase().endsWith(currency.toUpperCase());
+  const header = nameEndsWithCur ? name : `${name} · ${currency}`;
   return (
-    `<blockquote>${name} · ${currency}</blockquote>\n` +
+    `<blockquote>${header}</blockquote>\n` +
     `💰 Какой начальный баланс?\n\n` +
     `<i>Введите сумму или пропустите</i>`
   );

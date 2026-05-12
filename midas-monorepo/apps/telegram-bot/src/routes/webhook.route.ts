@@ -467,13 +467,20 @@ function buildAccountAddedD4Text(
   portfolio: Array<{ name: string; currency: string; type: string }>,
   providerIconsMap: ReadonlyMap<string, string>,
 ): string {
+  // Dedup: if name already ends with currency (e.g. "Наличные PLN"), skip " · PLN"
+  const newNameEndsCur = newName.trimEnd().toUpperCase().endsWith(newCurrency.toUpperCase());
+  const headerCurPart = newNameEndsCur ? '' : ` · ${newCurrency}`;
   const balPart = newBalance !== undefined ? ` · ${newBalance} ${newCurrency}` : '';
   const portfolioLines = portfolio
-    .map((a) => `${getIconByName(a.name, providerIconsMap)} ${a.name} · ${a.currency}`)
+    .map((a) => {
+      const endsCur = a.name.trimEnd().toUpperCase().endsWith(a.currency.toUpperCase());
+      const curSuffix = endsCur ? '' : ` · ${a.currency}`;
+      return `${getIconByName(a.name, providerIconsMap)} ${a.name}${curSuffix}`;
+    })
     .join('\n');
   return (
     `✅ Счёт добавлен\n\n` +
-    `${newIcon} <b>${newName}</b> · ${newCurrency}${balPart}\n\n` +
+    `${newIcon} <b>${newName}</b>${headerCurPart}${balPart}\n\n` +
     `Напишите операцию — «продукты 800» или «зарплата 45 000».\n` +
     `Midas распознает сумму, тип и категорию автоматически.\n\n` +
     `<b>Все счета:</b>\n${portfolioLines}`
