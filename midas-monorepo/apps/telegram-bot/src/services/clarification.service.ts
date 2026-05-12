@@ -15,12 +15,14 @@
  * Phase 2.4: DraftFields extended with account_id, account_debit_amount,
  *   account_debit_currency. getDraftFields() SQL updated accordingly.
  *   These fields drive the Account-Aware Draft Card (PR 6, PR 9, PR 11).
+ *   patchDraftAccount() — user tapped an account picker button (ia:acc:* or ia:acc:pick:*)
  *
  * SEC-01: intent validated against canonical enum; categoryId validated against DB.
+ *         accountId validated against account_sources (IDOR guard — PR 4).
  * SEC-02: amountStr validated against NUMERIC regex before any DB write.
  *         account_debit_amount returned as TEXT via ::TEXT cast (NUMERIC precision).
  * SEC-03: All DB operations use withTenantTransaction for RLS isolation.
- * SEC-12: Raw text inputs NOT logged.
+ * SEC-12: Raw text inputs NOT logged. Account names never logged.
  */
 
 import { withTenantTransaction } from '@midas/database';
@@ -364,3 +366,92 @@ export async function patchDraftCurrency(
   });
 }
 
+// ─────────────────────────────────────────────────────────────
+// patchDraftAccount — Phase 2.4 Account-Aware Draft Card (PR 4)
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Patch account_id on a pending_user or needs_clarification draft.
+ *
+ * Called when the user selects an account from the account picker
+ * (callback_data: ia:acc:pick:<accountId>).
+ *
+ * Two-step write:
+ *   1. IDOR guard — verify the account exists, is not deleted,
+ *      and belongs to this workspace (prevents cross-workspace account injection).
+ *   2. Lock + state-check the draft, then UPDATE account_id.
+ *
+ * accountId = null is allowed: delinks the current account without setting a new one.
+ * Used by the "🔄 Сменить счёт" button to clear the selection before
+ * showing the picker again (idempotent, safe).
+ *
+ * Does NOT change draft.status — account selection is orthogonal to the
+ * amount/intent/category clarification state machine. The caller (webhook.route.ts)
+ * is responsible for re-rendering the draft card after this patch.
+ *
+ * @param workspaceId - Internal workspace ULID (trusted backend, SEC-03)
+ * @param userId      - Internal user ULID (required by withTenantTransaction)
+ * @param draftId     - ULID of the draft to patch
+ * @param accountId   - ULID of the account to link, or null to delink
+ *
+ * @returns 'ready'       — account_id patched successfully
+ * @returns 'not_found'   — draft not found/expired, or accountId IDOR check failed
+ * @returns 'wrong_state' — draft not in pending_user or needs_clarification
+ *
+ * SEC-01: accountId validated against account_sources (IDOR guard).
+ *         accountId=null bypasses the guard (delink is always safe).
+ * SEC-03: withTenantTransaction enforces RLS + explicit workspace_id filter.
+ * SEC-12: Account names never logged (only IDs are used).
+ */
+export async function patchDraftAccount(
+  workspaceId: string,
+  userId: string,
+  draftId: string,
+  accountId: string | null,
+): Promise<PatchDraftResult> {
+  return withTenantTransaction(workspaceId, userId, async (client) => {
+    // ── Step 1: IDOR guard (skip for null — delink is unconditionally safe) ──
+    if (accountId !== null) {
+      const accountCheck = await client.query<{ id: string }>(
+        `SELECT id FROM account_sources
+         WHERE id = $1
+           AND workspace_id = $2
+           AND deleted_at IS NULL`,
+        [accountId, workspaceId],
+      );
+      if (accountCheck.rows.length === 0) {
+        // Account does not exist, is deleted, or belongs to another workspace.
+        // Treat as not_found — safe fallback, no information leakage (SEC-01).
+        return { status: 'not_found' };
+      }
+    }
+
+    // ── Step 2: Lock draft + state/expiry check ──────────────────────────────
+    const row = await client.query<{ id: string; status: string; expires_at: string }>(
+      `SELECT id, status, expires_at
+       FROM transaction_drafts
+       WHERE id = $1 AND workspace_id = $2
+       FOR UPDATE SKIP LOCKED`,
+      [draftId, workspaceId],
+    );
+
+    if (row.rows.length === 0) return { status: 'not_found' };
+    const draft = row.rows[0];
+    if (!draft) return { status: 'not_found' };
+    if (!['pending_user', 'needs_clarification'].includes(draft.status)) {
+      return { status: 'wrong_state' };
+    }
+    if (new Date(draft.expires_at) <= new Date()) return { status: 'not_found' };
+
+    // ── Step 3: Patch account_id ─────────────────────────────────────────────
+    await client.query(
+      `UPDATE transaction_drafts
+       SET account_id = $1,
+           updated_at = NOW()
+       WHERE id = $2 AND workspace_id = $3`,
+      [accountId, draftId, workspaceId],
+    );
+
+    return { status: 'ready', draftId };
+  });
+}
