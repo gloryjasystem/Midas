@@ -62,6 +62,35 @@ export function formatAmount(raw: string | number | null | undefined): string {
   return s;
 }
 
+/**
+ * Phase 2.4 PR13: Calculate approximate exchange rate for display.
+ *
+ * rate = debitAmount / txAmount  (rounded to 2 decimal places)
+ * Example: calcRate('920000', '10000') = '~92.00'
+ *
+ * Returns null if either value is 0 or non-numeric.
+ * SEC-02: Uses BigInt scaled arithmetic — no floating-point.
+ */
+export function calcRate(txAmount: string, debitAmount: string): string | null {
+  try {
+    const toFixed4 = (s: string): string => {
+      const [int = '0', dec = ''] = s.split('.');
+      return `${int}.${dec.padEnd(4, '0').slice(0, 4)}`;
+    };
+    const [txInt, txDec]   = toFixed4(txAmount).split('.') as [string, string];
+    const [debInt, debDec] = toFixed4(debitAmount).split('.') as [string, string];
+    const txScaled  = BigInt(`${txInt}${txDec}`);
+    const debScaled = BigInt(`${debInt}${debDec}`);
+    if (txScaled === 0n || debScaled === 0n) return null;
+    const rateX100 = (debScaled * 100n) / txScaled;
+    const rateInt  = (rateX100 / 100n).toString();
+    const rateDec  = (rateX100 % 100n).toString().padStart(2, '0');
+    return `~${rateInt}.${rateDec}`;
+  } catch {
+    return null;
+  }
+}
+
 // ─────────────────────────────────────────────────────────────
 // Preview Screen
 // ─────────────────────────────────────────────────────────────
@@ -114,12 +143,18 @@ export function buildPreviewScreen(data: PreviewScreenData): string {
 
 export interface ConfirmedScreenData {
   intent: string | null;
-  amount: string;
-  currency: string;
+  amount: string;           // pre-escaped NUMERIC string (tx amount)
+  currency: string;         // tx currency, pre-escaped
   categoryName: string | null;
   accountName: string | null;
   itemName: string | null;  // Phase 1.35
-  transactionTime?: string | null; // ISO string — опционально для обратной совместимости
+  transactionTime?: string | null;
+  // ── Phase 2.4 PR 13: account balance snapshot fields ──────────────────────────
+  accountCurrency?: string | null;  // may differ from tx currency
+  balanceBefore?: string | null;    // NUMERIC string
+  balanceAfter?: string | null;     // NUMERIC string
+  debitAmount?: string | null;      // account-currency amount (cross-currency only)
+  debitCurrency?: string | null;    // currency of debitAmount
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -148,7 +183,7 @@ export function buildConfirmedScreen(data: ConfirmedScreenData): string {
   const emoji = intentEmoji(data.intent);
   const lines: string[] = ['✅ <b>Записано</b>', ''];
 
-  // ── Blockquote: amount + item name ───────────────────────────
+  // ── Blockquote: amount + item name ───────────────────────────────────
   const amountLine = `${emoji} <b>${escapeHtml(data.amount)} ${escapeHtml(data.currency)}</b>`;
   const blockContent = data.itemName
     ? `${amountLine}\n${escapeHtml(data.itemName)}`
@@ -156,22 +191,55 @@ export function buildConfirmedScreen(data: ConfirmedScreenData): string {
   lines.push(`<blockquote>${blockContent}</blockquote>`);
   lines.push('');
 
-  // ── Details: category · account ──────────────────────────────
+  // ── Details: category (· legacy accountName only without balance snapshot) ──
   const details: string[] = [];
   if (data.categoryName) details.push(`📁 ${escapeHtml(data.categoryName)}`);
-  if (data.accountName)  details.push(`🏦 ${escapeHtml(data.accountName)}`);
+  if (data.accountName && !data.balanceBefore) details.push(`🏦 ${escapeHtml(data.accountName)}`);
   if (details.length > 0) {
     lines.push(details.join('   ·   '));
   }
 
-  // ── Timestamp ─────────────────────────────────────────────────
+  // ── Timestamp ─────────────────────────────────────────────────────────
   if (data.transactionTime) {
     const ts = formatTransactionTime(data.transactionTime);
     if (ts) lines.push(`🕐 <i>${ts}</i>`);
   }
 
+  // ── Phase 2.4 PR13: «Итог» — balance snapshot block ──────────────────
+  if (data.accountName && data.balanceBefore != null) {
+    const acctCurrency = data.accountCurrency ?? data.currency;
+    const debitAmt     = data.debitAmount ?? data.amount;
+    const debitCur     = data.debitCurrency ?? acctCurrency;
+
+    lines.push('');
+    lines.push(`🏦 <b>${escapeHtml(data.accountName)}</b> ${escapeHtml(acctCurrency)}`);
+
+    // Cross-currency rate line (only when debitCurrency differs from txCurrency)
+    const isCross = !!data.debitAmount && !!data.debitCurrency && data.debitCurrency !== data.currency;
+    if (isCross) {
+      const rate = calcRate(data.amount, data.debitAmount!);
+      const rateSuffix = rate ? ` (${rate} ${data.debitCurrency}/${data.currency})` : '';
+      lines.push(`🔁 ${escapeHtml(data.amount)} ${escapeHtml(data.currency)} → ${formatAmount(data.debitAmount!)} ${escapeHtml(data.debitCurrency!)}${rateSuffix}`);
+    }
+
+    // Math line: balanceBefore ± debitAmt = balanceAfter
+    if (data.balanceAfter != null) {
+      const isIncome = data.intent === 'income' || data.intent === 'debt_received';
+      const sign     = isIncome ? '+' : '−';
+      const before   = formatAmount(data.balanceBefore!);
+      const debit    = formatAmount(debitAmt);
+      const after    = formatAmount(data.balanceAfter);
+      const afterIsNeg = data.balanceAfter.startsWith('-');
+      const afterFmt   = afterIsNeg
+        ? `⚠️ <b>${after} ${escapeHtml(debitCur)}</b>`
+        : `<b>${after} ${escapeHtml(debitCur)}</b>`;
+      lines.push(`Итог: ${before} ${sign} ${debit} = ${afterFmt}`);
+    }
+  }
+
   return lines.join('\n');
 }
+
 
 // ─────────────────────────────────────────────────────────────
 // Status Screens
