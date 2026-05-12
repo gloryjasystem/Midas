@@ -638,3 +638,76 @@ export async function markReminderSent(draftIds: string[]): Promise<void> {
     [draftIds],
   );
 }
+
+// ─────────────────────────────────────────────────────────────
+// Phase 2.4 PR15: Account balance for preview card
+// ─────────────────────────────────────────────────────────────
+
+export interface AccountBalanceForPreview {
+  accountId: string;
+  accountName: string;
+  accountCurrency: string;
+  balance: string;           // NUMERIC string: initial_balance + all matched-currency txs
+}
+
+/**
+ * Fetch balance + name + currency for an account (for preview card balance block).
+ *
+ * Uses the same D1-D3 formula as balance.service.ts:
+ *   balance = initial_balance
+ *           + SUM(income + debt_received WHERE base_currency = acct.currency)
+ *           - SUM(expense + debt_given WHERE base_currency = acct.currency)
+ *
+ * transfer is excluded (D3 neutral).
+ * SEC-02: All arithmetic in PostgreSQL NUMERIC — no JS float.
+ * SEC-03: explicit workspace_id filter (no RLS dependency in background worker).
+ *
+ * Returns null if account not found / deleted.
+ */
+export async function getAccountBalanceForPreview(
+  workspaceId: string,
+  accountId: string,
+): Promise<AccountBalanceForPreview | null> {
+  const result = await pool.query<{
+    id: string;
+    name: string;
+    currency: string;
+    balance: string;
+  }>(
+    `SELECT
+       a.id,
+       a.name,
+       a.currency,
+       (
+         a.initial_balance
+         + COALESCE(SUM(CASE
+             WHEN t.transaction_intent IN ('income', 'debt_received')
+              AND t.base_currency = a.currency
+             THEN t.base_amount END), 0)
+         - COALESCE(SUM(CASE
+             WHEN t.transaction_intent IN ('expense', 'debt_given')
+              AND t.base_currency = a.currency
+             THEN t.base_amount END), 0)
+       )::TEXT AS balance
+     FROM account_sources a
+     LEFT JOIN transactions t
+       ON t.account_id = a.id
+      AND t.workspace_id = $1
+      AND t.deleted_at IS NULL
+     WHERE a.id = $2
+       AND a.workspace_id = $1
+       AND a.deleted_at IS NULL
+     GROUP BY a.id, a.name, a.currency, a.initial_balance`,
+    [workspaceId, accountId],
+  );
+
+  const row = result.rows[0];
+  if (!row) return null;
+
+  return {
+    accountId: row.id,
+    accountName: row.name,
+    accountCurrency: row.currency,
+    balance: row.balance,
+  };
+}
