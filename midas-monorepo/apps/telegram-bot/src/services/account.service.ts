@@ -1168,14 +1168,20 @@ export async function getAccountWithBalance(
  *   2. Default income account first  (if intent === 'income' | 'debt_received').
  *   3. Remaining accounts sorted by name ASC.
  *
- * This is the data source for buildAccountPickerForDraft() (PR 11).
+ * Phase 2.4: This is the primary data source for buildAccountPickerV2Keyboard (PR 7).
+ * Use toAccountPickerEntries() (below) to convert the result for the keyboard builder.
+ *
+ * Phase 2.4 filter: onboarding placeholder accounts are EXCLUDED
+ * (`is_onboarding_placeholder = FALSE`). Placeholders are workspace-internal
+ * accounts created during lazy-default onboarding; they should never appear
+ * in the user-facing transaction picker.
  *
  * Balance formula: identical to getAccountWithBalance() — mirrors balance.service.ts.
  *
  * intent is used ONLY for sort priority — it does NOT filter accounts.
- * All accounts are returned regardless of intent so the user can pick any.
+ * All non-placeholder accounts are returned so the user can pick any.
  *
- * Returns an empty array if the workspace has no active accounts.
+ * Returns an empty array if the workspace has no active non-placeholder accounts.
  *
  * SEC-02: balance computed in SQL NUMERIC — no float arithmetic.
  * SEC-03: withTenantTransaction (RLS enforced) + explicit workspace_id.
@@ -1239,6 +1245,7 @@ export async function getWorkspaceAccountsWithBalances(
            ON w.id = a.workspace_id
          WHERE a.workspace_id = $1
            AND a.deleted_at IS NULL
+           AND a.is_onboarding_placeholder = FALSE
          GROUP BY a.id, a.name, a.currency, a.type, a.initial_balance,
                   w.default_expense_account_id, w.default_income_account_id
          ORDER BY
@@ -1262,6 +1269,37 @@ export async function getWorkspaceAccountsWithBalances(
       }));
     },
   );
+}
+
+// ─────────────────────────────────────────────────────────────
+// toAccountPickerEntries — Phase 2.4 adapter
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Convert `AccountWithBalance[]` to `AccountPickerEntry[]`.
+ *
+ * This adapter decouples the two types:
+ *   - `AccountWithBalance` is the service-layer result (id, name, currency, type, balance, isXxxDefault)
+ *   - `AccountPickerEntry` is the UI-layer contract (id, name, currency, balance) imported by
+ *     `buildAccountPickerV2Keyboard` in account-inline-keyboard.service.ts.
+ *
+ * Caller is responsible for HTML-escaping names before passing to keyboard builders.
+ * Here we return raw names (pre-escaping happens in the webhook handler at call site).
+ *
+ * Pure function — no I/O, no side effects. Safe to call on empty arrays.
+ *
+ * @param accounts - Result from getWorkspaceAccountsWithBalances()
+ * @returns Array of AccountPickerEntry ready for buildAccountPickerV2Keyboard()
+ */
+export function toAccountPickerEntries(
+  accounts: AccountWithBalance[],
+): Array<{ id: string; name: string; currency: string; balance: string }> {
+  return accounts.map((a) => ({
+    id:       a.id,
+    name:     a.name,
+    currency: a.currency,
+    balance:  a.balance,
+  }));
 }
 
 // ─────────────────────────────────────────────────────────────
