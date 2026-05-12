@@ -205,7 +205,6 @@ import {
 } from '../services/balance-keyboard.service.js';
 import {
   parseInlineAccountCallback,        // Phase 1.31
-  RENAME_PROMPT,                     // Phase 1.31
   type InlineAccountState,           // Phase 1.31
 } from '../services/account-inline-keyboard.service.js';
 import {
@@ -1190,14 +1189,25 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
         const iaMsgId = cq.message ? String(cq.message.message_id) : null;
 
         try {
-          if (iaCmd.cmd === 'skip') {
-            // User chose to record without a specific account — proceed with draft as-is.
-            // draft-confirmation.service will use the default account fallback.
-            await redisConnection.del(inlineAccountKey(iaCmd.draftId));
+          if (iaCmd.cmd === 'list') {
+            const allAccounts = await getWorkspaceAccountsForInline(iaResolved.workspaceId, iaResolved.userId);
+            const { buildAccountPickerKeyboard, ACCOUNT_PICKER_TEXT } = await import('../services/account-inline-keyboard.service.js');
+            const pickerKb = buildAccountPickerKeyboard(iaCmd.draftId, allAccounts);
             if (iaMsgId) {
-              const previewText = await confirmPreview(iaResolved.workspaceId, iaResolved.userId, iaCmd.draftId);
-              void editMessageText(chatId, iaMsgId, previewText, confirmKb(iaCmd.draftId));
-              try { await redisConnection.set(`midas:preview:${iaCmd.draftId}`, iaMsgId, 'EX', 3600); } catch { /* non-fatal */ }
+              void editMessageText(chatId, iaMsgId, ACCOUNT_PICKER_TEXT, pickerKb);
+            }
+
+          } else if (iaCmd.cmd === 'back') {
+            await redisConnection.del(inlineAccountKey(iaCmd.draftId));
+            const iaPointerKey = `midas:ia:ptr:${telegramUserId}:${chatId}`;
+            await redisConnection.del(iaPointerKey);
+
+            const draftHint = await getDraftAccountHint(iaResolved.workspaceId, iaResolved.userId, iaCmd.draftId);
+            const createName = draftHint?.parsed_account_hint ?? 'Счёт';
+            const createCurrency = draftHint?.parsed_currency ?? 'USDT';
+            const { buildNoMatchKeyboard, noMatchText } = await import('../services/account-inline-keyboard.service.js');
+            if (iaMsgId) {
+              void editMessageText(chatId, iaMsgId, noMatchText(createName, createCurrency), buildNoMatchKeyboard(iaCmd.draftId, createName, createCurrency));
             }
 
           } else if (iaCmd.cmd === 'rename') {
@@ -1217,7 +1227,14 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
             // Set user-scoped pointer key so the text intercept can find the active draft.
             const iaPointerKey = `midas:ia:ptr:${telegramUserId}:${chatId}`;
             await redisConnection.set(iaPointerKey, iaCmd.draftId, 'EX', INLINE_ACCOUNT_TTL_SEC);
-            void upsertBotMessage(telegramUserId, chatId, RENAME_PROMPT);
+            
+            if (iaMsgId) {
+              void editMessageText(
+                chatId, iaMsgId, 
+                '✏️ Укажите название для нового счёта:\n\n<blockquote>Например: <i>Тинькофф</i>, <i>Binance</i>, <i>Наличные USD</i></blockquote>',
+                { inline_keyboard: [[{ text: '◀️ Назад', callback_data: `ia:back:${iaCmd.draftId}` }]] }
+              );
+            }
 
           } else if (iaCmd.cmd === 'create') {
             // User confirmed creation with AI-suggested name.
