@@ -2968,7 +2968,7 @@ Midas создан, чтобы сделать учет денег максима
               if (detail) {
                 void upsertBotMessage(
                   telegramUserId, chatId,
-                  `✅ Баланс обновлён.\\n\\n` + formatAccountDetailText(detail),
+                  `✅ Баланс обновлён.\n\n` + formatAccountDetailText(detail),
                   buildAccountActionsKeyboard(blState.accountId),
                 );
               }
