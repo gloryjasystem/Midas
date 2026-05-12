@@ -127,6 +127,37 @@ export function _numericAdd(a: string, b: string, subtract: boolean): string {
 }
 
 /**
+ * Phase 2.4 PR13: Calculate approximate exchange rate for display.
+ *
+ * rate = debitAmount / txAmount  (rounded to 2 decimal places)
+ * Example: calcRate('920000', '10000') = '~92.00'
+ *
+ * Returns null if either value is 0 or non-numeric.
+ * SEC-02: Uses BigInt scaled arithmetic — no floating-point.
+ */
+export function calcRate(txAmount: string, debitAmount: string): string | null {
+  try {
+    // Scale to 4 decimal places for BigInt division
+    const toFixed4 = (s: string): string => {
+      const [int = '0', dec = ''] = s.split('.');
+      return `${int}.${dec.padEnd(4, '0').slice(0, 4)}`;
+    };
+    const [txInt, txDec]     = toFixed4(txAmount).split('.') as [string, string];
+    const [debInt, debDec]   = toFixed4(debitAmount).split('.') as [string, string];
+    const txScaled  = BigInt(`${txInt}${txDec}`);
+    const debScaled = BigInt(`${debInt}${debDec}`);
+    if (txScaled === 0n || debScaled === 0n) return null;
+    // rate * 100 (2 decimal places) = (debScaled * 100) / txScaled
+    const rateX100 = (debScaled * 100n) / txScaled;
+    const rateInt  = (rateX100 / 100n).toString();
+    const rateDec  = (rateX100 % 100n).toString().padStart(2, '0');
+    return `~${rateInt}.${rateDec}`;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Build the account balance block for the draft confirm card.
  *
  * For expense / debt_given / transfer (subtract):
@@ -251,12 +282,29 @@ export function buildPreviewScreen(data: PreviewScreenData): string {
 
 export interface ConfirmedScreenData {
   intent: string | null;
-  amount: string;               // pre-escaped NUMERIC string
-  currency: string;             // pre-escaped
+  amount: string;               // pre-escaped NUMERIC string (tx amount)
+  currency: string;             // tx currency, pre-escaped
   categoryName: string | null;  // pre-escaped
-  accountName: string | null;   // pre-escaped
+  accountName: string | null;   // pre-escaped (legacy simple hint)
   itemName: string | null;      // Phase 1.35, pre-escaped
   transactionTime?: string | null; // ISO string — опционально для обратной совместимости
+  // ── Phase 2.4 PR 13: account balance snapshot fields (Снимок баланса) —————————————
+  /**
+   * Account currency (may differ from tx currency in cross-currency mode).
+   * When provided, replaces legacy `accountName` hint in the "Итог" block.
+   */
+  accountCurrency?: string | null;
+  /** Balance BEFORE the transaction was applied (NUMERIC string). */
+  balanceBefore?: string | null;
+  /** Balance AFTER the transaction was applied (NUMERIC string). */
+  balanceAfter?: string | null;
+  /**
+   * Debit amount in the account's currency (only for cross-currency).
+   * If null and accountCurrency is set, the tx amount/currency is used.
+   */
+  debitAmount?: string | null;
+  /** Currency of debitAmount (e.g. 'RUB'). */
+  debitCurrency?: string | null;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -284,7 +332,7 @@ function formatTransactionTime(iso: string): string {
 /**
  * Build the post-confirmation "Записано" card.
  *
- * Layout:
+ * Layout (no account):
  * ```
  * ✅ Записано
  *
@@ -293,6 +341,21 @@ function formatTransactionTime(iso: string): string {
  *
  * 📁 Кофе   ·   🏦 Binance
  * 🕐 09:13, 9 мая
+ * ```
+ *
+ * Layout (with account + balance snapshot, Phase 2.4 PR13):
+ * ```
+ * ✅ Записано
+ *
+ * ┃ 💸 10 000 USD
+ * ┃ лавка с оружием
+ *
+ * 📁 Оборудование
+ * 🕐 17:15, 12 мая
+ *
+ * 🏦 Тинькофф RUB
+ * 🔁 10 000 USD → 920 000 RUB (~92.00 RUB/USD)   ← only cross-currency
+ * Итог: 1 080 000 − 920 000 = 160 000 RUB
  * ```
  */
 export function buildConfirmedScreen(data: ConfirmedScreenData): string {
@@ -308,10 +371,10 @@ export function buildConfirmedScreen(data: ConfirmedScreenData): string {
   lines.push(`<blockquote>${blockContent}</blockquote>`);
   lines.push('');
 
-  // ── Details: category · account ──────────────────────────────
+  // ── Details: category (· legacy accountName only without balance snapshot) ──
   const details: string[] = [];
   if (data.categoryName) details.push(`📁 ${data.categoryName}`);
-  if (data.accountName)  details.push(`🏦 ${data.accountName}`);
+  if (data.accountName && !data.balanceBefore) details.push(`🏦 ${data.accountName}`);
   if (details.length > 0) {
     lines.push(details.join('   ·   '));
   }
@@ -322,8 +385,41 @@ export function buildConfirmedScreen(data: ConfirmedScreenData): string {
     if (ts) lines.push(`🕐 <i>${ts}</i>`);
   }
 
+  // ── Phase 2.4 PR13: «Итог» — balance snapshot block ───────────
+  if (data.accountName && data.balanceBefore != null) {
+    const acctCurrency = data.accountCurrency ?? data.currency;
+    const debitAmt     = data.debitAmount ?? data.amount;
+    const debitCur     = data.debitCurrency ?? acctCurrency;
+
+    lines.push('');
+    lines.push(`🏦 <b>${data.accountName}</b> ${acctCurrency}`);
+
+    // Cross-currency rate line (only when debitCurrency differs from txCurrency)
+    const isCross = !!data.debitAmount && !!data.debitCurrency && data.debitCurrency !== data.currency;
+    if (isCross) {
+      const rate = calcRate(data.amount, data.debitAmount!);
+      const rateSuffix = rate ? ` (${rate} ${data.debitCurrency}/${data.currency})` : '';
+      lines.push(`🔁 ${data.amount} ${data.currency} → ${formatAmount(data.debitAmount!)} ${data.debitCurrency}${rateSuffix}`);
+    }
+
+    // Math line: balanceBefore ± debitAmt = balanceAfter
+    if (data.balanceAfter != null) {
+      const isIncome = data.intent === 'income' || data.intent === 'debt_received';
+      const sign     = isIncome ? '+' : '−';
+      const before   = formatAmount(data.balanceBefore!);
+      const debit    = formatAmount(debitAmt);
+      const after    = formatAmount(data.balanceAfter);
+      const afterIsNeg = data.balanceAfter.startsWith('-');
+      const afterFmt   = afterIsNeg
+        ? `⚠️ <b>${after} ${debitCur}</b>`
+        : `<b>${after} ${debitCur}</b>`;
+      lines.push(`Итог: ${before} ${sign} ${debit} = ${afterFmt}`);
+    }
+  }
+
   return lines.join('\n');
 }
+
 
 // ─────────────────────────────────────────────────────────────
 // Rejected Screen
