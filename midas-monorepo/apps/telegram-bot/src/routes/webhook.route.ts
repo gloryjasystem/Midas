@@ -717,40 +717,41 @@ async function sendAndStorePreview(
   prefixText?: string, // optional prefix (e.g. account creation label)
 ): Promise<void> {
   // ── Phase 2.4: Picker vs Preview decision ─────────────────────────────
+  // ALWAYS show account picker first (regardless of whether AI pre-set account_id).
+  // This ensures the user always explicitly selects/confirms the account.
   const draft = await getDraftFields(workspaceId, userId, draftId);
-
-  if (draft && !draft.account_id) {
-    // No account linked yet — FORCE account picker
+  if (draft) {
     const accounts = await getWorkspaceAccountsWithBalances(workspaceId, userId, draft.parsed_intent);
-    const pickerEntries = toAccountPickerEntries(accounts).map((e) => ({
-      ...e,
-      name: escapeHtml(e.name),
-    }));
-    const pickerText = prefixText
-      ? `${prefixText}\n\n${getPickerV2Text(draft.parsed_intent)}`
-      : getPickerV2Text(draft.parsed_intent);
-    
-    const textToSend = accounts.length > 0 ? pickerText : ACCOUNT_PICKER_EMPTY_TEXT;
 
-    const pickerMsgId = await upsertBotMessage(
-      telegramUserId,
-      chatId,
-      textToSend,
-      buildAccountPickerV2Keyboard(pickerEntries, draftId),
-    );
-    // Store picker msgId — ia:pk handler (PR9) will editMessageText → preview.
-    if (pickerMsgId) {
-      try {
-        await redisConnection.set(`midas:preview:${draftId}`, pickerMsgId, 'EX', 3600);
-        void pool.query(
-          `UPDATE transaction_drafts
-           SET preview_message_id = $1, preview_chat_id = $2, updated_at = NOW()
-           WHERE id = $3 AND workspace_id = $4`,
-          [pickerMsgId, chatId, draftId, workspaceId],
-        ).catch(() => {/* non-fatal */ });
-      } catch { /* non-fatal */ }
+    if (accounts.length > 0) {
+      const pickerEntries = toAccountPickerEntries(accounts).map((e) => ({
+        ...e,
+        name: escapeHtml(e.name),
+      }));
+      const pickerText = prefixText
+        ? `${prefixText}\n\n${getPickerV2Text(draft.parsed_intent)}`
+        : getPickerV2Text(draft.parsed_intent);
+
+      const pickerMsgId = await upsertBotMessage(
+        telegramUserId,
+        chatId,
+        pickerText,
+        buildAccountPickerV2Keyboard(pickerEntries, draftId),
+      );
+      // Store picker msgId — ia:pk handler (PR9) will editMessageText → preview.
+      if (pickerMsgId) {
+        try {
+          await redisConnection.set(`midas:preview:${draftId}`, pickerMsgId, 'EX', 3600);
+          void pool.query(
+            `UPDATE transaction_drafts
+             SET preview_message_id = $1, preview_chat_id = $2, updated_at = NOW()
+             WHERE id = $3 AND workspace_id = $4`,
+            [pickerMsgId, chatId, draftId, workspaceId],
+          ).catch(() => {/* non-fatal */ });
+        } catch { /* non-fatal */ }
+      }
+      return; // picker sent — ia:pk handler continues the flow.
     }
-    return; // picker sent — ia:pk handler continues the flow.
   }
 
   // ── Standard path: preview with (optional) account balance block ──────
