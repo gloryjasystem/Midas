@@ -118,7 +118,7 @@ async function getDraftStatus(pool, draftId) {
  * Uses the admin pool (midas_user) which has GRANT EXECUTE on the function.
  */
 async function callExpireFunction(pool) {
-  const r = await pool.query(`SELECT system_expire_pending_drafts() AS expired_count`);
+  const r = await pool.query(`SELECT COUNT(*)::INT AS expired_count FROM system_expire_pending_drafts()`);
   return r.rows[0]?.expired_count ?? 0;
 }
 

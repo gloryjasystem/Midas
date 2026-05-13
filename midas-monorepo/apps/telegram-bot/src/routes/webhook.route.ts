@@ -865,6 +865,15 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
         const acKey = onboardStateKey(telegramUserId, chatId);
         const acMsgId = cq.message ? String(cq.message.message_id) : null;
 
+        // ── Phase 2.5: Preserve linked draft ID globally for onboarding ──
+        const rawAcStateGlob = await redisConnection.get(acKey);
+        let globalLinkedDraftId: string | undefined;
+        if (rawAcStateGlob) {
+          try {
+            globalLinkedDraftId = (JSON.parse(rawAcStateGlob) as AccountOnboardState).linkedDraftId;
+          } catch { /* ignore */ }
+        }
+
         try {
           if (acCmd.cmd === 'open') {
             // Phase 1.37-UX: User tapped "Добавить счёт" from the 2-button /start keyboard.
@@ -988,33 +997,33 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
             // ── Phase 2.3: Input-first flow ──────────────────────────────────────
             if (acCmd.accountType === 'card') {
               // Card → input prompt (Экран 2Б): «🏦 Как называется ваш банк?»
-              const state: AccountOnboardState = { step: 'name_input', accountType: 'card' };
+              const state: AccountOnboardState = { step: 'name_input', accountType: 'card', linkedDraftId: globalLinkedDraftId };
               await redisConnection.set(acKey, JSON.stringify(state), 'EX', ONBOARD_STATE_TTL_SEC);
               const promptText = buildInputPromptText('card', undefined, 2, 5);
               if (acMsgId) void editMessageText(chatId, acMsgId, promptText, { inline_keyboard: [] });
 
             } else if (acCmd.accountType === 'exchange') {
               // Exchange → input prompt (Экран 2Б): «📊 Какая биржа?»
-              const state: AccountOnboardState = { step: 'name_input', accountType: 'exchange' };
+              const state: AccountOnboardState = { step: 'name_input', accountType: 'exchange', linkedDraftId: globalLinkedDraftId };
               await redisConnection.set(acKey, JSON.stringify(state), 'EX', ONBOARD_STATE_TTL_SEC);
               const promptText = buildInputPromptText('exchange', undefined, 2, 5);
               if (acMsgId) void editMessageText(chatId, acMsgId, promptText, { inline_keyboard: [] });
 
             } else if (acCmd.accountType === 'wallet') {
               // Wallet → sub-type picker (Экран 2А): «Крипто / E-wallet / TON / Lightning»
-              const state: AccountOnboardState = { step: 'wallet_subtype', accountType: 'wallet' };
+              const state: AccountOnboardState = { step: 'wallet_subtype', accountType: 'wallet', linkedDraftId: globalLinkedDraftId };
               await redisConnection.set(acKey, JSON.stringify(state), 'EX', ONBOARD_STATE_TTL_SEC);
               if (acMsgId) void editMessageText(chatId, acMsgId, '🔐 <b>Выберите тип кошелька:</b>', buildWalletSubtypeKeyboard());
 
             } else if (acCmd.accountType === 'cash') {
               // Cash: name is auto-determined from currency (e.g. «Наличные RUB»)
-              const state: AccountOnboardState = { step: 'cur_pick', accountType: 'cash' };
+              const state: AccountOnboardState = { step: 'cur_pick', accountType: 'cash', linkedDraftId: globalLinkedDraftId };
               await redisConnection.set(acKey, JSON.stringify(state), 'EX', ONBOARD_STATE_TTL_SEC);
               if (acMsgId) void editMessageText(chatId, acMsgId, buildCurrencyPickerText('Наличные'), buildFiatCurrencyKeyboard());
 
             } else {
               // Custom: input prompt with generic label
-              const state: AccountOnboardState = { step: 'name_input', accountType: acCmd.accountType };
+              const state: AccountOnboardState = { step: 'name_input', accountType: acCmd.accountType, linkedDraftId: globalLinkedDraftId };
               await redisConnection.set(acKey, JSON.stringify(state), 'EX', ONBOARD_STATE_TTL_SEC);
               const promptText = buildInputPromptText('custom', undefined, 2, 5);
               if (acMsgId) void editMessageText(chatId, acMsgId, promptText, { inline_keyboard: [] });
@@ -1029,6 +1038,7 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
               step: 'name_input',
               accountType: 'wallet',
               walletSubtype: subtype,
+              linkedDraftId: globalLinkedDraftId,
             };
             await redisConnection.set(acKey, JSON.stringify(state), 'EX', ONBOARD_STATE_TTL_SEC);
             const promptText = buildInputPromptText('wallet', subtype, 3, stepTotal);
@@ -1036,38 +1046,39 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
 
           } else if (acCmd.cmd === 'type_back') {
             // ── Phase 2.3: Back to type picker (ac:type:back from wallet sub-type) ──
-            await redisConnection.del(acKey);
+            const state: AccountOnboardState = { step: 'type_pick', linkedDraftId: globalLinkedDraftId };
+            await redisConnection.set(acKey, JSON.stringify(state), 'EX', ONBOARD_STATE_TTL_SEC);
             if (acMsgId) void editMessageText(chatId, acMsgId, ACCOUNTS_EMPTY_TEXT, buildAccountTypeKeyboard());
 
           } else if (acCmd.cmd === 'bank_preset') {
             // Phase 2.1: User picked a bank preset — set name, show fiat currency picker
-            const state: AccountOnboardState = { step: 'cur_pick', accountType: 'card', name: acCmd.name };
+            const state: AccountOnboardState = { step: 'cur_pick', accountType: 'card', name: acCmd.name, linkedDraftId: globalLinkedDraftId };
             await redisConnection.set(acKey, JSON.stringify(state), 'EX', ONBOARD_STATE_TTL_SEC);
             if (acMsgId) void editMessageText(chatId, acMsgId, buildCurrencyPickerText(acCmd.name), buildFiatCurrencyPage(0));
 
           } else if (acCmd.cmd === 'bank_custom') {
             // Phase 2.3: User tapped "Другой банк" — show free-text re-prompt
-            const state: AccountOnboardState = { step: 'name_input', accountType: 'card' };
+            const state: AccountOnboardState = { step: 'name_input', accountType: 'card', linkedDraftId: globalLinkedDraftId };
             await redisConnection.set(acKey, JSON.stringify(state), 'EX', ONBOARD_STATE_TTL_SEC);
             const reprText = buildFreeTextPromptText('card');
             if (acMsgId) void editMessageText(chatId, acMsgId, reprText, buildFreeTextPromptKeyboard('type'));
 
           } else if (acCmd.cmd === 'exchange_preset') {
             // User picked an exchange preset — show crypto currency picker
-            const state: AccountOnboardState = { step: 'cur_pick', accountType: 'exchange', name: acCmd.name };
+            const state: AccountOnboardState = { step: 'cur_pick', accountType: 'exchange', name: acCmd.name, linkedDraftId: globalLinkedDraftId };
             await redisConnection.set(acKey, JSON.stringify(state), 'EX', ONBOARD_STATE_TTL_SEC);
             if (acMsgId) void editMessageText(chatId, acMsgId, buildCurrencyPickerText(acCmd.name), buildCryptoCurrencyPage(0));
 
           } else if (acCmd.cmd === 'exchange_custom') {
             // Phase 2.3: User tapped "Другая биржа" — show free-text re-prompt
-            const state: AccountOnboardState = { step: 'name_input', accountType: 'exchange' };
+            const state: AccountOnboardState = { step: 'name_input', accountType: 'exchange', linkedDraftId: globalLinkedDraftId };
             await redisConnection.set(acKey, JSON.stringify(state), 'EX', ONBOARD_STATE_TTL_SEC);
             const reprText = buildFreeTextPromptText('exchange');
             if (acMsgId) void editMessageText(chatId, acMsgId, reprText, buildFreeTextPromptKeyboard('type'));
 
           } else if (acCmd.cmd === 'wallet_preset') {
             // Phase 2.3: User picked a wallet preset — show crypto currency picker
-            const state: AccountOnboardState = { step: 'cur_pick', accountType: 'wallet', name: acCmd.name };
+            const state: AccountOnboardState = { step: 'cur_pick', accountType: 'wallet', name: acCmd.name, linkedDraftId: globalLinkedDraftId };
             await redisConnection.set(acKey, JSON.stringify(state), 'EX', ONBOARD_STATE_TTL_SEC);
             if (acMsgId) void editMessageText(chatId, acMsgId, buildCurrencyPickerText(acCmd.name), buildCryptoCurrencyPage(0));
 
@@ -1078,7 +1089,7 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
             if (rawStateWc) {
               try { walletSubtypeWc = (JSON.parse(rawStateWc) as AccountOnboardState).walletSubtype; } catch { /* ignore */ }
             }
-            const stateWc: AccountOnboardState = { step: 'name_input', accountType: 'wallet', walletSubtype: walletSubtypeWc as AccountOnboardState['walletSubtype'] };
+            const stateWc: AccountOnboardState = { step: 'name_input', accountType: 'wallet', walletSubtype: walletSubtypeWc as AccountOnboardState['walletSubtype'], linkedDraftId: globalLinkedDraftId };
             await redisConnection.set(acKey, JSON.stringify(stateWc), 'EX', ONBOARD_STATE_TTL_SEC);
             const reprText = buildFreeTextPromptText('wallet', walletSubtypeWc);
             if (acMsgId) void editMessageText(chatId, acMsgId, reprText, buildFreeTextPromptKeyboard('subtype'));
@@ -4654,8 +4665,8 @@ Midas создан, чтобы сделать учет денег максима
             } else {
               accountName = acState.name ?? 'Счёт';
             }
-            const res = await addAccountWithCurrency(resolved.workspaceId, resolved.userId, accountName, rawCode);
-            if (res === 'duplicate') {
+            const res = await addAccountReturningId(resolved.workspaceId, resolved.userId, accountName, rawCode);
+            if (res.status === 'duplicate') {
 
               void upsertBotMessage(
                 telegramUserId,
@@ -4664,6 +4675,29 @@ Midas создан, чтобы сделать учет денег максима
                 buildFinishOnboardKeyboard(),
               );
             } else {
+              // ── Phase 2.5: If launched from draft picker — link account and return to draft ──
+              if (acState.linkedDraftId && res.accountId) {
+                try {
+                  await setDraftAccountId(resolved.workspaceId, resolved.userId, acState.linkedDraftId, res.accountId);
+                } catch { /* non-fatal */ }
+                try {
+                  await softDeletePlaceholderAccount(resolved.workspaceId, resolved.userId);
+                } catch { /* non-fatal */ }
+                const pickerMsgIdCi = await getActiveMessageId(telegramUserId, chatId);
+                await clearActiveMessageId(telegramUserId, chatId);
+                const previewResCi = await confirmPreviewFull(resolved.workspaceId, resolved.userId, acState.linkedDraftId);
+                const confirmMsgCi = `✅ Счёт <b>${escapeHtml(accountName)}</b> создан!\n\n${previewResCi.text}`;
+                if (pickerMsgIdCi) {
+                  void editMessageText(chatId, pickerMsgIdCi, confirmMsgCi, confirmKbForDraft(acState.linkedDraftId, previewResCi));
+                  try { await redisConnection.set(`midas:preview:${acState.linkedDraftId}`, pickerMsgIdCi, 'EX', 3600); } catch { /* non-fatal */ }
+                } else {
+                  void upsertBotMessage(telegramUserId, chatId, confirmMsgCi, confirmKbForDraft(acState.linkedDraftId, previewResCi));
+                }
+                request.log.info({ msg: '[midas:bot:webhook] ac: cur_input — account linked to draft', workspaceId: resolved.workspaceId });
+                await reply.status(200).send({ ok: true });
+                return; // Skip standard D4 / first-account success screen
+              }
+
               // Phase LD: custom account created via free-text currency input.
               // Soft-delete the onboarding placeholder — only the custom account remains.
               try {
