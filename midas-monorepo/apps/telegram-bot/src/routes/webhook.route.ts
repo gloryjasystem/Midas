@@ -1738,7 +1738,6 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
             const sf = txCmd.from ? `:${txCmd.from}` : '';
             if (txMsgId) void editMessageText(chatId, txMsgId, '\u{1F5D1}\uFE0F <b>\u0423\u0434\u0430\u043B\u0438\u0442\u044C \u0442\u0440\u0430\u043D\u0437\u0430\u043A\u0446\u0438\u044E?</b>\n\n\u042D\u0442\u043E \u0434\u0435\u0439\u0441\u0442\u0432\u0438\u0435 \u043D\u0435\u043B\u044C\u0437\u044F \u043E\u0442\u043C\u0435\u043D\u0438\u0442\u044C.', { inline_keyboard: [[{ text: '\u{1F5D1}\uFE0F \u0414\u0430, \u0443\u0434\u0430\u043B\u0438\u0442\u044C', callback_data: `tx:d:yes:${txCmd.txId}${sf}` }, { text: '\u25C0\uFE0F \u041E\u0442\u043C\u0435\u043D\u0430', callback_data: `tx:v:${txCmd.txId}${sf}` }]] });
           } else if (txCmd.cmd === 'delete_confirm') {
-            const sf = txCmd.from ? `:${txCmd.from}` : '';
             const result = await softDeleteTransaction(txCmd.txId, txResolved.workspaceId, txResolved.userId);
             if (result.status === 'ok') {
               if (txCmd.from === 's') {
