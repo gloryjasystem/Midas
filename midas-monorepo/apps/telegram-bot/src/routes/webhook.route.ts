@@ -258,6 +258,7 @@ import {
   NAV_BTN_REPORT,                  // Phase 1.36-UX
   NAV_BTN_SETTINGS,                // Phase 1.36-UX
   NAV_BTN_TRANSACTIONS,            // Phase 2.0
+  buildRejectedScreen,             // ia:cancel handler
 } from '../utils/screen-builder.js'; // Phase 1.35
 import {
   getTransactionList,
@@ -1408,6 +1409,25 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
               void editMessageText(chatId, iaMsgId, previewRes.text, confirmKbForDraft(iaCmd.draftId, previewRes));
               try { await redisConnection.set(`midas:preview:${iaCmd.draftId}`, iaMsgId, 'EX', 3600); } catch { /* non-fatal */ }
             }
+
+          } else if (iaCmd.cmd === 'cancel') {
+            // User tapped "✖️ Отмена" on the no-match ("Создать счёт?") card.
+            // 1. Edit card in-place → "❌ Отменено" (no keyboard)
+            // 2. Reject draft in DB (workspace-scoped, safe without full withTenantTransaction)
+            // 3. Cleanup Redis keys
+            if (iaMsgId) {
+              void editMessageText(chatId, iaMsgId, buildRejectedScreen(), { inline_keyboard: [] });
+            }
+            // Reject draft — simple SQL, workspace-scoped (SEC-03 RLS via workspace_id filter)
+            void pool.query(
+              `UPDATE transaction_drafts SET status = 'rejected', updated_at = NOW()
+               WHERE id = $1 AND workspace_id = $2 AND status = 'pending_user'`,
+              [iaCmd.draftId, iaResolved.workspaceId],
+            ).catch(() => { /* non-fatal */ });
+            // Cleanup
+            void redisConnection.del(inlineAccountKey(iaCmd.draftId));
+            void redisConnection.del(`midas:preview:${iaCmd.draftId}`);
+            void redisConnection.del(`midas:gate_sent:${telegramUserId}:${chatId}`);
 
           } else if (iaCmd.cmd === 'rename') {
             // User wants to type a custom account name.

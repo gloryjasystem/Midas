@@ -522,7 +522,7 @@ async function processAiParse(job: Job<AiParseJobPayload>): Promise<void> {
           inline_keyboard: [
             [{ text: `✅ Создать «${escapeHtml(accountHint)}» (${escapeHtml(currency)})`, callback_data: `ia:create:${draftId}` }],
             [{ text: '✏️ Другое название', callback_data: `ia:rename:${draftId}` }],
-            [{ text: '📋 Записать без счёта', callback_data: `ia:skip:${draftId}` }],
+            [{ text: '✖️ Отмена', callback_data: `ia:cancel:${draftId}` }],
           ],
         };
         previewMsg =

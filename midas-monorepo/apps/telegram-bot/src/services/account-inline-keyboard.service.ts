@@ -79,6 +79,8 @@ export type InlineAccountCmd =
   | { cmd: 'xfx_back'; draftId: string }
   /** Phase 2.4 PR13: user tapped "◀️ Назад" on account picker screen (ia:pk:back:{draftId}) */
   | { cmd: 'back'; draftId: string }
+  /** Cancel no-match card — reject draft + send cancelled message (ia:cancel:{draftId}) */
+  | { cmd: 'cancel'; draftId: string }
   /** Phase 2.5: user tapped "➕ Создать счёт" from V2 picker — launches onboarding (ia:newac:{draftId}) */
   | { cmd: 'newaccount'; draftId: string };
 
@@ -177,6 +179,14 @@ export function parseInlineAccountCallback(data: string): InlineAccountCmd | nul
     return { cmd: 'newaccount', draftId };
   }
 
+  // ia:cancel:{draftId} — user tapped "✖️ Отмена" on no-match card → reject draft
+  // "ia:cancel:" = 10 + 26 = 36 bytes ≤ 64 ✓
+  if (sub === 'cancel' && parts.length === 3) {
+    const draftId = parts[2] ?? '';
+    if (!ULID_RE.test(draftId)) return null;
+    return { cmd: 'cancel', draftId };
+  }
+
   return null;
 }
 
@@ -197,7 +207,7 @@ export function buildNoMatchKeyboard(
     inline_keyboard: [
       [{ text: `✅ Создать «${suggestedName}» (${currency})`, callback_data: `ia:create:${draftId}` }],
       [{ text: '✏️ Другое название',                          callback_data: `ia:rename:${draftId}` }],
-      [{ text: '📋 Записать без счёта',                       callback_data: `ia:skip:${draftId}` }],
+      [{ text: '✖️ Отмена',                                   callback_data: `ia:cancel:${draftId}` }],
     ],
   };
 }
