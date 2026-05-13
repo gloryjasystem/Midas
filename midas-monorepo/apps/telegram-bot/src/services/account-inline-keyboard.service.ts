@@ -75,7 +75,9 @@ export type InlineAccountCmd =
   /** Phase 2.4 PR12: user tapped "✏️ Указать сумму в {currency}" — cross-currency input (ia:xfx:{draftId}) */
   | { cmd: 'xfx';     draftId: string }
   /** Phase 2.4 PR12: user tapped "◀️ Назад" on cross-currency input screen (ia:xfx:back:{draftId}) */
-  | { cmd: 'xfx_back'; draftId: string };
+  | { cmd: 'xfx_back'; draftId: string }
+  /** Phase 2.4 PR13: user tapped "◀️ Назад" on account picker screen (ia:pk:back:{draftId}) */
+  | { cmd: 'back'; draftId: string };
 
 /**
  * Parse and validate an inline account creation callback_data string.
@@ -89,6 +91,7 @@ export type InlineAccountCmd =
  *   ia:rename:{ULID}
  *   ia:pk:{ULID}:{ULID}           Phase 2.4 PR9
  *   ia:pk:delink:{ULID}           Phase 2.4 PR9
+ *   ia:pk:back:{ULID}             Phase 2.4 PR13
  *   ia:xfx:{ULID}                 Phase 2.4 PR12
  *   ia:xfx:back:{ULID}            Phase 2.4 PR12
  */
@@ -130,7 +133,7 @@ export function parseInlineAccountCallback(data: string): InlineAccountCmd | nul
     return { cmd: 'fuzzy', accountId, draftId };
   }
 
-  // Phase 2.4 PR9: ia:pk:{accountId}:{draftId} or ia:pk:delink:{draftId}
+  // Phase 2.4 PR9: ia:pk:{accountId}:{draftId} or ia:pk:delink:{draftId} or ia:pk:back:{draftId}
   // "ia:pk:" = 6 + 26 + 1 + 26 = 59 bytes ≤ 64 ✓
   if (sub === 'pk' && parts.length === 4) {
     const seg2 = parts[2] ?? '';
@@ -138,6 +141,10 @@ export function parseInlineAccountCallback(data: string): InlineAccountCmd | nul
     if (seg2 === 'delink') {
       if (!ULID_RE.test(seg3)) return null;
       return { cmd: 'delink', draftId: seg3 };
+    }
+    if (seg2 === 'back') {
+      if (!ULID_RE.test(seg3)) return null;
+      return { cmd: 'back', draftId: seg3 };
     }
     if (!ULID_RE.test(seg2) || !ULID_RE.test(seg3)) return null;
     return { cmd: 'pick', accountId: seg2, draftId: seg3 };
@@ -500,8 +507,8 @@ export function buildAccountPickerForDraft(
   // Phase 2.4: Create account option in full picker
   rows.push([{ text: '➕ Создать счёт', callback_data: `ia:rename:${draftId}` }]);
 
-  // Always-last: back button (delinks current account, redisplays picker or card)
-  rows.push([{ text: '◀️ Назад', callback_data: `ia:pk:delink:${draftId}` }]);
+  // Always-last: back button to return to the draft preview card
+  rows.push([{ text: '◀️ Назад', callback_data: `ia:pk:back:${draftId}` }]);
 
   return { inline_keyboard: rows };
 }

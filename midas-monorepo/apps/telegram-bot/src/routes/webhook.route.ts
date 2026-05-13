@@ -1445,6 +1445,15 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
             }
             request.log.info({ msg: '[midas:bot:webhook] ia:delink: account delinked → full picker shown', workspaceId: iaResolved.workspaceId });
 
+          // ── Phase 2.4 PR13: ia:back — user tapped "◀️ Назад" on account picker screen ────
+          } else if (iaCmd.cmd === 'back') {
+            if (iaMsgId) {
+              const previewRes = await confirmPreviewFull(iaResolved.workspaceId, iaResolved.userId, iaCmd.draftId);
+              void editMessageText(chatId, iaMsgId, previewRes.text, confirmKbForDraft(iaCmd.draftId, previewRes));
+              try { await redisConnection.set(`midas:preview:${iaCmd.draftId}`, iaMsgId, 'EX', 3600); } catch { /* non-fatal */ }
+            }
+            request.log.info({ msg: '[midas:bot:webhook] ia:back: returning from picker to preview card', workspaceId: iaResolved.workspaceId });
+
           // ── Phase 2.4 PR12: ia:xfx — user tapped "✏️ Указать сумму в {cur}" ──
           } else if (iaCmd.cmd === 'xfx') {
             // Save the cross-currency input pointer in Redis so the next free-text
