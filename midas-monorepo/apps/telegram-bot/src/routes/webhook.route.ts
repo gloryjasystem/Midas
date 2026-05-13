@@ -1456,22 +1456,43 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
             const createName = draftHintForCreate?.parsed_account_hint ?? 'Счёт';
             const createCurrency = draftHintForCreate?.parsed_currency ?? 'USDT';
 
-            const createRes = await addAccountWithCurrency(
+            const createRes = await addAccountReturningId(
               iaResolved.workspaceId, iaResolved.userId, createName, createCurrency,
             );
-            // Fetch the new or existing account id
-            const allAccounts = await getWorkspaceAccountsForInline(iaResolved.workspaceId, iaResolved.userId);
-            const foundAcc = allAccounts.find((a) => a.name.trim().toLowerCase() === createName.trim().toLowerCase());
-            if (foundAcc) {
-              await setDraftAccountId(iaResolved.workspaceId, iaResolved.userId, iaCmd.draftId, foundAcc.id);
+
+            if (createRes.status === 'duplicate') {
+              const allAccounts = await getWorkspaceAccountsForInline(iaResolved.workspaceId, iaResolved.userId);
+              const foundAcc = allAccounts.find((a) => a.name.trim().toLowerCase() === createName.trim().toLowerCase());
+              if (foundAcc) {
+                await setDraftAccountId(iaResolved.workspaceId, iaResolved.userId, iaCmd.draftId, foundAcc.id);
+              }
+              const label = `⚠️ Счёт уже существует.`;
+              if (iaMsgId) {
+                const previewRes = await confirmPreviewFull(iaResolved.workspaceId, iaResolved.userId, iaCmd.draftId);
+                void editMessageText(chatId, iaMsgId, `${label}\n\n${previewRes.text}`, confirmKbForDraft(iaCmd.draftId, previewRes));
+                try { await redisConnection.set(`midas:preview:${iaCmd.draftId}`, iaMsgId, 'EX', 3600); } catch { /* non-fatal */ }
+              }
+              request.log.info({ msg: '[midas:bot:webhook] ia: duplicate account inline', workspaceId: iaResolved.workspaceId });
+            } else {
+              // Newly created. We want to ask for balance!
+              const acKey = `midas:ac:${telegramUserId}:${chatId}`;
+              const newState: AccountOnboardState = {
+                step: 'bal_input',
+                accountType: 'custom',
+                name: createName,
+                accountId: createRes.accountId,
+                currency: createCurrency,
+                linkedDraftId: iaCmd.draftId,
+              };
+              await redisConnection.set(acKey, JSON.stringify(newState), 'EX', ONBOARD_STATE_TTL_SEC);
+              const balPrompt = buildBalancePromptText(escapeHtml(createName), escapeHtml(createCurrency));
+              if (iaMsgId) {
+                void editMessageText(chatId, iaMsgId, balPrompt, buildSkipBalanceKeyboard());
+              } else {
+                void upsertBotMessage(telegramUserId, chatId, balPrompt, buildSkipBalanceKeyboard());
+              }
+              request.log.info({ msg: '[midas:bot:webhook] ia: account created inline, awaiting balance', workspaceId: iaResolved.workspaceId });
             }
-            const label = createRes === 'duplicate' ? `⚠️ Счёт уже существует.` : `✅ Счёт <b>${escapeHtml(createName)}</b> (${escapeHtml(createCurrency)}) создан!`;
-            if (iaMsgId) {
-              const previewRes = await confirmPreviewFull(iaResolved.workspaceId, iaResolved.userId, iaCmd.draftId);
-              void editMessageText(chatId, iaMsgId, `${label}\n\n${previewRes.text}`, confirmKbForDraft(iaCmd.draftId, previewRes));
-              try { await redisConnection.set(`midas:preview:${iaCmd.draftId}`, iaMsgId, 'EX', 3600); } catch { /* non-fatal */ }
-            }
-            request.log.info({ msg: '[midas:bot:webhook] ia: account created inline', workspaceId: iaResolved.workspaceId });
 
           } else if (iaCmd.cmd === 'use' || iaCmd.cmd === 'fuzzy') {
             // user selected an existing account.
