@@ -1190,13 +1190,11 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
             // Read state again to get linkedDraftId and accountId.
             let linkedDraftIdBal: string | undefined;
             let linkedAccountIdBal: string | undefined;
-            let linkedAccountNameBal = 'Счёт';
             if (rawStateBal) {
               try {
                 const sLink = JSON.parse(rawStateBal) as AccountOnboardState;
                 linkedDraftIdBal = sLink.linkedDraftId;
                 linkedAccountIdBal = sLink.accountId;
-                linkedAccountNameBal = sLink.name ?? 'Счёт';
               } catch { /* ignore */ }
             }
 
@@ -4908,7 +4906,6 @@ Midas создан, чтобы сделать учет денег максима
               const pickerMsgIdBi2 = await getActiveMessageId(telegramUserId, chatId);
               await clearActiveMessageId(telegramUserId, chatId);
               const previewResBi2 = await confirmPreviewFull(resolved.workspaceId, resolved.userId, acState.linkedDraftId);
-              const acNameBi2 = acState.name ?? 'Счёт';
               const confirmMsgBi2 = previewResBi2.text;
               if (pickerMsgIdBi2) {
                 void editMessageText(chatId, pickerMsgIdBi2, confirmMsgBi2, confirmKbForDraft(acState.linkedDraftId, previewResBi2));
