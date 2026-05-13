@@ -224,6 +224,18 @@ async function processNotification(job: Job<NotificationJobPayload>): Promise<vo
     } catch { /* non-fatal */ }
   }
 
+  // Phase 1.33: Update active message pointer
+  if (job.data.telegramUserId && sentMessageId) {
+    try {
+      await redisConnection.set(
+        `midas:am:${job.data.telegramUserId}:${chatId}`,
+        sentMessageId,
+        'EX',
+        86400, // 24 hours
+      );
+    } catch { /* non-fatal */ }
+  }
+
   // Phase 1.37-UX: If cacheStoreKey is set, write sentMessageId back to Redis.
   // Used by clarification flow and Phase 1.39 reminder/gate tracking.
   if (job.data.cacheStoreKey && sentMessageId) {
