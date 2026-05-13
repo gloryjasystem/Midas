@@ -40,6 +40,7 @@
  */
 
 import type { InlineKeyboardMarkup } from '../services/telegram-api.js';
+import { classifyCurrency } from './account-currency-validator.service.js'; // Phase 2.5
 
 // ─────────────────────────────────────────────────────────────
 // Redis state type for rename sub-flow
@@ -324,11 +325,27 @@ export function buildAccountPickerV2Keyboard(
   const rows = accounts.slice(0, 8).map((acc) => {
     // Strip trailing zeros from balance for display: 15400.0000 → 15400
     const balDisplay = stripTrailingZeros(acc.balance);
+    // Phase 2.5: use currency-aware emoji
+    const isCrypto = classifyCurrency(acc.currency) !== 'fiat';
+    const icon = isCrypto ? '💎' : '🏦';
+    // ⚠️ badge: only when the account NAME suggests a fiat bank but currency is crypto.
+    // Since V2 entry has no type field, we use the heuristic: name contains none of
+    // the common crypto-account markers (exchange / wallet / крипто) AND currency is crypto.
+    const nameHint = acc.name.toLowerCase();
+    const looksLikeBank = isCrypto &&
+      !nameHint.includes('exchange') &&
+      !nameHint.includes('биржа') &&
+      !nameHint.includes('кошелёк') &&
+      !nameHint.includes('кошелек') &&
+      !nameHint.includes('wallet') &&
+      !nameHint.includes('crypto');
+    const badge = looksLikeBank ? '⚠️ ' : '';
     return [{
-      text: `🏦 ${acc.name} · ${balDisplay} ${acc.currency}`,
+      text: `${badge}${icon} ${acc.name} · ${balDisplay} ${acc.currency}`,
       callback_data: `ia:pk:${acc.id}:${draftId}`,
     }];
   });
+
 
   // Phase 2.4: Mandatory account selection - replace "Без счёта" with "Создать счёт"
   rows.push([{ text: '➕ Создать счёт', callback_data: `ia:rename:${draftId}` }]);
@@ -432,6 +449,23 @@ function stripTrailingZeros(s: string): string {
   return s.replace(/\.?0+$/, '');
 }
 
+/**
+ * Phase 2.5: Heuristic anomaly detector.
+ * Returns '⚠️ ' if an account looks like a bank/cash/e-wallet
+ * (emoji resolves to 🏦) but holds a crypto or stablecoin currency.
+ *
+ * This is a purely cosmetic warning — the account still works.
+ * A hard block is enforced at creation time by account-currency-validator.service.
+ *
+ * If the user somehow has an existing anomalous account (created before Phase 2.5,
+ * or via a custom path) the badge helps them understand the mismatch.
+ */
+function anomalyBadge(emoji: string, currency: string): string {
+  if (emoji !== '🏦') return ''; // crypto/cash accounts are fine with any currency
+  const cls = classifyCurrency(currency);
+  return cls !== 'fiat' ? '⚠️ ' : '';
+}
+
 // ─────────────────────────────────────────────────────────────
 // Phase 2.4 PR 11 — Full Account Picker for Draft Card
 // ─────────────────────────────────────────────────────────────
@@ -498,8 +532,10 @@ export function buildAccountPickerForDraft(
     const emoji  = accountTypeEmoji(acc.type, acc.currency, acc.name);
     const bal    = stripTrailingZeros(acc.balance);
     const check  = acc.id === currentAccountId ? '✓ ' : '   ';
+    // Phase 2.5: warn if account looks like a bank but holds crypto
+    const badge  = anomalyBadge(emoji, acc.currency);
     return [{
-      text: `${check}${emoji} ${acc.name} · ${bal} ${acc.currency}`,
+      text: `${check}${badge}${emoji} ${acc.name} · ${bal} ${acc.currency}`,
       callback_data: `ia:pk:${acc.id}:${draftId}`,
     }];
   });
