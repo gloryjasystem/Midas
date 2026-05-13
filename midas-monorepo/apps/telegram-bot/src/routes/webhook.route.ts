@@ -4858,7 +4858,6 @@ Midas создан, чтобы сделать учет денег максима
       const edKey = editStateKey(telegramUserId, chatId);
       const edState = await redisConnection.get(edKey);
       if (edState) {
-        await redisConnection.del(edKey);
         // edState format: "amt:<txId>"
         const colonIdx = edState.indexOf(':');
         const field = colonIdx === -1 ? edState : edState.slice(0, colonIdx);
@@ -4870,23 +4869,43 @@ Midas создан, чтобы сделать учет денег максима
             const resolved = await resolveWorkspace(telegramUserId, chatId);
             edWorkspaceId = resolved.workspaceId;
             const res = await updateTransactionAmount(txId, edWorkspaceId, resolved.userId, message.text);
-            if (res.status === 'ok') {
-              void upsertBotMessage(telegramUserId, chatId, '✅ Сумма изменена. Баланс пересчитан автоматически.');
-              request.log.info({ msg: '[midas:bot:webhook] edit: amount updated via text', txId, workspaceId: edWorkspaceId });
-            } else if (res.status === 'invalid_amount') {
+            
+            if (res.status === 'invalid_amount') {
+              // Keep state alive so user can try again
+              await redisConnection.expire(edKey, EDIT_STATE_TTL_SEC);
               void upsertBotMessage(telegramUserId, chatId, '⚠️ Неверная сумма. Отправьте число, например: 380 или 1500.50');
-            } else if (res.status === 'cross_currency_blocked') {
-              void upsertBotMessage(telegramUserId, chatId, '⚠️ Изменение суммы недоступно для мультивалютных транзакций.');
             } else {
-              void upsertBotMessage(telegramUserId, chatId, '⚠️ Транзакция не найдена.');
+              // Delete state on success or hard error
+              await redisConnection.del(edKey);
+              
+              if (res.status === 'ok') {
+                const card = await getTransactionCard(txId, edWorkspaceId, resolved.userId);
+                if (card) {
+                  void upsertBotMessage(
+                    telegramUserId,
+                    chatId,
+                    formatTransactionCard(card),
+                    buildTransactionCardKeyboard(txId, card.is_cross_currency)
+                  );
+                } else {
+                  void upsertBotMessage(telegramUserId, chatId, '✅ Сумма изменена. Баланс пересчитан автоматически.');
+                }
+                request.log.info({ msg: '[midas:bot:webhook] edit: amount updated via text', txId, workspaceId: edWorkspaceId });
+              } else if (res.status === 'cross_currency_blocked') {
+                void upsertBotMessage(telegramUserId, chatId, '⚠️ Изменение суммы недоступно для мультивалютных транзакций.');
+              } else {
+                void upsertBotMessage(telegramUserId, chatId, '⚠️ Транзакция не найдена.');
+              }
             }
           } catch (err: unknown) {
+            await redisConnection.del(edKey);
             const errorClass = err instanceof Error ? err.constructor.name : 'UnknownError';
             request.log.error({ msg: '[midas:bot:webhook] edit amount update failed', txId, errorClass });
             void upsertBotMessage(telegramUserId, chatId, '⚠️ Не удалось сохранить. Попробуйте позже.');
           }
         } else {
           // Malformed state — discard silently, let message fall through
+          await redisConnection.del(edKey);
           request.log.warn({ msg: '[midas:bot:webhook] edit: malformed Redis state — discarded', field });
         }
         await reply.status(200).send({ ok: true });
@@ -4928,6 +4947,8 @@ Midas создан, чтобы сделать учет денег максима
           } else if (txSearchMode === 'date') {
             const parsed = parseDateInput(queryText);
             if (!parsed) {
+              // Restore state so they can try again
+              await redisConnection.setex(txSearchKey, 120, 'date');
               void upsertBotMessage(telegramUserId, chatId,
                 '⚠️ Не удалось распознать дату.\n\nПопробуй:\n' +
                 '  <code>10.05</code>  — конкретный день\n' +
@@ -4958,9 +4979,10 @@ Midas создан, чтобы сделать учет денег максима
             return;
 
           } else {
-            // amount mode — validate numeric input
             const amountMatch = queryText.replace(/[^\d.,]/g, '').replace(',', '.');
             if (!amountMatch || !/^\d+(\.\d{1,2})?$/.test(amountMatch)) {
+              // Restore state so they can try again
+              await redisConnection.setex(txSearchKey, 120, 'amount');
               void upsertBotMessage(telegramUserId, chatId, '⚠️ Неверная сумма. Введите число, например: 1000 или 250.50');
               await reply.status(200).send({ ok: true });
               return;
