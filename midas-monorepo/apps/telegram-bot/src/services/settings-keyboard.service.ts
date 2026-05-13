@@ -51,21 +51,11 @@ import { escapeHtml } from '../utils/html-escape.js';
 export function buildSettingsMainKeyboard(): InlineKeyboardMarkup {
   return {
     inline_keyboard: [
-      [
-        { text: '💵 Основная валюта', callback_data: 'st:g:pick' },
-        { text: '🏦 Основной счет', callback_data: 'st:da:all' },
-      ],
-      [
-        { text: '🕒 Часовой пояс', callback_data: 'st:tz' },
-        { text: '🔔 Уведомления', callback_data: 'st:ntf' },
-      ],
-      [
-        { text: '💬 Поддержка', url: 'https://t.me/midas_support' },
-        { text: 'ℹ️ О боте', callback_data: 'st:info' },
-      ],
-      [
-        { text: '✖️ Закрыть', callback_data: 'st:cancel' },
-      ],
+      [{ text: '💵 Основная валюта', callback_data: 'st:g:pick' }],
+      [{ text: '🕒 Часовой пояс', callback_data: 'st:tz' }],
+      [{ text: '🔔 Уведомления', callback_data: 'st:ntf' }],
+      [{ text: '💬 Поддержка', url: 'https://t.me/midas_support' }],
+      [{ text: '✖️ Закрыть', callback_data: 'st:cancel' }],
     ],
   };
 }
@@ -78,16 +68,11 @@ export function buildSettingsMainKeyboard(): InlineKeyboardMarkup {
 export function formatSettingsMenuText(
   currency: string,
   timezone: string,
-  mainAccountName?: string | null,
+  _mainAccountName?: string | null, // preserved signature for compatibility
 ): string {
-  const mainAcct = mainAccountName
-    ? escapeHtml(mainAccountName)
-    : '<i>не задан</i>';
-
   return (
     '⚙️ <b>Настройки Midas</b>\n\n' +
     `💵 Основная валюта: <b>${escapeHtml(currency)}</b>\n` +
-    `🏦 Основной счет: ${mainAcct}\n` +
     `🕒 Часовой пояс: <b>${escapeHtml(timezone)}</b>`
   );
 }
