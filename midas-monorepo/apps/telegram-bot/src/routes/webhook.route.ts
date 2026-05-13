@@ -238,6 +238,7 @@ import {
   patchDraftCategoryHint,            // Phase 2.5: smart category detector
 } from '../services/clarification.service.js';
 import { detectCategoryFromItem } from '../services/item-category-detector.service.js'; // Phase 2.5
+import { validateAccountCurrency } from '../services/account-currency-validator.service.js'; // Phase 2.5
 import {
   upsertBotMessage,                  // Phase 1.33
   tryDeleteUserMessage,              // Phase 1.33
@@ -1099,9 +1100,30 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
                 accountName = state.name ?? 'Счёт';
               }
 
+              // ── Phase 2.5: Account-currency compatibility gate ────────
+              const providerKeyForValidation = (state.name ?? '').toLowerCase();
+              const currencyValidation = validateAccountCurrency(
+                state.accountType,
+                state.walletSubtype,
+                providerKeyForValidation,
+                acCmd.code,
+              );
+              if (!currencyValidation.valid) {
+                // Block creation — show error, keep state intact so user can pick a different currency
+                if (acMsgId) {
+                  void editMessageText(chatId, acMsgId, currencyValidation.errorMessage);
+                } else {
+                  void upsertBotMessage(telegramUserId, chatId, currencyValidation.errorMessage);
+                }
+                await reply.status(200).send({ ok: true });
+                return;
+              }
+              // ── End Phase 2.5 ─────────────────────────────────────────
+
               const res = await addAccountReturningId(
                 acResolved.workspaceId, acResolved.userId, accountName, acCmd.code,
               );
+
 
               if (res.status === 'duplicate') {
                 await redisConnection.del(acKey);
@@ -4542,6 +4564,21 @@ Midas создан, чтобы сделать учет денег максима
             return;
           }
 
+          // ── Phase 2.5: Account-currency compatibility gate ────────────
+          const curInputValidation = validateAccountCurrency(
+            acState.accountType,
+            acState.walletSubtype,
+            (acState.name ?? '').toLowerCase(),
+            rawCode,
+          );
+          if (!curInputValidation.valid) {
+            // Do NOT delete state — user can type a valid code instead
+            void upsertBotMessage(telegramUserId, chatId, curInputValidation.errorMessage);
+            await reply.status(200).send({ ok: true });
+            return;
+          }
+          // ── End Phase 2.5 ────────────────────────────────────────────
+
           await redisConnection.del(acKey);
           try {
             const resolved = await resolveWorkspace(telegramUserId, chatId);
@@ -4553,6 +4590,7 @@ Midas создан, чтобы сделать учет денег максима
             }
             const res = await addAccountWithCurrency(resolved.workspaceId, resolved.userId, accountName, rawCode);
             if (res === 'duplicate') {
+
               void upsertBotMessage(
                 telegramUserId,
                 chatId,
