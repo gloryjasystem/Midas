@@ -1716,7 +1716,7 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
               rows.push([{ text: '\uD83C\uDFE6 \u0418\u0437\u043C\u0435\u043D\u0438\u0442\u044C \u0441\u0447\u0451\u0442', callback_data: `tx:f:acc:${txCmd.txId}` }]);
               rows.push([{ text: '\uD83D\uDD04 \u0418\u0437\u043C\u0435\u043D\u0438\u0442\u044C \u0442\u0438\u043F', callback_data: `tx:f:int:${txCmd.txId}` }]);
               rows.push([{ text: '\uD83D\uDDD1\uFE0F \u0423\u0434\u0430\u043B\u0438\u0442\u044C', callback_data: `tx:d:ask:${txCmd.txId}` }]);
-              rows.push([{ text: '\u2716\uFE0F \u0417\u0430\u043A\u0440\u044B\u0442\u044C', callback_data: `tx:done:${txCmd.txId}` }]);
+              rows.push([{ text: '\u2716\uFE0F \u0417\u0430\u043A\u0440\u044B\u0442\u044C', callback_data: 'tx:close' }]);
               if (txMsgId) void editMessageText(chatId, txMsgId, text, { inline_keyboard: rows });
             } else {
               if (txMsgId) void editMessageText(chatId, txMsgId, '\u26A0\uFE0F \u0422\u0440\u0430\u043D\u0437\u0430\u043A\u0446\u0438\u044F \u043D\u0435 \u043D\u0430\u0439\u0434\u0435\u043D\u0430.', { inline_keyboard: [[{ text: '\u25C0\uFE0F \u041D\u0430\u0437\u0430\u0434', callback_data: 'tx:l:0:a' }]] });
