@@ -454,6 +454,54 @@ export function buildConfirmedScreen(data: ConfirmedScreenData): string {
   return lines.join('\n');
 }
 
+/**
+ * Rebuild a Success Card from a DB TransactionCard and Account balance.
+ */
+export function formatRestoredSuccessCard(
+  card: {
+    transaction_intent: string;
+    base_amount: string;
+    currency: string;
+    original_amount: string;
+    category_name: string;
+    account_name: string;
+    transaction_time: string;
+  },
+  account?: {
+    currency: string;
+    balance: string;
+  } | null
+): string {
+  const data: ConfirmedScreenData = {
+    intent: card.transaction_intent,
+    amount: card.original_amount,
+    currency: card.currency,
+    categoryName: card.category_name,
+    accountName: card.account_name,
+    itemName: null, // We don't store this in DB
+    transactionTime: card.transaction_time,
+  };
+
+  if (account) {
+    data.accountCurrency = account.currency;
+    data.balanceAfter = account.balance;
+
+    const isIncome = card.transaction_intent === 'income' || card.transaction_intent === 'debt_received';
+    
+    // balanceBefore = balanceAfter [OPPOSITE] debit
+    data.debitAmount = card.base_amount;
+    data.debitCurrency = account.currency; // base_currency is account currency
+
+    data.balanceBefore = _numericAdd(
+      account.balance,
+      card.base_amount,
+      isIncome // if income (balance increased), subtract to get before
+    );
+  }
+
+  return buildConfirmedScreen(data);
+}
+
 
 // ─────────────────────────────────────────────────────────────
 // Rejected Screen

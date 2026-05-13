@@ -1634,6 +1634,15 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
 
         const txMsgId = cq.message ? String(cq.message.message_id) : null;
 
+        const getRestoredCardText = async (txId: string) => {
+          const card = await getTransactionCard(txId, txResolved.workspaceId, txResolved.userId);
+          if (!card) return null;
+          const { getAccountWithBalance } = await import('../services/account.service.js');
+          const { formatRestoredSuccessCard } = await import('../utils/screen-builder.js');
+          const account = card.account_id ? await getAccountWithBalance(txResolved.workspaceId, txResolved.userId, card.account_id) : null;
+          return { card, text: formatRestoredSuccessCard(card, account) };
+        };
+
         try {
           if (txCmd.cmd === 'cancel') {
             if (txMsgId) void editMessageText(chatId, txMsgId, '📋 Закрыто.', { inline_keyboard: [] });
@@ -1646,9 +1655,9 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
             }
           } else if (txCmd.cmd === 'done') {
             // Revert back to the simple "Success" card state with a single "Edit" button
-            const card = await getTransactionCard(txCmd.txId, txResolved.workspaceId, txResolved.userId);
-            if (card && txMsgId) {
-              void editMessageText(chatId, txMsgId, formatTransactionCard(card), { inline_keyboard: [[{ text: '✏️ Изменить запись', callback_data: `ed:v:${txCmd.txId}` }]] });
+            const res = await getRestoredCardText(txCmd.txId);
+            if (res && txMsgId) {
+              void editMessageText(chatId, txMsgId, res.text, { inline_keyboard: [[{ text: '✏️ Изменить запись', callback_data: `ed:v:${txCmd.txId}` }]] });
             }
           } else if (txCmd.cmd === 'list') {
             const [items, total, stats] = await Promise.all([
@@ -1661,17 +1670,24 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
             const keyboard = buildTxListKeyboard(items, txCmd.page, totalPages, txCmd.filter);
             if (txMsgId) void editMessageText(chatId, txMsgId, header, keyboard);
           } else if (txCmd.cmd === 'view') {
-            const card = await getTransactionCard(txCmd.txId, txResolved.workspaceId, txResolved.userId);
-            if (card) {
-              const text = formatTransactionCard(card);
+            const res = await getRestoredCardText(txCmd.txId);
+            if (res) {
               const rows: { text: string; callback_data: string }[][] = [];
-              if (!card.is_cross_currency) rows.push([{ text: '\u270F\uFE0F \u0418\u0437\u043C\u0435\u043D\u0438\u0442\u044C \u0441\u0443\u043C\u043C\u0443', callback_data: `tx:f:amt:${txCmd.txId}` }]);
+              if (!res.card.is_cross_currency) rows.push([{ text: '\u270F\uFE0F \u0418\u0437\u043C\u0435\u043D\u0438\u0442\u044C \u0441\u0443\u043C\u043C\u0443', callback_data: `tx:f:amt:${txCmd.txId}` }]);
               rows.push([{ text: '\u{1F4C1} \u0418\u0437\u043C\u0435\u043D\u0438\u0442\u044C \u043A\u0430\u0442\u0435\u0433\u043E\u0440\u0438\u044E', callback_data: `tx:f:cat:${txCmd.txId}:0` }]);
               rows.push([{ text: '\u{1F3E6} \u0418\u0437\u043C\u0435\u043D\u0438\u0442\u044C \u0441\u0447\u0451\u0442', callback_data: `tx:f:acc:${txCmd.txId}` }]);
               rows.push([{ text: '\u{1F504} \u0418\u0437\u043C\u0435\u043D\u0438\u0442\u044C \u0442\u0438\u043F', callback_data: `tx:f:int:${txCmd.txId}` }]);
               rows.push([{ text: '\u{1F5D1}\uFE0F \u0423\u0434\u0430\u043B\u0438\u0442\u044C', callback_data: `tx:d:ask:${txCmd.txId}` }]);
-              rows.push([{ text: '\u25C0\uFE0F \u041D\u0430\u0437\u0430\u0434 \u043A \u0441\u043F\u0438\u0441\u043A\u0443', callback_data: 'tx:l:0:a' }]);
-              if (txMsgId) void editMessageText(chatId, txMsgId, text, { inline_keyboard: rows });
+              
+              if (txCmd.from === 's') {
+                rows.push([{ text: '\u2716\uFE0F \u0417\u0430\u043A\u0440\u044B\u0442\u044C', callback_data: `tx:done:${txCmd.txId}` }]);
+              } else {
+                rows.push([{ text: '\u25C0\uFE0F \u041D\u0430\u0437\u0430\u0434 \u043A \u0441\u043F\u0438\u0441\u043A\u0443', callback_data: 'tx:l:0:a' }]);
+              }
+
+              try { await redisConnection.set(`midas:tx:view:${telegramUserId}:${chatId}`, `${txCmd.txId}:${txMsgId || ''}:${txCmd.from || ''}`, 'EX', 120); } catch { /* non-fatal */ }
+
+              if (txMsgId) void editMessageText(chatId, txMsgId, res.text, { inline_keyboard: rows });
             } else {
               if (txMsgId) void editMessageText(chatId, txMsgId, '\u26A0\uFE0F \u0422\u0440\u0430\u043D\u0437\u0430\u043A\u0446\u0438\u044F \u043D\u0435 \u043D\u0430\u0439\u0434\u0435\u043D\u0430.', { inline_keyboard: [[{ text: '\u25C0\uFE0F \u041D\u0430\u0437\u0430\u0434', callback_data: 'tx:l:0:a' }]] });
             }
@@ -1717,22 +1733,22 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
             const result = await updateTransactionCategory(txCmd.txId, txResolved.workspaceId, txResolved.userId, txCmd.catId);
             const sf = txCmd.from ? `:${txCmd.from}` : '';
             if (result.status === 'ok') {
-              const card = await getTransactionCard(txCmd.txId, txResolved.workspaceId, txResolved.userId);
-              if (card && txMsgId) void editMessageText(chatId, txMsgId, '\u2705 \u041A\u0430\u0442\u0435\u0433\u043E\u0440\u0438\u044F \u0438\u0437\u043C\u0435\u043D\u0435\u043D\u0430.\n\n' + formatTransactionCard(card), { inline_keyboard: [[{ text: '\u25C0\uFE0F \u041A \u0442\u0440\u0430\u043D\u0437\u0430\u043A\u0446\u0438\u0438', callback_data: `tx:v:${txCmd.txId}${sf}` }]] });
+              const res = await getRestoredCardText(txCmd.txId);
+              if (res && txMsgId) void editMessageText(chatId, txMsgId, '\u2705 \u041A\u0430\u0442\u0435\u0433\u043E\u0440\u0438\u044F \u0438\u0437\u043C\u0435\u043D\u0435\u043D\u0430.\n\n' + res.text, { inline_keyboard: [[{ text: '\u25C0\uFE0F \u041A \u0442\u0440\u0430\u043D\u0437\u0430\u043A\u0446\u0438\u0438', callback_data: `tx:v:${txCmd.txId}${sf}` }]] });
             } else if (txMsgId) void editMessageText(chatId, txMsgId, '\u26A0\uFE0F \u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u0438\u0437\u043C\u0435\u043D\u0438\u0442\u044C.', { inline_keyboard: [[{ text: '\u25C0\uFE0F \u041D\u0430\u0437\u0430\u0434', callback_data: `tx:v:${txCmd.txId}${sf}` }]] });
           } else if (txCmd.cmd === 'confirm_acc') {
             const result = await updateTransactionAccount(txCmd.txId, txResolved.workspaceId, txResolved.userId, txCmd.accId);
             const sf = txCmd.from ? `:${txCmd.from}` : '';
             if (result.status === 'ok') {
-              const card = await getTransactionCard(txCmd.txId, txResolved.workspaceId, txResolved.userId);
-              if (card && txMsgId) void editMessageText(chatId, txMsgId, '\u2705 \u0421\u0447\u0451\u0442 \u0438\u0437\u043C\u0435\u043D\u0451\u043D.\n\n' + formatTransactionCard(card), { inline_keyboard: [[{ text: '\u25C0\uFE0F \u041A \u0442\u0440\u0430\u043D\u0437\u0430\u043A\u0446\u0438\u0438', callback_data: `tx:v:${txCmd.txId}${sf}` }]] });
+              const res = await getRestoredCardText(txCmd.txId);
+              if (res && txMsgId) void editMessageText(chatId, txMsgId, '\u2705 \u0421\u0447\u0451\u0442 \u0438\u0437\u043C\u0435\u043D\u0451\u043D.\n\n' + res.text, { inline_keyboard: [[{ text: '\u25C0\uFE0F \u041A \u0442\u0440\u0430\u043D\u0437\u0430\u043A\u0446\u0438\u0438', callback_data: `tx:v:${txCmd.txId}${sf}` }]] });
             } else if (txMsgId) void editMessageText(chatId, txMsgId, '\u26A0\uFE0F \u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u0438\u0437\u043C\u0435\u043D\u0438\u0442\u044C.', { inline_keyboard: [[{ text: '\u25C0\uFE0F \u041D\u0430\u0437\u0430\u0434', callback_data: `tx:v:${txCmd.txId}${sf}` }]] });
           } else if (txCmd.cmd === 'confirm_int') {
             const result = await updateTransactionIntent(txCmd.txId, txResolved.workspaceId, txResolved.userId, txCmd.intent);
             const sf = txCmd.from ? `:${txCmd.from}` : '';
             if (result.status === 'ok') {
-              const card = await getTransactionCard(txCmd.txId, txResolved.workspaceId, txResolved.userId);
-              if (card && txMsgId) void editMessageText(chatId, txMsgId, '\u2705 \u0422\u0438\u043F \u0438\u0437\u043C\u0435\u043D\u0451\u043D.\n\n' + formatTransactionCard(card), { inline_keyboard: [[{ text: '\u25C0\uFE0F \u041A \u0442\u0440\u0430\u043D\u0437\u0430\u043A\u0446\u0438\u0438', callback_data: `tx:v:${txCmd.txId}${sf}` }]] });
+              const res = await getRestoredCardText(txCmd.txId);
+              if (res && txMsgId) void editMessageText(chatId, txMsgId, '\u2705 \u0422\u0438\u043F \u0438\u0437\u043C\u0435\u043D\u0451\u043D.\n\n' + res.text, { inline_keyboard: [[{ text: '\u25C0\uFE0F \u041A \u0442\u0440\u0430\u043D\u0437\u0430\u043A\u0446\u0438\u0438', callback_data: `tx:v:${txCmd.txId}${sf}` }]] });
             } else if (txMsgId) void editMessageText(chatId, txMsgId, '\u26A0\uFE0F \u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u0438\u0437\u043C\u0435\u043D\u0438\u0442\u044C.', { inline_keyboard: [[{ text: '\u25C0\uFE0F \u041D\u0430\u0437\u0430\u0434', callback_data: `tx:v:${txCmd.txId}${sf}` }]] });
           } else if (txCmd.cmd === 'delete_ask') {
             const sf = txCmd.from ? `:${txCmd.from}` : '';
@@ -2054,7 +2070,11 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
             } else if (aliasCmd.cmd === 'view') {
               const card = await getTransactionCard(aliasCmd.txId, txResolved.workspaceId, txResolved.userId);
               if (card) {
-                const text = formatTransactionCard(card);
+                const { getAccountWithBalance } = await import('../services/account.service.js');
+                const { formatRestoredSuccessCard } = await import('../utils/screen-builder.js');
+                const account = card.account_id ? await getAccountWithBalance(txResolved.workspaceId, txResolved.userId, card.account_id) : null;
+                const text = formatRestoredSuccessCard(card, account);
+                
                 const rows: { text: string; callback_data: string }[][] = [];
                 const sf = aliasCmd.from ? `:${aliasCmd.from}` : '';
                 
@@ -2069,6 +2089,8 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
                 } else {
                   rows.push([{ text: '\u25C0\uFE0F \u041D\u0430\u0437\u0430\u0434 \u043A \u0441\u043F\u0438\u0441\u043A\u0443', callback_data: 'tx:l:0:a' }]);
                 }
+
+                try { await redisConnection.set(`midas:tx:view:${telegramUserId}:${chatId}`, `${aliasCmd.txId}:${txMsgId || ''}:${aliasCmd.from || ''}`, 'EX', 120); } catch { /* non-fatal */ }
                 
                 if (txMsgId) void editMessageText(chatId, txMsgId, text, { inline_keyboard: rows });
               } else {
@@ -2175,7 +2197,10 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
             if (res.status === 'ok') {
               const card = await getTransactionCard(cmd.txId, edResolved.workspaceId, edResolved.userId);
               if (card && messageId) {
-                void editMessageText(chatId, messageId, formatTransactionCard(card), buildTransactionCardKeyboard(cmd.txId, card.is_cross_currency));
+                const { getAccountWithBalance } = await import('../services/account.service.js');
+                const { formatRestoredSuccessCard } = await import('../utils/screen-builder.js');
+                const account = card.account_id ? await getAccountWithBalance(edResolved.workspaceId, edResolved.userId, card.account_id) : null;
+                void editMessageText(chatId, messageId, formatRestoredSuccessCard(card, account), buildTransactionCardKeyboard(cmd.txId, card.is_cross_currency));
               }
               request.log.info({ msg: '[midas:bot:webhook] edit: category updated', txId: cmd.txId, workspaceId: edResolved.workspaceId });
             } else if (res.status === 'invalid_category') {
@@ -2191,7 +2216,10 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
             if (res.status === 'ok') {
               const card = await getTransactionCard(cmd.txId, edResolved.workspaceId, edResolved.userId);
               if (card && messageId) {
-                void editMessageText(chatId, messageId, formatTransactionCard(card), buildTransactionCardKeyboard(cmd.txId, card.is_cross_currency));
+                const { getAccountWithBalance } = await import('../services/account.service.js');
+                const { formatRestoredSuccessCard } = await import('../utils/screen-builder.js');
+                const account = card.account_id ? await getAccountWithBalance(edResolved.workspaceId, edResolved.userId, card.account_id) : null;
+                void editMessageText(chatId, messageId, formatRestoredSuccessCard(card, account), buildTransactionCardKeyboard(cmd.txId, card.is_cross_currency));
               }
               request.log.info({ msg: '[midas:bot:webhook] edit: account updated', txId: cmd.txId, workspaceId: edResolved.workspaceId });
             } else if (res.status === 'invalid_account') {
@@ -2211,7 +2239,10 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
               if (res.status === 'ok') {
                 const card = await getTransactionCard(cmd.txId, edResolved.workspaceId, edResolved.userId);
                 if (card && messageId) {
-                  void editMessageText(chatId, messageId, formatTransactionCard(card), buildTransactionCardKeyboard(cmd.txId, card.is_cross_currency));
+                  const { getAccountWithBalance } = await import('../services/account.service.js');
+                  const { formatRestoredSuccessCard } = await import('../utils/screen-builder.js');
+                  const account = card.account_id ? await getAccountWithBalance(edResolved.workspaceId, edResolved.userId, card.account_id) : null;
+                  void editMessageText(chatId, messageId, formatRestoredSuccessCard(card, account), buildTransactionCardKeyboard(cmd.txId, card.is_cross_currency));
                 }
                 request.log.info({ msg: '[midas:bot:webhook] edit: intent updated', txId: cmd.txId, workspaceId: edResolved.workspaceId });
               } else {
@@ -2225,9 +2256,12 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
                 // Soft-deleted already, or IDOR — graceful degradation.
                 if (messageId) void editMessageText(chatId, messageId, '⚠️ Транзакция не найдена или уже удалена.', { inline_keyboard: [] });
               } else {
+                const { getAccountWithBalance } = await import('../services/account.service.js');
+                const { formatRestoredSuccessCard } = await import('../utils/screen-builder.js');
+                const account = card.account_id ? await getAccountWithBalance(edResolved.workspaceId, edResolved.userId, card.account_id) : null;
                 const warningText =
                   '⚠️ <b>Удалить транзакцию?</b>\n\n' +
-                  `${formatTransactionCard(card)}\n` +
+                  `${formatRestoredSuccessCard(card, account)}\n` +
                   'Транзакция будет скрыта из всех отчётов и баланс автоматически пересчитается.';
                 const keyboard = buildDeleteConfirmKeyboard(cmd.txId);
                 if (messageId) void editMessageText(chatId, messageId, warningText, keyboard);
@@ -2633,6 +2667,7 @@ Midas создан, чтобы сделать учет денег максима
               ? `${intentEmoji(draft.parsed_intent)} ${intentLabel(draft.parsed_intent)}`
               : null;
             const lines = ['✏️ <b>Что изменить?</b>', ''];
+            try { await redisConnection.set(`midas:draft:view:${telegramUserId}:${chatId}`, draftEditId, 'EX', 120); } catch { /* non-fatal */ }
             if (iLabel) lines.push(iLabel);
             if (draft.parsed_amount) lines.push(`Сумма: <b>${formatAmount(draft.parsed_amount)} ${draft.parsed_currency ?? 'USDT'}</b>`);
             if (draft.item_name) lines.push(`Товар: ${draft.item_name}`);
@@ -4910,10 +4945,13 @@ Midas создан, чтобы сделать учет денег максима
               if (res.status === 'ok') {
                 const card = await getTransactionCard(txId, edWorkspaceId, resolved.userId);
                 if (card) {
+                  const { getAccountWithBalance } = await import('../services/account.service.js');
+                  const { formatRestoredSuccessCard } = await import('../utils/screen-builder.js');
+                  const account = card.account_id ? await getAccountWithBalance(edWorkspaceId, resolved.userId, card.account_id) : null;
                   void upsertBotMessage(
                     telegramUserId,
                     chatId,
-                    formatTransactionCard(card),
+                    formatRestoredSuccessCard(card, account),
                     buildTransactionCardKeyboard(txId, card.is_cross_currency)
                   );
                 } else {
@@ -4963,6 +5001,11 @@ Midas создан, чтобы сделать учет денег максима
               if (res.status === 'ok') {
                 const card = await getTransactionCard(txEdStateTxId, edWorkspaceId, resolved.userId);
                 if (card) {
+                  const { getAccountWithBalance } = await import('../services/account.service.js');
+                  const { formatRestoredSuccessCard } = await import('../utils/screen-builder.js');
+                  const account = card.account_id ? await getAccountWithBalance(edWorkspaceId, resolved.userId, card.account_id) : null;
+                  const cardText = formatRestoredSuccessCard(card, account);
+
                   const rows: { text: string; callback_data: string }[][] = [];
                   const sf = txFrom ? `:${txFrom}` : '';
                   if (!card.is_cross_currency) rows.push([{ text: '✏️ Изменить сумму', callback_data: `tx:f:amt:${txEdStateTxId}${sf}` }]);
@@ -4979,14 +5022,14 @@ Midas создан, чтобы сделать учет денег максима
                   
                   if (txMsgId) {
                     const { editMessageText, deleteMessage } = await import('../services/telegram-api.js');
-                    void editMessageText(chatId, txMsgId, formatTransactionCard(card), { inline_keyboard: rows });
+                    void editMessageText(chatId, txMsgId, cardText, { inline_keyboard: rows });
                     // Clean up user text message
                     void deleteMessage(chatId, String(message.message_id));
                   } else {
                     void upsertBotMessage(
                       telegramUserId,
                       chatId,
-                      formatTransactionCard(card),
+                      cardText,
                       { inline_keyboard: rows }
                     );
                   }
@@ -5241,6 +5284,81 @@ Midas создан, чтобы сделать учет денег максима
       const BARE_NUMBER_RE = /^\d[\d\s.,]*$/;
       if (BARE_NUMBER_RE.test(message.text.trim())) {
         const num = message.text.trim().replace(/\s+/g, '');
+
+        // Smart Edit: Intercept bare numbers if user recently viewed a transaction or draft menu
+        try {
+          const smartTxKey = `midas:tx:view:${telegramUserId}:${chatId}`;
+          const smartTxState = await redisConnection.get(smartTxKey);
+          if (smartTxState) {
+            const [svTxId, svMsgId, svFrom] = smartTxState.split(':') as [string, string | undefined, string | undefined];
+            if (svTxId && /^[0-9A-Z]{26}$/.test(svTxId)) {
+              const resolved = await resolveWorkspace(telegramUserId, chatId);
+              const { updateTransactionAmount, getTransactionCard } = await import('../services/edit.service.js');
+              const res = await updateTransactionAmount(svTxId, resolved.workspaceId, resolved.userId, num);
+              if (res.status === 'ok') {
+                const card = await getTransactionCard(svTxId, resolved.workspaceId, resolved.userId);
+                if (card) {
+                  const { getAccountWithBalance } = await import('../services/account.service.js');
+                  const { formatRestoredSuccessCard } = await import('../utils/screen-builder.js');
+                  const account = card.account_id ? await getAccountWithBalance(resolved.workspaceId, resolved.userId, card.account_id) : null;
+                  const cardText = formatRestoredSuccessCard(card, account);
+                  
+                  const rows: { text: string; callback_data: string }[][] = [];
+                  const sf = svFrom ? `:${svFrom}` : '';
+                  if (!card.is_cross_currency) rows.push([{ text: '\u270F\uFE0F \u0418\u0437\u043C\u0435\u043D\u0438\u0442\u044C \u0441\u0443\u043C\u043C\u0443', callback_data: `tx:f:amt:${svTxId}${sf}` }]);
+                  rows.push([{ text: '\uD83D\uDCC1 \u0418\u0437\u043C\u0435\u043D\u0438\u0442\u044C \u043A\u0430\u0442\u0435\u0433\u043E\u0440\u0438\u044E', callback_data: `tx:f:cat:${svTxId}:0${sf}` }]);
+                  rows.push([{ text: '\uD83C\uDFE6 \u0418\u0437\u043C\u0435\u043D\u0438\u0442\u044C \u0441\u0447\u0451\u0442', callback_data: `tx:f:acc:${svTxId}${sf}` }]);
+                  rows.push([{ text: '\uD83D\uDD04 \u0418\u0437\u043C\u0435\u043D\u0438\u0442\u044C \u0442\u0438\u043F', callback_data: `tx:f:int:${svTxId}${sf}` }]);
+                  rows.push([{ text: '\uD83D\uDDD1\uFE0F \u0423\u0434\u0430\u043B\u0438\u0442\u044C', callback_data: `tx:d:ask:${svTxId}${sf}` }]);
+                  if (svFrom === 's') {
+                    rows.push([{ text: '\u2716\uFE0F \u0417\u0430\u043A\u0440\u044B\u0442\u044C', callback_data: `tx:done:${svTxId}` }]);
+                  } else {
+                    rows.push([{ text: '\u25C0\uFE0F \u041D\u0430\u0437\u0430\u0434 \u043A \u0441\u043F\u0438\u0441\u043A\u0443', callback_data: 'tx:l:0:a' }]);
+                  }
+                  
+                  if (svMsgId) {
+                    void editMessageText(chatId, svMsgId, cardText, { inline_keyboard: rows });
+                    void deleteMessage(chatId, String(message.message_id));
+                  } else {
+                    void upsertBotMessage(telegramUserId, chatId, cardText, { inline_keyboard: rows });
+                  }
+                }
+                request.log.info({ msg: '[midas:bot:webhook] smart edit: tx amount updated via bare number guard', txId: svTxId });
+                await reply.status(200).send({ ok: true });
+                return;
+              } else if (res.status === 'cross_currency_blocked') {
+                void upsertBotMessage(telegramUserId, chatId, '⚠️ Изменение суммы недоступно для мультивалютных транзакций.');
+                await reply.status(200).send({ ok: true });
+                return;
+              }
+            }
+          }
+
+          const smartDraftKey = `midas:draft:view:${telegramUserId}:${chatId}`;
+          const smartDraftId = await redisConnection.get(smartDraftKey);
+          if (smartDraftId && /^[0-9A-Z]{26}$/.test(smartDraftId)) {
+            const resolved = await resolveWorkspace(telegramUserId, chatId);
+            const { patchDraftAmount } = await import('../services/clarification.service.js');
+            const amtPatchResult = await patchDraftAmount(resolved.workspaceId, resolved.userId, smartDraftId, num);
+            
+            if (amtPatchResult.status === 'ready') {
+              const curSetFlag = await redisConnection.exists(`midas:cur_set:${resolved.workspaceId}`);
+              if (!curSetFlag) {
+                const awaitCurKey = `midas:awaiting_cur:${chatId}`;
+                await redisConnection.setex(awaitCurKey, 300, `${smartDraftId}:${resolved.workspaceId}:${resolved.userId}`);
+                const clarMsg = await upsertBotMessage(telegramUserId, chatId, 'В какой валюте?');
+                if (clarMsg) await redisConnection.setex(`midas:clar:msg:${telegramUserId}:${chatId}`, 300, clarMsg);
+              } else {
+                await sendAndStorePreview(telegramUserId, chatId, resolved.workspaceId, resolved.userId, smartDraftId);
+              }
+              void deleteMessage(chatId, String(message.message_id));
+              request.log.info({ msg: '[midas:bot:webhook] smart edit: draft amount updated via bare number guard', draftId: smartDraftId });
+              await reply.status(200).send({ ok: true });
+              return;
+            }
+          }
+        } catch { /* non-fatal, fall through to default hint */ }
+
         const hint = [
           '💡 <b>Укажи сумму с валютой</b>',
           '',
