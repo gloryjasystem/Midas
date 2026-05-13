@@ -504,6 +504,46 @@ export function formatRestoredSuccessCard(
 
 
 // ─────────────────────────────────────────────────────────────
+// Transaction Detail / Edit Card (Screenshot 2 format)
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Build the "📋 Транзакция" detail view shown when user clicks "Изменить запись".
+ * Shows all fields in a structured list — NOT the "✅ Записано" success card.
+ */
+export function formatTxDetailCard(card: {
+  transaction_intent: string;
+  base_amount: string;
+  original_amount: string;
+  currency: string;
+  base_currency: string;
+  category_name: string;
+  account_name: string;
+  transaction_time: string;
+  is_cross_currency: boolean;
+}): string {
+  const intentLine = `${intentEmoji(card.transaction_intent)} ${intentLabel(card.transaction_intent)}`;
+  const amount = card.is_cross_currency
+    ? `${formatAmount(card.original_amount)} ${card.currency}`
+    : `${formatAmount(card.base_amount)} ${card.base_currency || card.currency}`;
+  // Parse date from transaction_time (ISO string from DB)
+  const dt = new Date(card.transaction_time);
+  const day   = String(dt.getDate()).padStart(2, '0');
+  const month = String(dt.getMonth() + 1).padStart(2, '0');
+  const year  = dt.getFullYear();
+  const dateStr = `${day}.${month}.${year}`;
+  return [
+    '📋 <b>Транзакция</b>',
+    '',
+    intentLine,
+    `💰 Сумма: <b>${amount}</b>`,
+    `📁 Категория: ${card.category_name}`,
+    `🏦 Счёт: ${card.account_name}`,
+    `📅 Дата: ${dateStr}`,
+  ].join('\n');
+}
+
+// ─────────────────────────────────────────────────────────────
 // Rejected Screen
 // ─────────────────────────────────────────────────────────────
 
