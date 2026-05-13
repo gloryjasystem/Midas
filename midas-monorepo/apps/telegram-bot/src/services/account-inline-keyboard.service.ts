@@ -357,9 +357,9 @@ export function buildAccountPickerV2Keyboard(
   });
 
 
-  // Phase 2.5: "Создать счёт" → launches full onboarding (ia:newac) + "Отмена" → back to preview
+  // Phase 2.5: "Создать счёт" → launches full onboarding (ia:newac) + "Назад" → back to draft preview
   rows.push([{ text: '➕ Создать счёт', callback_data: `ia:newac:${draftId}` }]);
-  rows.push([{ text: '✖️ Отмена',        callback_data: `ia:pk:back:${draftId}` }]);
+  rows.push([{ text: '◀️ Назад',         callback_data: `ia:pk:back:${draftId}` }]);
 
   return { inline_keyboard: rows };
 }
