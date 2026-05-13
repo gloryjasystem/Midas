@@ -554,7 +554,9 @@ async function processAiParse(job: Job<AiParseJobPayload>): Promise<void> {
           const balDisplay = acc.balance.replace(/\.?0+$/, '') || '0';
           return [{ text: `\uD83C\uDFE6 ${acc.name} \u00B7 ${balDisplay} ${acc.currency}`, callback_data: `ia:pk:${acc.id}:${draftId}` }];
         });
-        pickerRows.push([{ text: '\uD83D\uDCDD \u0411\u0435\u0437 \u0441\u0447\u0451\u0442\u0430', callback_data: `ia:skip:${draftId}` }]);
+        
+        pickerRows.push([{ text: '➕ Создать счёт', callback_data: `ia:newac:${draftId}` }]);
+        pickerRows.push([{ text: '✖️ Отмена', callback_data: `ia:pk:back:${draftId}` }]);
 
         inlineKeyboard = { inline_keyboard: pickerRows };
         previewMsg = richPreview + '\n\n' + pickerHeader;
