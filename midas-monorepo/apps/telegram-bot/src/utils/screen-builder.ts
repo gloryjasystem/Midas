@@ -456,6 +456,77 @@ export function buildConfirmedScreen(data: ConfirmedScreenData): string {
 
 
 // ─────────────────────────────────────────────────────────────
+// Transaction Detail Card (Screenshot 2: "📋 Транзакция" edit view)
+// ─────────────────────────────────────────────────────────────
+
+/** Renders the detailed field-by-field view shown when user clicks "Изменить запись". */
+export function formatTxDetailCard(card: {
+  transaction_intent: string;
+  base_amount: string;
+  original_amount: string;
+  currency: string;
+  base_currency: string;
+  category_name: string;
+  account_name: string;
+  transaction_time: string;
+  is_cross_currency: boolean;
+}): string {
+  const amount = card.is_cross_currency
+    ? `${formatAmount(card.original_amount)} ${card.currency}`
+    : `${formatAmount(card.base_amount)} ${card.base_currency || card.currency}`;
+  const dt = new Date(card.transaction_time);
+  const dateStr = `${String(dt.getDate()).padStart(2, '0')}.${String(dt.getMonth() + 1).padStart(2, '0')}.${dt.getFullYear()}`;
+  return [
+    '📋 <b>Транзакция</b>',
+    '',
+    `${intentEmoji(card.transaction_intent)} ${intentLabel(card.transaction_intent)}`,
+    `💰 Сумма: <b>${amount}</b>`,
+    `📁 Категория: ${card.category_name}`,
+    `🏦 Счёт: ${card.account_name}`,
+    `📅 Дата: ${dateStr}`,
+  ].join('\n');
+}
+
+// ─────────────────────────────────────────────────────────────
+// Restored Success Card (Screenshot 1: "✅ Записано" with balance)
+// ─────────────────────────────────────────────────────────────
+
+/** Renders the "✅ Записано" success card with recalculated balance. */
+export function formatRestoredSuccessCard(
+  card: {
+    transaction_intent: string;
+    base_amount: string;
+    original_amount: string;
+    currency: string;
+    base_currency: string;
+    category_name: string;
+    account_name: string;
+    transaction_time: string;
+    is_cross_currency: boolean;
+  },
+  account?: { currency: string; balance: string } | null,
+): string {
+  const isIncome = card.transaction_intent === 'income' || card.transaction_intent === 'debt_received';
+  const data: ConfirmedScreenData = {
+    intent:          card.transaction_intent,
+    amount:          card.original_amount,
+    currency:        card.currency,
+    categoryName:    card.category_name,
+    accountName:     card.account_name,
+    itemName:        null,
+    transactionTime: card.transaction_time,
+  };
+  if (account) {
+    data.accountCurrency = account.currency;
+    data.balanceAfter    = account.balance;
+    data.debitAmount     = card.base_amount;
+    data.debitCurrency   = account.currency;
+    data.balanceBefore   = _numericAdd(account.balance, card.base_amount, isIncome);
+  }
+  return buildConfirmedScreen(data);
+}
+
+// ─────────────────────────────────────────────────────────────
 // Rejected Screen
 // ─────────────────────────────────────────────────────────────
 

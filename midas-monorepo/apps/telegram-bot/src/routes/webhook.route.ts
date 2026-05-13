@@ -1645,10 +1645,13 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
               await redisConnection.del(`midas:empty_tx_msg:${chatId}`).catch(() => {});
             }
           } else if (txCmd.cmd === 'done') {
-            // Revert back to the simple "Success" card state with a single "Edit" button
+            // Returns to "✅ Записано" success card (Screenshot 1) with recalculated balance
             const card = await getTransactionCard(txCmd.txId, txResolved.workspaceId, txResolved.userId);
             if (card && txMsgId) {
-              void editMessageText(chatId, txMsgId, formatTransactionCard(card), { inline_keyboard: [[{ text: '✏️ Изменить запись', callback_data: `ed:v:${txCmd.txId}` }]] });
+              const { getAccountWithBalance } = await import('../services/account.service.js');
+              const { formatRestoredSuccessCard } = await import('../utils/screen-builder.js');
+              const account = card.account_id ? await getAccountWithBalance(txResolved.workspaceId, txResolved.userId, card.account_id) : null;
+              void editMessageText(chatId, txMsgId, formatRestoredSuccessCard(card, account), { inline_keyboard: [[{ text: '\u270F\uFE0F \u0418\u0437\u043C\u0435\u043D\u0438\u0442\u044C \u0437\u0430\u043F\u0438\u0441\u044C', callback_data: `ed:v:${txCmd.txId}` }]] });
             }
           } else if (txCmd.cmd === 'list') {
             const [items, total, stats] = await Promise.all([
@@ -1663,14 +1666,15 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
           } else if (txCmd.cmd === 'view') {
             const card = await getTransactionCard(txCmd.txId, txResolved.workspaceId, txResolved.userId);
             if (card) {
-              const text = formatTransactionCard(card);
+              const { formatTxDetailCard } = await import('../utils/screen-builder.js');
+              const text = formatTxDetailCard(card);
               const rows: { text: string; callback_data: string }[][] = [];
               if (!card.is_cross_currency) rows.push([{ text: '\u270F\uFE0F \u0418\u0437\u043C\u0435\u043D\u0438\u0442\u044C \u0441\u0443\u043C\u043C\u0443', callback_data: `tx:f:amt:${txCmd.txId}` }]);
-              rows.push([{ text: '\u{1F4C1} \u0418\u0437\u043C\u0435\u043D\u0438\u0442\u044C \u043A\u0430\u0442\u0435\u0433\u043E\u0440\u0438\u044E', callback_data: `tx:f:cat:${txCmd.txId}:0` }]);
-              rows.push([{ text: '\u{1F3E6} \u0418\u0437\u043C\u0435\u043D\u0438\u0442\u044C \u0441\u0447\u0451\u0442', callback_data: `tx:f:acc:${txCmd.txId}` }]);
-              rows.push([{ text: '\u{1F504} \u0418\u0437\u043C\u0435\u043D\u0438\u0442\u044C \u0442\u0438\u043F', callback_data: `tx:f:int:${txCmd.txId}` }]);
-              rows.push([{ text: '\u{1F5D1}\uFE0F \u0423\u0434\u0430\u043B\u0438\u0442\u044C', callback_data: `tx:d:ask:${txCmd.txId}` }]);
-              rows.push([{ text: '\u25C0\uFE0F \u041D\u0430\u0437\u0430\u0434 \u043A \u0441\u043F\u0438\u0441\u043A\u0443', callback_data: 'tx:l:0:a' }]);
+              rows.push([{ text: '\uD83D\uDCC1 \u0418\u0437\u043C\u0435\u043D\u0438\u0442\u044C \u043A\u0430\u0442\u0435\u0433\u043E\u0440\u0438\u044E', callback_data: `tx:f:cat:${txCmd.txId}:0` }]);
+              rows.push([{ text: '\uD83C\uDFE6 \u0418\u0437\u043C\u0435\u043D\u0438\u0442\u044C \u0441\u0447\u0451\u0442', callback_data: `tx:f:acc:${txCmd.txId}` }]);
+              rows.push([{ text: '\uD83D\uDD04 \u0418\u0437\u043C\u0435\u043D\u0438\u0442\u044C \u0442\u0438\u043F', callback_data: `tx:f:int:${txCmd.txId}` }]);
+              rows.push([{ text: '\uD83D\uDDD1\uFE0F \u0423\u0434\u0430\u043B\u0438\u0442\u044C', callback_data: `tx:d:ask:${txCmd.txId}` }]);
+              rows.push([{ text: '\u2716\uFE0F \u0417\u0430\u043A\u0440\u044B\u0442\u044C', callback_data: `tx:done:${txCmd.txId}` }]);
               if (txMsgId) void editMessageText(chatId, txMsgId, text, { inline_keyboard: rows });
             } else {
               if (txMsgId) void editMessageText(chatId, txMsgId, '\u26A0\uFE0F \u0422\u0440\u0430\u043D\u0437\u0430\u043A\u0446\u0438\u044F \u043D\u0435 \u043D\u0430\u0439\u0434\u0435\u043D\u0430.', { inline_keyboard: [[{ text: '\u25C0\uFE0F \u041D\u0430\u0437\u0430\u0434', callback_data: 'tx:l:0:a' }]] });
@@ -2054,22 +2058,15 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
             } else if (aliasCmd.cmd === 'view') {
               const card = await getTransactionCard(aliasCmd.txId, txResolved.workspaceId, txResolved.userId);
               if (card) {
-                const text = formatTransactionCard(card);
+                const { formatTxDetailCard } = await import('../utils/screen-builder.js');
+                const text = formatTxDetailCard(card);
                 const rows: { text: string; callback_data: string }[][] = [];
-                const sf = aliasCmd.from ? `:${aliasCmd.from}` : '';
-                
-                if (!card.is_cross_currency) rows.push([{ text: '\u270F\uFE0F \u0418\u0437\u043C\u0435\u043D\u0438\u0442\u044C \u0441\u0443\u043C\u043C\u0443', callback_data: `tx:f:amt:${aliasCmd.txId}${sf}` }]);
-                rows.push([{ text: '\uD83D\uDCC1 \u0418\u0437\u043C\u0435\u043D\u0438\u0442\u044C \u043A\u0430\u0442\u0435\u0433\u043E\u0440\u0438\u044E', callback_data: `tx:f:cat:${aliasCmd.txId}:0${sf}` }]);
-                rows.push([{ text: '\uD83C\uDFE6 \u0418\u0437\u043C\u0435\u043D\u0438\u0442\u044C \u0441\u0447\u0451\u0442', callback_data: `tx:f:acc:${aliasCmd.txId}${sf}` }]);
-                rows.push([{ text: '\uD83D\uDD04 \u0418\u0437\u043C\u0435\u043D\u0438\u0442\u044C \u0442\u0438\u043F', callback_data: `tx:f:int:${aliasCmd.txId}${sf}` }]);
-                rows.push([{ text: '\uD83D\uDDD1\uFE0F \u0423\u0434\u0430\u043B\u0438\u0442\u044C', callback_data: `tx:d:ask:${aliasCmd.txId}${sf}` }]); // Need to add 'from' to delete commands if we want, but close enough. Let's not touch delete for now to keep it safe, actually delete goes to list anyway.
-                
-                if (aliasCmd.from === 's') {
-                  rows.push([{ text: '\u2716\uFE0F \u0417\u0430\u043A\u0440\u044B\u0442\u044C', callback_data: `tx:done:${aliasCmd.txId}` }]);
-                } else {
-                  rows.push([{ text: '\u25C0\uFE0F \u041D\u0430\u0437\u0430\u0434 \u043A \u0441\u043F\u0438\u0441\u043A\u0443', callback_data: 'tx:l:0:a' }]);
-                }
-                
+                if (!card.is_cross_currency) rows.push([{ text: '\u270F\uFE0F \u0418\u0437\u043C\u0435\u043D\u0438\u0442\u044C \u0441\u0443\u043C\u043C\u0443', callback_data: `tx:f:amt:${aliasCmd.txId}:s` }]);
+                rows.push([{ text: '\uD83D\uDCC1 \u0418\u0437\u043C\u0435\u043D\u0438\u0442\u044C \u043A\u0430\u0442\u0435\u0433\u043E\u0440\u0438\u044E', callback_data: `tx:f:cat:${aliasCmd.txId}:0:s` }]);
+                rows.push([{ text: '\uD83C\uDFE6 \u0418\u0437\u043C\u0435\u043D\u0438\u0442\u044C \u0441\u0447\u0451\u0442', callback_data: `tx:f:acc:${aliasCmd.txId}:s` }]);
+                rows.push([{ text: '\uD83D\uDD04 \u0418\u0437\u043C\u0435\u043D\u0438\u0442\u044C \u0442\u0438\u043F', callback_data: `tx:f:int:${aliasCmd.txId}:s` }]);
+                rows.push([{ text: '\uD83D\uDDD1\uFE0F \u0423\u0434\u0430\u043B\u0438\u0442\u044C', callback_data: `tx:d:ask:${aliasCmd.txId}:s` }]);
+                rows.push([{ text: '\u2716\uFE0F \u0417\u0430\u043A\u0440\u044B\u0442\u044C', callback_data: `tx:done:${aliasCmd.txId}` }]);
                 if (txMsgId) void editMessageText(chatId, txMsgId, text, { inline_keyboard: rows });
               } else {
                 if (txMsgId) void editMessageText(chatId, txMsgId, '\u26A0\uFE0F \u0422\u0440\u0430\u043D\u0437\u0430\u043A\u0446\u0438\u044F \u043D\u0435 \u043D\u0430\u0439\u0434\u0435\u043D\u0430.', { inline_keyboard: [[{ text: '\u25C0\uFE0F \u041D\u0430\u0437\u0430\u0434', callback_data: 'tx:l:0:a' }]] });
@@ -4947,7 +4944,7 @@ Midas создан, чтобы сделать учет денег максима
       const txEdKey = `midas:tx:edit:amt:${telegramUserId}:${chatId}`;
       const txEdStateValue = await redisConnection.get(txEdKey);
       if (txEdStateValue) {
-        const [txEdStateTxId, txMsgId, txFrom] = txEdStateValue.split(':') as [string, string | undefined, string | undefined];
+        const [txEdStateTxId, txMsgId] = txEdStateValue.split(':') as [string, string | undefined];
         if (txEdStateTxId && /^[0-9A-Z]{26}$/.test(txEdStateTxId)) {
           let edWorkspaceId: string;
           try {
@@ -4963,32 +4960,20 @@ Midas создан, чтобы сделать учет денег максима
               if (res.status === 'ok') {
                 const card = await getTransactionCard(txEdStateTxId, edWorkspaceId, resolved.userId);
                 if (card) {
-                  const rows: { text: string; callback_data: string }[][] = [];
-                  const sf = txFrom ? `:${txFrom}` : '';
-                  if (!card.is_cross_currency) rows.push([{ text: '✏️ Изменить сумму', callback_data: `tx:f:amt:${txEdStateTxId}${sf}` }]);
-                  rows.push([{ text: '📁 Изменить категорию', callback_data: `tx:f:cat:${txEdStateTxId}:0${sf}` }]);
-                  rows.push([{ text: '🏦 Изменить счёт', callback_data: `tx:f:acc:${txEdStateTxId}${sf}` }]);
-                  rows.push([{ text: '🔄 Изменить тип', callback_data: `tx:f:int:${txEdStateTxId}${sf}` }]);
-                  rows.push([{ text: '🗑️ Удалить', callback_data: `tx:d:ask:${txEdStateTxId}${sf}` }]);
-                  
-                  if (txFrom === 's') {
-                    rows.push([{ text: '\u2716\uFE0F \u0417\u0430\u043A\u0440\u044B\u0442\u044C', callback_data: `tx:done:${txEdStateTxId}` }]);
-                  } else {
-                    rows.push([{ text: '◀️ Назад к списку', callback_data: 'tx:l:0:a' }]);
-                  }
-                  
+                  const { formatTxDetailCard } = await import('../utils/screen-builder.js');
+                  const detailRows: { text: string; callback_data: string }[][] = [];
+                  if (!card.is_cross_currency) detailRows.push([{ text: '\u270F\uFE0F \u0418\u0437\u043C\u0435\u043D\u0438\u0442\u044C \u0441\u0443\u043C\u043C\u0443', callback_data: `tx:f:amt:${txEdStateTxId}:s` }]);
+                  detailRows.push([{ text: '\uD83D\uDCC1 \u0418\u0437\u043C\u0435\u043D\u0438\u0442\u044C \u043A\u0430\u0442\u0435\u0433\u043E\u0440\u0438\u044E', callback_data: `tx:f:cat:${txEdStateTxId}:0:s` }]);
+                  detailRows.push([{ text: '\uD83C\uDFE6 \u0418\u0437\u043C\u0435\u043D\u0438\u0442\u044C \u0441\u0447\u0451\u0442', callback_data: `tx:f:acc:${txEdStateTxId}:s` }]);
+                  detailRows.push([{ text: '\uD83D\uDD04 \u0418\u0437\u043C\u0435\u043D\u0438\u0442\u044C \u0442\u0438\u043F', callback_data: `tx:f:int:${txEdStateTxId}:s` }]);
+                  detailRows.push([{ text: '\uD83D\uDDD1\uFE0F \u0423\u0434\u0430\u043B\u0438\u0442\u044C', callback_data: `tx:d:ask:${txEdStateTxId}:s` }]);
+                  detailRows.push([{ text: '\u2716\uFE0F \u0417\u0430\u043A\u0440\u044B\u0442\u044C', callback_data: `tx:done:${txEdStateTxId}` }]);
                   if (txMsgId) {
-                    const { editMessageText, deleteMessage } = await import('../services/telegram-api.js');
-                    void editMessageText(chatId, txMsgId, formatTransactionCard(card), { inline_keyboard: rows });
-                    // Clean up user text message
+                    const { editMessageText: editMsg, deleteMessage } = await import('../services/telegram-api.js');
+                    void editMsg(chatId, txMsgId, formatTxDetailCard(card), { inline_keyboard: detailRows });
                     void deleteMessage(chatId, String(message.message_id));
                   } else {
-                    void upsertBotMessage(
-                      telegramUserId,
-                      chatId,
-                      formatTransactionCard(card),
-                      { inline_keyboard: rows }
-                    );
+                    void upsertBotMessage(telegramUserId, chatId, formatTxDetailCard(card), { inline_keyboard: detailRows });
                   }
                 } else {
                   void upsertBotMessage(telegramUserId, chatId, '✅ Сумма изменена. Баланс пересчитан.');

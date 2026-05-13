@@ -103,7 +103,10 @@ export interface TransactionListItem {
 }
 
 export interface TransactionCard extends TransactionListItem {
-  exchange_rate: string;
+  original_amount: string;
+  currency:        string;
+  account_id:      string | null;
+  exchange_rate:   string;
   is_cross_currency: boolean; // exchange_rate != 1.000000000000
 }
 
@@ -198,6 +201,7 @@ export async function getTransactionCard(
          t.transaction_time::text,
          COALESCE(c.name, '—')  AS category_name,
          COALESCE(a.name, '—')  AS account_name,
+         t.account_id,
          (t.exchange_rate != 1.000000000000) AS is_cross_currency
        FROM transactions t
        LEFT JOIN categories     c ON c.id = t.category_id
