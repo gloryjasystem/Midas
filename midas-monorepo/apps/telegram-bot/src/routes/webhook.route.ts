@@ -4807,10 +4807,11 @@ Midas создан, чтобы сделать учет денег максима
         } else {
           // Onboarding is active but current step does NOT expect free text
           // (cur_pick, wallet_subtype, type_pick, name_confirm_custom — waiting for button).
-          // cur_search is handled above (2.5) and NEVER falls through to here.
-          // Silently swallow the message so it never reaches the AI parser.
-          await reply.status(200).send({ ok: true });
-          return;
+          // Phase 2.5+: Instead of silently ignoring the message, clear the onboarding state
+          // and fall through to the AI parser so the user can naturally "escape" by typing
+          // a new transaction (e.g. "кофе 150" while on type_pick step).
+          await redisConnection.del(acKey);
+          // Fall through — do NOT return here. The message continues to the AI parse path below.
         }
       }
     }

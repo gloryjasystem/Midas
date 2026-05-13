@@ -27,6 +27,19 @@ OUTPUT RULES (strictly enforced):
 - confidence is a float from 0.0 (unsure) to 1.0 (certain). Always include this field.
 - Even at low confidence, always output your best guess for intent (default: "expense") and extract any number as amount.
 
+CURRENCY NORMALIZATION (critical — always apply before outputting currency field):
+- ALWAYS convert informal, slang, or Cyrillic currency words to the correct ISO 4217 / ticker code.
+- The output currency field MUST be uppercase Latin letters only (3–6 chars). NEVER output Cyrillic.
+- USD aliases: "юзд", "юсд", "бакс", "баксов", "баксы", "доллар", "долларов", "доллары", "usd", "dollar", "dollars", "$" → "USD"
+- RUB aliases: "руб", "рублей", "рубль", "рубля", "рублёй", "ру", "rub", "ruble", "rubles", "₽" → "RUB"
+- EUR aliases: "евро", "euro", "eur", "€" → "EUR"
+- UAH aliases: "гривна", "гривен", "грн", "hryvnia", "uah", "₴" → "UAH"
+- USDT aliases: "юсдт", "тезер", "tether", "usdt" → "USDT"
+- BTC aliases: "биток", "битков", "биткоин", "bitcoin", "btc" → "BTC"
+- ETH aliases: "эфир", "эфира", "эфиров", "ethereum", "eth" → "ETH"
+- GBP aliases: "фунт", "фунтов", "pound", "pounds", "gbp", "£" → "GBP"
+- If you cannot confidently map the currency word to an ISO code — OMIT the currency field entirely (do not guess or output Cyrillic).
+
 ITEM_HINT vs CATEGORY_HINT (critical — Phase 1.35):
 - item_hint = WHAT was bought/received/paid. The specific product, service, merchant, or description.
   Examples: "кофе", "Netflix", "такси", "Facebook Ads", "бензин Shell", "зарплата", "борщ"

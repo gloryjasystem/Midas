@@ -89,6 +89,10 @@ export const AiOutputSchema = z
     /**
      * Currency code (ISO 4217 or ticker). Optional.
      * If omitted → backend applies workspace.default_currency (SEC-10).
+     * Phase 1.38+: .catch(undefined) ensures a malformed currency string (e.g. Cyrillic
+     * slang that Claude failed to normalise) silently drops the field instead of failing
+     * the entire AiOutputSchema parse. The transaction still proceeds with the default
+     * workspace currency, which the user can correct inline via the draft card.
      */
     currency: z
       .string()
@@ -96,7 +100,8 @@ export const AiOutputSchema = z
       .min(1)
       .max(10)
       .regex(/^[A-Z]{3,6}$/, 'Currency must be 3–6 uppercase letters')
-      .optional(),
+      .optional()
+      .catch(undefined),
 
     /**
      * Item/product/merchant description extracted from user text (Phase 1.35).
