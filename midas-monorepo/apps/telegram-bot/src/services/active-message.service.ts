@@ -118,7 +118,8 @@ export async function upsertBotMessage(
       void setActiveMessageId(telegramUserId, chatId, currentMsgId);
       return currentMsgId;
     }
-    // Edit failed — fall through to send new message
+    // Edit failed — fall through to send new message. Try best-effort delete of the old message.
+    void deleteMessage(chatId, currentMsgId);
   }
 
   // Step 3: Send new message
