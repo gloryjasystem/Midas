@@ -962,7 +962,7 @@ export function buildStartOnboardKeyboardWithBack(draftId: string): InlineKeyboa
         { text: '🔐 Кошелёк',          callback_data: 'ac:type:wallet' },
       ],
       [{ text: '✏️ Своё название',     callback_data: 'ac:type:custom' }],
-      [{ text: '◀️ Назад',             callback_data: `ia:pk:back:${draftId}` }],
+      [{ text: '◀️ Назад',             callback_data: `ia:showpicker:${draftId}` }],
     ],
   };
 }

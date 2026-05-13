@@ -1211,7 +1211,7 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
               const pickerMsgIdBal = await getActiveMessageId(telegramUserId, chatId);
               await clearActiveMessageId(telegramUserId, chatId);
               const previewResNewAcc = await confirmPreviewFull(acResolved.workspaceId, acResolved.userId, linkedDraftIdBal);
-              const confirmMsgNewAcc = `✅ Счёт <b>${escapeHtml(linkedAccountNameBal)}</b> создан!\n\n${previewResNewAcc.text}`;
+              const confirmMsgNewAcc = previewResNewAcc.text;
               if (pickerMsgIdBal) {
                 void editMessageText(chatId, pickerMsgIdBal, confirmMsgNewAcc, confirmKbForDraft(linkedDraftIdBal, previewResNewAcc));
                 try { await redisConnection.set(`midas:preview:${linkedDraftIdBal}`, pickerMsgIdBal, 'EX', 3600); } catch { /* non-fatal */ }
@@ -1658,13 +1658,54 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
             if (iaMsgId) {
               void editMessageText(
                 chatId, iaMsgId,
-                '➕ <b>Создайте новый счёт</b>',
+                ACCOUNTS_EMPTY_TEXT,
                 buildStartOnboardKeyboardWithBack(iaCmd.draftId),
               );
               // Store msgId as activeMessageId — bal_input text handler will delete/edit this msg.
               await setActiveMessageId(telegramUserId, chatId, iaMsgId);
             }
             request.log.info({ msg: '[midas:bot:webhook] ia:newaccount: onboarding started from draft picker', workspaceId: iaResolved.workspaceId });
+
+          // ── Phase 2.5: ia:showpicker — «◀️ Назад» from type-picker → show account picker ──
+          } else if (iaCmd.cmd === 'showpicker') {
+            // Restore the previously saved account_id (saved by ia:delink before unlinking).
+            // This ensures the draft is not left in an account-less state if user bails out.
+            const prevAcctKey = `midas:prev_acct:${iaCmd.draftId}`;
+            try {
+              const savedAcctId = await redisConnection.get(prevAcctKey);
+              if (savedAcctId) {
+                await patchDraftAccount(iaResolved.workspaceId, iaResolved.userId, iaCmd.draftId, savedAcctId);
+                // Keep the key alive — user might open the picker again and go back again.
+              }
+            } catch { /* non-fatal */ }
+
+            // Clear FSM onboarding state — user backed out, so any partial ac: state is irrelevant.
+            void redisConnection.del(onboardStateKey(telegramUserId, chatId));
+
+            // Fetch intent + accounts and show the full picker (same as ia:delink flow).
+            const showPickerDraft = await getDraftFields(iaResolved.workspaceId, iaResolved.userId, iaCmd.draftId);
+            const showPickerIntent = showPickerDraft?.parsed_intent ?? null;
+            const showPickerAccounts = await getWorkspaceAccountsWithBalances(
+              iaResolved.workspaceId, iaResolved.userId, showPickerIntent,
+            );
+            const showPickerEntries: AccountPickerFullEntry[] = showPickerAccounts.map((acc) => ({
+              id:       acc.id,
+              name:     escapeHtml(acc.name),
+              currency: acc.currency,
+              type:     acc.type,
+              balance:  acc.balance,
+            }));
+            if (iaMsgId) {
+              const pickerText = showPickerEntries.length > 0
+                ? getPickerScreenText(showPickerIntent)
+                : ACCOUNT_PICKER_EMPTY_TEXT;
+              void editMessageText(
+                chatId, iaMsgId,
+                pickerText,
+                buildAccountPickerForDraft(iaCmd.draftId, showPickerEntries, null),
+              );
+            }
+            request.log.info({ msg: '[midas:bot:webhook] ia:showpicker: returned to account picker from type screen', workspaceId: iaResolved.workspaceId });
           }
 
         } catch (err: unknown) {
@@ -4773,7 +4814,7 @@ Midas создан, чтобы сделать учет денег максима
                 const pickerMsgIdCi = await getActiveMessageId(telegramUserId, chatId);
                 await clearActiveMessageId(telegramUserId, chatId);
                 const previewResCi = await confirmPreviewFull(resolved.workspaceId, resolved.userId, acState.linkedDraftId);
-                const confirmMsgCi = `✅ Счёт <b>${escapeHtml(accountName)}</b> создан!\n\n${previewResCi.text}`;
+                const confirmMsgCi = previewResCi.text;
                 if (pickerMsgIdCi) {
                   void editMessageText(chatId, pickerMsgIdCi, confirmMsgCi, confirmKbForDraft(acState.linkedDraftId, previewResCi));
                   try { await redisConnection.set(`midas:preview:${acState.linkedDraftId}`, pickerMsgIdCi, 'EX', 3600); } catch { /* non-fatal */ }
@@ -4868,7 +4909,7 @@ Midas создан, чтобы сделать учет денег максима
               await clearActiveMessageId(telegramUserId, chatId);
               const previewResBi2 = await confirmPreviewFull(resolved.workspaceId, resolved.userId, acState.linkedDraftId);
               const acNameBi2 = acState.name ?? 'Счёт';
-              const confirmMsgBi2 = `✅ Счёт <b>${escapeHtml(acNameBi2)}</b> создан!\n\n${previewResBi2.text}`;
+              const confirmMsgBi2 = previewResBi2.text;
               if (pickerMsgIdBi2) {
                 void editMessageText(chatId, pickerMsgIdBi2, confirmMsgBi2, confirmKbForDraft(acState.linkedDraftId, previewResBi2));
                 try { await redisConnection.set(`midas:preview:${acState.linkedDraftId}`, pickerMsgIdBi2, 'EX', 3600); } catch { /* non-fatal */ }

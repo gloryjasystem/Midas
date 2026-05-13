@@ -82,7 +82,9 @@ export type InlineAccountCmd =
   /** Cancel no-match card — reject draft + send cancelled message (ia:cancel:{draftId}) */
   | { cmd: 'cancel'; draftId: string }
   /** Phase 2.5: user tapped "➕ Создать счёт" from V2 picker — launches onboarding (ia:newac:{draftId}) */
-  | { cmd: 'newaccount'; draftId: string };
+  | { cmd: 'newaccount'; draftId: string }
+  /** Phase 2.5: user tapped "◀️ Назад" on type-picker screen — return to account picker (ia:showpicker:{draftId}) */
+  | { cmd: 'showpicker'; draftId: string };
 
 /**
  * Parse and validate an inline account creation callback_data string.
@@ -99,6 +101,7 @@ export type InlineAccountCmd =
  *   ia:pk:back:{ULID}             Phase 2.4 PR13
  *   ia:xfx:{ULID}                 Phase 2.4 PR12
  *   ia:xfx:back:{ULID}            Phase 2.4 PR12
+ *   ia:showpicker:{ULID}          Phase 2.5 (back from type-picker → account picker)
  */
 export function parseInlineAccountCallback(data: string): InlineAccountCmd | null {
   if (!data.startsWith('ia:')) return null;
@@ -185,6 +188,14 @@ export function parseInlineAccountCallback(data: string): InlineAccountCmd | nul
     const draftId = parts[2] ?? '';
     if (!ULID_RE.test(draftId)) return null;
     return { cmd: 'cancel', draftId };
+  }
+
+  // Phase 2.5: ia:showpicker:{draftId} — user tapped "◀️ Назад" on type-picker screen
+  // "ia:showpicker:" = 14 + 26 = 40 bytes ≤ 64 ✓
+  if (sub === 'showpicker' && parts.length === 3) {
+    const draftId = parts[2] ?? '';
+    if (!ULID_RE.test(draftId)) return null;
+    return { cmd: 'showpicker', draftId };
   }
 
   return null;
@@ -562,7 +573,7 @@ export function buildAccountPickerForDraft(
   });
 
   // Phase 2.4: Create account option in full picker
-  rows.push([{ text: '➕ Создать счёт', callback_data: `ia:rename:${draftId}` }]);
+  rows.push([{ text: '➕ Создать счёт', callback_data: `ia:newac:${draftId}` }]);
 
   // Always-last: back button to return to the draft preview card
   rows.push([{ text: '◀️ Назад', callback_data: `ia:pk:back:${draftId}` }]);
