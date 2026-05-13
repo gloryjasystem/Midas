@@ -551,6 +551,8 @@ export interface PendingDraftInfo {
   parsedCurrency: string | null;
   itemName: string | null;
   parsedCategoryHint: string | null;
+  accountId: string | null;
+  accountDebitAmount: string | null;
 }
 
 /**
@@ -574,11 +576,14 @@ export async function getPendingDraftForUser(
     parsed_currency: string | null;
     item_name: string | null;
     parsed_category_hint: string | null;
+    account_id: string | null;
+    account_debit_amount: string | null;
   }>(
     `SELECT td.id, td.status,
             td.preview_message_id, td.preview_chat_id,
             td.parsed_intent, td.parsed_amount::TEXT AS parsed_amount,
-            td.parsed_currency, td.item_name, td.parsed_category_hint
+            td.parsed_currency, td.item_name, td.parsed_category_hint,
+            td.account_id, td.account_debit_amount::TEXT AS account_debit_amount
      FROM transaction_drafts td
      WHERE td.workspace_id = $1
         AND td.status = 'pending_user'
@@ -599,6 +604,8 @@ export async function getPendingDraftForUser(
     parsedCurrency: row.parsed_currency,
     itemName: row.item_name,
     parsedCategoryHint: row.parsed_category_hint,
+    accountId: row.account_id,
+    accountDebitAmount: row.account_debit_amount,
   };
 }
 

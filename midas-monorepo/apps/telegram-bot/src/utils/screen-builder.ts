@@ -230,6 +230,7 @@ export interface PreviewScreenData {
   itemName: string | null;        // Phase 1.35, pre-escaped
   /** Phase 2.4: pre-built account balance block. null = no linked account. */
   accountBlock?: AccountBalanceBlock | null;
+  gateAlert?: string | null;
 }
 
 /**
@@ -266,10 +267,14 @@ export function buildPreviewScreen(data: PreviewScreenData): string {
   const emoji = intentEmoji(data.intent);
   const label = intentLabel(data.intent);
 
-  const lines: string[] = [
-    `${emoji} <b>${label}</b>`,
-    '',
-  ];
+  const lines: string[] = [];
+  
+  if (data.gateAlert) {
+    lines.push(data.gateAlert);
+    lines.push('');
+  }
+
+  lines.push(`${emoji} <b>${label}</b>`, '');
 
   // ── Blockquote: amount + item name ───────────────────────────
   if (data.amount) {

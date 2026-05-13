@@ -43,7 +43,6 @@ import {
   buildNonsenseScreen,
   buildConfirmKeyboard,
   buildCurrencyClarScreen,
-  buildGatePausedPreview,
   escapeHtml,
   type AccountBalanceBlock,
 } from '../utils/screen-builder.js';
@@ -247,13 +246,43 @@ async function processAiParse(job: Job<AiParseJobPayload>): Promise<void> {
     if (!alreadySent) {
       // Single edit-in-place: update existing preview card with alert banner + keyboard.
       // No new messages sent — zero chat clutter.
-      const gateData = {
-        parsedIntent: pendingDraft.parsedIntent,
-        parsedAmount: pendingDraft.parsedAmount,
-        parsedCurrency: pendingDraft.parsedCurrency,
-        parsedCategoryHint: pendingDraft.parsedCategoryHint,
-        itemName: pendingDraft.itemName,
-      };
+      let accountBlock: AccountBalanceBlock | null = null;
+      let accountForKb: { id: string; name: string; currency: string } | null = null;
+      let xfxForKb: { hasCrossAmount: boolean } | null = null;
+
+      if (pendingDraft.accountId) {
+        const acctData = await getAccountBalanceForPreview(workspaceId, pendingDraft.accountId);
+        if (acctData) {
+          accountForKb = { id: acctData.accountId, name: acctData.accountName, currency: acctData.accountCurrency };
+          const isCrossCurrency = !!pendingDraft.parsedCurrency && acctData.accountCurrency !== pendingDraft.parsedCurrency;
+          const hasCrossAmount = !!pendingDraft.accountDebitAmount;
+          xfxForKb = isCrossCurrency ? { hasCrossAmount } : null;
+
+          const debitAmount = isCrossCurrency ? pendingDraft.accountDebitAmount : pendingDraft.parsedAmount;
+
+          accountBlock = {
+            accountName: escapeHtml(acctData.accountName),
+            accountCurrency: acctData.accountCurrency,
+            currentBalance: acctData.balance,
+            debitAmount: debitAmount,
+            debitCurrency: acctData.accountCurrency,
+            txAmount: pendingDraft.parsedAmount ?? '0',
+            txCurrency: pendingDraft.parsedCurrency ?? 'USD',
+            intent: pendingDraft.parsedIntent,
+          };
+        }
+      }
+
+      const gateMessageText = buildPreviewScreen({
+        intent: pendingDraft.parsedIntent,
+        amount: pendingDraft.parsedAmount,
+        currency: pendingDraft.parsedCurrency,
+        categoryHint: pendingDraft.parsedCategoryHint ? escapeHtml(pendingDraft.parsedCategoryHint) : null,
+        accountHint: null,
+        itemName: pendingDraft.itemName ? escapeHtml(pendingDraft.itemName) : null,
+        accountBlock,
+        gateAlert: '⚠️ <b>Новая запись отклонена.</b>\nЗавершите эту транзакцию, чтобы продолжить.',
+      });
 
       if (pendingDraft.previewMessageId && pendingDraft.previewChatId) {
         // Edit the existing preview card: alert header + summary + keyboard stays
@@ -265,9 +294,9 @@ async function processAiParse(job: Job<AiParseJobPayload>): Promise<void> {
             workspaceId,
             chatId: pendingDraft.previewChatId,
             draftId: pendingDraft.draftId,
-            message: buildGatePausedPreview(gateData),
+            message: gateMessageText,
             activeMessageId: pendingDraft.previewMessageId,
-            inlineKeyboardJson: JSON.stringify(buildConfirmKeyboard(pendingDraft.draftId)),
+            inlineKeyboardJson: JSON.stringify(buildConfirmKeyboard(pendingDraft.draftId, accountForKb, xfxForKb)),
           },
           { jobId: IdempotencyKeyBuilder.notification(workspaceId, gateEditId) },
         );
@@ -429,19 +458,27 @@ async function processAiParse(job: Job<AiParseJobPayload>): Promise<void> {
 
         // Phase 2.4 PR15: Fetch account balance for preview card
         let accountBlock: AccountBalanceBlock | null = null;
+        let accountForKb: { id: string; name: string; currency: string } | null = null;
+        let xfxForKb: { hasCrossAmount: boolean } | null = null;
+
         try {
           const acctData = await getAccountBalanceForPreview(workspaceId, resolution.accountId);
           if (acctData && aiData?.amount) {
+            accountForKb = { id: acctData.accountId, name: acctData.accountName, currency: acctData.accountCurrency };
+            const isCrossCurrency = !!aiData.currency && acctData.accountCurrency !== aiData.currency;
+            xfxForKb = isCrossCurrency ? { hasCrossAmount: false } : null;
+
             // Debit amount in account currency:
             // For same-currency: use tx amount; for XFX: we don't know yet at parse time
-            // so we show tx amount as proxy (XFX debit confirmed later via ia:xfx flow)
             const isSameCurrency = !aiData.currency || aiData.currency === acctData.accountCurrency;
             accountBlock = {
               accountName:     escapeHtml(acctData.accountName),
               accountCurrency: acctData.accountCurrency,
               currentBalance:  acctData.balance,
-              debitAmount:     aiData.amount,  // tx amount (XFX debit unknown at parse time)
+              debitAmount:     isSameCurrency ? aiData.amount : null,
               debitCurrency:   isSameCurrency ? acctData.accountCurrency : (aiData.currency ?? acctData.accountCurrency),
+              txAmount:        aiData.amount,
+              txCurrency:      aiData.currency ?? 'USD',
               intent:          aiData?.intent ?? null,
             };
           }
@@ -459,7 +496,7 @@ async function processAiParse(job: Job<AiParseJobPayload>): Promise<void> {
           accountBlock,
         });
 
-        inlineKeyboard = buildConfirmKeyboard(draftId);
+        inlineKeyboard = buildConfirmKeyboard(draftId, accountForKb, xfxForKb);
         previewMsg = richPreviewWithBalance;
         console.log('[midas:ai-parse-worker] Phase 1.31: exact account match', {
           workspaceId, draftId,

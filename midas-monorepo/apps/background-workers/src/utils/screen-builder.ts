@@ -82,11 +82,19 @@ export interface AccountBalanceBlock {
    * otherwise account_debit_amount (from patchDraftDebitAmount — PR 5).
    * Example: "500" or "501.5"
    */
-  debitAmount: string;
+  debitAmount: string | null;
   /**
    * Currency of the debit amount (usually = accountCurrency).
    */
   debitCurrency: string;
+  /**
+   * Base transaction amount. Example: "10000"
+   */
+  txAmount: string;
+  /**
+   * Base transaction currency. Example: "USD"
+   */
+  txCurrency: string;
   /**
    * Transaction intent — determines sign:
    *   expense / debt_given / transfer → subtract (balance decreases)
@@ -142,17 +150,38 @@ export function buildAccountBalanceBlock(data: AccountBalanceBlock): string {
   const isIncome = data.intent === 'income' || data.intent === 'debt_received';
   const subtract = !isIncome;
 
-  const balanceAfter = _numericAdd(data.currentBalance, data.debitAmount, subtract);
+  const isCross = data.txCurrency !== data.accountCurrency;
+
+  const lines: string[] = [];
+  lines.push(`🏦 <b>${data.accountName}</b> · ${data.accountCurrency}`);
+
+  if (isCross && !data.debitAmount) {
+    lines.push(`🔄 Укажите, сколько ${data.accountCurrency} списано`);
+    return lines.join('\n');
+  }
+
+  // Cross currency with debit amount provided
+  if (isCross && data.debitAmount) {
+    const rate = calcRate(data.txAmount, data.debitAmount);
+    const rateSuffix = rate ? ` (${rate} ${data.accountCurrency}/${data.txCurrency})` : '';
+    lines.push(`🔁 ${data.txAmount} ${data.txCurrency} → ${formatAmount(data.debitAmount)} ${data.accountCurrency}${rateSuffix}`);
+  }
+
+  // If we reach here, we either have same currency (debitAmount = txAmount) or cross currency with debitAmount provided.
+  const amtToMath = data.debitAmount ?? data.txAmount;
+  const balanceAfter = _numericAdd(data.currentBalance, amtToMath, subtract);
 
   const before = formatAmount(data.currentBalance);
-  const debit  = formatAmount(data.debitAmount);
+  const debit  = formatAmount(amtToMath);
   const after  = formatAmount(balanceAfter);
   const sign   = subtract ? '−' : '+';
+  const afterIsNeg = balanceAfter.startsWith('-');
+  const afterFmt = afterIsNeg ? `⚠️ <b>${after} ${data.accountCurrency}</b>` : `<b>${after} ${data.accountCurrency}</b>`;
 
-  return (
-    `🏦 <b>${data.accountName}</b> · ${data.accountCurrency}\n` +
-    `💳 ${before} ${sign} ${debit} = <b>${after} ${data.debitCurrency}</b>`
-  );
+  const prefix = isCross ? 'Итог: ' : '💳 ';
+  lines.push(`${prefix}${before} ${sign} ${debit} = ${afterFmt}`);
+
+  return lines.join('\n');
 }
 
 
@@ -202,12 +231,20 @@ export interface PreviewScreenData {
   itemName: string | null;  // Phase 1.35
   /** Phase 2.4 PR15: pre-built account balance block. null = no linked account. */
   accountBlock?: AccountBalanceBlock | null;
+  gateAlert?: string | null;
 }
 
 export function buildPreviewScreen(data: PreviewScreenData): string {
   const emoji = intentEmoji(data.intent);
   const label = intentLabel(data.intent);
-  const lines: string[] = [`${emoji} <b>${label}</b>`, ''];
+  const lines: string[] = [];
+  
+  if (data.gateAlert) {
+    lines.push(data.gateAlert);
+    lines.push('');
+  }
+
+  lines.push(`${emoji} <b>${label}</b>`, '');
 
   // ── Blockquote: amount + item name ───────────────────────────
   // <blockquote> — нативный UI-элемент Telegram (полоска слева).
@@ -555,18 +592,63 @@ export function buildMainMenuReplyKeyboard(): object {
   };
 }
 
-export function buildConfirmKeyboard(draftId: string): InlineKeyboard {
-  return {
-    inline_keyboard: [
-      [
-        { text: '✅  Подтвердить', callback_data: `approve:${draftId}` },
-      ],
-      [
-        { text: '✏️ Изменить', callback_data: `draft:edit:${draftId}` },
-        { text: '✖️ Отмена',   callback_data: `reject:${draftId}` },
-      ],
-    ],
-  };
+/**
+ * Build the approve/reject confirmation keyboard.
+ *
+ * Row 1: [✅  Подтвердить]             ← Primary — полная ширина
+ * Row 2: [✏️ Изменить] [✖️ Отмена]   ← Secondary (neutral emoji, not red ❌)
+ * Row 3: [🔄 Сменить счёт: {name}]   ← if account supplied (Phase 2.4 PR12)
+ *     OR [➕ Выбрать счёт]            ← if no account
+ * Row 4: [✏️ Указать/Изменить сумму в {cur}] ← only for cross-currency (Phase 2.4 PR12)
+ *
+ * @param draftId  - ULID of the draft
+ * @param account  - {id, name, currency} of linked account, or null if none (Phase 2.4)
+ * @param xfx      - cross-currency params, or null if same-currency (Phase 2.4)
+ *
+ * SEC-01: account.id is a system ULID; name never goes into callback_data.
+ */
+export function buildConfirmKeyboard(
+  draftId: string,
+  account?: { id: string; name: string; currency: string } | null,
+  xfx?: { hasCrossAmount: boolean } | null,
+): InlineKeyboard {
+  const rows: Array<Array<{ text: string; callback_data: string }>> = [];
+
+  // Phase 2.4: Block confirm button if missing account or cross-currency amount
+  const allowConfirm = account && (!xfx || xfx.hasCrossAmount);
+  if (allowConfirm || account === undefined) {
+    rows.push([{ text: '✅  Подтвердить', callback_data: `approve:${draftId}` }]);
+  }
+
+  rows.push([
+    { text: '✏️ Изменить', callback_data: `draft:edit:${draftId}` },
+    { text: '✖️ Отмена',   callback_data: `reject:${draftId}` },
+  ]);
+
+  // Phase 2.4 PR12: account row
+  if (account) {
+    rows.push([{
+      text: `🔄 Сменить счёт: ${account.name}`,
+      callback_data: `ia:pk:delink:${draftId}`,
+    }]);
+  } else if (account === null) {
+    // Explicit null = no account linked yet → show "Выбрать счёт"
+    rows.push([{
+      text: '➕ Выбрать счёт',
+      callback_data: `ia:pk:delink:${draftId}`,
+    }]);
+  }
+
+  // Phase 2.4 PR12: cross-currency amount row
+  if (xfx && account) {
+    const actionLabel = xfx.hasCrossAmount ? 'Изменить' : 'Указать';
+    rows.push([{
+      text: `✏️ ${actionLabel} сумму в ${account.currency}`,
+      callback_data: `ia:xfx:${draftId}`,
+    }]);
+  }
+
+  return { inline_keyboard: rows };
 }
 
 // ── Phase 1.38: Currency clarification screen ────────────────
