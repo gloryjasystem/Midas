@@ -1,7 +1,7 @@
 # WORKFLOW_STATE.MD — Диспетчер задач ИИ-агента Midas
 
 > **Тип:** MUTABLE — кратковременная память агента. Обновляется на каждом шаге работы.
-> **Обновлён:** 2026-05-12 20:27 (UTC+3)
+> **Обновлён:** 2026-05-13 11:24 (UTC+3)
 
 ---
 
@@ -9,13 +9,13 @@
 
 | Параметр | Значение |
 |---|---|
-| **PHASE** | `2.4 — Account-Aware Draft Card` |
-| **STEP** | `Phase 2.4 — Account Picker UX Hotfixes ✅.` |
-| **AGENT STATUS** | `DONE. Исправлен баг отсутствия пикера и тихой XFX конвертации. E2E верификация: tsc 0 ошибок. 103/103 smoke.` |
-| **DEPLOYMENT** | `Railway (spirited-happiness project)` — `Midas` ✅ Online · `background-workers` ✅ Online · `Postgres` ✅ · `Redis` ✅. Phase 2.4 hotfixes deployed. Health: https://midas-production-f4f1.up.railway.app/health → {"status":"ok"} |
-| **LAST COMPLETED** | `Phase 2.4 Hotfixes COMPLETE — PR 1–16 merged + UX fixes deployed to Railway production. tsc 0 ошибок. 103/103 smoke. Health OK.` |
+| **PHASE** | `2.5 — Smart Transaction Logic` |
+| **STEP** | `Phase 2.5 — Все 3 шага завершены ✅` |
+| **AGENT STATUS** | `DONE. Шаг 1 (item-category-detector), Шаг 2 (account-currency-validator), Шаг 3 (anomaly badge в пикерах). tsc 0 ошибок. Задеплоено.` |
+| **DEPLOYMENT** | `Railway (spirited-happiness project)` — `Midas` ✅ Online · `background-workers` ✅ Online · `Postgres` ✅ · `Redis` ✅. Phase 2.5 deployed (commits d9ad480 + f543c5e). Health: https://midas-production-f4f1.up.railway.app/health → {"status":"ok"} |
+| **LAST COMPLETED** | `Phase 2.5 Step 3 COMPLETE — anomaly badge ⚠️ в обоих account picker'ах. tsc 0 ошибок. Commit f543c5e pushed to main.` |
 | **BLOCKER** | None. |
-| **NEXT ACTION** | Проверка продакшна после деплоя Railway на сценариях "купил [товар] за [сумма] [валюта]" и "заработал [сумма]". Пикер должен появляться всегда, если счета существуют. |
+| **NEXT ACTION** | Phase 3.0 — DB Migration: добавить колонки `account_type`, `wallet_subtype`, `provider_key` в `account_sources`. Заполнять при создании счёта. Использовать для 100% точной валидации вместо эвристик. (см. Раздел 16 — Active Roadmap) |
 
 
 ---
@@ -83,6 +83,7 @@
 | **Phase LD — Lazy Default Account Onboarding** | ✅ DEPLOYED | **Цель:** новые пользователи не получают оба счёта (Default + кастомный). **DB:** `migrations/1779500000000_onboarding-placeholder-flag.js` — колонка `is_onboarding_placeholder BOOLEAN NOT NULL DEFAULT FALSE` + partial index `idx_account_sources_onboarding_placeholder` + `system_find_or_create_user` обновлена (помечает Default как `TRUE`). **Services:** `account.service.ts` — `softDeletePlaceholderAccount()` (Scenario A: кастомный счёт создан → Default soft-deleted) + `activatePlaceholderAccount()` (Scenario B: пропустить → Default активирован). **Route:** `webhook.route.ts` — 5 точек подключения: `ac:skip`, `ac:currency`, `bal_skip`, `cur_input`, `bal_input`. **Security:** `draft-confirmation.service.ts` — `resolveDefaultAccount` LIMIT 1 fallback + `AND deleted_at IS NULL` (транзакции не крепятся к удалённым счетам). **Tests:** `smoke-test-lazy-default.mjs` — **39/39 PASS** против production DB. Commit `27cfb85`. |
 | **Phase LD++ — Default Account Roles** | ✅ DEPLOYED | **Цель:** пользователи могут назначить счёт «основным для расходов» (💸) и «основным для доходов» (💰) прямо из карточки счёта. **DB:** миграций нет — использованы существующие колонки `workspaces.default_expense_account_id` + `default_income_account_id` (добавлены в Phase 1.35). **Migration:** `packages/database/migrations/1779600000000_workspace-default-account-roles.js` — FK constraints + partial indexes. **Services:** `account.service.ts` — `getWorkspaceDefaultAccounts()`, `getAccountRoles()`, `setDefaultExpenseAccount()`, `setDefaultIncomeAccount()`, `clearDefaultExpenseAccount()`, `clearDefaultIncomeAccount()`. `balance.service.ts` — LEFT JOIN workspaces, маркеры 💸/💰/💸💰 в accountLines. **UI:** `balance-keyboard.service.ts` — кнопки ⚪/🟢 (set/clear expense/income), `BalanceCallbackCmd` расширен (сmd: `se`, `si`, `ce`, `cl`). **Route:** `webhook.route.ts` — 5 call sites обновлены (getAccountRoles), 4 новых handler (`bl:se`, `bl:si`, `bl:ce`, `bl:cl`). **Tests:** `smoke-test-lazy-default.mjs` 39/39 ✅, `smoke-test-master-roadmap.mjs` 76/76 ✅, tsc 0 ошибок. **Deployment:** Railway production, автодеплой из `main`. |
 | **Phase 2.4 — Account-Aware Draft Card** | ✅ COMPLETE | **PR 1–16 все смержены в `main`.** Реализован полный Account-Aware transaction workflow: DB миграция (PR1) → TypeScript types (PR2-5) → UI balance block `_numericAdd` + `buildAccountBalanceBlock` (PR6) → Account picker V2 keyboard (PR7-8) → `confirmPreview()` upgrade + `ia:pk/delink` handlers (PR9-10) → Account picker for draft (PR11) → XFX cross-currency flow `ia:xfx` (PR12) → Confirmed screen «Итог» block (PR13) → XFX rate recording `exchange_rate` + `base_amount` (PR14) → Preview balance block в bg-workers (PR15) → E2E finalize (PR16). tsc 0 ошибок · 103/103 smoke ✅ · DB: 8 Phase 2.4 колонок · Railway deployed. |
+| **Phase 2.5 — Smart Transaction Logic** | ✅ DEPLOYED | **Шаг 1:** `item-category-detector.service.ts` (NEW) — локальный словарь 200+ брендов/ключей, 9 категорий, longest-phrase-first matching. `patchDraftCategoryHint()` в `clarification.service.ts`. Интеграция в `webhook.route.ts` (`sendAndStorePreview`). Пример: «майбах» → 🚗 Транспорт авто. **Шаг 2:** `account-currency-validator.service.ts` (NEW) — матрица правил card/cash=fiat-only, exchange=all, wallet/crypto=crypto-only, wallet/lightning=BTC-only, wallet/ton=TON-ecosystem, wallet/ewallet=fiat+(hybrid:+stablecoin). Интеграция в 2 точки: `cmd=currency` (кнопка) + `cur_input` (ввод текстом). Коммит `d9ad480`. **Шаг 3:** `anomalyBadge()` в `account-inline-keyboard.service.ts` — `⚠️` badge в обоих пикерах (V2 + full) при обнаружении bank+crypto аномалии. V2 пикер улучшен: `💎` для крипто-счетов вместо `🏦`. Коммит `f543c5e`. tsc 0 ошибок · Railway deployed. |
 
 
 ---
@@ -446,6 +447,9 @@ CТАРТ: PR 1 (миграция БД) — самый безопасный пе
 | 2026-05-12 19:35 | **Phase 2.4 PR 2 - v������� � ������.** `account.service.ts`: �������� `AccountWithBalance` interface + `getAccountWithBalance()` + `getWorkspaceAccountsWithBalances()`. tsc 0 ������. GitHub PR #2 merged squash � main (commit 7cc8528). |
 | 2026-05-12 17:27 | **Phase 2.4 — UX Design сессия и планирование.** Спроектированы: черновик + математика баланса («🏦 Bybit USD» + «💳 15 400 − 10 000 = 5 400 USD»), пикер счетов (кнопка «🔄 Сменить счёт»), кросс-валюта (ввод суммы конвертации), confirmed card без кнопок Баланс/Отчёт. UX-изменения ia:list/ia:back из текущего чата ОТМЕНЕНЫ (кодовая база возвращена в stable). 16 атомарных PR спроектированы. Анализ конфликтов: 1 breaking change (PR 7 buildConfirmKeyboard), 1 новый Redis-префикс (midas:xfx:ptr). Полный план: `account_debit_ux_plan.md`. workflow_state.md обновлён. |
 | 2026-05-12 21:00 | **Phase 2.4 — Account Picker UX Hotfixes.** Исправление критического бага отсутствия пикера при AI parse без account_hint. В `ai-parse.worker.ts` добавлен принудительный показ пикера. В `draft.service.ts` добавлена `getWorkspaceAccountsForPicker` для воркера. В `draft-confirmation.service.ts` добавлена защита (`accountWasExplicitlyChosen`) от тихой автоконвертации XFX при несовпадении валюты дефолтного счета. Внедрены intent-aware тексты (доход/расход) для пикера счетов в `account-inline-keyboard.service.ts`. Все 103/103 smoke-теста прошли. |
+| 2026-05-13 08:17 | **Phase 2.5 Шаг 1 — Smart Item→Category Auto-Detector.** `item-category-detector.service.ts` (NEW): 200+ брендов и ключевых слов, 9 категорий (Транспорт/Еда/Электроника/Одежда/Здоровье/Дом/Развлечения/Образование/Оборудование), longest-phrase-first matching. `patchDraftCategoryHint()` в `clarification.service.ts`: atomic idempotent DB patch (перезаписывает только если `parsed_category_hint IS NULL` или `= 'Другое'`). Интеграция в `webhook.route.ts` → `sendAndStorePreview`: non-blocking, не блокирует flow при ошибке. Тест: «майбах» → Транспорт, «starbucks» → Еда. tsc 0 ошибок. |
+| 2026-05-13 08:20 | **Phase 2.5 Шаг 2 — Account-Currency Compatibility Validation Gate.** `account-currency-validator.service.ts` (NEW): матрица 8 правил, `classifyCurrency()`, `HYBRID_EWALLET_KEYS`, `TON_ASSETS`. Интегрирован в 2 точки `webhook.route.ts`: (1) `cmd=currency` callback — editMessageText с ошибкой, FSM state сохраняется в Redis; (2) `cur_input` text interceptor — upsertBotMessage с ошибкой, `redisConnection.del` НЕ вызывается. Блокирует: Монобанк+USDT, Наличные+ETH, Lightning+USDC. Разрешает: Bybit+USDT, Payeer+USDT (гибрид), MetaMask+BTC. Commit `d9ad480`. tsc 0 ошибок. git push → Railway deployed. |
+| 2026-05-13 08:24 | **Phase 2.5 Шаг 3 — Anomaly Badge в пикерах.** `account-inline-keyboard.service.ts` (MODIFY): импорт `classifyCurrency`. `anomalyBadge(emoji, currency)` — возвращает `'⚠️ '` если emoji=`🏦` и валюта не фиат. `buildAccountPickerV2Keyboard` улучшен: `💎` для крипто, `🏦` для фиата, `⚠️` только для банк+крипто аномалий по имени счёта. `buildAccountPickerForDraft`: `⚠️` через `anomalyBadge()` по `accountTypeEmoji()`. Commit `f543c5e`. tsc 0 ошибок. git push → Railway deployed. Phase 2.5 COMPLETE. |
 
 
 ---
@@ -1088,3 +1092,114 @@ workspaces
 | `midas:awaiting_cur:{chatId}` | 600s | Ожидание ввода валюты |
 | `midas:clar:{userId}:{chatId}` | 300s | Ожидание ввода суммы при clarification |
 | `midas:cur_set:{workspaceId}` | - | Флаг установленной валюты (не запрашивать повторно) |
+
+---
+
+## 16. ACTIVE ROADMAP — КУДА ДВИГАЕМСЯ ДАЛЬШЕ
+
+> Этот раздел — живой документ. Обновляется при завершении каждой фазы.
+> Последнее обновление: 2026-05-13 11:24 (UTC+3)
+
+### ✅ Завершено в Phase 2.5 (Smart Transaction Logic)
+
+| Шаг | Что сделано | Статус |
+|---|---|---|
+| Шаг 1 | `item-category-detector.service.ts` — авто-определение категории по названию товара/бренда (200+ записей, 9 категорий, Maybach→Транспорт) | ✅ |
+| Шаг 2 | `account-currency-validator.service.ts` — блокировка несовместимых пар счёт+валюта (Банк+USDT = ❌, Биржа+USDT = ✅) | ✅ |
+| Шаг 3 | `anomalyBadge()` в пикерах — визуальный `⚠️` для подозрительных существующих счетов | ✅ |
+
+---
+
+### 🔴 Phase 3.0 — DB Schema: Полная архитектурная валидация (ОБЯЗАТЕЛЬНО)
+
+> **Приоритет: ВЫСОКИЙ.** Текущая валидация (Шаг 2) — эвристическая, основана на `AccountOnboardState` из Redis.
+> Если Redis-ключ истёк или пользователь создаёт счёт нестандартным путём — тип счёта неизвестен.
+> Phase 3.0 переводит систему на **100% надёжную, схема-enforced валидацию**.
+
+#### Что нужно сделать
+
+**Миграция БД:**
+```sql
+ALTER TABLE account_sources
+  ADD COLUMN account_type    TEXT CHECK (account_type IN ('card','cash','exchange','wallet','custom')),
+  ADD COLUMN wallet_subtype  TEXT CHECK (wallet_subtype IN ('crypto','ewallet','ton','lightning')),
+  ADD COLUMN provider_key    TEXT;  -- 'mono', 'binance', 'payeer', etc. (lowercase)
+```
+
+**Заполнение при создании счёта:**
+- В `account.service.ts` → `addAccountReturningId()` и `addAccountWithCurrency()`:
+  принимать `accountType`, `walletSubtype`, `providerKey` из `AccountOnboardState` и записывать в БД.
+- В `webhook.route.ts` → `cmd=currency` handler: передавать `state.accountType`, `state.walletSubtype`, `state.name.toLowerCase()` как `providerKey`.
+
+**Использование при транзакциях:**
+- `buildAccountPickerForDraft` и `buildAccountPickerV2Keyboard`:
+  вместо эвристики по имени → читать `account_type` из БД, передавать в `validateAccountCurrency()`.
+  Это делает `⚠️` badge на 100% точным.
+
+**Ретроактивное заполнение (опционально):**
+- Попытаться вывести `account_type` из существующих названий счетов через матч с `BANK_PRESETS`/`EWALLET_PRESETS`/`EXCHANGE_PRESETS`.
+- Все что не подошло → `account_type = 'custom'`.
+
+#### Файлы для изменения
+
+| Файл | Изменение |
+|---|---|
+| `packages/database/migrations/XXXXXXX_account-sources-type-columns.js` | NEW — ALTER TABLE |
+| `apps/telegram-bot/src/services/account.service.ts` | MODIFY — расширить сигнатуры addAccount* |
+| `apps/telegram-bot/src/routes/webhook.route.ts` | MODIFY — передавать тип в addAccount* |
+| `apps/telegram-bot/src/services/account-inline-keyboard.service.ts` | MODIFY — читать тип из БД вместо эвристики |
+| `apps/telegram-bot/src/services/account-currency-validator.service.ts` | MODIFY — убрать провайдер-хинт из сигнатуры (теперь из БД) |
+
+#### Оценка работы
+- ~3–4 часа (миграция + сигнатуры + интеграция + smoke test)
+- Без breaking changes в UX — изменения только в слое данных
+
+---
+
+### 🟡 Phase 3.1 — Расширение словаря детектора категорий
+
+> **Приоритет: СРЕДНИЙ.** Текущий словарь: 200+ записей, 9 категорий.
+> Цель: расширить до 500+ записей, добавить локальные бренды (UA/KZ/UZ/BY).
+
+- Добавить категории: `Путешествия`, `Подарки`, `Питомцы`, `Инвестиции`
+- Добавить 150+ локальных брендов: АТБ, Сільпо, Kaspi, OLX, Wildberries, Ozon, СДЭК
+- Добавить транслитерацию: «starbaks» → Starbucks, «mak» → McDonald's
+
+---
+
+### 🟡 Phase 3.2 — Отчёт 3.0: Категорийная аналитика
+
+> **Приоритет: СРЕДНИЙ.** Текущий `/report` показывает только суммы по intent.
+> Добавить разбивку по категориям + топ-5 трат за период.
+
+```
+📊 Отчёт за май 2026
+
+💸 Расходы: 45 000 UAH
+  🚗 Транспорт: 12 000 (27%)
+  🍔 Еда: 8 500 (19%)
+  💻 Электроника: 15 000 (33%)
+  📁 Другое: 9 500 (21%)
+
+💰 Доходы: 120 000 UAH
+```
+
+---
+
+### 🔵 Phase 4.0 — Telegram Mini App (Frontend)
+
+> **Приоритет: НИЗКИЙ / БУДУЩЕЕ.** React 19 + Vite 8.
+> Визуальный дашборд баланса, диаграммы расходов по категориям, история транзакций.
+> **Не начинать до завершения Phase 3.0 + 3.1.**
+
+---
+
+### Сводная таблица приоритетов
+
+| Фаза | Название | Приоритет | Статус | Требует |
+|---|---|---|---|---|
+| **3.0** | DB Schema: account_type/wallet_subtype | 🔴 ВЫСОКИЙ | ⏳ Следующая | Phase 2.5 ✅ |
+| **3.1** | Расширение словаря детектора | 🟡 СРЕДНИЙ | 📋 Запланирована | Phase 3.0 |
+| **3.2** | Отчёт 3.0: категорийная аналитика | 🟡 СРЕДНИЙ | 📋 Запланирована | Phase 3.0 |
+| **4.0** | Telegram Mini App | 🔵 НИЗКИЙ | 📋 Будущее | Phase 3.x |
+
