@@ -503,17 +503,18 @@ export function formatRestoredSuccessCard(
     account_name: string;
     transaction_time: string;
     is_cross_currency: boolean;
+    item_name?: string | null;
   },
   account?: { currency: string; balance: string } | null,
 ): string {
   const isIncome = card.transaction_intent === 'income' || card.transaction_intent === 'debt_received';
   const data: ConfirmedScreenData = {
     intent:          card.transaction_intent,
-    amount:          card.original_amount,
+    amount:          formatAmount(card.original_amount), // strip trailing .00
     currency:        card.currency,
     categoryName:    card.category_name,
     accountName:     card.account_name,
-    itemName:        null,
+    itemName:        card.item_name ?? null,
     transactionTime: card.transaction_time,
   };
   if (account) {
