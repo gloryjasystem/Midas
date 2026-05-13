@@ -568,3 +568,47 @@ export async function patchDraftDebitAmount(
     return { status: 'ready', draftId };
   });
 }
+
+// ─────────────────────────────────────────────────────────────
+// patchDraftCategoryHint — Phase 2.5 Smart Category Detector
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Patch parsed_category_hint on a draft with a detector-resolved category name.
+ *
+ * Called by sendAndStorePreview when item-category-detector fires BEFORE
+ * the preview card is rendered. Updates the hint so the preview shows the
+ * correct category (e.g. "Транспорт" instead of "Другое").
+ *
+ * Only patches if current hint is null / empty / generic ("Другое").
+ * Non-throwing — silently returns false on any error so preview is never blocked.
+ *
+ * SEC-12: categoryName NOT logged (canonical name, but still internal).
+ * SEC-03: withTenantTransaction enforces RLS.
+ */
+export async function patchDraftCategoryHint(
+  workspaceId: string,
+  userId: string,
+  draftId: string,
+  categoryName: string,
+): Promise<boolean> {
+  try {
+    await withTenantTransaction(workspaceId, userId, async (client) => {
+      await client.query(
+        `UPDATE transaction_drafts
+         SET parsed_category_hint = $1, updated_at = NOW()
+         WHERE id = $2
+           AND workspace_id = $3
+           AND status IN ('pending_user', 'needs_clarification')
+           AND expires_at > NOW()
+           AND (parsed_category_hint IS NULL
+                OR TRIM(parsed_category_hint) = ''
+                OR LOWER(parsed_category_hint) = 'другое')`,
+        [categoryName, draftId, workspaceId],
+      );
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}

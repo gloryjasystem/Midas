@@ -235,7 +235,9 @@ import {
   patchDraftCurrency,                // Phase 1.35
   validateCurrencyCode,              // Phase 1.35
   patchDraftAccount,                 // Phase 2.4 PR9: delink (null) / relink account on draft
+  patchDraftCategoryHint,            // Phase 2.5: smart category detector
 } from '../services/clarification.service.js';
+import { detectCategoryFromItem } from '../services/item-category-detector.service.js'; // Phase 2.5
 import {
   upsertBotMessage,                  // Phase 1.33
   tryDeleteUserMessage,              // Phase 1.33
@@ -750,8 +752,22 @@ async function sendAndStorePreview(
   }
 
   // ── Standard path: preview with (optional) account balance block ──────
+
+  // ── Phase 2.5: Smart category auto-detection ─────────────────────────
+  // If item_name matches a known brand/product keyword and current category
+  // hint is null / empty / "Другое", patch it silently before rendering preview.
+  // Non-blocking: await is safe here (single DB UPDATE, <5ms). Any failure is
+  // silently swallowed by patchDraftCategoryHint — preview is never blocked.
+  if (draft?.item_name) {
+    const detected = detectCategoryFromItem(draft.item_name);
+    if (detected) {
+      void patchDraftCategoryHint(workspaceId, userId, draftId, detected.category);
+    }
+  }
+
   const res = await confirmPreviewFull(workspaceId, userId, draftId);
   const fullText = prefixText ? `${prefixText}\n\n${res.text}` : res.text;
+
   const msgId = await upsertBotMessage(
     telegramUserId,
     chatId,
