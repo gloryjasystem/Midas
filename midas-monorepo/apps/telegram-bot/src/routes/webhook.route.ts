@@ -1543,12 +1543,21 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
 
           // ── Phase 2.4 PR11: ia:delink — user tapped "🔄 Сменить счёт" ────
           } else if (iaCmd.cmd === 'delink') {
+            // Before delinking, fetch and save the current account_id to Redis
+            // so we can restore it if the user presses "◀️ Назад" from the picker.
+            const delinkDraftBefore = await getDraftFields(iaResolved.workspaceId, iaResolved.userId, iaCmd.draftId);
+            const prevAccountId = delinkDraftBefore?.account_id ?? null;
+            if (prevAccountId) {
+              try {
+                await redisConnection.set(`midas:prev_acct:${iaCmd.draftId}`, prevAccountId, 'EX', 600);
+              } catch { /* non-fatal */ }
+            }
+
             // Delink: set account_id = NULL on the draft (patchDraftAccount with null).
             await patchDraftAccount(iaResolved.workspaceId, iaResolved.userId, iaCmd.draftId, null);
 
-            // Fetch current draft to determine intent for sort priority.
-            const delinkDraft = await getDraftFields(iaResolved.workspaceId, iaResolved.userId, iaCmd.draftId);
-            const delinkIntent = delinkDraft?.parsed_intent ?? null;
+            // Fetch intent for sort priority.
+            const delinkIntent = delinkDraftBefore?.parsed_intent ?? null;
 
             // Fetch all workspace accounts with balances for the picker.
             const allAccounts = await getWorkspaceAccountsWithBalances(
@@ -1578,12 +1587,22 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
 
           // ── Phase 2.4 PR13: ia:back — user tapped "◀️ Назад" on account picker screen ────
           } else if (iaCmd.cmd === 'back') {
+            // Restore previously linked account (saved by ia:delink before unlinking)
+            const prevAcctKey = `midas:prev_acct:${iaCmd.draftId}`;
+            try {
+              const savedAcctId = await redisConnection.get(prevAcctKey);
+              if (savedAcctId) {
+                await patchDraftAccount(iaResolved.workspaceId, iaResolved.userId, iaCmd.draftId, savedAcctId);
+                void redisConnection.del(prevAcctKey);
+              }
+            } catch { /* non-fatal */ }
+
             if (iaMsgId) {
               const previewRes = await confirmPreviewFull(iaResolved.workspaceId, iaResolved.userId, iaCmd.draftId);
               void editMessageText(chatId, iaMsgId, previewRes.text, confirmKbForDraft(iaCmd.draftId, previewRes));
               try { await redisConnection.set(`midas:preview:${iaCmd.draftId}`, iaMsgId, 'EX', 3600); } catch { /* non-fatal */ }
             }
-            request.log.info({ msg: '[midas:bot:webhook] ia:back: returning from picker to preview card', workspaceId: iaResolved.workspaceId });
+            request.log.info({ msg: '[midas:bot:webhook] ia:back: account restored, returning to preview card', workspaceId: iaResolved.workspaceId });
 
           // ── Phase 2.4 PR12: ia:xfx — user tapped "✏️ Указать сумму в {cur}" ──
           } else if (iaCmd.cmd === 'xfx') {
