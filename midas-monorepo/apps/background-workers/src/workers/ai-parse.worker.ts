@@ -556,7 +556,7 @@ async function processAiParse(job: Job<AiParseJobPayload>): Promise<void> {
         });
         
         pickerRows.push([{ text: '➕ Создать счёт', callback_data: `ia:newac:${draftId}` }]);
-        pickerRows.push([{ text: '✖️ Отмена', callback_data: `ia:pk:back:${draftId}` }]);
+        pickerRows.push([{ text: '✖️ Отмена', callback_data: `ia:cancel:${draftId}` }]);
 
         inlineKeyboard = { inline_keyboard: pickerRows };
         previewMsg = richPreview + '\n\n' + pickerHeader;
