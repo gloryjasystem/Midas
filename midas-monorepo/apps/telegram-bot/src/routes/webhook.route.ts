@@ -2475,19 +2475,13 @@ Midas создан, чтобы сделать учет денег максима
 
           if (isBack) {
             // Restore confirmation card
-            const { buildPreviewScreen, buildConfirmKeyboard } = await import('../utils/screen-builder.js');
-            const previewMsg = buildPreviewScreen({
-              intent: draft.parsed_intent,
-              amount: draft.parsed_amount,
-              currency: draft.parsed_currency,
-              categoryHint: draft.parsed_category_hint,
-              accountHint: null,
-              itemName: draft.item_name,
-            });
-            void upsertBotMessage(
-              telegramUserId, chatId, previewMsg,
-              buildConfirmKeyboard(draftEditId),
-            );
+            const previewRes = await confirmPreviewFull(deResolved.workspaceId, deResolved.userId, draftEditId);
+            if (cq.message?.message_id) {
+              void editMessageText(chatId, String(cq.message.message_id), previewRes.text, confirmKbForDraft(draftEditId, previewRes));
+              try { await redisConnection.set(`midas:preview:${draftEditId}`, String(cq.message.message_id), 'EX', 3600); } catch { /* non-fatal */ }
+            } else {
+              void upsertBotMessage(telegramUserId, chatId, previewRes.text, confirmKbForDraft(draftEditId, previewRes));
+            }
           } else {
             // Show edit sub-menu
             const { intentEmoji, intentLabel, formatAmount } = await import('../utils/screen-builder.js');
@@ -2658,16 +2652,13 @@ Midas создан, чтобы сделать учет денег максима
               // Refresh draft and restore confirm card
               const refreshed = await getDraftFields(curResolved.workspaceId, curResolved.userId, curDraftId);
               if (refreshed) {
-                const { buildPreviewScreen, buildConfirmKeyboard } = await import('../utils/screen-builder.js');
-                const previewMsg = buildPreviewScreen({
-                  intent: refreshed.parsed_intent,
-                  amount: refreshed.parsed_amount,
-                  currency: refreshed.parsed_currency,
-                  categoryHint: refreshed.parsed_category_hint,
-                  accountHint: null,
-                  itemName: refreshed.item_name,
-                });
-                void upsertBotMessage(telegramUserId, chatId, previewMsg, buildConfirmKeyboard(curDraftId));
+                const previewRes = await confirmPreviewFull(curResolved.workspaceId, curResolved.userId, curDraftId);
+                if (cq.message?.message_id) {
+                  void editMessageText(chatId, String(cq.message.message_id), previewRes.text, confirmKbForDraft(curDraftId, previewRes));
+                  try { await redisConnection.set(`midas:preview:${curDraftId}`, String(cq.message.message_id), 'EX', 3600); } catch { /* non-fatal */ }
+                } else {
+                  void upsertBotMessage(telegramUserId, chatId, previewRes.text, confirmKbForDraft(curDraftId, previewRes));
+                }
               }
             } else {
               void upsertBotMessage(telegramUserId, chatId, '⏰ <b>Черновик истёк</b>\n\nОтправьте сообщение повторно.');
