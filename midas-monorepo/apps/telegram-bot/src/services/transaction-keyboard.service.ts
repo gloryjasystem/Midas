@@ -316,7 +316,7 @@ function pluralRu(n: number): string {
  */
 export type TxCallbackCmd =
   | { cmd: 'list'; page: number; filter: IntentFilter }
-  | { cmd: 'view'; txId: string }
+  | { cmd: 'view'; txId: string; from?: string }
   | { cmd: 'search_menu' }
   | { cmd: 'search_name' }
   | { cmd: 'search_amount' }
@@ -327,17 +327,18 @@ export type TxCallbackCmd =
   | { cmd: 'search_date_custom' }
   | { cmd: 'search_date_cancel' }
   | { cmd: 'search_results_page'; page: number }
-  | { cmd: 'field_amount'; txId: string }
-  | { cmd: 'field_cat'; txId: string; page: number }
-  | { cmd: 'field_acc'; txId: string }
-  | { cmd: 'field_int'; txId: string }
-  | { cmd: 'delete_ask'; txId: string }
-  | { cmd: 'delete_confirm'; txId: string }
-  | { cmd: 'confirm_cat'; txId: string; catId: string }
-  | { cmd: 'confirm_acc'; txId: string; accId: string }
-  | { cmd: 'confirm_int'; txId: string; intent: string }
+  | { cmd: 'field_amount'; txId: string; from?: string }
+  | { cmd: 'field_cat'; txId: string; page: number; from?: string }
+  | { cmd: 'field_acc'; txId: string; from?: string }
+  | { cmd: 'field_int'; txId: string; from?: string }
+  | { cmd: 'delete_ask'; txId: string; from?: string }
+  | { cmd: 'delete_confirm'; txId: string; from?: string }
+  | { cmd: 'confirm_cat'; txId: string; catId: string; from?: string }
+  | { cmd: 'confirm_acc'; txId: string; accId: string; from?: string }
+  | { cmd: 'confirm_int'; txId: string; intent: string; from?: string }
   | { cmd: 'cancel' }
-  | { cmd: 'close' };
+  | { cmd: 'close' }
+  | { cmd: 'done'; txId: string };
 
 const VALID_FILTERS: readonly string[] = ['a', 'e', 'i', 'd'];
 
@@ -358,6 +359,13 @@ export function parseTxCallback(data: string): TxCallbackCmd | null {
 
   // tx:close → close (remove keyboard)
   if (sub === 'close') return { cmd: 'close' };
+  
+  // tx:done:<txId> → done (restore simple success card)
+  if (sub === 'done') {
+    const txId = parts[2] ?? '';
+    if (!ULID_RE.test(txId)) return null;
+    return { cmd: 'done', txId };
+  }
 
   // tx:sr:p:{page} → search results page navigation
   if (sub === 'sr') {
@@ -378,11 +386,12 @@ export function parseTxCallback(data: string): TxCallbackCmd | null {
     return { cmd: 'list', page, filter };
   }
 
-  // tx:v:<txId> → view
+  // tx:v:<txId>[:<from>] → view
   if (sub === 'v') {
     const txId = parts[2] ?? '';
     if (!ULID_RE.test(txId)) return null;
-    return { cmd: 'view', txId };
+    const from = parts[3];
+    return { cmd: 'view', txId, from };
   }
 
   // tx:s → search namespace
@@ -412,19 +421,19 @@ export function parseTxCallback(data: string): TxCallbackCmd | null {
     return null;
   }
 
-  // tx:f:<field>:<txId>[:<page>] → edit fields (mirrors ed:f:*)
+  // tx:f:<field>:<txId>[:<page>][:<from>] → edit fields (mirrors ed:f:*)
   if (sub === 'f') {
     const field = parts[2] ?? '';
     const txId  = parts[3] ?? '';
     if (!ULID_RE.test(txId)) return null;
 
-    if (field === 'amt') return { cmd: 'field_amount', txId };
-    if (field === 'acc') return { cmd: 'field_acc', txId };
-    if (field === 'int') return { cmd: 'field_int', txId };
+    if (field === 'amt') return { cmd: 'field_amount', txId, from: parts[4] };
+    if (field === 'acc') return { cmd: 'field_acc', txId, from: parts[4] };
+    if (field === 'int') return { cmd: 'field_int', txId, from: parts[4] };
     if (field === 'cat') {
       const page = parseInt(parts[4] ?? '0', 10);
       if (isNaN(page) || page < 0) return null;
-      return { cmd: 'field_cat', txId, page };
+      return { cmd: 'field_cat', txId, page, from: parts[5] };
     }
     return null;
   }

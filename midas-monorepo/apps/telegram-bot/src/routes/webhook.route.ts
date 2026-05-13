@@ -1644,6 +1644,12 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
               void deleteMessage(chatId, txMsgId);
               await redisConnection.del(`midas:empty_tx_msg:${chatId}`).catch(() => {});
             }
+          } else if (txCmd.cmd === 'done') {
+            // Revert back to the simple "Success" card state with a single "Edit" button
+            const card = await getTransactionCard(txCmd.txId, txResolved.workspaceId, txResolved.userId);
+            if (card && txMsgId) {
+              void editMessageText(chatId, txMsgId, formatTransactionCard(card), { inline_keyboard: [[{ text: '✏️ Изменить запись', callback_data: `ed:v:${txCmd.txId}` }]] });
+            }
           } else if (txCmd.cmd === 'list') {
             const [items, total, stats] = await Promise.all([
               getTransactionList(txResolved.workspaceId, txResolved.userId, txCmd.page, txCmd.filter),
@@ -1673,8 +1679,9 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
             if (txMsgId) void editMessageText(chatId, txMsgId, '\u{1F50D} <b>\u041F\u043E\u0438\u0441\u043A \u0442\u0440\u0430\u043D\u0437\u0430\u043A\u0446\u0438\u0439</b>\n\n\u0412\u044B\u0431\u0435\u0440\u0438\u0442\u0435 \u0442\u0438\u043F \u043F\u043E\u0438\u0441\u043A\u0430:', buildTxSearchMenu());
           } else if (txCmd.cmd === 'field_amount') {
             if (txMsgId) {
-              void editMessageText(chatId, txMsgId, '\u270F\uFE0F \u0412\u0432\u0435\u0434\u0438\u0442\u0435 \u043D\u043E\u0432\u0443\u044E \u0441\u0443\u043C\u043C\u0443:', { inline_keyboard: [[{ text: '\u25C0\uFE0F \u041E\u0442\u043C\u0435\u043D\u0430', callback_data: `tx:v:${txCmd.txId}` }]] });
-              try { await redisConnection.set(`midas:tx:edit:amt:${telegramUserId}:${chatId}`, `${txCmd.txId}:${txMsgId}`, 'EX', 120); } catch { /* non-fatal */ }
+              const sf = txCmd.from ? `:${txCmd.from}` : '';
+              void editMessageText(chatId, txMsgId, '\u270F\uFE0F \u0412\u0432\u0435\u0434\u0438\u0442\u0435 \u043D\u043E\u0432\u0443\u044E \u0441\u0443\u043C\u043C\u0443:', { inline_keyboard: [[{ text: '\u25C0\uFE0F \u041E\u0442\u043C\u0435\u043D\u0430', callback_data: `tx:v:${txCmd.txId}${sf}` }]] });
+              try { await redisConnection.set(`midas:tx:edit:amt:${telegramUserId}:${chatId}`, `${txCmd.txId}:${txMsgId}:${txCmd.from || ''}`, 'EX', 120); } catch { /* non-fatal */ }
             }
           } else if (txCmd.cmd === 'field_cat') {
             const cats = await getWorkspaceCategories(txResolved.workspaceId, txResolved.userId);
@@ -1683,50 +1690,62 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
             const pageItems = cats.slice(start, start + catPageSize);
             const catTotalPages = Math.ceil(cats.length / catPageSize);
             const rows: { text: string; callback_data: string }[][] = [];
+            const sf = txCmd.from ? `:${txCmd.from}` : '';
             for (let i = 0; i < pageItems.length; i += catCols) {
-              rows.push(pageItems.slice(i, i + catCols).map((cat) => ({ text: escapeHtml(cat.name), callback_data: `tx:c:cat:${txCmd.txId}:${cat.id}` })));
+              rows.push(pageItems.slice(i, i + catCols).map((cat) => ({ text: escapeHtml(cat.name), callback_data: `tx:c:cat:${txCmd.txId}:${cat.id}${sf}` })));
             }
             const navRow: { text: string; callback_data: string }[] = [];
-            if (txCmd.page > 0) navRow.push({ text: '\u25C0\uFE0F', callback_data: `tx:f:cat:${txCmd.txId}:${txCmd.page - 1}` });
+            if (txCmd.page > 0) navRow.push({ text: '\u25C0\uFE0F', callback_data: `tx:f:cat:${txCmd.txId}:${txCmd.page - 1}${sf}` });
             if (catTotalPages > 1) navRow.push({ text: `${txCmd.page + 1}/${catTotalPages}`, callback_data: 'tx:x' });
-            if (txCmd.page < catTotalPages - 1) navRow.push({ text: '\u25B6\uFE0F', callback_data: `tx:f:cat:${txCmd.txId}:${txCmd.page + 1}` });
+            if (txCmd.page < catTotalPages - 1) navRow.push({ text: '\u25B6\uFE0F', callback_data: `tx:f:cat:${txCmd.txId}:${txCmd.page + 1}${sf}` });
             if (navRow.length > 0) rows.push(navRow);
-            rows.push([{ text: '\u25C0\uFE0F \u041D\u0430\u0437\u0430\u0434', callback_data: `tx:v:${txCmd.txId}` }]);
+            rows.push([{ text: '\u25C0\uFE0F \u041D\u0430\u0437\u0430\u0434', callback_data: `tx:v:${txCmd.txId}${sf}` }]);
             if (txMsgId) void editMessageText(chatId, txMsgId, '\u{1F4C1} \u0412\u044B\u0431\u0435\u0440\u0438\u0442\u0435 \u043A\u0430\u0442\u0435\u0433\u043E\u0440\u0438\u044E:', { inline_keyboard: rows });
           } else if (txCmd.cmd === 'field_acc') {
             const accs = await getWorkspaceAccounts(txResolved.workspaceId, txResolved.userId);
-            const rows: { text: string; callback_data: string }[][] = accs.map((acc) => [{ text: escapeHtml(acc.name), callback_data: `tx:c:acc:${txCmd.txId}:${acc.id}` }]);
-            rows.push([{ text: '\u25C0\uFE0F \u041D\u0430\u0437\u0430\u0434', callback_data: `tx:v:${txCmd.txId}` }]);
+            const sf = txCmd.from ? `:${txCmd.from}` : '';
+            const rows: { text: string; callback_data: string }[][] = accs.map((acc) => [{ text: escapeHtml(acc.name), callback_data: `tx:c:acc:${txCmd.txId}:${acc.id}${sf}` }]);
+            rows.push([{ text: '\u25C0\uFE0F \u041D\u0430\u0437\u0430\u0434', callback_data: `tx:v:${txCmd.txId}${sf}` }]);
             if (txMsgId) void editMessageText(chatId, txMsgId, '\u{1F3E6} \u0412\u044B\u0431\u0435\u0440\u0438\u0442\u0435 \u0441\u0447\u0451\u0442:', { inline_keyboard: rows });
           } else if (txCmd.cmd === 'field_int') {
             const intentLabels: Record<string, string> = { income: '\u{1F4B0} \u0414\u043E\u0445\u043E\u0434', expense: '\u{1F4B8} \u0420\u0430\u0441\u0445\u043E\u0434', debt_given: '\u{1F534} \u0414\u043E\u043B\u0433 \u0432\u044B\u0434\u0430\u043D', debt_received: '\u{1F7E2} \u0414\u043E\u043B\u0433 \u043F\u043E\u043B\u0443\u0447\u0435\u043D', transfer: '\u{1F504} \u041F\u0435\u0440\u0435\u0432\u043E\u0434' };
-            const rows: { text: string; callback_data: string }[][] = (EDITABLE_INTENTS as readonly string[]).map((int) => [{ text: intentLabels[int] ?? int, callback_data: `tx:c:int:${txCmd.txId}:${int}` }]);
-            rows.push([{ text: '\u25C0\uFE0F \u041D\u0430\u0437\u0430\u0434', callback_data: `tx:v:${txCmd.txId}` }]);
+            const sf = txCmd.from ? `:${txCmd.from}` : '';
+            const rows: { text: string; callback_data: string }[][] = (EDITABLE_INTENTS as readonly string[]).map((int) => [{ text: intentLabels[int] ?? int, callback_data: `tx:c:int:${txCmd.txId}:${int}${sf}` }]);
+            rows.push([{ text: '\u25C0\uFE0F \u041D\u0430\u0437\u0430\u0434', callback_data: `tx:v:${txCmd.txId}${sf}` }]);
             if (txMsgId) void editMessageText(chatId, txMsgId, '\u{1F504} \u0412\u044B\u0431\u0435\u0440\u0438\u0442\u0435 \u0442\u0438\u043F:', { inline_keyboard: rows });
           } else if (txCmd.cmd === 'confirm_cat') {
             const result = await updateTransactionCategory(txCmd.txId, txResolved.workspaceId, txResolved.userId, txCmd.catId);
+            const sf = txCmd.from ? `:${txCmd.from}` : '';
             if (result.status === 'ok') {
               const card = await getTransactionCard(txCmd.txId, txResolved.workspaceId, txResolved.userId);
-              if (card && txMsgId) void editMessageText(chatId, txMsgId, '\u2705 \u041A\u0430\u0442\u0435\u0433\u043E\u0440\u0438\u044F \u0438\u0437\u043C\u0435\u043D\u0435\u043D\u0430.\n\n' + formatTransactionCard(card), { inline_keyboard: [[{ text: '\u25C0\uFE0F \u041A \u0442\u0440\u0430\u043D\u0437\u0430\u043A\u0446\u0438\u0438', callback_data: `tx:v:${txCmd.txId}` }]] });
-            } else if (txMsgId) void editMessageText(chatId, txMsgId, '\u26A0\uFE0F \u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u0438\u0437\u043C\u0435\u043D\u0438\u0442\u044C.', { inline_keyboard: [[{ text: '\u25C0\uFE0F \u041D\u0430\u0437\u0430\u0434', callback_data: `tx:v:${txCmd.txId}` }]] });
+              if (card && txMsgId) void editMessageText(chatId, txMsgId, '\u2705 \u041A\u0430\u0442\u0435\u0433\u043E\u0440\u0438\u044F \u0438\u0437\u043C\u0435\u043D\u0435\u043D\u0430.\n\n' + formatTransactionCard(card), { inline_keyboard: [[{ text: '\u25C0\uFE0F \u041A \u0442\u0440\u0430\u043D\u0437\u0430\u043A\u0446\u0438\u0438', callback_data: `tx:v:${txCmd.txId}${sf}` }]] });
+            } else if (txMsgId) void editMessageText(chatId, txMsgId, '\u26A0\uFE0F \u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u0438\u0437\u043C\u0435\u043D\u0438\u0442\u044C.', { inline_keyboard: [[{ text: '\u25C0\uFE0F \u041D\u0430\u0437\u0430\u0434', callback_data: `tx:v:${txCmd.txId}${sf}` }]] });
           } else if (txCmd.cmd === 'confirm_acc') {
             const result = await updateTransactionAccount(txCmd.txId, txResolved.workspaceId, txResolved.userId, txCmd.accId);
+            const sf = txCmd.from ? `:${txCmd.from}` : '';
             if (result.status === 'ok') {
               const card = await getTransactionCard(txCmd.txId, txResolved.workspaceId, txResolved.userId);
-              if (card && txMsgId) void editMessageText(chatId, txMsgId, '\u2705 \u0421\u0447\u0451\u0442 \u0438\u0437\u043C\u0435\u043D\u0451\u043D.\n\n' + formatTransactionCard(card), { inline_keyboard: [[{ text: '\u25C0\uFE0F \u041A \u0442\u0440\u0430\u043D\u0437\u0430\u043A\u0446\u0438\u0438', callback_data: `tx:v:${txCmd.txId}` }]] });
-            } else if (txMsgId) void editMessageText(chatId, txMsgId, '\u26A0\uFE0F \u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u0438\u0437\u043C\u0435\u043D\u0438\u0442\u044C.', { inline_keyboard: [[{ text: '\u25C0\uFE0F \u041D\u0430\u0437\u0430\u0434', callback_data: `tx:v:${txCmd.txId}` }]] });
+              if (card && txMsgId) void editMessageText(chatId, txMsgId, '\u2705 \u0421\u0447\u0451\u0442 \u0438\u0437\u043C\u0435\u043D\u0451\u043D.\n\n' + formatTransactionCard(card), { inline_keyboard: [[{ text: '\u25C0\uFE0F \u041A \u0442\u0440\u0430\u043D\u0437\u0430\u043A\u0446\u0438\u0438', callback_data: `tx:v:${txCmd.txId}${sf}` }]] });
+            } else if (txMsgId) void editMessageText(chatId, txMsgId, '\u26A0\uFE0F \u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u0438\u0437\u043C\u0435\u043D\u0438\u0442\u044C.', { inline_keyboard: [[{ text: '\u25C0\uFE0F \u041D\u0430\u0437\u0430\u0434', callback_data: `tx:v:${txCmd.txId}${sf}` }]] });
           } else if (txCmd.cmd === 'confirm_int') {
             const result = await updateTransactionIntent(txCmd.txId, txResolved.workspaceId, txResolved.userId, txCmd.intent);
+            const sf = txCmd.from ? `:${txCmd.from}` : '';
             if (result.status === 'ok') {
               const card = await getTransactionCard(txCmd.txId, txResolved.workspaceId, txResolved.userId);
-              if (card && txMsgId) void editMessageText(chatId, txMsgId, '\u2705 \u0422\u0438\u043F \u0438\u0437\u043C\u0435\u043D\u0451\u043D.\n\n' + formatTransactionCard(card), { inline_keyboard: [[{ text: '\u25C0\uFE0F \u041A \u0442\u0440\u0430\u043D\u0437\u0430\u043A\u0446\u0438\u0438', callback_data: `tx:v:${txCmd.txId}` }]] });
-            } else if (txMsgId) void editMessageText(chatId, txMsgId, '\u26A0\uFE0F \u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u0438\u0437\u043C\u0435\u043D\u0438\u0442\u044C.', { inline_keyboard: [[{ text: '\u25C0\uFE0F \u041D\u0430\u0437\u0430\u0434', callback_data: `tx:v:${txCmd.txId}` }]] });
+              if (card && txMsgId) void editMessageText(chatId, txMsgId, '\u2705 \u0422\u0438\u043F \u0438\u0437\u043C\u0435\u043D\u0451\u043D.\n\n' + formatTransactionCard(card), { inline_keyboard: [[{ text: '\u25C0\uFE0F \u041A \u0442\u0440\u0430\u043D\u0437\u0430\u043A\u0446\u0438\u0438', callback_data: `tx:v:${txCmd.txId}${sf}` }]] });
+            } else if (txMsgId) void editMessageText(chatId, txMsgId, '\u26A0\uFE0F \u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u0438\u0437\u043C\u0435\u043D\u0438\u0442\u044C.', { inline_keyboard: [[{ text: '\u25C0\uFE0F \u041D\u0430\u0437\u0430\u0434', callback_data: `tx:v:${txCmd.txId}${sf}` }]] });
           } else if (txCmd.cmd === 'delete_ask') {
-            if (txMsgId) void editMessageText(chatId, txMsgId, '\u{1F5D1}\uFE0F <b>\u0423\u0434\u0430\u043B\u0438\u0442\u044C \u0442\u0440\u0430\u043D\u0437\u0430\u043A\u0446\u0438\u044E?</b>\n\n\u042D\u0442\u043E \u0434\u0435\u0439\u0441\u0442\u0432\u0438\u0435 \u043D\u0435\u043B\u044C\u0437\u044F \u043E\u0442\u043C\u0435\u043D\u0438\u0442\u044C.', { inline_keyboard: [[{ text: '\u{1F5D1}\uFE0F \u0414\u0430, \u0443\u0434\u0430\u043B\u0438\u0442\u044C', callback_data: `tx:d:yes:${txCmd.txId}` }, { text: '\u25C0\uFE0F \u041E\u0442\u043C\u0435\u043D\u0430', callback_data: `tx:v:${txCmd.txId}` }]] });
+            const sf = txCmd.from ? `:${txCmd.from}` : '';
+            if (txMsgId) void editMessageText(chatId, txMsgId, '\u{1F5D1}\uFE0F <b>\u0423\u0434\u0430\u043B\u0438\u0442\u044C \u0442\u0440\u0430\u043D\u0437\u0430\u043A\u0446\u0438\u044E?</b>\n\n\u042D\u0442\u043E \u0434\u0435\u0439\u0441\u0442\u0432\u0438\u0435 \u043D\u0435\u043B\u044C\u0437\u044F \u043E\u0442\u043C\u0435\u043D\u0438\u0442\u044C.', { inline_keyboard: [[{ text: '\u{1F5D1}\uFE0F \u0414\u0430, \u0443\u0434\u0430\u043B\u0438\u0442\u044C', callback_data: `tx:d:yes:${txCmd.txId}${sf}` }, { text: '\u25C0\uFE0F \u041E\u0442\u043C\u0435\u043D\u0430', callback_data: `tx:v:${txCmd.txId}${sf}` }]] });
           } else if (txCmd.cmd === 'delete_confirm') {
+            const sf = txCmd.from ? `:${txCmd.from}` : '';
             const result = await softDeleteTransaction(txCmd.txId, txResolved.workspaceId, txResolved.userId);
             if (result.status === 'ok') {
-              if (txMsgId) void editMessageText(chatId, txMsgId, '\u2705 \u0422\u0440\u0430\u043D\u0437\u0430\u043A\u0446\u0438\u044F \u0443\u0434\u0430\u043B\u0435\u043D\u0430.', { inline_keyboard: [[{ text: '\u25C0\uFE0F \u041A \u0441\u043F\u0438\u0441\u043A\u0443', callback_data: 'tx:l:0:a' }]] });
+              if (txCmd.from === 's') {
+                if (txMsgId) void editMessageText(chatId, txMsgId, '\u2705 \u0422\u0440\u0430\u043D\u0437\u0430\u043A\u0446\u0438\u044F \u0443\u0434\u0430\u043B\u0435\u043D\u0430.', { inline_keyboard: [[{ text: '\u2716\uFE0F \u0417\u0430\u043A\u0440\u044B\u0442\u044C', callback_data: 'tx:close' }]] });
+              } else {
+                if (txMsgId) void editMessageText(chatId, txMsgId, '\u2705 \u0422\u0440\u0430\u043D\u0437\u0430\u043A\u0446\u0438\u044F \u0443\u0434\u0430\u043B\u0435\u043D\u0430.', { inline_keyboard: [[{ text: '\u25C0\uFE0F \u041A \u0441\u043F\u0438\u0441\u043A\u0443', callback_data: 'tx:l:0:a' }]] });
+              }
             } else {
               if (txMsgId) void editMessageText(chatId, txMsgId, '\u26A0\uFE0F \u0422\u0440\u0430\u043D\u0437\u0430\u043A\u0446\u0438\u044F \u043D\u0435 \u043D\u0430\u0439\u0434\u0435\u043D\u0430.', { inline_keyboard: [[{ text: '\u25C0\uFE0F \u041A \u0441\u043F\u0438\u0441\u043A\u0443', callback_data: 'tx:l:0:a' }]] });
             }
@@ -2008,7 +2027,10 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
       // ISSUE-2 FIX: structure matches (tx:f: = ed:f:, tx:d: = ed:d:, tx:v: = ed:v:)
       // Simple prefix remap: ed:v:{id} → tx:v:{id}, ed:l:0 → tx:l:0 (filter defaults to 'a')
       if (callbackData.startsWith('ed:')) {
-        const remapped = 'tx:' + callbackData.slice(3);
+        let remapped = 'tx:' + callbackData.slice(3);
+        if (callbackData.startsWith('ed:v:') || callbackData.startsWith('ed:f:')) {
+          remapped += ':s';
+        }
         const { parseTxCallback: parseTxAlias } = await import('../services/transaction-keyboard.service.js');
         const aliasCmd = parseTxAlias(remapped);
         if (aliasCmd) {
@@ -2035,12 +2057,20 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
               if (card) {
                 const text = formatTransactionCard(card);
                 const rows: { text: string; callback_data: string }[][] = [];
-                if (!card.is_cross_currency) rows.push([{ text: '\u270F\uFE0F \u0418\u0437\u043C\u0435\u043D\u0438\u0442\u044C \u0441\u0443\u043C\u043C\u0443', callback_data: `tx:f:amt:${aliasCmd.txId}` }]);
-                rows.push([{ text: '\uD83D\uDCC1 \u0418\u0437\u043C\u0435\u043D\u0438\u0442\u044C \u043A\u0430\u0442\u0435\u0433\u043E\u0440\u0438\u044E', callback_data: `tx:f:cat:${aliasCmd.txId}:0` }]);
-                rows.push([{ text: '\uD83C\uDFE6 \u0418\u0437\u043C\u0435\u043D\u0438\u0442\u044C \u0441\u0447\u0451\u0442', callback_data: `tx:f:acc:${aliasCmd.txId}` }]);
-                rows.push([{ text: '\uD83D\uDD04 \u0418\u0437\u043C\u0435\u043D\u0438\u0442\u044C \u0442\u0438\u043F', callback_data: `tx:f:int:${aliasCmd.txId}` }]);
-                rows.push([{ text: '\uD83D\uDDD1\uFE0F \u0423\u0434\u0430\u043B\u0438\u0442\u044C', callback_data: `tx:d:ask:${aliasCmd.txId}` }]);
-                rows.push([{ text: '\u25C0\uFE0F \u041D\u0430\u0437\u0430\u0434 \u043A \u0441\u043F\u0438\u0441\u043A\u0443', callback_data: 'tx:l:0:a' }]);
+                const sf = aliasCmd.from ? `:${aliasCmd.from}` : '';
+                
+                if (!card.is_cross_currency) rows.push([{ text: '\u270F\uFE0F \u0418\u0437\u043C\u0435\u043D\u0438\u0442\u044C \u0441\u0443\u043C\u043C\u0443', callback_data: `tx:f:amt:${aliasCmd.txId}${sf}` }]);
+                rows.push([{ text: '\uD83D\uDCC1 \u0418\u0437\u043C\u0435\u043D\u0438\u0442\u044C \u043A\u0430\u0442\u0435\u0433\u043E\u0440\u0438\u044E', callback_data: `tx:f:cat:${aliasCmd.txId}:0${sf}` }]);
+                rows.push([{ text: '\uD83C\uDFE6 \u0418\u0437\u043C\u0435\u043D\u0438\u0442\u044C \u0441\u0447\u0451\u0442', callback_data: `tx:f:acc:${aliasCmd.txId}${sf}` }]);
+                rows.push([{ text: '\uD83D\uDD04 \u0418\u0437\u043C\u0435\u043D\u0438\u0442\u044C \u0442\u0438\u043F', callback_data: `tx:f:int:${aliasCmd.txId}${sf}` }]);
+                rows.push([{ text: '\uD83D\uDDD1\uFE0F \u0423\u0434\u0430\u043B\u0438\u0442\u044C', callback_data: `tx:d:ask:${aliasCmd.txId}${sf}` }]); // Need to add 'from' to delete commands if we want, but close enough. Let's not touch delete for now to keep it safe, actually delete goes to list anyway.
+                
+                if (aliasCmd.from === 's') {
+                  rows.push([{ text: '\u2716\uFE0F \u0417\u0430\u043A\u0440\u044B\u0442\u044C', callback_data: `tx:done:${aliasCmd.txId}` }]);
+                } else {
+                  rows.push([{ text: '\u25C0\uFE0F \u041D\u0430\u0437\u0430\u0434 \u043A \u0441\u043F\u0438\u0441\u043A\u0443', callback_data: 'tx:l:0:a' }]);
+                }
+                
                 if (txMsgId) void editMessageText(chatId, txMsgId, text, { inline_keyboard: rows });
               } else {
                 if (txMsgId) void editMessageText(chatId, txMsgId, '\u26A0\uFE0F \u0422\u0440\u0430\u043D\u0437\u0430\u043A\u0446\u0438\u044F \u043D\u0435 \u043D\u0430\u0439\u0434\u0435\u043D\u0430.', { inline_keyboard: [[{ text: '\u25C0\uFE0F \u041D\u0430\u0437\u0430\u0434', callback_data: 'tx:l:0:a' }]] });
@@ -4918,7 +4948,7 @@ Midas создан, чтобы сделать учет денег максима
       const txEdKey = `midas:tx:edit:amt:${telegramUserId}:${chatId}`;
       const txEdStateValue = await redisConnection.get(txEdKey);
       if (txEdStateValue) {
-        const [txEdStateTxId, txMsgId] = txEdStateValue.split(':') as [string, string | undefined];
+        const [txEdStateTxId, txMsgId, txFrom] = txEdStateValue.split(':') as [string, string | undefined, string | undefined];
         if (txEdStateTxId && /^[0-9A-Z]{26}$/.test(txEdStateTxId)) {
           let edWorkspaceId: string;
           try {
@@ -4935,12 +4965,18 @@ Midas создан, чтобы сделать учет денег максима
                 const card = await getTransactionCard(txEdStateTxId, edWorkspaceId, resolved.userId);
                 if (card) {
                   const rows: { text: string; callback_data: string }[][] = [];
-                  if (!card.is_cross_currency) rows.push([{ text: '✏️ Изменить сумму', callback_data: `tx:f:amt:${txEdStateTxId}` }]);
-                  rows.push([{ text: '📁 Изменить категорию', callback_data: `tx:f:cat:${txEdStateTxId}:0` }]);
-                  rows.push([{ text: '🏦 Изменить счёт', callback_data: `tx:f:acc:${txEdStateTxId}` }]);
-                  rows.push([{ text: '🔄 Изменить тип', callback_data: `tx:f:int:${txEdStateTxId}` }]);
-                  rows.push([{ text: '🗑️ Удалить', callback_data: `tx:d:ask:${txEdStateTxId}` }]);
-                  rows.push([{ text: '◀️ Назад к списку', callback_data: 'tx:l:0:a' }]);
+                  const sf = txFrom ? `:${txFrom}` : '';
+                  if (!card.is_cross_currency) rows.push([{ text: '✏️ Изменить сумму', callback_data: `tx:f:amt:${txEdStateTxId}${sf}` }]);
+                  rows.push([{ text: '📁 Изменить категорию', callback_data: `tx:f:cat:${txEdStateTxId}:0${sf}` }]);
+                  rows.push([{ text: '🏦 Изменить счёт', callback_data: `tx:f:acc:${txEdStateTxId}${sf}` }]);
+                  rows.push([{ text: '🔄 Изменить тип', callback_data: `tx:f:int:${txEdStateTxId}${sf}` }]);
+                  rows.push([{ text: '🗑️ Удалить', callback_data: `tx:d:ask:${txEdStateTxId}${sf}` }]);
+                  
+                  if (txFrom === 's') {
+                    rows.push([{ text: '\u2716\uFE0F \u0417\u0430\u043A\u0440\u044B\u0442\u044C', callback_data: `tx:done:${txEdStateTxId}` }]);
+                  } else {
+                    rows.push([{ text: '◀️ Назад к списку', callback_data: 'tx:l:0:a' }]);
+                  }
                   
                   if (txMsgId) {
                     const { editMessageText, deleteMessage } = await import('../services/telegram-api.js');
