@@ -78,7 +78,9 @@ export type InlineAccountCmd =
   /** Phase 2.4 PR12: user tapped "◀️ Назад" on cross-currency input screen (ia:xfx:back:{draftId}) */
   | { cmd: 'xfx_back'; draftId: string }
   /** Phase 2.4 PR13: user tapped "◀️ Назад" on account picker screen (ia:pk:back:{draftId}) */
-  | { cmd: 'back'; draftId: string };
+  | { cmd: 'back'; draftId: string }
+  /** Phase 2.5: user tapped "➕ Создать счёт" from V2 picker — launches onboarding (ia:newac:{draftId}) */
+  | { cmd: 'newaccount'; draftId: string };
 
 /**
  * Parse and validate an inline account creation callback_data string.
@@ -165,6 +167,14 @@ export function parseInlineAccountCallback(data: string): InlineAccountCmd | nul
     const draftId = parts[3] ?? '';
     if (!ULID_RE.test(draftId)) return null;
     return { cmd: 'xfx_back', draftId };
+  }
+
+  // Phase 2.5: ia:newac:{draftId} — launch account creation onboarding from draft picker
+  // "ia:newac:" = 9 + 26 = 35 bytes ≤ 64 ✓
+  if (sub === 'newac' && parts.length === 3) {
+    const draftId = parts[2] ?? '';
+    if (!ULID_RE.test(draftId)) return null;
+    return { cmd: 'newaccount', draftId };
   }
 
   return null;
@@ -347,8 +357,9 @@ export function buildAccountPickerV2Keyboard(
   });
 
 
-  // Phase 2.4: Mandatory account selection - replace "Без счёта" with "Создать счёт"
-  rows.push([{ text: '➕ Создать счёт', callback_data: `ia:rename:${draftId}` }]);
+  // Phase 2.5: "Создать счёт" → launches full onboarding (ia:newac) + "Отмена" → back to preview
+  rows.push([{ text: '➕ Создать счёт', callback_data: `ia:newac:${draftId}` }]);
+  rows.push([{ text: '✖️ Отмена',        callback_data: `ia:pk:back:${draftId}` }]);
 
   return { inline_keyboard: rows };
 }

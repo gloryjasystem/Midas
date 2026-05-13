@@ -192,6 +192,7 @@ import {
   CRYPTO_CURRENCY_PRESETS,           // master_roadmap: currency pool helper
   TON_CURRENCY_PRESETS,              // master_roadmap: currency pool helper
   type AccountOnboardState,          // Phase 1.30
+  buildStartOnboardKeyboardWithBack, // Phase 2.5: onboarding from draft picker with back btn
 } from '../services/account-onboard-keyboard.service.js';
 import {
   parseBalanceCallback,              // Phase 2.1
@@ -1139,12 +1140,14 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
                   await softDeletePlaceholderAccount(acResolved.workspaceId, acResolved.userId);
                 } catch { /* non-fatal — don't block onboarding UX */ }
                 // Phase 2.2: transition to bal_input step
+                // Phase 2.5: preserve linkedDraftId if onboarding was started from draft picker
                 const newState: AccountOnboardState = {
                   step: 'bal_input',
                   accountType: state.accountType,
                   name: accountName,
                   accountId: res.accountId,
                   currency: acCmd.code,
+                  linkedDraftId: state.linkedDraftId,
                 };
                 await redisConnection.set(acKey, JSON.stringify(newState), 'EX', ONBOARD_STATE_TTL_SEC);
                 const balPrompt = buildBalancePromptText(escapeHtml(accountName), escapeHtml(acCmd.code));
@@ -1169,41 +1172,78 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
                 skippedSub = s.walletSubtype;
               } catch { /* ignore */ }
             }
-            await redisConnection.del(acKey);
-            // Phase LD: user completed custom account creation (with skipped balance).
-            // Soft-delete the onboarding placeholder — only the custom account remains.
-            try {
-              await softDeletePlaceholderAccount(acResolved.workspaceId, acResolved.userId);
-            } catch { /* non-fatal */ }
-            const skippedIcon = getProviderIcon(undefined, skippedType, skippedSub);
-            // Phase LD+: fetch default account + check if first
-            const defBal = await getWorkspaceDefaultAccount(acResolved.workspaceId, acResolved.userId).catch(() => null);
-            // Activate nav keyboard: delete inline onboarding msg
-            if (acMsgId) void deleteMessage(chatId, acMsgId);
-            await clearActiveMessageId(telegramUserId, chatId);
-            if (defBal && !defBal.isFirst) {
-              // D.4 Hybrid: 2nd+ account — delete old success card, send fresh one
-              const oldSuccessId = await redisConnection.get(lastSuccessMsgKey(telegramUserId, chatId));
-              if (oldSuccessId) void deleteMessage(chatId, oldSuccessId);
-              const portfolio = await getWorkspaceActiveAccounts(acResolved.workspaceId, acResolved.userId).catch(() => []);
-              const d4Text = buildAccountAddedD4Text(
-                skippedIcon, escapeHtml(skippedName), skippedCur, undefined, portfolio,
-                PROVIDER_ICONS,
-              );
-              const newSuccessId = await sendMessageWithReplyKeyboard(chatId, d4Text, buildMainMenuKeyboard());
-              if (newSuccessId) void redisConnection.set(lastSuccessMsgKey(telegramUserId, chatId), newSuccessId, 'EX', LAST_SUCCESS_MSG_TTL_SEC);
-            } else {
-              // First account — full onboarding success screen
-              const defIcon = defBal ? getProviderIcon(undefined, defBal.type, undefined) : skippedIcon;
-              const defName = defBal?.name ?? skippedName;
-              const defCur = defBal?.currency ?? skippedCur;
-              const firstSuccessId = await sendMessageWithReplyKeyboard(
-                chatId,
-                buildSuccessScreenText(escapeHtml(defName), defCur, undefined, defIcon),
-                buildMainMenuKeyboard(),
-              );
-              if (firstSuccessId) void redisConnection.set(lastSuccessMsgKey(telegramUserId, chatId), firstSuccessId, 'EX', LAST_SUCCESS_MSG_TTL_SEC);
+
+            // ── Phase 2.5: If launched from draft picker — link account and return to draft ──
+            // Read state again to get linkedDraftId and accountId.
+            let linkedDraftIdBal: string | undefined;
+            let linkedAccountIdBal: string | undefined;
+            let linkedAccountNameBal = 'Счёт';
+            if (rawStateBal) {
+              try {
+                const sLink = JSON.parse(rawStateBal) as AccountOnboardState;
+                linkedDraftIdBal = sLink.linkedDraftId;
+                linkedAccountIdBal = sLink.accountId;
+                linkedAccountNameBal = sLink.name ?? 'Счёт';
+              } catch { /* ignore */ }
             }
+
+            if (linkedDraftIdBal && linkedAccountIdBal) {
+              await redisConnection.del(acKey);
+              try {
+                await setDraftAccountId(acResolved.workspaceId, acResolved.userId, linkedDraftIdBal, linkedAccountIdBal);
+              } catch { /* non-fatal */ }
+              try {
+                await softDeletePlaceholderAccount(acResolved.workspaceId, acResolved.userId);
+              } catch { /* non-fatal */ }
+              const pickerMsgIdBal = await getActiveMessageId(telegramUserId, chatId);
+              await clearActiveMessageId(telegramUserId, chatId);
+              const previewResNewAcc = await confirmPreviewFull(acResolved.workspaceId, acResolved.userId, linkedDraftIdBal);
+              const confirmMsgNewAcc = `✅ Счёт <b>${escapeHtml(linkedAccountNameBal)}</b> создан!\n\n${previewResNewAcc.text}`;
+              if (pickerMsgIdBal) {
+                void editMessageText(chatId, pickerMsgIdBal, confirmMsgNewAcc, confirmKbForDraft(linkedDraftIdBal, previewResNewAcc));
+                try { await redisConnection.set(`midas:preview:${linkedDraftIdBal}`, pickerMsgIdBal, 'EX', 3600); } catch { /* non-fatal */ }
+              } else {
+                void upsertBotMessage(telegramUserId, chatId, confirmMsgNewAcc, confirmKbForDraft(linkedDraftIdBal, previewResNewAcc));
+              }
+              request.log.info({ msg: '[midas:bot:webhook] ac: bal_skip — account linked to draft', workspaceId: acResolved.workspaceId });
+              // Skip standard D4 / first-account success screen
+            } else {
+              await redisConnection.del(acKey);
+              // Phase LD: user completed custom account creation (with skipped balance).
+              // Soft-delete the onboarding placeholder — only the custom account remains.
+              try {
+                await softDeletePlaceholderAccount(acResolved.workspaceId, acResolved.userId);
+              } catch { /* non-fatal */ }
+              const skippedIcon = getProviderIcon(undefined, skippedType, skippedSub);
+              // Phase LD+: fetch default account + check if first
+              const defBal = await getWorkspaceDefaultAccount(acResolved.workspaceId, acResolved.userId).catch(() => null);
+              // Activate nav keyboard: delete inline onboarding msg
+              if (acMsgId) void deleteMessage(chatId, acMsgId);
+              await clearActiveMessageId(telegramUserId, chatId);
+              if (defBal && !defBal.isFirst) {
+                // D.4 Hybrid: 2nd+ account — delete old success card, send fresh one
+                const oldSuccessId = await redisConnection.get(lastSuccessMsgKey(telegramUserId, chatId));
+                if (oldSuccessId) void deleteMessage(chatId, oldSuccessId);
+                const portfolio = await getWorkspaceActiveAccounts(acResolved.workspaceId, acResolved.userId).catch(() => []);
+                const d4Text = buildAccountAddedD4Text(
+                  skippedIcon, escapeHtml(skippedName), skippedCur, undefined, portfolio,
+                  PROVIDER_ICONS,
+                );
+                const newSuccessId = await sendMessageWithReplyKeyboard(chatId, d4Text, buildMainMenuKeyboard());
+                if (newSuccessId) void redisConnection.set(lastSuccessMsgKey(telegramUserId, chatId), newSuccessId, 'EX', LAST_SUCCESS_MSG_TTL_SEC);
+              } else {
+                // First account — full onboarding success screen
+                const defIcon = defBal ? getProviderIcon(undefined, defBal.type, undefined) : skippedIcon;
+                const defName = defBal?.name ?? skippedName;
+                const defCur = defBal?.currency ?? skippedCur;
+                const firstSuccessId = await sendMessageWithReplyKeyboard(
+                  chatId,
+                  buildSuccessScreenText(escapeHtml(defName), defCur, undefined, defIcon),
+                  buildMainMenuKeyboard(),
+                );
+                if (firstSuccessId) void redisConnection.set(lastSuccessMsgKey(telegramUserId, chatId), firstSuccessId, 'EX', LAST_SUCCESS_MSG_TTL_SEC);
+              }
+            } // end else (standard D4 path)
 
           } else if (acCmd.cmd === 'bank_page') {
             // Phase 2.2: paginate bank picker
@@ -1527,6 +1567,32 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
               void editMessageText(chatId, iaMsgId, previewRes.text, confirmKbForDraft(iaCmd.draftId, previewRes));
             }
             request.log.info({ msg: '[midas:bot:webhook] ia:xfx:back: cross-currency input cancelled', workspaceId: iaResolved.workspaceId });
+
+          // ── Phase 2.5: ia:newaccount — launch account creation from draft picker ──
+          } else if (iaCmd.cmd === 'newaccount') {
+            // User tapped «➕ Создать счёт» from the V2 account picker on a draft card.
+            // 1. Save onboarding state with linkedDraftId so the onboarding flow knows
+            //    to link the new account to this draft when done, instead of showing D4 screen.
+            // 2. Edit the picker message in-place → onboarding type picker screen.
+            // 3. Store iaMsgId as activeMessageId so the ac: text handlers (bal_input)
+            //    can edit/delete this same message when balance is entered.
+            const acKeyNew = onboardStateKey(telegramUserId, chatId);
+            const initStateNew: AccountOnboardState = {
+              step: 'type_pick',
+              linkedDraftId: iaCmd.draftId,
+            };
+            await redisConnection.set(acKeyNew, JSON.stringify(initStateNew), 'EX', ONBOARD_STATE_TTL_SEC);
+
+            if (iaMsgId) {
+              void editMessageText(
+                chatId, iaMsgId,
+                '➕ <b>Создайте новый счёт</b>',
+                buildStartOnboardKeyboardWithBack(iaCmd.draftId),
+              );
+              // Store msgId as activeMessageId — bal_input text handler will delete/edit this msg.
+              await setActiveMessageId(telegramUserId, chatId, iaMsgId);
+            }
+            request.log.info({ msg: '[midas:bot:webhook] ia:newaccount: onboarding started from draft picker', workspaceId: iaResolved.workspaceId });
           }
 
         } catch (err: unknown) {
@@ -4668,6 +4734,31 @@ Midas создан, чтобы сделать учет денег максима
           try {
             const resolved = await resolveWorkspace(telegramUserId, chatId);
             await setAccountBalanceById(resolved.workspaceId, resolved.userId, acState.accountId, amount);
+
+            // ── Phase 2.5: If launched from draft picker — link account and return to draft ──
+            if (acState.linkedDraftId) {
+              try {
+                await setDraftAccountId(resolved.workspaceId, resolved.userId, acState.linkedDraftId, acState.accountId);
+              } catch { /* non-fatal */ }
+              try {
+                await softDeletePlaceholderAccount(resolved.workspaceId, resolved.userId);
+              } catch { /* non-fatal */ }
+              const pickerMsgIdBi2 = await getActiveMessageId(telegramUserId, chatId);
+              await clearActiveMessageId(telegramUserId, chatId);
+              const previewResBi2 = await confirmPreviewFull(resolved.workspaceId, resolved.userId, acState.linkedDraftId);
+              const acNameBi2 = acState.name ?? 'Счёт';
+              const confirmMsgBi2 = `✅ Счёт <b>${escapeHtml(acNameBi2)}</b> создан!\n\n${previewResBi2.text}`;
+              if (pickerMsgIdBi2) {
+                void editMessageText(chatId, pickerMsgIdBi2, confirmMsgBi2, confirmKbForDraft(acState.linkedDraftId, previewResBi2));
+                try { await redisConnection.set(`midas:preview:${acState.linkedDraftId}`, pickerMsgIdBi2, 'EX', 3600); } catch { /* non-fatal */ }
+              } else {
+                void upsertBotMessage(telegramUserId, chatId, confirmMsgBi2, confirmKbForDraft(acState.linkedDraftId, previewResBi2));
+              }
+              request.log.info({ msg: '[midas:bot:webhook] ac: bal_input — account linked to draft', workspaceId: resolved.workspaceId });
+              await reply.status(200).send({ ok: true });
+              return; // Skip standard D4 / first-account success screen
+            }
+
             // Phase LD: balance entered — custom account fully set up.
             // Soft-delete the onboarding placeholder (already gone after ac:currency, but idempotent).
             try {

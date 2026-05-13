@@ -98,6 +98,11 @@ export interface AccountOnboardState {
   isCustomName?: boolean;
   /** Currency pool to show after name confirmation */
   currencyPool?: 'fiat' | 'crypto' | 'ton';
+  /**
+   * If onboarding was launched from the transaction draft picker (ia:newac),
+   * this holds the draftId to link the new account to after creation.
+   */
+  linkedDraftId?: string;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -934,6 +939,30 @@ export function buildStartOnboardKeyboard(): InlineKeyboardMarkup {
         { text: '🔐 Кошелёк',           callback_data: 'ac:type:wallet' },
       ],
       [{ text: '✏️ Своё название', callback_data: 'ac:type:custom' }],
+    ],
+  };
+}
+
+/**
+ * Онбординг-клавиатура типа счёта, запущенная из пикера черновика транзакции.
+ * Идентична buildStartOnboardKeyboard, но добавляет «◀️ Назад» снизу.
+ * Кнопка «◀️ Назад» использует ia:pk:back:{draftId} — уже обрабатывается webhook.
+ *
+ * SEC-01: draftId — системный ULID, не содержит пользовательских данных.
+ */
+export function buildStartOnboardKeyboardWithBack(draftId: string): InlineKeyboardMarkup {
+  return {
+    inline_keyboard: [
+      [
+        { text: '💳 Банковская карта', callback_data: 'ac:type:card' },
+        { text: '💵 Наличные',         callback_data: 'ac:type:cash' },
+      ],
+      [
+        { text: '🔄 Крипто-биржа',     callback_data: 'ac:type:exchange' },
+        { text: '🔐 Кошелёк',          callback_data: 'ac:type:wallet' },
+      ],
+      [{ text: '✏️ Своё название',     callback_data: 'ac:type:custom' }],
+      [{ text: '◀️ Назад',             callback_data: `ia:pk:back:${draftId}` }],
     ],
   };
 }
