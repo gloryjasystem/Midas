@@ -1768,6 +1768,12 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
             const keyboard = buildTxListKeyboard(items, txCmd.page, totalPages, txCmd.filter);
             if (txMsgId) void editMessageText(chatId, txMsgId, header, keyboard);
           } else if (txCmd.cmd === 'view') {
+            // FIX: clear both edit-state keys when returning to tx menu (e.g. pressing "Отмена"
+            // on the amount-entry screen). This prevents a dangling Redis key from intercepting
+            // subsequent free-form messages as an amount input.
+            void redisConnection.del(`midas:tx:edit:amt:${telegramUserId}:${chatId}`);
+            void redisConnection.del(editStateKey(telegramUserId, chatId));
+
             const card = await getTransactionCard(txCmd.txId, txResolved.workspaceId, txResolved.userId);
             if (card) {
               const { formatTxDetailCard } = await import('../utils/screen-builder.js');
@@ -2236,6 +2242,10 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
             if (messageId) void editMessageText(chatId, messageId, text, keyboard);
 
           } else if (cmd.cmd === 'view') {
+            // FIX: clear both edit-state keys when returning to card view (symmetry with tx:view fix).
+            void redisConnection.del(`midas:tx:edit:amt:${telegramUserId}:${chatId}`);
+            void redisConnection.del(editStateKey(telegramUserId, chatId));
+
             const card = await getTransactionCard(cmd.txId, edResolved.workspaceId, edResolved.userId);
             if (!card) {
               // Phase 1.29: transaction may be soft-deleted (deleted_at IS NOT NULL).
@@ -5006,52 +5016,61 @@ Midas создан, чтобы сделать учет денег максима
         const txId = colonIdx === -1 ? '' : edState.slice(colonIdx + 1);
 
         if (field === 'amt' && /^[0-9A-Z]{26}$/.test(txId)) {
-          let edWorkspaceId: string;
-          try {
-            const resolved = await resolveWorkspace(telegramUserId, chatId);
-            edWorkspaceId = resolved.workspaceId;
-            const res = await updateTransactionAmount(txId, edWorkspaceId, resolved.userId, message.text);
-            
-            if (res.status === 'invalid_amount') {
-              // Keep state alive so user can try again
-              await redisConnection.expire(edKey, EDIT_STATE_TTL_SEC);
-              void upsertBotMessage(telegramUserId, chatId, '⚠️ Неверная сумма. Отправьте число, например: 380 или 1500.50');
-            } else {
-              // Delete state on success or hard error
-              await redisConnection.del(edKey);
-              
-              if (res.status === 'ok') {
-                const card = await getTransactionCard(txId, edWorkspaceId, resolved.userId);
-                if (card) {
-                  void upsertBotMessage(
-                    telegramUserId,
-                    chatId,
-                    formatTransactionCard(card),
-                    buildTransactionCardKeyboard(txId, card.is_cross_currency)
-                  );
-                } else {
-                  void upsertBotMessage(telegramUserId, chatId, '✅ Сумма изменена. Баланс пересчитан автоматически.');
-                }
-                request.log.info({ msg: '[midas:bot:webhook] edit: amount updated via text', txId, workspaceId: edWorkspaceId });
-              } else if (res.status === 'cross_currency_blocked') {
-                void upsertBotMessage(telegramUserId, chatId, '⚠️ Изменение суммы недоступно для мультивалютных транзакций.');
-              } else {
-                void upsertBotMessage(telegramUserId, chatId, '⚠️ Транзакция не найдена.');
-              }
-            }
-          } catch (err: unknown) {
+          // FIX: extract number from free-form text ("убил кенни 50000 руб" → "50000").
+          // If no number present, user is writing a new transaction — clear state and fall through to AI.
+          const extractedAmtOld = extractAmountFromText(message.text);
+          if (!extractedAmtOld) {
             await redisConnection.del(edKey);
-            const errorClass = err instanceof Error ? err.constructor.name : 'UnknownError';
-            request.log.error({ msg: '[midas:bot:webhook] edit amount update failed', txId, errorClass });
-            void upsertBotMessage(telegramUserId, chatId, '⚠️ Не удалось сохранить. Попробуйте позже.');
+            request.log.info({ msg: '[midas:bot:webhook] edit: no number in text — cleared edit state, falling through to AI', txId });
+            // No return — fall through to AI parse below
+          } else {
+            let edWorkspaceId: string;
+            try {
+              const resolved = await resolveWorkspace(telegramUserId, chatId);
+              edWorkspaceId = resolved.workspaceId;
+              const res = await updateTransactionAmount(txId, edWorkspaceId, resolved.userId, extractedAmtOld);
+
+              if (res.status === 'invalid_amount') {
+                // Keep state alive so user can try again
+                await redisConnection.expire(edKey, EDIT_STATE_TTL_SEC);
+                void upsertBotMessage(telegramUserId, chatId, '⚠️ Неверная сумма. Отправьте число, например: 380 или 1500.50');
+              } else {
+                // Delete state on success or hard error
+                await redisConnection.del(edKey);
+
+                if (res.status === 'ok') {
+                  const card = await getTransactionCard(txId, edWorkspaceId, resolved.userId);
+                  if (card) {
+                    void upsertBotMessage(
+                      telegramUserId,
+                      chatId,
+                      formatTransactionCard(card),
+                      buildTransactionCardKeyboard(txId, card.is_cross_currency)
+                    );
+                  } else {
+                    void upsertBotMessage(telegramUserId, chatId, '✅ Сумма изменена. Баланс пересчитан автоматически.');
+                  }
+                  request.log.info({ msg: '[midas:bot:webhook] edit: amount updated via text', txId, workspaceId: edWorkspaceId });
+                } else if (res.status === 'cross_currency_blocked') {
+                  void upsertBotMessage(telegramUserId, chatId, '⚠️ Изменение суммы недоступно для мультивалютных транзакций.');
+                } else {
+                  void upsertBotMessage(telegramUserId, chatId, '⚠️ Транзакция не найдена.');
+                }
+              }
+            } catch (err: unknown) {
+              await redisConnection.del(edKey);
+              const errorClass = err instanceof Error ? err.constructor.name : 'UnknownError';
+              request.log.error({ msg: '[midas:bot:webhook] edit amount update failed', txId, errorClass });
+              void upsertBotMessage(telegramUserId, chatId, '⚠️ Не удалось сохранить. Попробуйте позже.');
+            }
+            await reply.status(200).send({ ok: true });
+            return;
           }
         } else {
           // Malformed state — discard silently, let message fall through
           await redisConnection.del(edKey);
           request.log.warn({ msg: '[midas:bot:webhook] edit: malformed Redis state — discarded', field });
         }
-        await reply.status(200).send({ ok: true });
-        return;
       }
     }
 
@@ -5062,53 +5081,62 @@ Midas создан, чтобы сделать учет денег максима
       if (txEdStateValue) {
         const [txEdStateTxId, txMsgId] = txEdStateValue.split(':') as [string, string | undefined];
         if (txEdStateTxId && /^[0-9A-Z]{26}$/.test(txEdStateTxId)) {
-          let edWorkspaceId: string;
-          try {
-            const resolved = await resolveWorkspace(telegramUserId, chatId);
-            edWorkspaceId = resolved.workspaceId;
-            const res = await updateTransactionAmount(txEdStateTxId, edWorkspaceId, resolved.userId, message.text);
-            
-            if (res.status === 'invalid_amount') {
-              await redisConnection.expire(txEdKey, 120);
-              void upsertBotMessage(telegramUserId, chatId, '⚠️ Неверная сумма. Отправьте число, например: 380 или 1500.50');
-            } else {
-              await redisConnection.del(txEdKey);
-              if (res.status === 'ok') {
-                const card = await getTransactionCard(txEdStateTxId, edWorkspaceId, resolved.userId);
-                if (card) {
-                  const { formatTxDetailCard } = await import('../utils/screen-builder.js');
-                  const detailRows: { text: string; callback_data: string }[][] = [];
-                  if (!card.is_cross_currency) detailRows.push([{ text: '\u270F\uFE0F \u0418\u0437\u043C\u0435\u043D\u0438\u0442\u044C \u0441\u0443\u043C\u043C\u0443', callback_data: `tx:f:amt:${txEdStateTxId}:s` }]);
-                  detailRows.push([{ text: '\uD83D\uDCC1 \u0418\u0437\u043C\u0435\u043D\u0438\u0442\u044C \u043A\u0430\u0442\u0435\u0433\u043E\u0440\u0438\u044E', callback_data: `tx:f:cat:${txEdStateTxId}:0:s` }]);
-                  detailRows.push([{ text: '\uD83C\uDFE6 \u0418\u0437\u043C\u0435\u043D\u0438\u0442\u044C \u0441\u0447\u0451\u0442', callback_data: `tx:f:acc:${txEdStateTxId}:s` }]);
-                  detailRows.push([{ text: '\uD83D\uDD04 \u0418\u0437\u043C\u0435\u043D\u0438\u0442\u044C \u0442\u0438\u043F', callback_data: `tx:f:int:${txEdStateTxId}:s` }]);
-                  detailRows.push([{ text: '\uD83D\uDDD1\uFE0F \u0423\u0434\u0430\u043B\u0438\u0442\u044C', callback_data: `tx:d:ask:${txEdStateTxId}:s` }]);
-                  detailRows.push([{ text: '\u2716\uFE0F \u0417\u0430\u043A\u0440\u044B\u0442\u044C', callback_data: `tx:done:${txEdStateTxId}` }]);
-                  if (txMsgId) {
-                    const { editMessageText: editMsg, deleteMessage } = await import('../services/telegram-api.js');
-                    void editMsg(chatId, txMsgId, formatTxDetailCard(card), { inline_keyboard: detailRows });
-                    void deleteMessage(chatId, String(message.message_id));
-                  } else {
-                    void upsertBotMessage(telegramUserId, chatId, formatTxDetailCard(card), { inline_keyboard: detailRows });
-                  }
-                } else {
-                  void upsertBotMessage(telegramUserId, chatId, '✅ Сумма изменена. Баланс пересчитан.');
-                }
-                request.log.info({ msg: '[midas:bot:webhook] tx edit: amount updated via text', txId: txEdStateTxId, workspaceId: edWorkspaceId });
-              } else if (res.status === 'cross_currency_blocked') {
-                void upsertBotMessage(telegramUserId, chatId, '⚠️ Изменение суммы недоступно для мультивалютных транзакций.');
-              } else {
-                void upsertBotMessage(telegramUserId, chatId, '⚠️ Транзакция не найдена.');
-              }
-            }
-          } catch (err: unknown) {
+          // FIX: extract number from free-form text ("убил кенни 50000 руб" → "50000").
+          // If no number present, user is writing a new transaction — clear state and fall through to AI.
+          const extractedAmt = extractAmountFromText(message.text);
+          if (!extractedAmt) {
             await redisConnection.del(txEdKey);
-            const errorClass = err instanceof Error ? err.constructor.name : 'UnknownError';
-            request.log.error({ msg: '[midas:bot:webhook] tx edit amount update failed', txId: txEdStateTxId, errorClass });
-            void upsertBotMessage(telegramUserId, chatId, '⚠️ Не удалось сохранить. Попробуйте позже.');
+            request.log.info({ msg: '[midas:bot:webhook] tx edit: no number in text — cleared edit state, falling through to AI', txId: txEdStateTxId });
+            // No return — fall through to AI parse below
+          } else {
+            let edWorkspaceId: string;
+            try {
+              const resolved = await resolveWorkspace(telegramUserId, chatId);
+              edWorkspaceId = resolved.workspaceId;
+              const res = await updateTransactionAmount(txEdStateTxId, edWorkspaceId, resolved.userId, extractedAmt);
+
+              if (res.status === 'invalid_amount') {
+                await redisConnection.expire(txEdKey, 120);
+                void upsertBotMessage(telegramUserId, chatId, '⚠️ Неверная сумма. Отправьте число, например: 380 или 1500.50');
+              } else {
+                await redisConnection.del(txEdKey);
+                if (res.status === 'ok') {
+                  const card = await getTransactionCard(txEdStateTxId, edWorkspaceId, resolved.userId);
+                  if (card) {
+                    const { formatTxDetailCard } = await import('../utils/screen-builder.js');
+                    const detailRows: { text: string; callback_data: string }[][] = [];
+                    if (!card.is_cross_currency) detailRows.push([{ text: '\u270F\uFE0F \u0418\u0437\u043C\u0435\u043D\u0438\u0442\u044C \u0441\u0443\u043C\u043C\u0443', callback_data: `tx:f:amt:${txEdStateTxId}:s` }]);
+                    detailRows.push([{ text: '\uD83D\uDCC1 \u0418\u0437\u043C\u0435\u043D\u0438\u0442\u044C \u043A\u0430\u0442\u0435\u0433\u043E\u0440\u0438\u044E', callback_data: `tx:f:cat:${txEdStateTxId}:0:s` }]);
+                    detailRows.push([{ text: '\uD83C\uDFE6 \u0418\u0437\u043C\u0435\u043D\u0438\u0442\u044C \u0441\u0447\u0451\u0442', callback_data: `tx:f:acc:${txEdStateTxId}:s` }]);
+                    detailRows.push([{ text: '\uD83D\uDD04 \u0418\u0437\u043C\u0435\u043D\u0438\u0442\u044C \u0442\u0438\u043F', callback_data: `tx:f:int:${txEdStateTxId}:s` }]);
+                    detailRows.push([{ text: '\uD83D\uDDD1\uFE0F \u0423\u0434\u0430\u043B\u0438\u0442\u044C', callback_data: `tx:d:ask:${txEdStateTxId}:s` }]);
+                    detailRows.push([{ text: '\u2716\uFE0F \u0417\u0430\u043A\u0440\u044B\u0442\u044C', callback_data: `tx:done:${txEdStateTxId}` }]);
+                    if (txMsgId) {
+                      const { editMessageText: editMsg, deleteMessage } = await import('../services/telegram-api.js');
+                      void editMsg(chatId, txMsgId, formatTxDetailCard(card), { inline_keyboard: detailRows });
+                      void deleteMessage(chatId, String(message.message_id));
+                    } else {
+                      void upsertBotMessage(telegramUserId, chatId, formatTxDetailCard(card), { inline_keyboard: detailRows });
+                    }
+                  } else {
+                    void upsertBotMessage(telegramUserId, chatId, '✅ Сумма изменена. Баланс пересчитан.');
+                  }
+                  request.log.info({ msg: '[midas:bot:webhook] tx edit: amount updated via text', txId: txEdStateTxId, workspaceId: edWorkspaceId });
+                } else if (res.status === 'cross_currency_blocked') {
+                  void upsertBotMessage(telegramUserId, chatId, '⚠️ Изменение суммы недоступно для мультивалютных транзакций.');
+                } else {
+                  void upsertBotMessage(telegramUserId, chatId, '⚠️ Транзакция не найдена.');
+                }
+              }
+            } catch (err: unknown) {
+              await redisConnection.del(txEdKey);
+              const errorClass = err instanceof Error ? err.constructor.name : 'UnknownError';
+              request.log.error({ msg: '[midas:bot:webhook] tx edit amount update failed', txId: txEdStateTxId, errorClass });
+              void upsertBotMessage(telegramUserId, chatId, '⚠️ Не удалось сохранить. Попробуйте позже.');
+            }
+            await reply.status(200).send({ ok: true });
+            return;
           }
-          await reply.status(200).send({ ok: true });
-          return;
         } else if (txEdStateTxId) {
           // Malformed state
           await redisConnection.del(txEdKey);
