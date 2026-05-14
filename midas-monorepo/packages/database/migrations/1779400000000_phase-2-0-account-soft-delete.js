@@ -10,7 +10,7 @@
  */
 
 /** @param {import('pg').Client} client */
-exports.up = async (client) => {
+export const up = async (client) => {
   await client.query(`
     ALTER TABLE account_sources
     ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
@@ -25,7 +25,7 @@ exports.up = async (client) => {
 };
 
 /** @param {import('pg').Client} client */
-exports.down = async (client) => {
+export const down = async (client) => {
   await client.query(`DROP INDEX IF EXISTS idx_account_sources_active;`);
   await client.query(`ALTER TABLE account_sources DROP COLUMN IF EXISTS deleted_at;`);
 };
