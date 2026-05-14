@@ -733,9 +733,15 @@ async function sendAndStorePreview(
         ...e,
         name: escapeHtml(e.name),
       }));
+
+      // Phase 2.6: Build richPreview and prepend it to the picker message.
+      // Without this, the user sees only "С какого счёта списать?" with no
+      // transaction summary — the full card must be shown above the picker.
+      const richPreviewRes = await confirmPreviewFull(workspaceId, userId, draftId);
+      const pickerHeader = getPickerV2Text(draft.parsed_intent);
       const pickerText = prefixText
-        ? `${prefixText}\n\n${getPickerV2Text(draft.parsed_intent)}`
-        : getPickerV2Text(draft.parsed_intent);
+        ? `${prefixText}\n\n${richPreviewRes.text}\n\n${pickerHeader}`
+        : `${richPreviewRes.text}\n\n${pickerHeader}`;
 
       const pickerMsgId = await upsertBotMessage(
         telegramUserId,
