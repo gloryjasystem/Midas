@@ -460,13 +460,14 @@ export function parseTxCallback(data: string): TxCallbackCmd | null {
     return null;
   }
 
-  // tx:d:<action>:<txId> → delete flow
+  // tx:d:<action>:<txId>[:<from>] → delete flow
   if (sub === 'd') {
     const action = parts[2] ?? '';
     const txId   = parts[3] ?? '';
     if (!ULID_RE.test(txId)) return null;
-    if (action === 'ask') return { cmd: 'delete_ask', txId };
-    if (action === 'yes') return { cmd: 'delete_confirm', txId };
+    const from = parts[4]; // preserve 'from' context (e.g. 's' = came from success card)
+    if (action === 'ask') return { cmd: 'delete_ask', txId, from };
+    if (action === 'yes') return { cmd: 'delete_confirm', txId, from };
     return null;
   }
 
