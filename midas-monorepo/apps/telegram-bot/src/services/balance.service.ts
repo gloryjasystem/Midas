@@ -42,6 +42,13 @@
 
 import { withTenantTransaction } from '@midas/database';
 import { escapeHtml } from '../utils/html-escape.js';
+import {
+  classifyAccountGroup,
+  GROUP_EMOJI,
+  GROUP_ORDER,
+  formatBalanceShort,
+  type GroupType,
+} from './balance-keyboard.service.js';
 
 // ─────────────────────────────────────────────────────────────
 // Types
@@ -65,11 +72,7 @@ interface AccountBalanceRow {
   is_income_default: boolean;
 }
 
-/** Row from the currency totals query. */
-interface CurrencyTotalRow {
-  currency: string;
-  currency_total: { toFixed: (dp: number) => string }; // Decimal
-}
+
 
 // ─────────────────────────────────────────────────────────────
 // Russian type labels (same mapping as account.service.ts)
@@ -139,50 +142,7 @@ const PER_ACCOUNT_SQL = `
   ORDER BY a.currency, a.name
 `;
 
-// ─────────────────────────────────────────────────────────────
-// SQL — per-currency workspace totals (D5: currency grouping)
-// Phase 1.27: uses the same mismatch-safe formula as PER_ACCOUNT_SQL
-// ─────────────────────────────────────────────────────────────
 
-const CURRENCY_TOTALS_SQL = `
-  SELECT
-    currency,
-    SUM(balance) AS currency_total
-  FROM (
-    SELECT
-      a.currency,
-      a.initial_balance
-        + COALESCE(SUM(CASE
-            WHEN t.transaction_intent = 'income'        AND t.base_currency = a.currency
-            THEN t.base_amount END), 0)
-        + COALESCE(SUM(CASE
-            WHEN t.transaction_intent = 'debt_received' AND t.base_currency = a.currency
-            THEN t.base_amount END), 0)
-        - COALESCE(SUM(CASE
-            WHEN t.transaction_intent = 'expense'       AND t.base_currency = a.currency
-            THEN t.base_amount END), 0)
-        - COALESCE(SUM(CASE
-            WHEN t.transaction_intent = 'debt_given'    AND t.base_currency = a.currency
-            THEN t.base_amount END), 0)
-        AS balance
-    FROM account_sources a
-    -- Phase 1.29: AND t.deleted_at IS NULL in the JOIN ON clause (not WHERE) to
-    --   preserve accounts with zero non-deleted transactions in LEFT JOIN semantics.
-    LEFT JOIN transactions t
-      ON t.account_id = a.id
-     AND t.workspace_id = $1
-     AND t.deleted_at IS NULL   -- Phase 1.29: exclude soft-deleted from currency totals
-    WHERE a.workspace_id = $1
-      AND a.deleted_at IS NULL   -- Phase 2.1: hide soft-deleted accounts
-    GROUP BY a.id, a.currency, a.initial_balance
-  ) AS account_balances
-  GROUP BY currency
-  ORDER BY currency
-`;
-
-// ─────────────────────────────────────────────────────────────
-// getAccountBalances — main export
-// ─────────────────────────────────────────────────────────────
 
 /**
  * Generate a per-account balance report for the current workspace.
@@ -258,23 +218,14 @@ export async function getBalanceData(
   workspaceId: string,
   userId: string,
 ): Promise<BalanceData> {
-  const { accounts, currencyTotals } = await withTenantTransaction<{
-    accounts: AccountBalanceRow[];
-    currencyTotals: CurrencyTotalRow[];
-  }>(workspaceId, userId, async (client) => {
-    const accountsResult = await client.query<AccountBalanceRow>(
-      PER_ACCOUNT_SQL,
-      [workspaceId],
-    );
-    const totalsResult = await client.query<CurrencyTotalRow>(
-      CURRENCY_TOTALS_SQL,
-      [workspaceId],
-    );
-    return {
-      accounts: accountsResult.rows,
-      currencyTotals: totalsResult.rows,
-    };
-  });
+  // Phase A: single query — currencyTotals removed (no longer shown)
+  const accounts = await withTenantTransaction<AccountBalanceRow[]>(
+    workspaceId, userId,
+    async (client) => {
+      const res = await client.query<AccountBalanceRow>(PER_ACCOUNT_SQL, [workspaceId]);
+      return res.rows;
+    },
+  );
 
   // ── Build structured rows for keyboard ────────────────────────
   const accountRows: BalanceDataRow[] = accounts.map((row) => ({
@@ -295,44 +246,42 @@ export async function getBalanceData(
     };
   }
 
-  // ── Per-account lines ─────────────────────────────────────
-  const accountLines = accounts.map((row) => {
-    const name = escapeHtml(row.name);
-    const currency = escapeHtml(row.currency);
-    const num = parseFloat(row.balance.toFixed(2));
-    const balanceStr = isNaN(num)
-      ? row.balance.toFixed(2)
-      : num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  // ── Grouped text by account type (Phase A) ───────────────────
+  const GROUP_LABEL: Record<GroupType, string> = {
+    bank:            'БАНКИ И КАРТЫ',
+    crypto_exchange: 'КРИПТОБИРЖИ',
+    crypto_wallet:   'КРИПТО-КОШЕЛЬКИ',
+    cash:            'НАЛИЧНЫЕ',
+    other:           'ПРОЧЕЕ',
+  };
 
-    const isExp = Boolean(row.is_expense_default);
-    const isInc = Boolean(row.is_income_default);
-    const roleBadge = (isExp && isInc) ? ' (💸💰 основной)'
-                    : isExp            ? ' (💸 расходы)'
-                    : isInc            ? ' (💰 доходы)'
-                    : '';
+  const grouped = new Map<GroupType, AccountBalanceRow[]>();
+  for (const row of accounts) {
+    const g = classifyAccountGroup(row.name, row.currency, row.type);
+    if (!grouped.has(g)) grouped.set(g, []);
+    grouped.get(g)!.push(row);
+  }
 
-    return `<b>${name}</b>${roleBadge}\n└ ${balanceStr} ${currency}`;
-  });
+  const sections: string[] = [];
+  for (const groupType of GROUP_ORDER) {
+    const rows = grouped.get(groupType);
+    if (!rows || rows.length === 0) continue;
 
-  // ── Currency totals — compact single line ─────────────────
-  const totalParts = currencyTotals.map((row) => {
-    const currency = escapeHtml(row.currency);
-    const num = parseFloat(row.currency_total.toFixed(2));
-    const totalStr = isNaN(num)
-      ? row.currency_total.toFixed(2)
-      : num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    return `${currency} ${totalStr}`;
-  });
+    const lines = rows.map((row) => {
+      const isExp = Boolean(row.is_expense_default);
+      const isInc = Boolean(row.is_income_default);
+      const roleBadge = (isExp && isInc) ? ' (💸💰 основной)'
+                      : isExp            ? ' (💸 расходы)'
+                      : isInc            ? ' (💰 доходы)'
+                      : '';
+      const balStr = formatBalanceShort(row.balance.toFixed(2));
+      return `<b>${escapeHtml(row.name)}</b>${roleBadge}\n└ ${balStr} ${escapeHtml(row.currency)}`;
+    });
 
-  const totalsLine = totalParts.length > 0
-    ? `\n\nИтого: ${totalParts.join('  ·  ')}`
-    : '';
+    sections.push(`${GROUP_EMOJI[groupType]} ${GROUP_LABEL[groupType]}\n\n${lines.join('\n\n')}`);
+  }
 
-  const text =
-    '💰 <b>Баланс счетов</b>\n\n' +
-    accountLines.join('\n\n') +
-    totalsLine;
-
+  const text = '💰 <b>Баланс счетов</b>\n\n' + sections.join('\n\n');
   return { text, accounts: accountRows };
 }
 

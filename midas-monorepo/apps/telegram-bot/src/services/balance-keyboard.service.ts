@@ -34,6 +34,43 @@ import {
   FIAT_CURRENCY_PRESETS,
   CRYPTO_CURRENCY_PRESETS,
 } from '../services/account-onboard-keyboard.service.js';
+import { classifyCurrency } from './account-currency-validator.service.js';
+
+// ─────────────────────────────────────────────────────────────
+// Account group classification — Balance Redesign Phase A
+// ─────────────────────────────────────────────────────────────
+
+export type GroupType = 'bank' | 'crypto_exchange' | 'crypto_wallet' | 'cash' | 'other';
+
+export const GROUP_EMOJI: Record<GroupType, string> = {
+  bank:            '🏦',
+  crypto_exchange: '🪙',
+  crypto_wallet:   '👛',
+  cash:            '💵',
+  other:           '📁',
+};
+
+export const GROUP_ORDER: GroupType[] = [
+  'bank', 'crypto_exchange', 'crypto_wallet', 'cash', 'other',
+];
+
+const EXCHANGE_NAME_RE =
+  /okx|okex|binance|bybit|kraken|huobi|kucoin|gate\.io|mexc|bitget|coinbase|биржа|exchange/i;
+const CASH_NAME_RE = /наличн|нал\b|кэш|кеш|cash|налик/i;
+
+/**
+ * Classify an account into a display group.
+ * Uses existing classifyCurrency() — no duplication.
+ * Phase A: heuristic only (no sub_type column yet).
+ */
+export function classifyAccountGroup(name: string, currency: string, type: string): GroupType {
+  if (type === 'bank_sync')        return 'bank';
+  if (type === 'crypto_read_only') return 'crypto_exchange';
+  const cls = classifyCurrency(currency);
+  const isCrypto = cls === 'crypto' || cls === 'stablecoin';
+  if (isCrypto) return EXCHANGE_NAME_RE.test(name) ? 'crypto_exchange' : 'crypto_wallet';
+  return CASH_NAME_RE.test(name) ? 'cash' : 'bank';
+}
 
 // ─────────────────────────────────────────────────────────────
 // Callback_data parsed type
@@ -164,26 +201,32 @@ const TYPE_LABELS: Record<string, string> = {
  *   "Wallet · 0 ETH"            (no role — no tag)
  */
 export function buildBalanceListKeyboard(accounts: BalanceAccountRow[]): InlineKeyboardMarkup {
-  // Account rows (tappable to view detail)
-  const accountRows = accounts.map((acc) => {
-    // Role tag appended inline — strictly enclosed in parentheses with emojis
-    const roleTag = (acc.isExpenseDefault && acc.isIncomeDefault) ? ' (💸💰 основной)'
-                  : acc.isExpenseDefault                          ? ' (💸 расходы)'
-                  : acc.isIncomeDefault                           ? ' (💰 доходы)'
+  // Sort by group order, then alphabetically by name within group
+  const sorted = [...accounts].sort((a, b) => {
+    const ga = classifyAccountGroup(a.name, a.currency, a.type);
+    const gb = classifyAccountGroup(b.name, b.currency, b.type);
+    const diff = GROUP_ORDER.indexOf(ga) - GROUP_ORDER.indexOf(gb);
+    if (diff !== 0) return diff;
+    return a.name.localeCompare(b.name, 'ru');
+  });
+
+  const accountRows = sorted.map((acc) => {
+    const group   = classifyAccountGroup(acc.name, acc.currency, acc.type);
+    const emoji   = GROUP_EMOJI[group];
+    const roleTag = (acc.isExpenseDefault && acc.isIncomeDefault) ? ' 💸💰'
+                  : acc.isExpenseDefault                          ? ' 💸'
+                  : acc.isIncomeDefault                           ? ' 💰'
                   : '';
     return [{
-      text: `${acc.name} · ${formatBalanceShort(acc.balance)} ${acc.currency}${roleTag}`,
+      text: `${emoji} ${acc.name}${roleTag}  ·  ${formatBalanceShort(acc.balance)} ${acc.currency}`,
       callback_data: `bl:v:${acc.account_id}`,
     }];
   });
 
   return {
     inline_keyboard: [
-      // Add Account — top (intentional action, hard to hit accidentally)
       [{ text: '➕ Добавить счёт', callback_data: 'bl:add' }],
-      // Account list
       ...accountRows,
-      // Close — bottom (last action, safety)
       [{ text: '✖️ Закрыть', callback_data: 'bl:close' }],
     ],
   };
@@ -373,7 +416,7 @@ export const BALANCE_EMPTY_TEXT =
  * "1234.50" → "1 234,50"
  * "2000.00" → "2 000"
  */
-function formatBalanceShort(numStr: string): string {
+export function formatBalanceShort(numStr: string): string {
   const num = parseFloat(numStr);
   if (isNaN(num)) return numStr;
   
