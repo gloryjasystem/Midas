@@ -1,7 +1,7 @@
 # WORKFLOW_STATE.MD — Диспетчер задач ИИ-агента Midas
 
 > **Тип:** MUTABLE — кратковременная память агента. Обновляется на каждом шаге работы.
-> **Обновлён:** 2026-05-14 00:00 (UTC+3)
+> **Обновлён:** 2026-05-14 20:14 (UTC+3)
 
 ---
 
@@ -9,11 +9,11 @@
 
 | Параметр | Значение |
 |---|---|
-| **PHASE** | `2.10+ — Gate Fix: Frozen UI on Concurrent Transaction Input` |
-| **STEP** | `All bugfixes deployed ✅ (commits df15a01 → 8894b92 → b869c03 → 8d25ec1)` |
-| **AGENT STATUS** | `DONE. Gate freeze fix: (1) webhook step-7 checks midas:gate_sent: before deleting amId — gate card stays visible on TX3+. (2) ia:pk: clears gate_sent after account pick. (3) ai-parse gate rebuilds full picker keyboard when accountId is null.` |
-| **DEPLOYMENT** | `Railway (spirited-happiness project)` — `Midas` ✅ Online · `background-workers` ✅ Online · `Postgres` ✅ · `Redis` ✅. Gate fix deployed. Health: https://midas-production-f4f1.up.railway.app/health → {"status":"ok"} |
-| **LAST COMPLETED** | `Phase 2.10+ COMPLETE — gate_sent guard in step-7 prevents frozen UI. Commits b869c03 → 8d25ec1 pushed to main.` |
+| **PHASE** | `Phase 2.5+ — Currency-Aware Account Picker (Bot + Worker)` |
+| **STEP** | `All fixes deployed ✅ (commits 6ebf429 → 04f7e81 → 0085d8f)` |
+| **AGENT STATUS** | `DONE. (1) isKnownCurrency() guard blocks phantom currencies at validation layer. (2) account.service.ts filters by parsedCurrency (fiat→fiat pool, stablecoin/crypto→exact only). (3) webhook.route.ts threads parsed_currency to all 3 picker entry points. (4) ai-parse.worker.ts applies filterPickerAccounts() in BOTH initial picker and gate picker — root cause fix.` |
+| **DEPLOYMENT** | `Railway (spirited-happiness project)` — `Midas` ✅ Online · `background-workers` ✅ Online · `Postgres` ✅ · `Redis` ✅. Health: https://midas-production-f4f1.up.railway.app/health → {"status":"ok"} |
+| **LAST COMPLETED** | `Phase 2.5+ currency-aware picker COMPLETE. USDT больше не появляется в пикере USD-транзакций. Commit 0085d8f pushed to main.` |
 | **BLOCKER** | None. |
 | **NEXT ACTION** | Phase 3.0 — DB Migration: добавить колонки `account_type`, `wallet_subtype`, `provider_key` в `account_sources`. Заполнять при создании счёта. Использовать для 100% точной валидации вместо эвристик. (см. Раздел 16 — Active Roadmap) |
 
@@ -462,6 +462,8 @@ CТАРТ: PR 1 (миграция БД) — самый безопасный пе
 | 2026-05-14 12:28 | **Phase 2.10 — Fix 2: from-context в delete flow parser.** Проблема: при нажатии «Изменить запись» → «Удалить» → «Отмена» → «Закрыть» — кнопка Закрыть удаляла карточку вместо восстановления success card. Корень: `parseTxCallback` не читал `parts[4]` для `tx:d:ask` и `tx:d:yes` — контекст `from='s'` терялся при парсинге. Fix: `transaction-keyboard.service.ts` — `const from = parts[4]`; return с `from` для обоих action. Теперь `tx:view` корректно видит `from==='s'` и ставит `closeCallback = tx:done:{txId}`. Commit `8894b92`. |
 | 2026-05-14 12:37 | **Phase 2.10 — Fix 3: Double-lock sentinel key.** Проблема: даже после Fix 1 success card иногда удалялась (race condition между background-workers и telegram-bot, или отставание деплоя). Решение — двойная блокировка: (1) `notifications.worker.ts` при `isSuccessCard`: SET `midas:success_card:{sentMessageId}` = '1' (TTL 30 дней), затем DEL `midas:am:`. (2) `webhook.route.ts` step-7: перед `deleteMessage(amId)` проверяет `EXISTS midas:success_card:{amId}` — если sentinel есть, сообщение НЕ удаляется (только очищается pointer). Два замка работают независимо. tsc 0 ошибок оба приложения. Commit `b869c03`. |
 | 2026-05-14 17:30 | **Phase 2.10+ Gate Fix — Frozen UI при параллельном вводе транзакций.** Проблема: TX1 открывает пикер счёта → TX2 (webhook step-7) удаляет пикер (gate_sent ещё не установлен) → ai-parse gate присылает новую карточку с пикером и устанавливает gate_sent → TX3 (webhook step-7) удаляет gate-карточку (gate_sent не проверялся!) → ai-parse молчит (gate_sent SET → silently ignore) → TX4, TX5... цикл: сообщение приходит, удаляется, ответа нет — **ЗАВИСОН**. **Fix 1 (webhook.route.ts строки 5446–5458):** `const gateSentActive = await redisConnection.exists('midas:gate_sent:...')`. Если активен — `deleteMessage` и `clearActiveMessageId` НЕ вызываются. Gate-карточка остаётся видимой при TX3, TX4... **Fix 2 (webhook.route.ts строка 1539, ia:pk: handler):** `redisConnection.del('midas:gate_sent:...')` после `setDraftAccountId` — нормальный flow восстанавливается сразу после выбора счёта. **Fix 3 (ai-parse.worker.ts):** Gate реконструирует полный пикер счетов (inline keyboard с кнопками счетов + ✖️ Отмена) когда `pendingDraft.accountId === null` — вместо пустой confirm-клавиатуры. **Жизненный цикл gate_sent:** SET ai-parse.worker (при gate) → DEL ia:cancel (строка 1432, до фикса) / ia:pk: (ДОБАВЛЕНО) / approve/reject confirmation.worker (строка 268, до фикса) / TTL auto 1h. Scope: 2 файла (webhook.route.ts, ai-parse.worker.ts) + утилита fix-stuck-draft.mjs. tsc 0 ошибок. git commit `8d25ec1`, push origin main ✅. Railway: Midas ✅ Online, background-workers ✅ Online. |
+| 2026-05-14 20:00 | **Phase 2.5+ — Currency-Aware Picker: Bot Layer (telegram-bot).** Проблема: в пикере счётов при USD-транзакции показывался USDT-счёт, хотя это стейблкоин и он не конвертируется в фиат. **Реализация (4 файла):** (1) `account-currency-validator.service.ts` — добавлена функция `isKnownCurrency(code)`: проверяет код по трём вайтлистам (FIAT_SET + STABLECOINS + CRYPTO_SET). Предотвращает создание фантомных валют типа «UDS» или «ЕВР». (2) `clarification.service.ts` — в `validateCurrencyCode()` добавлена ранняя проверка `!isKnownCurrency(upper)` → возврат `null` до записи в БД. (3) `account.service.ts` — `getWorkspaceAccountsWithBalances()` получает опциональный 4-й параметр `parsedCurrency?`. После SQL-запроса: если tx — фиат → exact-match сначала + остальные фиатные; если стейблкоин/крипто → только exact match. (4) `account-inline-keyboard.service.ts` — `getPickerScreenText(intent, parsedCurrency?)` добавляет контекстную подсказку; `getPickerEmptyText(parsedCurrency?)` — «Нет USDT-счетов» вместо общего сообщения. `webhook.route.ts` — пробрасывает `draft.parsed_currency` в 3 entry points (sendAndStorePreview, ia:delink, ia:showpicker). Первый деплой упал — TS6133 (ACCOUNT_PICKER_EMPTY_TEXT в импорте но не используется). Исправлено коммитом `04f7e81`. |
+| 2026-05-14 20:10 | **Phase 2.5+ — Currency-Aware Picker: Worker Layer (background-workers). Root Cause Fix.** Обнаружено: начальный пикер строится ПОЛНОСТЬЮ в `ai-parse.worker.ts` (background-workers), а не в `telegram-bot`. Изменения в `account.service.ts` (telegram-bot) на initial picker не влияют никак. **Реализация (`ai-parse.worker.ts`):** Добавлены локальные классификаторы: `PICKER_STABLECOINS` (10 записей), `PICKER_KNOWN_CRYPTOS` (27 записей), `classifyPickerCcy(code)`, `filterPickerAccounts(accounts, txCurrency)` — аналог логики `account.service.ts`. Применено в 2 местах: (A) **Initial picker** (строка ~620) — фильтрует по `aiData?.currency` (когда AI вернул currency, например «USDT»); (B) **Gate picker** (строка ~340) — фильтрует по `pendingDraft.parsedCurrency` (восстановление пикера при gate-блокировке). Итог фильтрации: `{USD tx}` → [USD-счета] + [другие фиатные]; `{USDT tx}` → [только USDT-счета]. tsc 0 ошибок (оба приложения). git commit `0085d8f`, push origin main ✅. Railway auto-deploy triggered. |
 
 
 ---
@@ -1120,6 +1122,23 @@ workspaces
 | Шаг 2 | `account-currency-validator.service.ts` — блокировка несовместимых пар счёт+валюта (Банк+USDT = ❌, Биржа+USDT = ✅) | ✅ |
 | Шаг 3 | `anomalyBadge()` в пикерах — визуальный `⚠️` для подозрительных существующих счетов | ✅ |
 | Шаг 4 | `ai-parse.worker.ts` — фикс «Active Draft Gate»: вывод Account/XFX-зависимых UI компонентов при активном черновике | ✅ |
+
+### ✅ Завершено в Phase 2.5+ (Currency-Aware Account Picker)
+
+> **Проблема:** USDT-счёт отображался в пикере при USD-транзакции. Причина — начальный пикер строится в `background-workers`, а не в `telegram-bot`, поэтому изменения в `account.service.ts` (telegram-bot) на него не влияли.
+
+| Шаг | Файл | Что сделано | Статус |
+|---|---|---|---|
+| 1 | `account-currency-validator.service.ts` | `isKnownCurrency()` — вайтлист-защита от фантомных валют (UDS, ЕВР) | ✅ |
+| 2 | `clarification.service.ts` | `validateCurrencyCode()` → ранняя проверка `isKnownCurrency()` перед записью в БД | ✅ |
+| 3 | `account.service.ts` | `getWorkspaceAccountsWithBalances(parsedCurrency?)` — фильтр: фиат→фиатный пул, стейблкоин/крипто→exact only | ✅ |
+| 4 | `account-inline-keyboard.service.ts` | Контекстные подсказки и `getPickerEmptyText(parsedCurrency?)` | ✅ |
+| 5 | `webhook.route.ts` | Пробрасывает `parsed_currency` в 3 entry points (preview, delink, showpicker) | ✅ |
+| 6 ⭐ | `ai-parse.worker.ts` | **Root-cause fix:** `filterPickerAccounts()` + `classifyPickerCcy()` применены к initial picker (`aiData.currency`) и gate picker (`pendingDraft.parsedCurrency`) | ✅ |
+
+**Архитектурный урок:** В Midas два независимых пайплайна пикера. Любые изменения логики пикера требуют обновления ОБОИХ приложений:
+- `apps/telegram-bot` — пикеры навигации (ia:delink, ia:showpicker)
+- `apps/background-workers` — начальный пикер после AI parse
 
 ---
 
