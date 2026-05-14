@@ -225,18 +225,25 @@ async function processNotification(job: Job<NotificationJobPayload>): Promise<vo
   }
 
   // Phase 1.33: Update active message pointer.
-  // Phase 2.10: Skip update for confirmed success cards (isSuccessCard === true).
-  //   Success cards are permanent floating records — they must NOT be tracked in midas:am:.
-  //   If we tracked them, the next user transaction would trigger deleteMessage(amId) in
-  //   webhook.route.ts Step-7 cleanup (line ~5437), wiping the "✅ Записано" card from chat.
-  if (job.data.telegramUserId && sentMessageId && !job.data.isSuccessCard) {
+  // Phase 2.10: For confirmed success cards (isSuccessCard === true), CLEAR midas:am: instead
+  //   of updating it. Rationale:
+  //   - The preview card (midas:am: = previewMsgId) was edited IN-PLACE to become the success card.
+  //   - So midas:am: ALREADY points to the success card via the old previewMsgId.
+  //   - Simply skipping the SET leaves stale pointer → step-7 cleanup would still delete it.
+  //   - DEL-ing the key ensures no pointer exists → step-7 finds null → card stays intact.
+  if (job.data.telegramUserId && sentMessageId) {
     try {
-      await redisConnection.set(
-        `midas:am:${job.data.telegramUserId}:${chatId}`,
-        sentMessageId,
-        'EX',
-        86400, // 24 hours
-      );
+      if (job.data.isSuccessCard) {
+        // DEL the pointer — success card must not be tracked in midas:am:
+        await redisConnection.del(`midas:am:${job.data.telegramUserId}:${chatId}`);
+      } else {
+        await redisConnection.set(
+          `midas:am:${job.data.telegramUserId}:${chatId}`,
+          sentMessageId,
+          'EX',
+          86400, // 24 hours
+        );
+      }
     } catch { /* non-fatal */ }
   }
 
