@@ -455,6 +455,9 @@ Phase B-1 (commit 75156b9, применено на live Railway Postgres):
 | 2026-05-14 20:10 | **Phase 2.5+ — Currency-Aware Picker: Worker Layer (background-workers). Root Cause Fix.** Обнаружено: начальный пикер строится ПОЛНОСТЬЮ в `ai-parse.worker.ts` (background-workers), а не в `telegram-bot`. Изменения в `account.service.ts` (telegram-bot) на initial picker не влияют никак. **Реализация (`ai-parse.worker.ts`):** Добавлены локальные классификаторы: `PICKER_STABLECOINS` (10 записей), `PICKER_KNOWN_CRYPTOS` (27 записей), `classifyPickerCcy(code)`, `filterPickerAccounts(accounts, txCurrency)` — аналог логики `account.service.ts`. Применено в 2 местах: (A) **Initial picker** (строка ~620) — фильтрует по `aiData?.currency` (когда AI вернул currency, например «USDT»); (B) **Gate picker** (строка ~340) — фильтрует по `pendingDraft.parsedCurrency` (восстановление пикера при gate-блокировке). Итог фильтрации: `{USD tx}` → [USD-счета] + [другие фиатные]; `{USDT tx}` → [только USDT-счета]. tsc 0 ошибок (оба приложения). git commit `0085d8f`, push origin main ✅. Railway auto-deploy triggered. |
 
 
+| 2026-05-14 23:50 | **Balance Phase B-5/B-6/B-8/B-9 � Add Currency Workflow ���������.** B-8: addChildAccount() � account.service.ts (withTenantTransaction, parent_account_id, no workspace defaults update). B-6: child_count subquery � ACCOUNT_DETAIL_SQL; AccountDetailData ������� child_count. B-5: buildAccountActionsKeyboard(hasChildren?) ���������� ������ bl:ac: (32 �����). webhook.route.ts: add_currency handler + currency_set ����� + 6 ������� � detail.child_count>0. B-9: parent_account_id � GROUP BY PER_ACCOUNT_SQL; ORDER BY �������������. tsc 0 ������. Commits 5ce9148+04e79b8. Railway auto-deploy. |
+
+
 ---
 
 ## 11. AGENT OPERATING PROTOCOL — ОБЯЗАТЕЛЬНЫЙ ПРОЦЕСС РАБОТЫ
