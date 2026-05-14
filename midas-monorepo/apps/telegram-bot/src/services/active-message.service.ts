@@ -139,6 +139,49 @@ export async function upsertBotMessage(
 }
 
 // ─────────────────────────────────────────────────────────────
+// sendNavMessage — for main menu nav buttons (Баланс / Отчёт / Транзакции / Настройки)
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Send a NEW message for main-menu navigation actions.
+ *
+ * Unlike upsertBotMessage, this function NEVER edits or deletes the previous
+ * active message. This is critical: the previous message may be a confirmed
+ * transaction card with an "✏️ Изменить запись" button — destroying it would
+ * be a data-loss UX bug.
+ *
+ * Strategy:
+ *   1. Always send a brand-new message (sendMessage / sendMessageWithKeyboard).
+ *   2. Update the Redis pointer to the new message.
+ *   3. Do NOT touch the previous active message.
+ *
+ * Returns the new message_id, or null on total failure.
+ *
+ * SEC-12: text content is NOT logged.
+ */
+export async function sendNavMessage(
+  telegramUserId: string,
+  chatId: string,
+  text: string,
+  keyboard?: InlineKeyboardMarkup,
+): Promise<string | null> {
+  // Always send a new message — never edit the existing active message
+  let newMsgId: string | null;
+  if (keyboard) {
+    newMsgId = await sendMessageWithKeyboard(chatId, text, keyboard);
+  } else {
+    newMsgId = await sendMessage(chatId, text);
+  }
+
+  // Update pointer to the new nav message
+  if (newMsgId) {
+    void setActiveMessageId(telegramUserId, chatId, newMsgId);
+  }
+
+  return newMsgId;
+}
+
+// ─────────────────────────────────────────────────────────────
 // tryDeleteUserMessage
 // ─────────────────────────────────────────────────────────────
 

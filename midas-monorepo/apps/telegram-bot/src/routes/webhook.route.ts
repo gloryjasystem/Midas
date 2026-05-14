@@ -243,6 +243,7 @@ import { detectCategoryFromItem } from '../services/item-category-detector.servi
 import { validateAccountCurrency } from '../services/account-currency-validator.service.js'; // Phase 2.5
 import {
   upsertBotMessage,                  // Phase 1.33
+  sendNavMessage,                    // Phase 2.9: nav buttons never delete tx records
   tryDeleteUserMessage,              // Phase 1.33
   setActiveMessageId,                // Phase 1.33
   clearActiveMessageId,              // Phase 1.33
@@ -3455,35 +3456,38 @@ Midas создан, чтобы сделать учет денег максима
     const navText = message.text.trim();
 
     if (navText === NAV_BTN_BALANCE) {
+      // Phase 2.9: sendNavMessage — always sends NEW message, never edits/deletes tx records
       try {
         const resolved = await resolveWorkspace(telegramUserId, chatId);
         const { text: balanceText, accounts } = await getBalanceData(resolved.workspaceId, resolved.userId);
-        void upsertBotMessage(telegramUserId, chatId, balanceText, buildBalanceListKeyboard(accounts as BalanceAccountRow[]));
+        void sendNavMessage(telegramUserId, chatId, balanceText, buildBalanceListKeyboard(accounts as BalanceAccountRow[]));
         request.log.info({ msg: '[midas:bot:webhook] nav:balance shortcut', telegramUserId, workspaceId: resolved.workspaceId });
       } catch (err: unknown) {
         const errorClass = err instanceof Error ? err.constructor.name : 'UnknownError';
         request.log.error({ msg: '[midas:bot:webhook] nav:balance shortcut failed', telegramUserId, errorClass });
-        void upsertBotMessage(telegramUserId, chatId, '⚠️ Не удалось получить баланс. Попробуйте позже.');
+        void sendNavMessage(telegramUserId, chatId, '⚠️ Не удалось получить баланс. Попробуйте позже.');
       }
       await reply.status(200).send({ ok: true });
       return;
     }
 
     if (navText === NAV_BTN_REPORT) {
+      // Phase 2.9: sendNavMessage — always sends NEW message, never edits/deletes tx records
       try {
         const { buildPeriodPickerKeyboard } = await import('../services/report-keyboard.service.js');
-        void upsertBotMessage(telegramUserId, chatId, '📊 <b>Отчёты</b>\n\nВыбери период:', buildPeriodPickerKeyboard());
+        void sendNavMessage(telegramUserId, chatId, '📊 <b>Отчёты</b>\n\nВыбери период:', buildPeriodPickerKeyboard());
         request.log.info({ msg: '[midas:bot:webhook] nav:report → period picker', telegramUserId });
       } catch (err: unknown) {
         const errorClass = err instanceof Error ? err.constructor.name : 'UnknownError';
         request.log.error({ msg: '[midas:bot:webhook] nav:report failed', telegramUserId, errorClass });
-        void upsertBotMessage(telegramUserId, chatId, '⚠️ Не удалось открыть отчёты. Попробуйте позже.');
+        void sendNavMessage(telegramUserId, chatId, '⚠️ Не удалось открыть отчёты. Попробуйте позже.');
       }
       await reply.status(200).send({ ok: true });
       return;
     }
 
     if (navText === NAV_BTN_SETTINGS) {
+      // Phase 2.9: sendNavMessage — always sends NEW message, never edits/deletes tx records
       try {
         const resolved = await resolveWorkspace(telegramUserId, chatId);
         const settings = await getSettings(resolved.workspaceId, resolved.userId);
@@ -3492,12 +3496,12 @@ Midas создан, чтобы сделать учет денег максима
           settings?.timezone ?? 'UTC',
           settings?.main_account_name ?? null,
         );
-        void upsertBotMessage(telegramUserId, chatId, menuText, buildSettingsMainKeyboard());
+        void sendNavMessage(telegramUserId, chatId, menuText, buildSettingsMainKeyboard());
         request.log.info({ msg: '[midas:bot:webhook] nav:settings shortcut', telegramUserId, workspaceId: resolved.workspaceId });
       } catch (err: unknown) {
         const errorClass = err instanceof Error ? err.constructor.name : 'UnknownError';
         request.log.error({ msg: '[midas:bot:webhook] nav:settings shortcut failed', telegramUserId, errorClass });
-        void upsertBotMessage(telegramUserId, chatId, '⚠️ Ошибка настроек. Попробуйте позже.');
+        void sendNavMessage(telegramUserId, chatId, '⚠️ Ошибка настроек. Попробуйте позже.');
       }
       await reply.status(200).send({ ok: true });
       return;
@@ -3505,6 +3509,7 @@ Midas создан, чтобы сделать учет денег максима
 
     // Phase 2.0: Transaction Hub nav button
     if (navText === NAV_BTN_TRANSACTIONS) {
+      // Phase 2.9: sendNavMessage — always sends NEW message, never edits/deletes tx records
       try {
         const resolved = await resolveWorkspace(telegramUserId, chatId);
         const [items, total, stats] = await Promise.all([
@@ -3513,7 +3518,7 @@ Midas создан, чтобы сделать учет денег максима
           getMonthMiniStats(resolved.workspaceId, resolved.userId),
         ]);
         if (total === 0) {
-          const emptyMsgId = await upsertBotMessage(telegramUserId, chatId,
+          const emptyMsgId = await sendNavMessage(telegramUserId, chatId,
             '📋 <b>Транзакции</b>\n\nТранзакций пока нет.', EMPTY_KEYBOARD);
           if (emptyMsgId) {
             await redisConnection.set(`midas:empty_tx_msg:${chatId}`, emptyMsgId, 'EX', 86400);
@@ -3522,13 +3527,13 @@ Midas создан, чтобы сделать учет денег максима
           const totalPages = Math.max(1, Math.ceil(total / TX_PAGE_SIZE));
           const header = formatTxListHeader(stats, 'a');
           const keyboard = buildTxListKeyboard(items, 0, totalPages, 'a');
-          void upsertBotMessage(telegramUserId, chatId, header, keyboard);
+          void sendNavMessage(telegramUserId, chatId, header, keyboard);
         }
         request.log.info({ msg: '[midas:bot:webhook] nav:transactions', telegramUserId, workspaceId: resolved.workspaceId });
       } catch (err: unknown) {
         const errorClass = err instanceof Error ? err.constructor.name : 'UnknownError';
         request.log.error({ msg: '[midas:bot:webhook] nav:transactions failed', telegramUserId, errorClass });
-        void upsertBotMessage(telegramUserId, chatId, '⚠️ Не удалось загрузить транзакции. Попробуйте позже.');
+        void sendNavMessage(telegramUserId, chatId, '⚠️ Не удалось загрузить транзакции. Попробуйте позже.');
       }
       await reply.status(200).send({ ok: true });
       return;
