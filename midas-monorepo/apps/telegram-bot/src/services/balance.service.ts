@@ -141,8 +141,11 @@ const PER_ACCOUNT_SQL = `
   WHERE a.workspace_id = $1  -- explicit workspace filter (SEC-03)
     AND a.deleted_at IS NULL   -- Phase 2.1: hide soft-deleted accounts
   GROUP BY a.id, a.name, a.type, a.currency, a.initial_balance,
+           a.parent_account_id,
            w.default_expense_account_id, w.default_income_account_id
-  ORDER BY a.currency, a.name
+  -- Phase B-9: stable hierarchical ORDER — parents before children within group.
+  -- COALESCE ensures top-level accounts sort by their own id, children follow parent.
+  ORDER BY COALESCE(a.parent_account_id, a.id), a.parent_account_id NULLS FIRST, a.name
 `;
 
 
