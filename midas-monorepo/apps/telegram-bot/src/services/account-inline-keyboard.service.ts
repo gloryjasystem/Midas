@@ -583,14 +583,27 @@ export function buildAccountPickerForDraft(
 
 /**
  * Returns intent-aware picker header for the full picker screen.
+ * Optionally shows a currency-context hint below the main question.
+ *
  * income/debt_received → "На какой счёт зачислить?"
- * expense/... → "С какого счёта будет списана транзакция?"
+ * expense/...          → "С какого счёта будет списана транзакция?"
+ *
+ * parsedCurrency hint:
+ *   fiat      → "Сначала счета в USD, затем другие фиатные"
+ *   stablecoin/crypto → "Только счета в USDT"
  */
-export function getPickerScreenText(intent: string | null): string {
-  if (intent === 'income' || intent === 'debt_received') {
-    return '🔄 <b>Выберите счёт</b>\n\nНа какой счёт зачислить?';
+export function getPickerScreenText(intent: string | null, parsedCurrency: string | null = null): string {
+  let hint = '';
+  if (parsedCurrency) {
+    const cls = classifyCurrency(parsedCurrency.toUpperCase());
+    hint = cls === 'fiat'
+      ? `\n<i>Сначала счета в ${parsedCurrency}, затем другие фиатные</i>`
+      : `\n<i>Только счета в ${parsedCurrency}</i>`;
   }
-  return '🔄 <b>Выберите счёт</b>\n\nС какого счёта будет списана транзакция?';
+  if (intent === 'income' || intent === 'debt_received') {
+    return `🔄 <b>Выберите счёт</b>\n\nНа какой счёт зачислить?${hint}`;
+  }
+  return `🔄 <b>Выберите счёт</b>\n\nС какого счёта будет списана транзакция?${hint}`;
 }
 
 /** @deprecated use getPickerScreenText(intent) */
@@ -602,5 +615,22 @@ export const ACCOUNT_PICKER_SCREEN_TEXT =
  */
 export const ACCOUNT_PICKER_EMPTY_TEXT =
   '🔄 <b>Выберите счёт</b>\n\nУ вас пока нет счетов.\nНажмите «Создать счёт» ниже:';
+
+/**
+ * Text shown when no accounts match the transaction currency.
+ * Used instead of ACCOUNT_PICKER_EMPTY_TEXT when parsedCurrency is known.
+ *
+ * SEC-12: parsedCurrency is a validated system-known code — safe to embed in text.
+ */
+export function getPickerEmptyText(parsedCurrency: string | null): string {
+  if (parsedCurrency) {
+    return (
+      `🔄 <b>Выберите счёт</b>\n\n` +
+      `Нет счетов для валюты <b>${parsedCurrency}</b>.\n` +
+      `Создайте подходящий счёт ниже.`
+    );
+  }
+  return ACCOUNT_PICKER_EMPTY_TEXT;
+}
 
 

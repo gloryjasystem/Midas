@@ -214,6 +214,7 @@ import {
   buildAccountPickerForDraft,        // Phase 2.4 PR11: full picker (✓ + type emoji + back btn)
   getPickerScreenText,               // Phase 2.4 PR17: intent-aware full picker header text
   ACCOUNT_PICKER_EMPTY_TEXT,         // Phase 2.4 PR11: empty-state text for no-account workspaces
+  getPickerEmptyText,                // Phase 2.5: currency-aware empty-state text
   type AccountPickerFullEntry,       // Phase 2.4 PR11: rich entry type
   buildCrossCurrencyInputText,       // Phase 2.4 PR12: xfx input screen text
   buildCrossCurrencyInputKeyboard,   // Phase 2.4 PR12: xfx input screen keyboard
@@ -726,7 +727,7 @@ async function sendAndStorePreview(
   // This ensures the user always explicitly selects/confirms the account.
   const draft = await getDraftFields(workspaceId, userId, draftId);
   if (draft) {
-    const accounts = await getWorkspaceAccountsWithBalances(workspaceId, userId, draft.parsed_intent);
+    const accounts = await getWorkspaceAccountsWithBalances(workspaceId, userId, draft.parsed_intent, draft.parsed_currency);
 
     if (accounts.length > 0) {
       const pickerEntries = toAccountPickerEntries(accounts).map((e) => ({
@@ -1560,12 +1561,13 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
             // Delink: set account_id = NULL on the draft (patchDraftAccount with null).
             await patchDraftAccount(iaResolved.workspaceId, iaResolved.userId, iaCmd.draftId, null);
 
-            // Fetch intent for sort priority.
-            const delinkIntent = delinkDraftBefore?.parsed_intent ?? null;
+            // Fetch intent + currency for sort/filter priority.
+            const delinkIntent    = delinkDraftBefore?.parsed_intent    ?? null;
+            const delinkDraftCurrency = delinkDraftBefore?.parsed_currency ?? null;
 
-            // Fetch all workspace accounts with balances for the picker.
+            // Fetch workspace accounts filtered by transaction currency.
             const allAccounts = await getWorkspaceAccountsWithBalances(
-              iaResolved.workspaceId, iaResolved.userId, delinkIntent,
+              iaResolved.workspaceId, iaResolved.userId, delinkIntent, delinkDraftCurrency,
             );
 
             // PR 11: build rich picker entries (type emoji + ✓ marker + ◀️ Назад)
@@ -1579,8 +1581,8 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
 
             if (iaMsgId) {
               const pickerText = fullPickerEntries.length > 0
-                ? getPickerScreenText(delinkIntent)
-                : ACCOUNT_PICKER_EMPTY_TEXT;
+                ? getPickerScreenText(delinkIntent, delinkDraftCurrency)
+                : getPickerEmptyText(delinkDraftCurrency);
               void editMessageText(
                 chatId, iaMsgId,
                 pickerText,
@@ -1688,9 +1690,10 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
 
             // Fetch intent + accounts and show the full picker (same as ia:delink flow).
             const showPickerDraft = await getDraftFields(iaResolved.workspaceId, iaResolved.userId, iaCmd.draftId);
-            const showPickerIntent = showPickerDraft?.parsed_intent ?? null;
-            const showPickerAccounts = await getWorkspaceAccountsWithBalances(
-              iaResolved.workspaceId, iaResolved.userId, showPickerIntent,
+            const showPickerIntent    = showPickerDraft?.parsed_intent    ?? null;
+            const showPickerCurrency  = showPickerDraft?.parsed_currency  ?? null;
+            const showPickerAccounts  = await getWorkspaceAccountsWithBalances(
+              iaResolved.workspaceId, iaResolved.userId, showPickerIntent, showPickerCurrency,
             );
             const showPickerEntries: AccountPickerFullEntry[] = showPickerAccounts.map((acc) => ({
               id:       acc.id,
@@ -1701,8 +1704,8 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
             }));
             if (iaMsgId) {
               const pickerText = showPickerEntries.length > 0
-                ? getPickerScreenText(showPickerIntent)
-                : ACCOUNT_PICKER_EMPTY_TEXT;
+                ? getPickerScreenText(showPickerIntent, showPickerCurrency)
+                : getPickerEmptyText(showPickerCurrency);
               void editMessageText(
                 chatId, iaMsgId,
                 pickerText,

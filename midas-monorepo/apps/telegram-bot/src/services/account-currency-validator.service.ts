@@ -49,6 +49,18 @@ export function classifyCurrency(code: string): CurrencyClass {
   return /^[A-Z]{2,5}$/.test(upper) ? 'fiat' : 'crypto';
 }
 
+/**
+ * Returns true if the currency code is in the known whitelist.
+ * Unknown codes (e.g. "UDS", "XYZ") return false.
+ *
+ * SEC-01: used as a guard before any DB write involving user-supplied
+ *         currency codes (validateCurrencyCode, onboarding cur_input).
+ */
+export function isKnownCurrency(code: string): boolean {
+  const upper = code.toUpperCase();
+  return FIAT_SET.has(upper) || STABLECOINS.has(upper) || CRYPTO_SET.has(upper);
+}
+
 // ─────────────────────────────────────────────────────────────
 // Hybrid e-wallet providers (support stablecoins alongside fiat)
 // ─────────────────────────────────────────────────────────────

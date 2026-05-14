@@ -37,6 +37,7 @@
 import { withTenantTransaction } from '@midas/database';
 import { monotonicFactory } from 'ulid';
 import { escapeHtml } from '../utils/html-escape.js';
+import { classifyCurrency } from './account-currency-validator.service.js';
 
 // ─────────────────────────────────────────────────────────────
 // Types
@@ -1195,6 +1196,7 @@ export async function getWorkspaceAccountsWithBalances(
   workspaceId: string,
   userId: string,
   intent: string | null,
+  parsedCurrency: string | null = null,
 ): Promise<AccountWithBalance[]> {
   return withTenantTransaction<AccountWithBalance[]>(
     workspaceId,
@@ -1258,7 +1260,7 @@ export async function getWorkspaceAccountsWithBalances(
         [workspaceId, sortByIncome],
       );
 
-      return res.rows.map((row) => ({
+      const rawAccounts = res.rows.map((row) => ({
         id:               row.id,
         name:             row.name,
         currency:         row.currency,
@@ -1267,6 +1269,27 @@ export async function getWorkspaceAccountsWithBalances(
         isExpenseDefault: Boolean(row.is_expense_default),
         isIncomeDefault:  Boolean(row.is_income_default),
       }));
+
+      // ── Currency-context filtering (Phase 2.5 picker) ──────────────────────
+      // parsedCurrency = null → no filter (backward-compatible fallback).
+      if (!parsedCurrency) return rawAccounts;
+
+      const txCur = parsedCurrency.toUpperCase();
+      const txClass = classifyCurrency(txCur);
+
+      if (txClass === 'fiat') {
+        // Fiat: banks support auto-conversion → show ALL fiat accounts.
+        // Exact currency match appears first; other fiats follow.
+        const exact = rawAccounts.filter(a => a.currency.toUpperCase() === txCur);
+        const other = rawAccounts.filter(
+          a => a.currency.toUpperCase() !== txCur && classifyCurrency(a.currency) === 'fiat',
+        );
+        return [...exact, ...other];
+      }
+
+      // Stablecoin or crypto: no auto-conversion ever occurs → exact match only.
+      // e.g. USDT transaction → only USDT accounts; BTC → only BTC accounts.
+      return rawAccounts.filter(a => a.currency.toUpperCase() === txCur);
     },
   );
 }

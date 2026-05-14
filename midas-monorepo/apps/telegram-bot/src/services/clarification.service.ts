@@ -27,6 +27,7 @@
  */
 
 import { withTenantTransaction } from '@midas/database';
+import { isKnownCurrency } from './account-currency-validator.service.js';
 
 // ─────────────────────────────────────────────────────────────
 // NUMERIC validation regex (SEC-02)
@@ -326,6 +327,8 @@ const CURRENCY_REGEX = /^[A-Z0-9]{2,8}$/;
 export function validateCurrencyCode(input: string): string | null {
   const upper = input.trim().toUpperCase();
   if (!CURRENCY_REGEX.test(upper)) return null;
+  // SEC-01: reject codes not in the known whitelist (e.g. "UDS", "XYZ").
+  if (!isKnownCurrency(upper)) return null;
   return upper;
 }
 
