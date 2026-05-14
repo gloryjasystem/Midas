@@ -213,7 +213,6 @@ import {
   getPickerV2Text,                   // Phase 2.4 PR17: intent-aware picker header text
   buildAccountPickerForDraft,        // Phase 2.4 PR11: full picker (✓ + type emoji + back btn)
   getPickerScreenText,               // Phase 2.4 PR17: intent-aware full picker header text
-  ACCOUNT_PICKER_EMPTY_TEXT,         // Phase 2.4 PR11: empty-state text for no-account workspaces
   getPickerEmptyText,                // Phase 2.5: currency-aware empty-state text
   type AccountPickerFullEntry,       // Phase 2.4 PR11: rich entry type
   buildCrossCurrencyInputText,       // Phase 2.4 PR12: xfx input screen text
