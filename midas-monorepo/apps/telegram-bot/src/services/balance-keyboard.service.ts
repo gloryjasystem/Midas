@@ -1,5 +1,5 @@
 /**
- * Balance Keyboard Service — Phase 2.1 / Phase LD++
+ * Balance Keyboard Service — Phase 2.1 / Phase LD++ / Phase B-2
  *
  * Builds Telegram InlineKeyboardMarkup objects for the account management
  * dashboard inside the /balance flow.
@@ -20,6 +20,7 @@
  *   bl:si:{id}    → set default INCOME  account (6 + 26 = 32 bytes)  Phase LD++
  *   bl:ce:{id}    → clear default EXPENSE       (6 + 26 = 32 bytes)  Phase LD++
  *   bl:cl:{id}    → clear default INCOME        (6 + 26 = 32 bytes)  Phase LD++
+ *   bl:ac:{id}    → add currency to parent      (6 + 26 = 32 bytes)  Phase B-2
  *
  * All values ≤ 33 bytes — safely within Telegram 64-byte limit.
  * No user-provided data enters callback_data.
@@ -89,6 +90,8 @@ export type BalanceCallbackCmd =
   | { cmd: 'delete_confirm'; accountId: string }
   | { cmd: 'back' }
   | { cmd: 'close' }
+  // Phase B-2: add a child currency account under a parent
+  | { cmd: 'add_currency'; accountId: string }
   // Phase LD++: default account role toggles (cyclical)
   | { cmd: 'set_role'; role: 'none' | 'expense' | 'income' | 'main'; accountId: string };
 
@@ -113,7 +116,13 @@ export function parseBalanceCallback(data: string): BalanceCallbackCmd | null {
   if (sub === 'close') return { cmd: 'close' };
   if (sub === 'ci') return { cmd: 'currency_input' };
 
-  // bl:cs:{code} — currency set
+  // bl:ac:{id} — Phase B-2: add currency account under parent
+  if (sub === 'ac') {
+    const accountId = parts[2] ?? '';
+    if (accountId.length === 0) return null;
+    return { cmd: 'add_currency', accountId };
+  }
+
   if (sub === 'cs') {
     const code = parts[2] ?? '';
     if (!CURRENCY_CODE_RE.test(code)) return null;
@@ -166,6 +175,10 @@ export interface BalanceAccountRow {
   isExpenseDefault: boolean;
   /** Phase LD++: true if this account is workspace default for incomes */
   isIncomeDefault: boolean;
+  /** Phase B-2: ULID of parent account, or null/undefined for top-level */
+  parentAccountId?: string | null;
+  /** Phase B-2: number of direct children (0 for leaf accounts) */
+  childCount?: number;
 }
 
 /** Full account detail for the account card view. */
@@ -190,19 +203,47 @@ const TYPE_LABELS: Record<string, string> = {
   bank_sync: 'Банковская синхр.',
 };
 
+// ─────────────────────────────────────────────────────────────
+// Phase B-2: plural form for child currency count
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Russian plural form for currency count.
+ * 1 → «валюта», 2–4 → «валюты», 5+ → «валют»
+ * Special cases: 11–14 always → «валют»
+ */
+function pluralizeCurrency(n: number): string {
+  const mod10  = n % 10;
+  const mod100 = n % 100;
+  if (mod100 >= 11 && mod100 <= 14) return 'валют';
+  if (mod10 === 1)                  return 'валюта';
+  if (mod10 >= 2 && mod10 <= 4)    return 'валюты';
+  return 'валют';
+}
+
 /**
  * Build the main balance list keyboard.
  * One button per account (name · balance CURRENCY [· роль]) + [➕ Добавить счёт].
  *
- * Phase LD++: role tags written directly into the button text (Вариант 2).
- *   "Тинькофф · 15 400 RUB · расходы"
- *   "Наличные · 2 120 PLN · доходы"
- *   "Binance · 850 USDT · расходы и доходы"
- *   "Wallet · 0 ETH"            (no role — no tag)
+ * Phase LD++: role tags written directly into the button text (Variant 2).
+ * Phase B-2:  parent accounts with children show aggregation («N валют»)
+ *             instead of a single balance+currency, followed by child rows
+ *             and a [➕ Добавить валюту] button.
+ *             Leaf accounts (no parent, no children) render unchanged.
  */
 export function buildBalanceListKeyboard(accounts: BalanceAccountRow[]): InlineKeyboardMarkup {
-  // Sort by group order, then alphabetically by name within group
-  const sorted = [...accounts].sort((a, b) => {
+  // ── Separate parents from children ───────────────────────────────
+  const parentAccounts = accounts.filter((a) => !a.parentAccountId);
+  const childrenOf     = new Map<string, BalanceAccountRow[]>();
+  for (const acc of accounts) {
+    if (acc.parentAccountId) {
+      if (!childrenOf.has(acc.parentAccountId)) childrenOf.set(acc.parentAccountId, []);
+      childrenOf.get(acc.parentAccountId)!.push(acc);
+    }
+  }
+
+  // ── Sort top-level accounts by group, then name ───────────────────
+  const sorted = [...parentAccounts].sort((a, b) => {
     const ga = classifyAccountGroup(a.name, a.currency, a.type);
     const gb = classifyAccountGroup(b.name, b.currency, b.type);
     const diff = GROUP_ORDER.indexOf(ga) - GROUP_ORDER.indexOf(gb);
@@ -210,18 +251,47 @@ export function buildBalanceListKeyboard(accounts: BalanceAccountRow[]): InlineK
     return a.name.localeCompare(b.name, 'ru');
   });
 
-  const accountRows = sorted.map((acc) => {
-    const group   = classifyAccountGroup(acc.name, acc.currency, acc.type);
-    const emoji   = GROUP_EMOJI[group];
-    const roleTag = (acc.isExpenseDefault && acc.isIncomeDefault) ? ' 💸💰'
-                  : acc.isExpenseDefault                          ? ' 💸'
-                  : acc.isIncomeDefault                           ? ' 💰'
-                  : '';
-    return [{
-      text: `${emoji} ${acc.name}${roleTag}  ·  ${formatBalanceShort(acc.balance)} ${acc.currency}`,
-      callback_data: `bl:v:${acc.account_id}`,
-    }];
-  });
+  // ── Build keyboard rows ───────────────────────────────────────────
+  const accountRows: { text: string; callback_data: string }[][] = [];
+
+  for (const acc of sorted) {
+    const group    = classifyAccountGroup(acc.name, acc.currency, acc.type);
+    const emoji    = GROUP_EMOJI[group];
+    const children = childrenOf.get(acc.account_id) ?? [];
+
+    if (children.length > 0) {
+      // Phase B-2: Parent with children — show aggregation button
+      const n = children.length;
+      accountRows.push([{
+        text: `${emoji} ${acc.name}  ·  ${n}\u00a0${pluralizeCurrency(n)}`,
+        callback_data: `bl:v:${acc.account_id}`,
+      }]);
+
+      // Child rows: indented with └ connector, showing currency · balance
+      for (const child of children) {
+        accountRows.push([{
+          text: `  └ ${child.currency}  ·  ${formatBalanceShort(child.balance)}`,
+          callback_data: `bl:v:${child.account_id}`,
+        }]);
+      }
+
+      // ➕ Добавить валюту — bl:ac:{parentId} ≤ 32 bytes ✔️
+      accountRows.push([{
+        text: '➕ Добавить валюту',
+        callback_data: `bl:ac:${acc.account_id}`,
+      }]);
+    } else {
+      // Leaf account (no children): same as Phase A / LD++
+      const roleTag = (acc.isExpenseDefault && acc.isIncomeDefault) ? ' 💸💰'
+                    : acc.isExpenseDefault                          ? ' 💸'
+                    : acc.isIncomeDefault                           ? ' 💰'
+                    : '';
+      accountRows.push([{
+        text: `${emoji} ${acc.name}${roleTag}  ·  ${formatBalanceShort(acc.balance)} ${acc.currency}`,
+        callback_data: `bl:v:${acc.account_id}`,
+      }]);
+    }
+  }
 
   return {
     inline_keyboard: [

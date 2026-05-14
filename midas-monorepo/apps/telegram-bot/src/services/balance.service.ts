@@ -70,6 +70,8 @@ interface AccountBalanceRow {
   is_expense_default: boolean;
   /** Phase LD++: true if this account is workspace default for incomes */
   is_income_default: boolean;
+  /** Phase B-2: NULL for top-level accounts, ULID for children */
+  parent_account_id: string | null;
 }
 
 
@@ -91,6 +93,7 @@ const PER_ACCOUNT_SQL = `
     a.name,
     a.type,
     a.currency,
+    a.parent_account_id,
     -- Balance formula: D1 sign rules, D2 debt integrated, D3 transfer excluded.
     -- Phase 1.27: ONLY transactions with base_currency = account currency are summed.
     -- This prevents silent cross-currency mixing (e.g. EUR amounts counted as USD).
@@ -198,6 +201,10 @@ export interface BalanceDataRow {
   isExpenseDefault: boolean;
   /** Phase LD++: true if this account is workspace default for incomes */
   isIncomeDefault: boolean;
+  /** Phase B-2: NULL for top-level accounts, ULID for children */
+  parentAccountId: string | null;
+  /** Phase B-2: number of direct children (0 for leaf accounts) */
+  childCount: number;
 }
 
 /** Structured result from getBalanceData(). */
@@ -227,17 +234,6 @@ export async function getBalanceData(
     },
   );
 
-  // ── Build structured rows for keyboard ────────────────────────
-  const accountRows: BalanceDataRow[] = accounts.map((row) => ({
-    account_id:       row.account_id,
-    name:             row.name,
-    type:             row.type,
-    currency:         row.currency,
-    balance:          row.balance.toFixed(2),
-    isExpenseDefault: Boolean(row.is_expense_default),
-    isIncomeDefault:  Boolean(row.is_income_default),
-  }));
-
   // ── Empty workspace ─────────────────────────────────────────
   if (accounts.length === 0) {
     return {
@@ -246,7 +242,39 @@ export async function getBalanceData(
     };
   }
 
-  // ── Grouped text by account type (Phase A) ───────────────────
+  // ── Phase B-2: Build parent → children map ──────────────────
+  // childrenMap: parentId → list of child AccountBalanceRow
+  const childrenMap = new Map<string, AccountBalanceRow[]>();
+  for (const row of accounts) {
+    if (row.parent_account_id !== null) {
+      const pid = row.parent_account_id;
+      if (!childrenMap.has(pid)) childrenMap.set(pid, []);
+      childrenMap.get(pid)!.push(row);
+    }
+  }
+
+  // ── Phase B-2: Count children per account (for keyboard) ───
+  const childCountMap = new Map<string, number>();
+  for (const [parentId, kids] of childrenMap) {
+    childCountMap.set(parentId, kids.length);
+  }
+
+  // ── Build structured rows for keyboard (all accounts) ───────
+  // Children are included so buildBalanceListKeyboard can render them
+  // as indented sub-buttons under their parent.
+  const accountRows: BalanceDataRow[] = accounts.map((row) => ({
+    account_id:       row.account_id,
+    name:             row.name,
+    type:             row.type,
+    currency:         row.currency,
+    balance:          row.balance.toFixed(2),
+    isExpenseDefault: Boolean(row.is_expense_default),
+    isIncomeDefault:  Boolean(row.is_income_default),
+    parentAccountId:  row.parent_account_id ?? null,
+    childCount:       childCountMap.get(row.account_id) ?? 0,
+  }));
+
+  // ── Grouped text by account type (Phase A / B-2) ────────────
   const GROUP_LABEL: Record<GroupType, string> = {
     bank:            'БАНКИ И КАРТЫ',
     crypto_exchange: 'КРИПТОБИРЖИ',
@@ -255,8 +283,11 @@ export async function getBalanceData(
     other:           'ПРОЧЕЕ',
   };
 
+  // Phase B-2: only top-level accounts define group structure;
+  // children are rendered as a ladder under their parent.
   const grouped = new Map<GroupType, AccountBalanceRow[]>();
   for (const row of accounts) {
+    if (row.parent_account_id !== null) continue; // rendered under parent
     const g = classifyAccountGroup(row.name, row.currency, row.type);
     if (!grouped.has(g)) grouped.set(g, []);
     grouped.get(g)!.push(row);
@@ -274,6 +305,22 @@ export async function getBalanceData(
                       : isExp            ? ' (💸 расходы)'
                       : isInc            ? ' (💰 доходы)'
                       : '';
+
+      const childrenOfRow = childrenMap.get(row.account_id) ?? [];
+
+      if (childrenOfRow.length > 0) {
+        // Phase B-2: parent with children — render ├/└ ladder
+        // Parent shows name + role; children show currency · balance
+        const childLines = childrenOfRow.map((child, idx) => {
+          const isLast = idx === childrenOfRow.length - 1;
+          const connector = isLast ? '└' : '├';
+          const balStr = formatBalanceShort(child.balance.toFixed(2));
+          return `${connector} ${escapeHtml(child.currency)} · ${balStr}`;
+        });
+        return `<b>${escapeHtml(row.name)}</b>${roleBadge}\n${childLines.join('\n')}`;
+      }
+
+      // Leaf account (no children): same as Phase A
       const balStr = formatBalanceShort(row.balance.toFixed(2));
       return `<b>${escapeHtml(row.name)}</b>${roleBadge}\n└ ${balStr} ${escapeHtml(row.currency)}`;
     });
