@@ -341,19 +341,37 @@ export async function parseTransaction(rawText: string, accountNames?: string[])
 
   // ── Confidence check ────────────────────────────────────────
   // Below PARTIAL_CONFIDENCE_THRESHOLD (0.3) → nonsense by default.
-  // Exception: if we have amount + intent → show card optimistically (professional UX).
+  // Exception 1: if we have amount + intent → show card optimistically.
+  // Exception 2 (Phase 2.6): try postProcessIntentRecovery first — a strong
+  //   keyword (e.g. "купил") can boost confidence enough to save item_hint.
+  //   Without this, "купил квартиру юздт" would return needs_clarification
+  //   before recovery runs, throwing away item_hint="квартира".
   if (aiData.confidence < PARTIAL_CONFIDENCE_THRESHOLD) {
     if (aiData.amount && aiData.intent) {
       // Boost to just above partial threshold — we have enough data to show a card.
       aiData.confidence = PARTIAL_CONFIDENCE_THRESHOLD;
     } else {
-      return {
-        status: 'needs_clarification',
-        reason: `Very low confidence and no amount+intent: ${aiData.confidence.toFixed(2)}`,
-        tokensUsed,
-      };
+      // Phase 2.6: run recovery BEFORE giving up — preserves item_hint.
+      const earlyRecovery = postProcessIntentRecovery(rawText);
+      if (earlyRecovery) {
+        // Apply recovered intent (only if not already set to something specific).
+        if (!aiData.intent || aiData.intent === 'expense') {
+          aiData.intent = earlyRecovery.intent;
+        }
+        aiData.confidence = Math.min(1.0, aiData.confidence + earlyRecovery.boost);
+      }
+      // After recovery — still too low? Truly a nonsense message.
+      if (aiData.confidence < PARTIAL_CONFIDENCE_THRESHOLD) {
+        return {
+          status: 'needs_clarification',
+          reason: `Very low confidence after recovery: ${aiData.confidence.toFixed(2)}`,
+          tokensUsed,
+        };
+      }
+      // Recovery succeeded → continue to partial flow with item_hint intact.
     }
   }
+
 
   // ── Check for missing required fields ───────────────────────
   // After Phase 1.38: only 'amount' (when rawText has truly no number) can be missing.

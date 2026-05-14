@@ -5496,8 +5496,7 @@ Midas создан, чтобы сделать учет денег максима
         const hint = [
           '💡 <b>Укажи сумму с валютой</b>',
           '',
-          `${escapeHtml(num)} доллар  ·  ${escapeHtml(num)} евр  ·  ${escapeHtml(num)} грн`,
-          `или кофе ${escapeHtml(num)} руб  ·  зарплата ${escapeHtml(num)} USDT`,
+          `${escapeHtml(num)} долл  ·  1 500 EUR  ·  85 000 грн`,
         ].join('\n');
         void upsertBotMessage(telegramUserId, chatId, hint);
         request.log.info({
