@@ -1,7 +1,7 @@
 # WORKFLOW_STATE.MD — Диспетчер задач ИИ-агента Midas
 
 > **Тип:** MUTABLE — кратковременная память агента. Обновляется на каждом шаге работы.
-> **Обновлён:** 2026-05-14 20:14 (UTC+3)
+> **Обновлён:** 2026-05-14 22:13 (UTC+3)
 
 ---
 
@@ -9,11 +9,11 @@
 
 | Параметр | Значение |
 |---|---|
-| **PHASE** | `Phase 2.5+ — Currency-Aware Account Picker (Bot + Worker)` |
-| **STEP** | `All fixes deployed ✅ (commits 6ebf429 → 04f7e81 → 0085d8f)` |
-| **AGENT STATUS** | `DONE. (1) isKnownCurrency() guard blocks phantom currencies at validation layer. (2) account.service.ts filters by parsedCurrency (fiat→fiat pool, stablecoin/crypto→exact only). (3) webhook.route.ts threads parsed_currency to all 3 picker entry points. (4) ai-parse.worker.ts applies filterPickerAccounts() in BOTH initial picker and gate picker — root cause fix.` |
+| **PHASE** | `Phase 2.5+ Hot-Fixes — Transaction Parsing & UX Regression` |
+| **STEP** | `All fixes deployed ✅ (commit ccaec87 pushed to main)` |
+| **AGENT STATUS** | `DONE. (1) "юздт" добавлен как алиас USDT в prompts.ts — Claude теперь распознаёт сленговое написание. (2) Добавлены 2 примера в промпт ("купил квартиру юздт", "купил недвижку usdt") — Claude возвращает item_hint при отсутствии amount. (3) Кнопка "✖️ Отмена" в buildAccountPickerV2Keyboard изменена с ia:pk:back → ia:cancel — нажатие закрывает карточку целиком вместо возврата к превью.` |
 | **DEPLOYMENT** | `Railway (spirited-happiness project)` — `Midas` ✅ Online · `background-workers` ✅ Online · `Postgres` ✅ · `Redis` ✅. Health: https://midas-production-f4f1.up.railway.app/health → {"status":"ok"} |
-| **LAST COMPLETED** | `Phase 2.5+ currency-aware picker COMPLETE. USDT больше не появляется в пикере USD-транзакций. Commit 0085d8f pushed to main.` |
+| **LAST COMPLETED** | `Phase 2.5+ Hot-Fixes: юздт alias + промпт-примеры + Отмена в пикере → ia:cancel. Commit ccaec87 pushed to main.` |
 | **BLOCKER** | None. |
 | **NEXT ACTION** | Phase 3.0 — DB Migration: добавить колонки `account_type`, `wallet_subtype`, `provider_key` в `account_sources`. Заполнять при создании счёта. Использовать для 100% точной валидации вместо эвристик. (см. Раздел 16 — Active Roadmap) |
 
@@ -223,19 +223,18 @@ Replace the flat "Счетов пока нет." empty-state with a guided inter
 
 ---
 
-## 8. ФАЙЛЫ ДЛЯ ЧТЕНИЯ В НОВОМ ЧАТЕ (Phase 2.4 context)
+## 8. ФАЙЛЫ ДЛЯ ЧТЕНИЯ В НОВОМ ЧАТЕ (Phase 3.0 context)
 
-**⚡ ТЕКУЩИЙ КОНТЕКСТ: Phase 2.4 — Account-Aware Draft Card — ПЛАН ГОТОВ, РЕАЛИЗАЦИЯ НЕ НАЧАТА.**
+**⚡ ТЕКУЩИЙ КОНТЕКСТ: Phase 2.5+ Hot-Fixes ЗАВЕРШЕНЫ. Следующая — Phase 3.0 (DB Schema: account_type/wallet_subtype).**
 
 **ОБЯЗАТЕЛЬНО прочитать в новом чате:**
 ```
-apps/telegram-bot/src/utils/screen-builder.ts              ← buildPreviewScreen, buildConfirmedScreen, buildConfirmKeyboard, buildPostConfirmKeyboard
-apps/telegram-bot/src/routes/webhook.route.ts              ← confirmPreview(), approve/reject handlers, callback router
-apps/telegram-bot/src/services/account.service.ts          ← getWorkspaceAccountsForInline, getAccountById, setDraftAccountId, getWorkspaceDefaultAccounts
-apps/telegram-bot/src/services/clarification.service.ts    ← getDraftFields, DraftFields type, validateAmountString
-apps/telegram-bot/src/services/account-inline-keyboard.service.ts ← buildAccountPickerForDraft (новая), callback namespace ia:
-apps/background-workers/src/workers/confirmation.worker.ts ← approveDraft, confirmed card building
-apps/background-workers/src/utils/screen-builder.ts        ← buildConfirmedScreen (bg-workers version)
+apps/telegram-bot/src/routes/webhook.route.ts              ← ia:cancel handler, sendAndStorePreview, parsed_currency threading
+apps/telegram-bot/src/services/account-inline-keyboard.service.ts ← buildAccountPickerV2Keyboard (Отмена → ia:cancel)
+apps/telegram-bot/src/services/account.service.ts          ← getWorkspaceAccountsWithBalances(parsedCurrency?)
+apps/background-workers/src/workers/ai-parse.worker.ts     ← filterPickerAccounts(), initial + gate picker
+packages/ai-core/src/prompts.ts                            ← USDT aliases (юздт), partial examples (купил X юздт)
+packages/ai-core/src/claude-client.ts                      ← postProcessIntentRecovery, early-exit guard
 ```
 
 **Тесты (запустить в начале для верификации baseline):**
@@ -246,18 +245,12 @@ npx tsc --noEmit -p apps/telegram-bot/tsconfig.json   → 0 ошибок
 npx tsc --noEmit -p apps/background-workers/tsconfig.json → 0 ошибок
 ```
 
-**Полный план реализации:**
+**НЕ ЧИТАТЬ (не нужны для Phase 3.0):**
 ```
-C:\Users\secvency\.gemini\antigravity\brain\7517ec39-fd86-4359-816b-639eeaa6df79\account_debit_ux_plan.md
-```
-
-**НЕ ЧИТАТЬ (не нужны для Phase 2.4):**
-```
-packages/ai-core/src/claude-client.ts
-packages/ai-core/src/prompts.ts
-packages/database/src/db.ts
 apps/telegram-bot/src/services/report.service.ts
 apps/telegram-bot/src/services/transaction-list.service.ts
+apps/telegram-bot/src/services/balance.service.ts
+packages/database/smoke-test-phase*.mjs  (кроме текущего)
 ```
 
 ---
@@ -265,57 +258,37 @@ apps/telegram-bot/src/services/transaction-list.service.ts
 ## 9. ПРОМПТ ДЛЯ СТАРТА НОВОГО ЧАТА
 
 ```
-⚡ Фазы 1.1–1.40 + 2.0–2.3 + Master Roadmap + Phase LD + Phase LD++ — ЗАВЕРШЕНЫ И ЗАДЕПЛОЕНЫ.
-Фаза 2.4 — Account-Aware Draft Card — ПЛАН ГОТОВ, начинаем реализацию.
+⚡ Фазы 1.1–2.5+ Hot-Fixes — ЗАВЕРШЕНЫ И ЗАДЕПЛОЕНЫ (последний commit: ccaec87).
+Следующая — Phase 3.0: DB Schema account_type/wallet_subtype/provider_key.
 
 КОНТЕКСТ ПРОЕКТА:
 Midas DEPLOYED на Railway (project: spirited-happiness, env: production). Стабилен.
 MCP servers: Railway, GitHub, Postgres, Filesystem — все активны.
 Auto-deploy: push to `main` → GitHub → Railway строит Midas + background-workers.
 
-ЧТО НУЖНО РЕАЛИЗОВАТЬ (Phase 2.4):
-Добавить отображение счёта списания в карточку черновика транзакции с математикой баланса:
-  - Черновик показывает: «🏦 Bybit USD» + «💳 15 400 − 10 000 = 5 400 USD»
-  - Кнопка «🔄 Сменить счёт» → пикер всех счетов пользователя с балансами
-  - Кросс-валюта: кнопка «✏️ Указать сумму в RUB» → перехват текста → пересчёт
-  - Confirmed card: «Итог: 15 400 − 10 000 = 5 400 USD» (без кнопок Баланс/Отчёт)
+ПОСЛЕДНИЕ ИЗМЕНЕНИЯ (commit ccaec87, 2026-05-14):
+1. packages/ai-core/src/prompts.ts — добавлен "юздт" в алиасы USDT + 2 промпт-примера
+   ("купил квартиру юздт" → item_hint:квартира, currency:USDT, no amount)
+2. apps/telegram-bot/src/services/account-inline-keyboard.service.ts — кнопка
+   "✖️ Отмена" в buildAccountPickerV2Keyboard: ia:pk:back → ia:cancel
+   (теперь нажатие закрывает карточку, а не возвращает к превью)
 
-ПОЛНЫЙ ПЛАН: C:\Users\secvency\.gemini\antigravity\brain\7517ec39-fd86-4359-816b-639eeaa6df79\account_debit_ux_plan.md
-
-ПЛАН РАЗБИТ НА 16 АТОМАРНЫХ PR:
-PR 1  — Миграция БД: account_debit_amount, account_debit_currency в transaction_drafts + transactions
-PR 2  — account.service.ts: getAccountWithBalance(), getWorkspaceAccountsWithBalances()
-PR 3  — clarification.service.ts: расширить DraftFields (account_id, account_debit_amount, account_debit_currency)
-PR 4  — clarification.service.ts: patchDraftDebitAmount() — новая функция
-PR 5  — utils/decimal.ts (НОВЫЙ): calcBalanceAfter(), calcRate() — BigInt arithmetic
-PR 6  — screen-builder.ts (оба apps): buildPreviewScreen — новые поля accountName/Balance/DebitAmount
-PR 7  — screen-builder.ts: buildConfirmKeyboard — новая сигнатура (BREAKING: обновить все вызовы атомарно)
-PR 8  — screen-builder.ts: buildPostConfirmKeyboard — убрать кнопки Баланс/Отчёт
-PR 9  — webhook.route.ts: confirmPreview() — подтягивает счёт по priority chain
-PR 10 — webhook.route.ts: 3 callback-маршрута (draft:acct:*, draft:acct:pick:*, draft:acct:back:*)
-PR 11 — account-inline-keyboard.service.ts: buildAccountPickerForDraft()
-PR 12 — webhook.route.ts: кросс-валюта (draft:acct:xfx:*, Redis midas:xfx:ptr:*, text intercept)
-PR 13 — screen-builder.ts (оба apps): buildConfirmedScreen — новый блок «Итог"
-PR 14 — confirmation.worker.ts: snapshot balance_before, balance_after
-PR 15 — ai-parse.worker.ts: встроить дефолтный счёт в initial draft card
-PR 16 — smoke-test-phase-acct-draft.mjs: 6 сценариев тестирования
-
-CТАРТ: PR 1 (миграция БД) — самый безопасный первый шаг.
+ЧТО НУЖНО РЕАЛИЗОВАТЬ (Phase 3.0 — DB Schema):
+Миграция БД: добавить колонки account_type, wallet_subtype, provider_key в account_sources.
+Заполнять при создании счёта из AccountOnboardState.
+Использовать вместо эвристик в validateAccountCurrency() — 100% точная валидация.
+(Полное описание в Разделе 16 workflow_state.md)
 
 КЛЮЧЕВЫЕ ПРАВИЛА:
-- Callback namespace: draft:acct:* — конфликтов с существующими ia:/bl:/ac:/* НЕТ
-- Redis prefix: midas:xfx:ptr:{userId}:{chatId} — новый, не пересекается с существующими
-- PR 7 (buildConfirmKeyboard) — единственный breaking change: все вызовы обновить в одном коммите
-- buildPostConfirmKeyboard: убрать строку с [💰 Баланс][📊 Отчёт] — они в ReplyKeyboard
 - Финансовая математика: ТОЛЬКО BigInt/NUMERIC, никаких float (SEC-02)
 - Все мутации через withTenantTransaction (SEC-03)
-- Проверка account_id принадлежит workspace перед setDraftAccountId (SEC-01)
 - Не трогать project_config.md
 
 ТЕСТЫ BASELINE (запустить в начале):
 `node apps/telegram-bot/smoke-test-master-roadmap.mjs`  → 76/76 ✅
 `node packages/database/smoke-test-lazy-default.mjs`    → 39/39 ✅
 `npx tsc --noEmit -p apps/telegram-bot/tsconfig.json`  → 0 ошибок
+`npx tsc --noEmit -p apps/background-workers/tsconfig.json` → 0 ошибок
 ```
 
 
@@ -462,6 +435,9 @@ CТАРТ: PR 1 (миграция БД) — самый безопасный пе
 | 2026-05-14 12:28 | **Phase 2.10 — Fix 2: from-context в delete flow parser.** Проблема: при нажатии «Изменить запись» → «Удалить» → «Отмена» → «Закрыть» — кнопка Закрыть удаляла карточку вместо восстановления success card. Корень: `parseTxCallback` не читал `parts[4]` для `tx:d:ask` и `tx:d:yes` — контекст `from='s'` терялся при парсинге. Fix: `transaction-keyboard.service.ts` — `const from = parts[4]`; return с `from` для обоих action. Теперь `tx:view` корректно видит `from==='s'` и ставит `closeCallback = tx:done:{txId}`. Commit `8894b92`. |
 | 2026-05-14 12:37 | **Phase 2.10 — Fix 3: Double-lock sentinel key.** Проблема: даже после Fix 1 success card иногда удалялась (race condition между background-workers и telegram-bot, или отставание деплоя). Решение — двойная блокировка: (1) `notifications.worker.ts` при `isSuccessCard`: SET `midas:success_card:{sentMessageId}` = '1' (TTL 30 дней), затем DEL `midas:am:`. (2) `webhook.route.ts` step-7: перед `deleteMessage(amId)` проверяет `EXISTS midas:success_card:{amId}` — если sentinel есть, сообщение НЕ удаляется (только очищается pointer). Два замка работают независимо. tsc 0 ошибок оба приложения. Commit `b869c03`. |
 | 2026-05-14 17:30 | **Phase 2.10+ Gate Fix — Frozen UI при параллельном вводе транзакций.** Проблема: TX1 открывает пикер счёта → TX2 (webhook step-7) удаляет пикер (gate_sent ещё не установлен) → ai-parse gate присылает новую карточку с пикером и устанавливает gate_sent → TX3 (webhook step-7) удаляет gate-карточку (gate_sent не проверялся!) → ai-parse молчит (gate_sent SET → silently ignore) → TX4, TX5... цикл: сообщение приходит, удаляется, ответа нет — **ЗАВИСОН**. **Fix 1 (webhook.route.ts строки 5446–5458):** `const gateSentActive = await redisConnection.exists('midas:gate_sent:...')`. Если активен — `deleteMessage` и `clearActiveMessageId` НЕ вызываются. Gate-карточка остаётся видимой при TX3, TX4... **Fix 2 (webhook.route.ts строка 1539, ia:pk: handler):** `redisConnection.del('midas:gate_sent:...')` после `setDraftAccountId` — нормальный flow восстанавливается сразу после выбора счёта. **Fix 3 (ai-parse.worker.ts):** Gate реконструирует полный пикер счетов (inline keyboard с кнопками счетов + ✖️ Отмена) когда `pendingDraft.accountId === null` — вместо пустой confirm-клавиатуры. **Жизненный цикл gate_sent:** SET ai-parse.worker (при gate) → DEL ia:cancel (строка 1432, до фикса) / ia:pk: (ДОБАВЛЕНО) / approve/reject confirmation.worker (строка 268, до фикса) / TTL auto 1h. Scope: 2 файла (webhook.route.ts, ai-parse.worker.ts) + утилита fix-stuck-draft.mjs. tsc 0 ошибок. git commit `8d25ec1`, push origin main ✅. Railway: Midas ✅ Online, background-workers ✅ Online. |
+| 2026-05-14 20:00 | **Phase 2.5+ — Currency-Aware Picker: Bot Layer (telegram-bot).** Проблема: в пикере счётов при USD-транзакции показывался USDT-счёт, хотя это стейблкоин и он не конвертируется в фиат. **Реализация (4 файла):** (1) `account-currency-validator.service.ts` — добавлена функция `isKnownCurrency(code)`: проверяет код по трём вайтлистам (FIAT_SET + STABLECOINS + CRYPTO_SET). Предотвращает создание фантомных валют типа «UDS» или «ЕВР». (2) `clarification.service.ts` — в `validateCurrencyCode()` добавлена ранняя проверка `!isKnownCurrency(upper)` → возврат `null` до записи в БД. (3) `account.service.ts` — `getWorkspaceAccountsWithBalances()` получает опциональный 4-й параметр `parsedCurrency?`. После SQL-запроса: если tx — фиат → exact-match сначала + остальные фиатные; если стейблкоин/крипто → только exact match. (4) `account-inline-keyboard.service.ts` — `getPickerScreenText(intent, parsedCurrency?)` добавляет контекстную подсказку; `getPickerEmptyText(parsedCurrency?)` — «Нет USDT-счетов» вместо общего сообщения. `webhook.route.ts` — пробрасывает `draft.parsed_currency` в 3 entry points (sendAndStorePreview, ia:delink, ia:showpicker). Первый деплой упал — TS6133 (ACCOUNT_PICKER_EMPTY_TEXT в импорте но не используется). Исправлено коммитом `04f7e81`. |
+| 2026-05-14 20:10 | **Phase 2.5+ — Currency-Aware Picker: Worker Layer (background-workers). Root Cause Fix.** Обнаружено: начальный пикер строится ПОЛНОСТЬЮ в `ai-parse.worker.ts` (background-workers), а не в `telegram-bot`. Изменения в `account.service.ts` (telegram-bot) на initial picker не влияют никак. **Реализация (`ai-parse.worker.ts`):** Добавлены локальные классификаторы: `PICKER_STABLECOINS` (10 записей), `PICKER_KNOWN_CRYPTOS` (27 записей), `classifyPickerCcy(code)`, `filterPickerAccounts(accounts, txCurrency)` — аналог логики `account.service.ts`. Применено в 2 местах: (A) **Initial picker** (строка ~620) — фильтрует по `aiData?.currency` (когда AI вернул currency, например «USDT»); (B) **Gate picker** (строка ~340) — фильтрует по `pendingDraft.parsedCurrency` (восстановление пикера при gate-блокировке). Итог фильтрации: `{USD tx}` → [USD-счета] + [другие фиатные]; `{USDT tx}` → [только USDT-счета]. tsc 0 ошибок (оба приложения). git commit `0085d8f`, push origin main ✅. Railway auto-deploy triggered. |
+| 2026-05-14 22:00 | **Hotfix: кнопка "✖️ Отмена" в пикере счетов + "юздт" алиас USDT + промпт-примеры.** (1) `account-inline-keyboard.service.ts` (MODIFY) строка 381–383: кнопка `buildAccountPickerV2Keyboard` «✖️ Отмена» изменена с `ia:pk:back:{draftId}` → `ia:cancel:{draftId}`. До фикса: нажатие «Отмена» возвращало к карточке превью с кнопками [✏️ Изменить|✖️ Отмена]+[🏦 Выбрать счёт]. После фикса: `ia:cancel` handler редактирует сообщение → «❌ Отменено» без кнопок, ставит черновику статус `rejected`, чистит Redis. (2) `packages/ai-core/src/prompts.ts` — добавлен `"юздт"` в список алиасов USDT (строка 37): было `"юсдт", "тезер", "tether", "usdt"` → стало `"юсдт", "юздт", "тезер", "tether", "usdt"`. (3) `packages/ai-core/src/prompts.ts` — добавлены 2 примера в секцию `-- Partial (amount missing) --`: `"купил квартиру юздт"` → `{intent:expense,currency:USDT,item_hint:квартира,confidence:0.75}` и `"купил недвижку usdt"` → `{intent:expense,currency:USDT,item_hint:недвижимость,confidence:0.75}`. Цель: Claude теперь возвращает `item_hint` даже когда нет `amount`. tsc 0 ошибок. git commit `ccaec87`, push origin main ✅. Railway auto-deploy triggered. |
 | 2026-05-14 20:00 | **Phase 2.5+ — Currency-Aware Picker: Bot Layer (telegram-bot).** Проблема: в пикере счётов при USD-транзакции показывался USDT-счёт, хотя это стейблкоин и он не конвертируется в фиат. **Реализация (4 файла):** (1) `account-currency-validator.service.ts` — добавлена функция `isKnownCurrency(code)`: проверяет код по трём вайтлистам (FIAT_SET + STABLECOINS + CRYPTO_SET). Предотвращает создание фантомных валют типа «UDS» или «ЕВР». (2) `clarification.service.ts` — в `validateCurrencyCode()` добавлена ранняя проверка `!isKnownCurrency(upper)` → возврат `null` до записи в БД. (3) `account.service.ts` — `getWorkspaceAccountsWithBalances()` получает опциональный 4-й параметр `parsedCurrency?`. После SQL-запроса: если tx — фиат → exact-match сначала + остальные фиатные; если стейблкоин/крипто → только exact match. (4) `account-inline-keyboard.service.ts` — `getPickerScreenText(intent, parsedCurrency?)` добавляет контекстную подсказку; `getPickerEmptyText(parsedCurrency?)` — «Нет USDT-счетов» вместо общего сообщения. `webhook.route.ts` — пробрасывает `draft.parsed_currency` в 3 entry points (sendAndStorePreview, ia:delink, ia:showpicker). Первый деплой упал — TS6133 (ACCOUNT_PICKER_EMPTY_TEXT в импорте но не используется). Исправлено коммитом `04f7e81`. |
 | 2026-05-14 20:10 | **Phase 2.5+ — Currency-Aware Picker: Worker Layer (background-workers). Root Cause Fix.** Обнаружено: начальный пикер строится ПОЛНОСТЬЮ в `ai-parse.worker.ts` (background-workers), а не в `telegram-bot`. Изменения в `account.service.ts` (telegram-bot) на initial picker не влияют никак. **Реализация (`ai-parse.worker.ts`):** Добавлены локальные классификаторы: `PICKER_STABLECOINS` (10 записей), `PICKER_KNOWN_CRYPTOS` (27 записей), `classifyPickerCcy(code)`, `filterPickerAccounts(accounts, txCurrency)` — аналог логики `account.service.ts`. Применено в 2 местах: (A) **Initial picker** (строка ~620) — фильтрует по `aiData?.currency` (когда AI вернул currency, например «USDT»); (B) **Gate picker** (строка ~340) — фильтрует по `pendingDraft.parsedCurrency` (восстановление пикера при gate-блокировке). Итог фильтрации: `{USD tx}` → [USD-счета] + [другие фиатные]; `{USDT tx}` → [только USDT-счета]. tsc 0 ошибок (оба приложения). git commit `0085d8f`, push origin main ✅. Railway auto-deploy triggered. |
 
