@@ -314,20 +314,14 @@ export interface AccountRoleState {
 /**
  * Build the account actions keyboard (detail view).
  *
- * Phase LD++: a single cyclical button for role assignment.
- *   Обычный -> Расходы -> Доходы -> Основной -> Обычный
- *
- * Phase B-5: hasChildren — если true, добавляет кнопку «➕ Добавить валюту»
- *   (callback bl:ac:{accountId}, ≤32 байта — validated in parseBalanceCallback SEC-01).
- *
- * @param accountId   - ULID of the account being viewed
- * @param roles       - current role state
- * @param hasChildren - true if this is a parent account with sub-currency accounts
+ * Phase B-5: canAddCurrency — показывает кнопку «Добавить валюту» для
+ *   ВСЕХ top-level счётов (parent_account_id IS NULL), не только имеющих детей.
+ *   (callback bl:ac:{accountId}, 32 байта — SEC-01)
  */
 export function buildAccountActionsKeyboard(
   accountId: string,
   roles: AccountRoleState = { isExpenseDefault: false, isIncomeDefault: false },
-  hasChildren = false,
+  canAddCurrency = false,
 ): InlineKeyboardMarkup {
   const isExp = roles.isExpenseDefault;
   const isInc = roles.isIncomeDefault;
@@ -337,20 +331,20 @@ export function buildAccountActionsKeyboard(
 
   if (isExp && isInc) {
     roleLabel = '🏷 Роль: 💸💰 Основной';
-    nextRoleCode = 'n'; // next is none (Обычный)
+    nextRoleCode = 'n';
   } else if (isExp) {
     roleLabel = '🏷 Роль: 💸 Расходы';
-    nextRoleCode = 'i'; // next is income (Доходы)
+    nextRoleCode = 'i';
   } else if (isInc) {
     roleLabel = '🏷 Роль: 💰 Доходы';
-    nextRoleCode = 'm'; // next is main (Основной)
+    nextRoleCode = 'm';
   } else {
     roleLabel = '🏷 Роль: Обычный счёт';
-    nextRoleCode = 'e'; // next is expense (Расходы)
+    nextRoleCode = 'e';
   }
 
-  // Phase B-5: parent accounts get an extra "Add currency" button
-  const addCurrencyRow = hasChildren
+  // Phase B-5: all top-level accounts can add a sub-currency account
+  const addCurrencyRow = canAddCurrency
     ? [[{ text: '➕ Добавить валюту', callback_data: `bl:ac:${accountId}` }]]
     : [];
 

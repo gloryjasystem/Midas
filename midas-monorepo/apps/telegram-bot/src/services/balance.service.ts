@@ -304,16 +304,16 @@ export async function getBalanceData(
     const lines = rows.map((row) => {
       const isExp = Boolean(row.is_expense_default);
       const isInc = Boolean(row.is_income_default);
-      const roleBadge = (isExp && isInc) ? ' (💸💰 основной)'
-                      : isExp            ? ' (💸 расходы)'
-                      : isInc            ? ' (💰 доходы)'
+      // Compact role badge — icon only to save space
+      const roleBadge = (isExp && isInc) ? ' 💸💰'
+                      : isExp            ? ' 💸'
+                      : isInc            ? ' 💰'
                       : '';
 
       const childrenOfRow = childrenMap.get(row.account_id) ?? [];
 
       if (childrenOfRow.length > 0) {
         // Phase B-2: parent with children — render ├/└ ladder
-        // Parent shows name + role; children show currency · balance
         const childLines = childrenOfRow.map((child, idx) => {
           const isLast = idx === childrenOfRow.length - 1;
           const connector = isLast ? '└' : '├';
@@ -323,12 +323,14 @@ export async function getBalanceData(
         return `<b>${escapeHtml(row.name)}</b>${roleBadge}\n${childLines.join('\n')}`;
       }
 
-      // Leaf account (no children): same as Phase A
+      // Leaf account (no children)
       const balStr = formatBalanceShort(row.balance.toFixed(2));
       return `<b>${escapeHtml(row.name)}</b>${roleBadge}\n└ ${balStr} ${escapeHtml(row.currency)}`;
     });
 
-    sections.push(`${GROUP_EMOJI[groupType]} ${GROUP_LABEL[groupType]}\n\n${lines.join('\n\n')}`);
+    // Compact: no blank line between section label and first account,
+    // no blank lines between accounts within the section.
+    sections.push(`${GROUP_EMOJI[groupType]} <b>${GROUP_LABEL[groupType]}</b>\n${lines.join('\n')}`);
   }
 
   const text = '💰 <b>Баланс счетов</b>\n\n' + sections.join('\n\n');
@@ -347,6 +349,7 @@ const ACCOUNT_DETAIL_SQL = `
     a.type,
     a.currency,
     a.created_at,
+    a.parent_account_id,
     a.initial_balance
       + COALESCE(SUM(CASE
           WHEN t.transaction_intent = 'income'        AND t.base_currency = a.currency
@@ -375,7 +378,8 @@ const ACCOUNT_DETAIL_SQL = `
   WHERE a.id = $2
     AND a.workspace_id = $1
     AND a.deleted_at IS NULL
-  GROUP BY a.id, a.name, a.type, a.currency, a.created_at, a.initial_balance
+  GROUP BY a.id, a.name, a.type, a.currency, a.created_at, a.initial_balance,
+           a.parent_account_id
 `;
 
 /** Row from account detail query. */
@@ -385,6 +389,7 @@ interface AccountDetailRow {
   type: string;
   currency: string;
   created_at: string;
+  parent_account_id: string | null;  // Phase B-6: NULL = top-level account
   balance: { toFixed: (dp: number) => string };
   tx_count: string;
   child_count: number;  // Phase B-6: number of active child accounts
@@ -399,6 +404,8 @@ export interface AccountDetailData {
   balance: string;
   tx_count: string;
   created_at: string;
+  /** Phase B-6: NULL = top-level account; truthy = child account. */
+  parent_account_id: string | null;
   /** Phase B-6: number of active child accounts (0 for leaf accounts). */
   child_count: number;
 }
@@ -432,7 +439,8 @@ export async function getAccountDetail(
         balance: row.balance.toFixed(2),
         tx_count: row.tx_count,
         created_at: String(row.created_at),
-        child_count: Number(row.child_count ?? 0),  // Phase B-6
+        parent_account_id: row.parent_account_id ?? null,  // Phase B-6
+        child_count: Number(row.child_count ?? 0),          // Phase B-6
       };
     },
   );

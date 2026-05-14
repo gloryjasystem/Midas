@@ -3206,7 +3206,7 @@ Midas создан, чтобы сделать учет денег максима
               await upsertBotMessage(
                 telegramUserId, chatId,
                 formatAccountDetailText(detail, roles),
-                buildAccountActionsKeyboard(blCmd.accountId, roles, detail.child_count > 0),
+                buildAccountActionsKeyboard(blCmd.accountId, roles, detail.parent_account_id === null),
               );
             }
 
@@ -3258,7 +3258,7 @@ Midas создан, чтобы сделать учет денег максима
                   await upsertBotMessage(
                     telegramUserId, chatId,
                     `✅ Валюта изменена на <b>${escapeHtml(blCmd.code)}</b>.\n\n` + formatAccountDetailText(detail, roles),
-                    buildAccountActionsKeyboard(state.accountId, roles, detail.child_count > 0),
+                    buildAccountActionsKeyboard(state.accountId, roles, detail.parent_account_id === null),
                   );
                 }
 
@@ -3286,7 +3286,7 @@ Midas создан, чтобы сделать учет денег максима
                   await upsertBotMessage(
                     telegramUserId, chatId,
                     prefix + formatAccountDetailText(detail, roles),
-                    buildAccountActionsKeyboard(state.accountId, roles, /* hasChildren */ true),
+                    buildAccountActionsKeyboard(state.accountId, roles, detail.parent_account_id === null),
                   );
                 }
               }
@@ -3341,7 +3341,7 @@ Midas создан, чтобы сделать учет денег максима
                 await upsertBotMessage(
                   telegramUserId, chatId,
                   formatAccountDetailText(detail, roles),
-                  buildAccountActionsKeyboard(blCmd.accountId, roles, detail.child_count > 0),
+                  buildAccountActionsKeyboard(blCmd.accountId, roles, detail.parent_account_id === null),
                 );
               }
               // Toast message based on new role
@@ -3662,7 +3662,7 @@ Midas создан, чтобы сделать учет денег максима
                 void upsertBotMessage(
                   telegramUserId, chatId,
                   `✅ Счёт переименован.\n\n` + formatAccountDetailText(detail, roles),
-                  buildAccountActionsKeyboard(blState.accountId, roles, detail.child_count > 0),
+                  buildAccountActionsKeyboard(blState.accountId, roles, detail.parent_account_id === null),
                 );
               }
             }
@@ -3689,7 +3689,7 @@ Midas создан, чтобы сделать учет денег максима
                 void upsertBotMessage(
                   telegramUserId, chatId,
                   `✅ Баланс обновлён.\n\n` + formatAccountDetailText(detail, roles),
-                  buildAccountActionsKeyboard(blState.accountId, roles, detail.child_count > 0),
+                  buildAccountActionsKeyboard(blState.accountId, roles, detail.parent_account_id === null),
                 );
               }
             }
@@ -3713,7 +3713,7 @@ Midas создан, чтобы сделать учет денег максима
               void upsertBotMessage(
                 telegramUserId, chatId,
                 `✅ Валюта изменена на <b>${escapeHtml(code)}</b>.\n\n` + formatAccountDetailText(detail, roles),
-                buildAccountActionsKeyboard(blState.accountId, roles, detail.child_count > 0),
+                buildAccountActionsKeyboard(blState.accountId, roles, detail.parent_account_id === null),
               );
             }
           }
