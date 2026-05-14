@@ -141,6 +141,53 @@ function buildNonsenseKeyboard(): object {
 }
 
 // ─────────────────────────────────────────────────────────────
+// Currency-aware picker filtering — Phase 2.5
+// Mirrors account.service.ts logic for worker-side pickers.
+// ─────────────────────────────────────────────────────────────
+
+/** Stablecoins: never auto-convert — exact match only in picker */
+const PICKER_STABLECOINS = new Set([
+  'USDT', 'USDC', 'DAI', 'BUSD', 'TUSD', 'USDP', 'FDUSD', 'PYUSD', 'USDS', 'GUSD',
+]);
+
+/** Well-known crypto codes (non-stablecoin) — exact match only */
+const PICKER_KNOWN_CRYPTOS = new Set([
+  'BTC', 'ETH', 'BNB', 'SOL', 'ADA', 'XRP', 'DOGE', 'DOT', 'AVAX', 'MATIC',
+  'LINK', 'LTC', 'TRX', 'XMR', 'ETC', 'XLM', 'ATOM', 'FIL', 'NEAR', 'APT',
+  'ARB', 'OP', 'INJ', 'TON', 'NOT', 'DOGS', 'HMSTR', 'CATI',
+]);
+
+function classifyPickerCcy(code: string): 'fiat' | 'stablecoin' | 'crypto' {
+  const upper = code.toUpperCase();
+  if (PICKER_STABLECOINS.has(upper)) return 'stablecoin';
+  if (PICKER_KNOWN_CRYPTOS.has(upper)) return 'crypto';
+  // Pure alpha 2-5 chars → fiat (covers ISO 4217 codes not in the crypto list above)
+  return /^[A-Z]{2,5}$/.test(upper) ? 'fiat' : 'crypto';
+}
+
+/**
+ * Filter picker accounts by transaction currency.
+ *   - fiat tx: exact-currency accounts first, then other fiat (no stablecoins/crypto)
+ *   - stablecoin/crypto tx: exact match only — cross-asset auto-conversion never occurs
+ */
+function filterPickerAccounts(
+  accounts: WorkspaceAccountEntry[],
+  txCurrency: string,
+): WorkspaceAccountEntry[] {
+  const txCur = txCurrency.toUpperCase();
+  const txClass = classifyPickerCcy(txCur);
+  if (txClass === 'fiat') {
+    const exact = accounts.filter((a) => a.currency.toUpperCase() === txCur);
+    const other = accounts.filter(
+      (a) => a.currency.toUpperCase() !== txCur && classifyPickerCcy(a.currency) === 'fiat',
+    );
+    return [...exact, ...other];
+  }
+  // Stablecoin or crypto: exact match only
+  return accounts.filter((a) => a.currency.toUpperCase() === txCur);
+}
+
+// ─────────────────────────────────────────────────────────────
 // fetchWorkspaceCategories — Phase 1.32
 // ─────────────────────────────────────────────────────────────
 
@@ -292,9 +339,14 @@ async function processAiParse(job: Job<AiParseJobPayload>): Promise<void> {
 
       if (!pendingDraft.accountId) {
         // Draft has no account — user was looking at account picker. Restore it.
+        // Phase 2.5: apply same currency-aware filtering as the initial picker.
         let pickerAccountsGate: WorkspaceAccountEntry[] = [];
         try {
-          pickerAccountsGate = await getWorkspaceAccountsForPicker(workspaceId);
+          const allGateAccounts = await getWorkspaceAccountsForPicker(workspaceId);
+          const gateCur = pendingDraft.parsedCurrency ?? null;
+          pickerAccountsGate = gateCur
+            ? filterPickerAccounts(allGateAccounts, gateCur)
+            : allGateAccounts;
         } catch {
           pickerAccountsGate = [];
         }
@@ -568,10 +620,14 @@ async function processAiParse(job: Job<AiParseJobPayload>): Promise<void> {
       }
     } else {
       // No account_hint from AI — show account picker if workspace has accounts.
-      // Phase 2.4 PR17: always ask user to link an account before confirming.
+      // Phase 2.5: filtered by tx currency (stablecoin/crypto → exact only; fiat → fiat pool).
       let pickerAccounts: WorkspaceAccountEntry[] = [];
       try {
-        pickerAccounts = await getWorkspaceAccountsForPicker(workspaceId);
+        const allPickerAccounts = await getWorkspaceAccountsForPicker(workspaceId);
+        const txCur = aiData?.currency ?? null;
+        pickerAccounts = txCur
+          ? filterPickerAccounts(allPickerAccounts, txCur)
+          : allPickerAccounts;
       } catch {
         pickerAccounts = [];
       }
