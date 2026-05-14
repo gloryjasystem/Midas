@@ -2388,9 +2388,10 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
 
         try {
           if (cmd.cmd === 'cancel') {
-            // Remove keyboard from the message
+            // Phase 2.9+: Silent close — just delete the nav message, no "закрыто" text sent
             if (messageId) {
-              void editMessageText(chatId, messageId, '⚙️ Настройки закрыты.', EMPTY_KEYBOARD);
+              void deleteMessage(chatId, messageId);
+              void clearNavMessageId(telegramUserId, chatId);
             }
           } else if (cmd.cmd === 'menu' || cmd.cmd === 'grouppicker' || cmd.cmd === 'back') {
             if (cmd.cmd === 'menu' || cmd.cmd === 'back') {
@@ -3283,11 +3284,12 @@ Midas создан, чтобы сделать учет денег максима
             }
 
           } else if (blCmd.cmd === 'close') {
-            // Clean close of balance screen - delete message
+            // Phase 2.9+: Clean close of balance screen — delete message + clear nav pointer
             const msgId = cq.message ? String(cq.message.message_id) : null;
             if (msgId) {
               const { deleteMessage } = await import('../services/telegram-api.js');
               void deleteMessage(chatId, msgId);
+              void clearNavMessageId(telegramUserId, chatId);
             }
           }
         } catch (err: unknown) {
