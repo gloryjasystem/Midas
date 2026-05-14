@@ -1535,6 +1535,8 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
             } else {
               // Link account to draft, then re-render preview with account row + xfx button.
               await setDraftAccountId(iaResolved.workspaceId, iaResolved.userId, iaCmd.draftId, pickedAcct.id);
+              // Phase 2.10+: Clear gate_sent — user resolved the picker, normal text flow resumes.
+              void redisConnection.del(`midas:gate_sent:${telegramUserId}:${chatId}`).catch(() => {});
               if (iaMsgId) {
                 const previewRes = await confirmPreviewFull(iaResolved.workspaceId, iaResolved.userId, iaCmd.draftId);
                 void editMessageText(chatId, iaMsgId, previewRes.text, confirmKbForDraft(iaCmd.draftId, previewRes));
@@ -5435,13 +5437,24 @@ Midas создан, чтобы сделать учет денег максима
     // Phase 2.10: Guard — if amId points to a confirmed success card, do NOT delete it.
     // midas:success_card:{msgId} is set by notifications.worker when isSuccessCard === true.
     // This prevents the settled "✅ Записано" card from being wiped when the user types a new tx.
+    //
+    // Phase 2.10+: Gate guard — if midas:gate_sent: is active, the user is in the middle of
+    // resolving a pending draft (gate message with account picker is visible in chat).
+    // Deleting it on each new text input would cause the "freeze" bug:
+    //   TX2 → picker deleted → gate sends new card → TX3 → gate card deleted → gate silently
+    //   ignores (gate_sent set) → user sees nothing. Fix: keep the gate card alive.
+    const gateSentActive = await redisConnection.exists(
+      `midas:gate_sent:${telegramUserId}:${chatId}`,
+    ).catch(() => 0);
+
     const amId = await getActiveMessageId(telegramUserId, chatId);
     if (amId) {
       const isConfirmedCard = await redisConnection.exists(`midas:success_card:${amId}`).catch(() => 0);
-      if (!isConfirmedCard) {
+      if (!isConfirmedCard && !gateSentActive) {
         void deleteMessage(chatId, amId);
+        void clearActiveMessageId(telegramUserId, chatId);
       }
-      void clearActiveMessageId(telegramUserId, chatId);
+      // If gateSentActive or isConfirmedCard: preserve message + midas:am: pointer intact.
     }
 
     // Also clean up the explicit empty_tx_msg key just in case

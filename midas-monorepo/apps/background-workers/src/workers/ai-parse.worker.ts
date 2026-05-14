@@ -284,23 +284,57 @@ async function processAiParse(job: Job<AiParseJobPayload>): Promise<void> {
         gateAlert: '⚠️ <b>Новая запись отклонена.</b>\nЗавершите эту транзакцию, чтобы продолжить.',
       });
 
-      if (pendingDraft.previewMessageId && pendingDraft.previewChatId) {
-        // Edit the existing preview card: alert header + summary + keyboard stays
-        const gateEditId = ulid();
-        await notificationsQueue.add(
-          QUEUE_NAMES.NOTIFICATIONS,
-          {
-            alertId: gateEditId,
-            workspaceId,
-            chatId: pendingDraft.previewChatId,
-            draftId: pendingDraft.draftId,
-            message: gateMessageText,
-            activeMessageId: pendingDraft.previewMessageId,
-            inlineKeyboardJson: JSON.stringify(buildConfirmKeyboard(pendingDraft.draftId, accountForKb, xfxForKb)),
-          },
-          { jobId: IdempotencyKeyBuilder.notification(workspaceId, gateEditId) },
-        );
+      // Phase 2.10+: Choose the right keyboard for the gate message.
+      // If no account was selected yet (user was on account picker), rebuild the picker.
+      // If account is already linked, show confirm keyboard.
+      let gateInlineKeyboard: object;
+      let gateFinalMessage = gateMessageText;
+
+      if (!pendingDraft.accountId) {
+        // Draft has no account — user was looking at account picker. Restore it.
+        let pickerAccountsGate: WorkspaceAccountEntry[] = [];
+        try {
+          pickerAccountsGate = await getWorkspaceAccountsForPicker(workspaceId);
+        } catch {
+          pickerAccountsGate = [];
+        }
+        if (pickerAccountsGate.length > 0) {
+          const intentGate = pendingDraft.parsedIntent;
+          const pickerHeaderGate = (intentGate === 'income' || intentGate === 'debt_received')
+            ? '\uD83C\uDFE6 <b>\u041D\u0430 \u043A\u0430\u043A\u043E\u0439 \u0441\u0447\u0451\u0442 \u0437\u0430\u0447\u0438\u0441\u043B\u0438\u0442\u044C?</b>'
+            : '\uD83C\uDFE6 <b>\u0421 \u043A\u0430\u043A\u043E\u0433\u043e \u0441\u0447\u0451\u0442\u0430 \u0441\u043F\u0438\u0441\u0430\u0442\u044C?</b>';
+          const pickerRowsGate = pickerAccountsGate.slice(0, 8).map((acc) => {
+            const balDisplay = acc.balance.replace(/\.?0+$/, '') || '0';
+            return [{ text: `\uD83C\uDFE6 ${acc.name} \u00B7 ${balDisplay} ${acc.currency}`, callback_data: `ia:pk:${acc.id}:${pendingDraft.draftId}` }];
+          });
+          pickerRowsGate.push([{ text: '\u2795 \u0421\u043E\u0437\u0434\u0430\u0442\u044C \u0441\u0447\u0451\u0442', callback_data: `ia:newac:${pendingDraft.draftId}` }]);
+          pickerRowsGate.push([{ text: '\u2716\uFE0F \u041E\u0442\u043C\u0435\u043D\u0430', callback_data: `ia:cancel:${pendingDraft.draftId}` }]);
+          gateInlineKeyboard = { inline_keyboard: pickerRowsGate };
+          gateFinalMessage = gateMessageText + '\n\n' + pickerHeaderGate;
+        } else {
+          gateInlineKeyboard = buildConfirmKeyboard(pendingDraft.draftId, null, null);
+        }
+      } else {
+        gateInlineKeyboard = buildConfirmKeyboard(pendingDraft.draftId, accountForKb, xfxForKb);
       }
+
+      // Send gate notification: edit-in-place if previewMessageId known, else send new.
+      // telegramUserId included so notifications.worker updates midas:am: pointer.
+      const gateEditId = ulid();
+      await notificationsQueue.add(
+        QUEUE_NAMES.NOTIFICATIONS,
+        {
+          alertId: gateEditId,
+          workspaceId,
+          chatId: pendingDraft.previewChatId ?? chatId,
+          draftId: pendingDraft.draftId,
+          telegramUserId,
+          message: gateFinalMessage,
+          activeMessageId: pendingDraft.previewMessageId ?? undefined,
+          inlineKeyboardJson: JSON.stringify(gateInlineKeyboard),
+        },
+        { jobId: IdempotencyKeyBuilder.notification(workspaceId, gateEditId) },
+      );
 
       await redisConnection.set(gateSentKey, '1', 'EX', 3600);
     }
