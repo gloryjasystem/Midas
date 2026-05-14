@@ -251,6 +251,9 @@ async function processConfirmation(job: Job<CallbackConfirmJobPayload>): Promise
       // approve → "✅ Записано"  |  reject → "❌ Отменено"
       activeMessageId: previewMsgId,
       // No draftId in result notification (user already confirmed)
+      // Phase 2.10: confirmed success cards must NOT update midas:am: so the next
+      // upsertBotMessage (new tx draft) sends a NEW message instead of editing the card.
+      isSuccessCard: result.outcome === 'approved',
     },
     {
       jobId: IdempotencyKeyBuilder.notification(workspaceId, alertId),

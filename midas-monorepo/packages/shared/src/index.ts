@@ -120,6 +120,14 @@ export interface NotificationJobPayload {
    * deletes the old clarification card so only the preview card remains in chat.
    */
   deleteMessageId?: string;
+  /**
+   * Phase 2.10: When true, the notifications worker will NOT update midas:am: after sending.
+   * Used for confirmed transaction success cards ("✅ Записано") — these are permanent floating
+   * records that must NOT be overwritten or deleted when the user types a new transaction.
+   * Without this flag, midas:am: would point to the success card, causing the next
+   * upsertBotMessage (new draft picker) to edit/delete the confirmed record in-place.
+   */
+  isSuccessCard?: boolean;
 }
 
 /**
