@@ -433,9 +433,6 @@ export function buildClarificationScreen(data: ClarificationScreenData): string 
       if (data.askAmountWithCurrency) {
         // Phase 1.38: combined prompt — no default currency set
         lines.push('Напиши сумму и валюту:');
-        lines.push('<blockquote>1000 USD · 500 руб · 200 USDT · 50 евро</blockquote>');
-        lines.push('');
-        lines.push('<blockquote>💡 Чтобы не указывать каждый раз — установи её в ⚙️ Настройках</blockquote>');
       } else {
         lines.push('Сколько потратил? Отправь сумму:');
       }
@@ -451,7 +448,6 @@ export function buildNonsenseScreen(): string {
     '🤔 <b>Не понял</b>',
     '',
     'Укажи сумму и валюту:',
-    'кофе 150 UAH · займ 2000 USDT · зарплата 800 USD',
   ].join('\n');
 }
 
