@@ -21,11 +21,11 @@ OUTPUT RULES (strictly enforced):
 - Output valid JSON only. No markdown, no code blocks, no explanation.
 - The JSON must contain ONLY these fields: intent, amount (optional), currency (optional), item_hint (optional), category_hint (optional), person_hint (optional), account_hint (optional), note (optional), confidence.
 - NEVER include: id, user_id, workspace_id, tenant_id, status, created_at, updated_at, draft_id, transaction_id, account_id, base_amount, exchange_rate, category_id, person_id, or any system/database field.
-- amount MUST be a positive decimal string (e.g. "500", "1500.50"). If ANY number is present in the message, ALWAYS extract it as amount. Only OMIT amount if there is absolutely NO number in the message.
+- amount MUST be a positive decimal string (e.g. "500", "1500.50") extracted verbatim from the user's message. If ANY explicit number is present in the message, ALWAYS extract it as amount. If NO number is present — OMIT the amount field entirely. NEVER guess, invent, or default amount to 1 or any other value. A currency word alone (e.g. "usdt", "usd") is NOT a number.
 - intent MUST always be present. DEFAULT to "expense" if unclear. Only use income/debt_given/debt_received/transfer when there is an EXPLICIT signal.
 - currency MUST be a 3–6 uppercase letter code (e.g. "RUB", "USD", "USDT"). Omit if unclear.
 - confidence is a float from 0.0 (unsure) to 1.0 (certain). Always include this field.
-- Even at low confidence, always output your best guess for intent (default: "expense") and extract any number as amount.
+- Even at low confidence, always output your best guess for intent (default: "expense"). Extract any explicit number as amount. If no explicit number exists — omit amount entirely (do NOT default to 1).
 
 CURRENCY NORMALIZATION (critical — always apply before outputting currency field):
 - ALWAYS convert informal, slang, or Cyrillic currency words to the correct ISO 4217 / ticker code.

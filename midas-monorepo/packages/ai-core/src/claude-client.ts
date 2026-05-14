@@ -75,19 +75,39 @@ function getClient(): Anthropic {
  * Phase 1.38 professional UX — only amount (when truly absent) blocks the flow.
  *   - intent: NEVER blocking. AI defaults to "expense"; backend hardcodes fallback.
  *   - category: NEVER blocking. Defaults to "Другое" silently.
- *   - amount: blocking ONLY when rawText contains NO number at all.
+ *   - amount: blocking when rawText has NO number at all, OR when AI
+ *     hallucinated the default value "1" without an explicit "1" in user text.
+ *
+ * Phase 2.6: Secondary guard for AI hallucination of amount="1".
+ *   Claude sometimes returns amount:"1" as a guess when no number is present
+ *   (e.g. "купил недвижку usdt" → Claude outputs {"amount":"1","currency":"USDT"}).
+ *   We detect this by checking that the raw text contains no standalone digit 1
+ *   (word-boundary regex \b1\b). If "1" is NOT in the text → amount is missing.
  *
  * SEC-01: only looks at data fields — never produces system field names.
  */
 function computeMissingFields(data: AiOutput, rawText?: string): MissingField[] {
   const missing: MissingField[] = [];
+
   if (!data.amount) {
+    // Primary check: AI omitted amount entirely.
     // Only block if there's genuinely no number in the raw message.
     // If user wrote "Августи 200", AI should have extracted it, but even if not —
     // we don't ask again; the number is right there.
     const hasNumber = rawText ? /\d/.test(rawText) : false;
     if (!hasNumber) missing.push('amount');
+  } else if (data.amount === '1' && rawText) {
+    // Secondary check (Phase 2.6): AI returned amount="1" but user text has
+    // no standalone "1". This is a Claude hallucination/default.
+    // \b1\b matches only isolated "1" — not "10", "21", "1000", etc.
+    // Examples:
+    //   "купил недвижку usdt"  → no \b1\b → hallucinated → push 'amount'
+    //   "купил 1 кофе"         → \b1\b found → user meant 1 → do NOT push
+    //   "gas fee 1 USDT"       → \b1\b found → user meant 1 → do NOT push
+    const hasExplicitOne = /\b1\b/.test(rawText);
+    if (!hasExplicitOne) missing.push('amount');
   }
+
   // intent: never added — AI is instructed to always return it.
   // category: never added — defaults to 'Другое' silently.
   return missing;
