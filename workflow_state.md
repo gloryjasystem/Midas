@@ -1,7 +1,7 @@
 # WORKFLOW_STATE.MD — Диспетчер задач ИИ-агента Midas
 
 > **Тип:** MUTABLE — кратковременная память агента. Обновляется на каждом шаге работы.
-> **Обновлён:** 2026-05-14 22:13 (UTC+3)
+> **Обновлён:** 2026-05-15 02:27 (UTC+3)
 
 ---
 
@@ -9,13 +9,13 @@
 
 | Параметр | Значение |
 |---|---|
-| **PHASE** | `Phase 2.5+ Hot-Fixes — Transaction Parsing & UX Regression` |
-| **STEP** | `All fixes deployed ✅ (commit ccaec87 pushed to main)` |
-| **AGENT STATUS** | `DONE. (1) "юздт" добавлен как алиас USDT в prompts.ts — Claude теперь распознаёт сленговое написание. (2) Добавлены 2 примера в промпт ("купил квартиру юздт", "купил недвижку usdt") — Claude возвращает item_hint при отсутствии amount. (3) Кнопка "✖️ Отмена" в buildAccountPickerV2Keyboard изменена с ia:pk:back → ia:cancel — нажатие закрывает карточку целиком вместо возврата к превью.` |
+| **PHASE** | `Balance Redesign Phase A ✅ + Phase B-1 ✅ — Hierarchical Balance UI` |
+| **STEP** | `Б-1 DONE (migration parent_account_id + sub_type applied, commit 75156b9). Ready for Б-2.` |
+| **AGENT STATUS** | `Phase A (visuals): classifyAccountGroup + GROUP_EMOJI heuristics в balance-keyboard.service.ts; секционированный текст в balance.service.ts; удалён CURRENCY_TOTALS_SQL. Phase B-1 (schema): migration 1779800000000 применена — parent_account_id VARCHAR(26) FK + sub_type TEXT DEFAULT 'general' + idx_account_sources_parent. 100% аудит транзакций: формула initial_balance+income−expense верна, FK-целостность: 31/31, новые колонки с безопасными дефолтами, transaction INSERT не затронут.` |
 | **DEPLOYMENT** | `Railway (spirited-happiness project)` — `Midas` ✅ Online · `background-workers` ✅ Online · `Postgres` ✅ · `Redis` ✅. Health: https://midas-production-f4f1.up.railway.app/health → {"status":"ok"} |
-| **LAST COMPLETED** | `Phase 2.5+ Hot-Fixes: юздт alias + промпт-примеры + Отмена в пикере → ia:cancel. Commit ccaec87 pushed to main.` |
+| **LAST COMPLETED** | `Phase Balance-B-1: migration 1779800000000_account-parent-and-subtype.js applied on Railway Postgres. parent_account_id + sub_type live. Commit 75156b9.` |
 | **BLOCKER** | None. |
-| **NEXT ACTION** | Phase 3.0 — DB Migration: добавить колонки `account_type`, `wallet_subtype`, `provider_key` в `account_sources`. Заполнять при создании счёта. Использовать для 100% точной валидации вместо эвристик. (см. Раздел 16 — Active Roadmap) |
+| **NEXT ACTION** | Phase Balance-B-2 — обновить PER_ACCOUNT_SQL в balance.service.ts (добавить parent_account_id в SELECT), реализовать лесенку ├/└ в getBalanceData(), обновить buildBalanceListKeyboard для агрегации дочерних счетов. |
 
 
 ---
@@ -80,6 +80,8 @@
 | 2.9 Nav Buttons Never Delete Tx Records | ✅ DEPLOYED | `active-message.service.ts` (NEW `sendNavMessage()` — always sends new message), `webhook.route.ts` (4 NAV_BTN_* handlers: NAV_BTN_BALANCE/REPORT/SETTINGS/TRANSACTIONS → `sendNavMessage`). Commit `1477f55`. |
 | 2.9+ Smart Nav Message (midas:nav: key) | ✅ DEPLOYED | `active-message.service.ts` (полная переработка `sendNavMessage()` — edit-first через `midas:nav:`, не трогает `midas:am:`; новые функции `getNavMessageId`, `setNavMessageId`, `clearNavMessageId`). `webhook.route.ts` (импорт 2 новых функций; AI-parse path — cleanup `midas:nav:` перед стандартным `midas:am:` cleanup; `st:cancel` — silently deletes вместо редактирования; `bl:close` — добавлен `clearNavMessageId`). Commits `4baac9c` → `004966f`. |
 | 2.10 Transaction UI Persistence & Navigation Fixes | ✅ DEPLOYED | **Три независимых фикса:** (1) `notifications.worker.ts` + `confirmation.worker.ts` + `shared/index.ts` — `isSuccessCard?: boolean` флаг; при approve DEL `midas:am:` вместо SET (commit `df15a01`). (2) `transaction-keyboard.service.ts` — `parseTxCallback`: теперь читает `parts[4]` как `from` для `tx:d:ask` и `tx:d:yes` — контекст `:s` передаётся через весь delete flow; кнопка «Закрыть» в tx:view корректно возвращает на success card (commit `8894b92`). (3) `notifications.worker.ts` — запись sentinel `midas:success_card:{msgId}` (TTL 30 дней) при `isSuccessCard=true`; `webhook.route.ts` step-7 — проверяет `EXISTS midas:success_card:{amId}` перед `deleteMessage` — двойная блокировка удаления (commit `b869c03`). |
+| Balance Phase A — Grouped UI | ✅ DEPLOYED | `balance-keyboard.service.ts` (NEW: `classifyAccountGroup`, `GROUP_EMOJI`, `GROUP_ORDER`, `GroupType`, `buildBalanceListKeyboard` с emoji-префиксами по группам, `export formatBalanceShort`). `balance.service.ts` (MODIFY: секционированный текст 🏦/🪙/👛/💵/📁, удалён `CURRENCY_TOTALS_SQL`). Commit `4a1748c` pushed to main. Railway auto-deploy ✅. |
+| Balance Phase B-1 — DB Schema | ✅ DEPLOYED | `packages/database/migrations/1779800000000_account-parent-and-subtype.js` (NEW). `account_sources`: `parent_account_id VARCHAR(26) FK REFERENCES account_sources(id) ON DELETE CASCADE` (NULL=top-level), `sub_type TEXT NOT NULL DEFAULT 'general'` CHECK constraint. Partial index `idx_account_sources_parent`. Applied on Railway live DB via `node-pg-migrate up --check-order false`. Commit `75156b9`. 100% аудит: formula ✅ FK 31/31 ✅ defaults safe ✅ |
 | 2.10+ Gate Fix — Frozen UI on Concurrent Input | ✅ DEPLOYED | **Проблема:** пользователь пишет TX1 (пикер счёта открыт), TX2 → step-7 удаляет пикер до того как gate установит `gate_sent` → gate присылает новую карточку. TX3 → step-7 снова удаляет gate-карточку (gate_sent НЕ проверялся) → ai-parse молчит (gate_sent установлен) → UI зависает. **Фикс 1:** `webhook.route.ts` step-7 строки 5446–5458 — `EXISTS midas:gate_sent:` перед deleteMessage; если активен — карточка и `midas:am:` не трогаются. **Фикс 2:** `webhook.route.ts` ia:pk: строка 1539 — `DEL midas:gate_sent:` после выбора счёта → нормальный flow восстанавливается. **Фикс 3:** `ai-parse.worker.ts` — gate реконструирует полный пикер счетов когда `accountId = null`. **Жизненный цикл gate_sent:** SET в ai-parse → DEL при ia:cancel (строка 1432, до фикса) / ia:pk: (строка 1539, НОВОЕ) / approve/reject в confirmation.worker (строка 268, до фикса) / TTL 1h. Commit `8d25ec1`. tsc 0 ошибок. Railway ✅ оба сервиса Online. |
 
 ---
@@ -223,72 +225,78 @@ Replace the flat "Счетов пока нет." empty-state with a guided inter
 
 ---
 
-## 8. ФАЙЛЫ ДЛЯ ЧТЕНИЯ В НОВОМ ЧАТЕ (Phase 3.0 context)
+## 8. ФАЙЛЫ ДЛЯ ЧТЕНИЯ В НОВОМ ЧАТЕ (Phase Balance-B-2 context)
 
-**⚡ ТЕКУЩИЙ КОНТЕКСТ: Phase 2.5+ Hot-Fixes ЗАВЕРШЕНЫ. Следующая — Phase 3.0 (DB Schema: account_type/wallet_subtype).**
+**⚡ ТЕКУЩИЙ КОНТЕКСТ: Balance Redesign Phase A ✅ + B-1 ✅. Следующая — Phase B-2 (лесенка в getBalanceData + агрегация дочерних счетов).**
 
 **ОБЯЗАТЕЛЬНО прочитать в новом чате:**
 ```
-apps/telegram-bot/src/routes/webhook.route.ts              ← ia:cancel handler, sendAndStorePreview, parsed_currency threading
-apps/telegram-bot/src/services/account-inline-keyboard.service.ts ← buildAccountPickerV2Keyboard (Отмена → ia:cancel)
-apps/telegram-bot/src/services/account.service.ts          ← getWorkspaceAccountsWithBalances(parsedCurrency?)
-apps/background-workers/src/workers/ai-parse.worker.ts     ← filterPickerAccounts(), initial + gate picker
-packages/ai-core/src/prompts.ts                            ← USDT aliases (юздт), partial examples (купил X юздт)
-packages/ai-core/src/claude-client.ts                      ← postProcessIntentRecovery, early-exit guard
+apps/telegram-bot/src/services/balance-keyboard.service.ts   ← Группировка, buildBalanceListKeyboard
+apps/telegram-bot/src/services/balance.service.ts            ← PER_ACCOUNT_SQL, getBalanceData
+packages/database/migrations/1779800000000_account-parent-and-subtype.js ← Схема B-1
 ```
 
-**Тесты (запустить в начале для верификации baseline):**
-```
-node apps/telegram-bot/smoke-test-master-roadmap.mjs   → 76/76 ✅
-node packages/database/smoke-test-lazy-default.mjs     → 39/39 ✅
-npx tsc --noEmit -p apps/telegram-bot/tsconfig.json   → 0 ошибок
-npx tsc --noEmit -p apps/background-workers/tsconfig.json → 0 ошибок
-```
-
-**НЕ ЧИТАТЬ (не нужны для Phase 3.0):**
+**НЕ ЧИТАТЬ (не нужны для Phase B-2):**
 ```
 apps/telegram-bot/src/services/report.service.ts
 apps/telegram-bot/src/services/transaction-list.service.ts
-apps/telegram-bot/src/services/balance.service.ts
-packages/database/smoke-test-phase*.mjs  (кроме текущего)
+apps/background-workers/*
+packages/database/smoke-test-phase*.mjs
 ```
+
+**Состояние БД (проверено SQL-аудитом):**
+- `parent_account_id` — все NULL (все счета top-level, иерархия ещё не заполнена)
+- `sub_type` — все `'general'` (Phase A использует эвристику `classifyAccountGroup`)
+- 31 транзакция, формула баланса проверена (initial_balance + income − expense)
 
 ---
 
 ## 9. ПРОМПТ ДЛЯ СТАРТА НОВОГО ЧАТА
 
 ```
-⚡ Фазы 1.1–2.5+ Hot-Fixes — ЗАВЕРШЕНЫ И ЗАДЕПЛОЕНЫ (последний commit: ccaec87).
-Следующая — Phase 3.0: DB Schema account_type/wallet_subtype/provider_key.
+⚡ Balance Redesign — Phase A ✅ + Phase B-1 ✅ ЗАВЕРШЕНЫ. Следующая — Phase B-2.
 
-КОНТЕКСТ ПРОЕКТА:
-Midas DEPLOYED на Railway (project: spirited-happiness, env: production). Стабилен.
-MCP servers: Railway, GitHub, Postgres, Filesystem — все активны.
-Auto-deploy: push to `main` → GitHub → Railway строит Midas + background-workers.
+ПРОЕКТ:
+Midas Telegram Bot. Railway (project: spirited-happiness). MCP: Railway, GitHub, Postgres, Filesystem.
+Auto-deploy: push to main → GitHub → Railway строит Midas + background-workers.
 
-ПОСЛЕДНИЕ ИЗМЕНЕНИЯ (commit ccaec87, 2026-05-14):
-1. packages/ai-core/src/prompts.ts — добавлен "юздт" в алиасы USDT + 2 промпт-примера
-   ("купил квартиру юздт" → item_hint:квартира, currency:USDT, no amount)
-2. apps/telegram-bot/src/services/account-inline-keyboard.service.ts — кнопка
-   "✖️ Отмена" в buildAccountPickerV2Keyboard: ia:pk:back → ia:cancel
-   (теперь нажатие закрывает карточку, а не возвращает к превью)
+ЧТО УЖЕ СДЕЛАНО:
 
-ЧТО НУЖНО РЕАЛИЗОВАТЬ (Phase 3.0 — DB Schema):
-Миграция БД: добавить колонки account_type, wallet_subtype, provider_key в account_sources.
-Заполнять при создании счёта из AccountOnboardState.
-Использовать вместо эвристик в validateAccountCurrency() — 100% точная валидация.
-(Полное описание в Разделе 16 workflow_state.md)
+Phase A (commit 4a1748c, задеплоен):
+- balance-keyboard.service.ts: classifyAccountGroup(эвристика по name/currency),
+  GROUP_EMOJI (🏦/🪙/👛/💵/📁), buildBalanceListKeyboard с группами, export formatBalanceShort
+- balance.service.ts: секционированный текст getBalanceData(), удалён CURRENCY_TOTALS_SQL
+
+Phase B-1 (commit 75156b9, применено на live Railway Postgres):
+- migration 1779800000000_account-parent-and-subtype.js:
+  parent_account_id VARCHAR(26) FK (NULL=top-level счёт)
+  sub_type TEXT NOT NULL DEFAULT 'general' CHECK(card|cash|crypto_exchange|crypto_wallet|bank_account|general)
+  idx_account_sources_parent (partial index)
+
+100% АУДИТ ТРАНЗАКЦИЙ:
+- Формула initial_balance + income − expense — верна (проверено на реальных данных)
+- FK-целостность: 31/31 транзакций связаны с существующими счетами
+- draft-confirmation.service.ts (transaction INSERT) — не затронут нашими изменениями
+
+ЧТО НУЖНО СДЕЛАТь (Фаза B-2):
+
+1. balance.service.ts — обновить PER_ACCOUNT_SQL:
+   - Добавить parent_account_id в SELECT
+   - Строить дерево в getBalanceData(): parent счета + несколько children
+   - Оформить отображение с лесенкой: ├ OKX USDT · 32 601 / └ OKX BTC · 0.5
+
+2. balance-keyboard.service.ts — обновить buildBalanceListKeyboard:
+   - Parent-счёт: показывать агрегацию ("количество валют")
+   - Child-счёт: отступ + другие эмодзи
+   - БОНУС: кнопка "➕ Добавить валюту" (bl:ac:{parentId})
 
 КЛЮЧЕВЫЕ ПРАВИЛА:
 - Финансовая математика: ТОЛЬКО BigInt/NUMERIC, никаких float (SEC-02)
 - Все мутации через withTenantTransaction (SEC-03)
 - Не трогать project_config.md
+- Не менять draft-confirmation.service.ts — транзакции работают идеально
 
-ТЕСТЫ BASELINE (запустить в начале):
-`node apps/telegram-bot/smoke-test-master-roadmap.mjs`  → 76/76 ✅
-`node packages/database/smoke-test-lazy-default.mjs`    → 39/39 ✅
-`npx tsc --noEmit -p apps/telegram-bot/tsconfig.json`  → 0 ошибок
-`npx tsc --noEmit -p apps/background-workers/tsconfig.json` → 0 ошибок
+ОБЯЗАТЕЛЬНО прочитать workflow_state.md Раздел 16 (роадмап) и Фазу B-2 план.
 ```
 
 
@@ -437,6 +445,9 @@ Auto-deploy: push to `main` → GitHub → Railway строит Midas + backgrou
 | 2026-05-14 17:30 | **Phase 2.10+ Gate Fix — Frozen UI при параллельном вводе транзакций.** Проблема: TX1 открывает пикер счёта → TX2 (webhook step-7) удаляет пикер (gate_sent ещё не установлен) → ai-parse gate присылает новую карточку с пикером и устанавливает gate_sent → TX3 (webhook step-7) удаляет gate-карточку (gate_sent не проверялся!) → ai-parse молчит (gate_sent SET → silently ignore) → TX4, TX5... цикл: сообщение приходит, удаляется, ответа нет — **ЗАВИСОН**. **Fix 1 (webhook.route.ts строки 5446–5458):** `const gateSentActive = await redisConnection.exists('midas:gate_sent:...')`. Если активен — `deleteMessage` и `clearActiveMessageId` НЕ вызываются. Gate-карточка остаётся видимой при TX3, TX4... **Fix 2 (webhook.route.ts строка 1539, ia:pk: handler):** `redisConnection.del('midas:gate_sent:...')` после `setDraftAccountId` — нормальный flow восстанавливается сразу после выбора счёта. **Fix 3 (ai-parse.worker.ts):** Gate реконструирует полный пикер счетов (inline keyboard с кнопками счетов + ✖️ Отмена) когда `pendingDraft.accountId === null` — вместо пустой confirm-клавиатуры. **Жизненный цикл gate_sent:** SET ai-parse.worker (при gate) → DEL ia:cancel (строка 1432, до фикса) / ia:pk: (ДОБАВЛЕНО) / approve/reject confirmation.worker (строка 268, до фикса) / TTL auto 1h. Scope: 2 файла (webhook.route.ts, ai-parse.worker.ts) + утилита fix-stuck-draft.mjs. tsc 0 ошибок. git commit `8d25ec1`, push origin main ✅. Railway: Midas ✅ Online, background-workers ✅ Online. |
 | 2026-05-14 20:00 | **Phase 2.5+ — Currency-Aware Picker: Bot Layer (telegram-bot).** Проблема: в пикере счётов при USD-транзакции показывался USDT-счёт, хотя это стейблкоин и он не конвертируется в фиат. **Реализация (4 файла):** (1) `account-currency-validator.service.ts` — добавлена функция `isKnownCurrency(code)`: проверяет код по трём вайтлистам (FIAT_SET + STABLECOINS + CRYPTO_SET). Предотвращает создание фантомных валют типа «UDS» или «ЕВР». (2) `clarification.service.ts` — в `validateCurrencyCode()` добавлена ранняя проверка `!isKnownCurrency(upper)` → возврат `null` до записи в БД. (3) `account.service.ts` — `getWorkspaceAccountsWithBalances()` получает опциональный 4-й параметр `parsedCurrency?`. После SQL-запроса: если tx — фиат → exact-match сначала + остальные фиатные; если стейблкоин/крипто → только exact match. (4) `account-inline-keyboard.service.ts` — `getPickerScreenText(intent, parsedCurrency?)` добавляет контекстную подсказку; `getPickerEmptyText(parsedCurrency?)` — «Нет USDT-счетов» вместо общего сообщения. `webhook.route.ts` — пробрасывает `draft.parsed_currency` в 3 entry points (sendAndStorePreview, ia:delink, ia:showpicker). Первый деплой упал — TS6133 (ACCOUNT_PICKER_EMPTY_TEXT в импорте но не используется). Исправлено коммитом `04f7e81`. |
 | 2026-05-14 20:10 | **Phase 2.5+ — Currency-Aware Picker: Worker Layer (background-workers). Root Cause Fix.** Обнаружено: начальный пикер строится ПОЛНОСТЬЮ в `ai-parse.worker.ts` (background-workers), а не в `telegram-bot`. Изменения в `account.service.ts` (telegram-bot) на initial picker не влияют никак. **Реализация (`ai-parse.worker.ts`):** Добавлены локальные классификаторы: `PICKER_STABLECOINS` (10 записей), `PICKER_KNOWN_CRYPTOS` (27 записей), `classifyPickerCcy(code)`, `filterPickerAccounts(accounts, txCurrency)` — аналог логики `account.service.ts`. Применено в 2 местах: (A) **Initial picker** (строка ~620) — фильтрует по `aiData?.currency` (когда AI вернул currency, например «USDT»); (B) **Gate picker** (строка ~340) — фильтрует по `pendingDraft.parsedCurrency` (восстановление пикера при gate-блокировке). Итог фильтрации: `{USD tx}` → [USD-счета] + [другие фиатные]; `{USDT tx}` → [только USDT-счета]. tsc 0 ошибок (оба приложения). git commit `0085d8f`, push origin main ✅. Railway auto-deploy triggered. |
+| 2026-05-15 02:00 | **Balance Phase A — Grouped UI ЗАДЕПЛОЕН.** `balance-keyboard.service.ts` (MODIFY): `GroupType` union, `GROUP_EMOJI` map, `GROUP_ORDER` priority, `classifyAccountGroup(name, currency)` эвристика (Банки/Криптобиржи/Крипто-кошельки/Наличные/Прочее), `buildBalanceListKeyboard` с группировкой и emoji-префиксами, `export formatBalanceShort`. `balance.service.ts` (MODIFY): секционированный текст getBalanceData() с эмодзи групп, удалён CURRENCY_TOTALS_SQL. tsc 0 ошибок. Commit `4a1748c` push to main. Railway auto-deploy ✅. |
+| 2026-05-15 02:27 | **Balance Phase B-1 — DB Migration ПРИМЕНЕНА.** `packages/database/migrations/1779800000000_account-parent-and-subtype.js` (NEW): `parent_account_id VARCHAR(26) FK ON DELETE CASCADE`, `sub_type TEXT NOT NULL DEFAULT 'general'` CHECK constraint, `idx_account_sources_parent` (partial). Решена ESM-проблема `1779400000000` (exports → export const). Миграция применена `node-pg-migrate up --check-order false`. Аудит: FK 31/31 ✅, формула initial_balance+income−expense ✅, INSERT транзакций не затронут ✅. Commit `75156b9`. |
+| 2026-05-15 02:30 | **Обновлен workflow_state.md для Phase B-2 handoff.** Section 1 (status), Section 2 (фазы), Section 8 (файлы), Section 9 (промпт), Section 10 (история). Следующий шаг: Phase B-2 (PER_ACCOUNT_SQL + лесенка ├/└ + агрегация дочерних). |
 | 2026-05-14 22:00 | **Hotfix: кнопка "✖️ Отмена" в пикере счетов + "юздт" алиас USDT + промпт-примеры.** (1) `account-inline-keyboard.service.ts` (MODIFY) строка 381–383: кнопка `buildAccountPickerV2Keyboard` «✖️ Отмена» изменена с `ia:pk:back:{draftId}` → `ia:cancel:{draftId}`. До фикса: нажатие «Отмена» возвращало к карточке превью с кнопками [✏️ Изменить|✖️ Отмена]+[🏦 Выбрать счёт]. После фикса: `ia:cancel` handler редактирует сообщение → «❌ Отменено» без кнопок, ставит черновику статус `rejected`, чистит Redis. (2) `packages/ai-core/src/prompts.ts` — добавлен `"юздт"` в список алиасов USDT (строка 37): было `"юсдт", "тезер", "tether", "usdt"` → стало `"юсдт", "юздт", "тезер", "tether", "usdt"`. (3) `packages/ai-core/src/prompts.ts` — добавлены 2 примера в секцию `-- Partial (amount missing) --`: `"купил квартиру юздт"` → `{intent:expense,currency:USDT,item_hint:квартира,confidence:0.75}` и `"купил недвижку usdt"` → `{intent:expense,currency:USDT,item_hint:недвижимость,confidence:0.75}`. Цель: Claude теперь возвращает `item_hint` даже когда нет `amount`. tsc 0 ошибок. git commit `ccaec87`, push origin main ✅. Railway auto-deploy triggered. |
 | 2026-05-14 20:00 | **Phase 2.5+ — Currency-Aware Picker: Bot Layer (telegram-bot).** Проблема: в пикере счётов при USD-транзакции показывался USDT-счёт, хотя это стейблкоин и он не конвертируется в фиат. **Реализация (4 файла):** (1) `account-currency-validator.service.ts` — добавлена функция `isKnownCurrency(code)`: проверяет код по трём вайтлистам (FIAT_SET + STABLECOINS + CRYPTO_SET). Предотвращает создание фантомных валют типа «UDS» или «ЕВР». (2) `clarification.service.ts` — в `validateCurrencyCode()` добавлена ранняя проверка `!isKnownCurrency(upper)` → возврат `null` до записи в БД. (3) `account.service.ts` — `getWorkspaceAccountsWithBalances()` получает опциональный 4-й параметр `parsedCurrency?`. После SQL-запроса: если tx — фиат → exact-match сначала + остальные фиатные; если стейблкоин/крипто → только exact match. (4) `account-inline-keyboard.service.ts` — `getPickerScreenText(intent, parsedCurrency?)` добавляет контекстную подсказку; `getPickerEmptyText(parsedCurrency?)` — «Нет USDT-счетов» вместо общего сообщения. `webhook.route.ts` — пробрасывает `draft.parsed_currency` в 3 entry points (sendAndStorePreview, ia:delink, ia:showpicker). Первый деплой упал — TS6133 (ACCOUNT_PICKER_EMPTY_TEXT в импорте но не используется). Исправлено коммитом `04f7e81`. |
 | 2026-05-14 20:10 | **Phase 2.5+ — Currency-Aware Picker: Worker Layer (background-workers). Root Cause Fix.** Обнаружено: начальный пикер строится ПОЛНОСТЬЮ в `ai-parse.worker.ts` (background-workers), а не в `telegram-bot`. Изменения в `account.service.ts` (telegram-bot) на initial picker не влияют никак. **Реализация (`ai-parse.worker.ts`):** Добавлены локальные классификаторы: `PICKER_STABLECOINS` (10 записей), `PICKER_KNOWN_CRYPTOS` (27 записей), `classifyPickerCcy(code)`, `filterPickerAccounts(accounts, txCurrency)` — аналог логики `account.service.ts`. Применено в 2 местах: (A) **Initial picker** (строка ~620) — фильтрует по `aiData?.currency` (когда AI вернул currency, например «USDT»); (B) **Gate picker** (строка ~340) — фильтрует по `pendingDraft.parsedCurrency` (восстановление пикера при gate-блокировке). Итог фильтрации: `{USD tx}` → [USD-счета] + [другие фиатные]; `{USDT tx}` → [только USDT-счета]. tsc 0 ошибок (оба приложения). git commit `0085d8f`, push origin main ✅. Railway auto-deploy triggered. |
