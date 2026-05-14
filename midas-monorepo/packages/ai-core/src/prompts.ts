@@ -34,7 +34,7 @@ CURRENCY NORMALIZATION (critical — always apply before outputting currency fie
 - RUB aliases: "руб", "рублей", "рубль", "рубля", "рублёй", "ру", "rub", "ruble", "rubles", "₽" → "RUB"
 - EUR aliases: "евро", "euro", "eur", "€" → "EUR"
 - UAH aliases: "гривна", "гривен", "грн", "hryvnia", "uah", "₴" → "UAH"
-- USDT aliases: "юсдт", "тезер", "tether", "usdt" → "USDT"
+- USDT aliases: "юсдт", "юздт", "тезер", "tether", "usdt" → "USDT"
 - BTC aliases: "биток", "битков", "биткоин", "bitcoin", "btc" → "BTC"
 - ETH aliases: "эфир", "эфира", "эфиров", "ethereum", "eth" → "ETH"
 - GBP aliases: "фунт", "фунтов", "pound", "pounds", "gbp", "£" → "GBP"
@@ -304,6 +304,12 @@ Output: {"intent":"transfer","amount":"500","currency":"USDT","account_hint":"By
 -- Partial (amount missing) --
 User: "купил продукты"
 Output: {"intent":"expense","item_hint":"продукты","category_hint":"Продукты","confidence":0.8}
+
+User: "купил квартиру юздт"
+Output: {"intent":"expense","currency":"USDT","item_hint":"квартира","category_hint":"Жильё","confidence":0.75}
+
+User: "купил недвижку usdt"
+Output: {"intent":"expense","currency":"USDT","item_hint":"недвижимость","category_hint":"Жильё","confidence":0.75}
 
 User: "потратил 3000"
 Output: {"intent":"expense","amount":"3000","category_hint":"Другое","confidence":0.85}

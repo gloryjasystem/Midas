@@ -378,9 +378,10 @@ export function buildAccountPickerV2Keyboard(
   });
 
 
-  // Phase 2.5: "Создать счёт" → launches full onboarding (ia:newac) + "Отмена" → back to draft preview
+  // Phase 2.5: "Создать счёт" → launches full onboarding (ia:newac)
+  // "✖️ Отмена" → ia:cancel → rejects draft + deletes card (clean exit, no recovery)
   rows.push([{ text: '➕ Создать счёт', callback_data: `ia:newac:${draftId}` }]);
-  rows.push([{ text: '✖️ Отмена',        callback_data: `ia:pk:back:${draftId}` }]);
+  rows.push([{ text: '✖️ Отмена',        callback_data: `ia:cancel:${draftId}` }]);
 
   return { inline_keyboard: rows };
 }
