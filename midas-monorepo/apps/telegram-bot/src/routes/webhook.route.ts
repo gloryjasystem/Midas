@@ -158,6 +158,7 @@ import {
   buildCryptoCurrencyPage,           // Phase 2.2
   buildSkipBalanceKeyboard,          // Phase 2.2
   ACCOUNTS_EMPTY_TEXT,               // Phase 1.30
+  NEW_ACCOUNT_TEXT,                  // Phase 2.5
   START_WELCOME_TEXT,                // Phase 1.37-UX: new user welcome
   SETUP_COMPLETE_TEXT,               // Phase 1.37-UX: ReplyKeyboard activation message
   EXCHANGE_PICKER_TEXT,              // Phase 1.30
@@ -1656,7 +1657,7 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
             if (iaMsgId) {
               void editMessageText(
                 chatId, iaMsgId,
-                ACCOUNTS_EMPTY_TEXT,
+                NEW_ACCOUNT_TEXT,
                 buildStartOnboardKeyboardWithBack(iaCmd.draftId),
               );
               // Store msgId as activeMessageId — bal_input text handler will delete/edit this msg.
@@ -3141,7 +3142,7 @@ Midas создан, чтобы сделать учет денег максима
             // Redirect to account onboarding — show account type picker
             // Set a flag so that after creation, the user returns to balance
             await redisConnection.set(`bl:source:${telegramUserId}:${chatId}`, '1', 'EX', 300);
-            await upsertBotMessage(telegramUserId, chatId, ACCOUNTS_EMPTY_TEXT, buildAccountTypeKeyboard());
+            await upsertBotMessage(telegramUserId, chatId, NEW_ACCOUNT_TEXT, buildAccountTypeKeyboard());
 
           } else if (blCmd.cmd === 'back') {
             // Return to balance list

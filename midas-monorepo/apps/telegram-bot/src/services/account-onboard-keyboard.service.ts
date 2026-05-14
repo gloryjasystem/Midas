@@ -1418,6 +1418,11 @@ export const ACCOUNTS_EMPTY_TEXT =
   'карта, кошелёк, биржа, наличные.\n\n' +
   'Создай первый счёт:';
 
+/** Text for creating a new account when accounts already exist. */
+export const NEW_ACCOUNT_TEXT =
+  '➕ <b>Новый счёт</b>\n\n' +
+  'Выберите тип счёта:';
+
 /**
  * Phase 1.37-UX: Welcome text for new user /start — single message, no ReplyKeyboard.
  * Professional, product-grade copy. No examples, no instructions.
