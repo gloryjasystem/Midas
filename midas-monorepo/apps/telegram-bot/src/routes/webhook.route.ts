@@ -2814,13 +2814,28 @@ Midas создан, чтобы сделать учет денег максима
           const dsResolved = await resolveWorkspace(telegramUserId, chatId);
 
           if (isAmt) {
-            // Set Redis intercept key — same as clarification amount flow
+            // Set Redis intercept key — suffix :edit distinguishes this flow
+            // from the "new transaction without currency" flow (which uses :amt).
+            // Text intercept (Step 5f-clar) uses the suffix to decide whether to
+            // ask for currency or return straight to the draft edit menu.
             const clarKey = `midas:clar:${telegramUserId}:${chatId}`;
-            await redisConnection.set(clarKey, `${draftSubId}:amt`, 'EX', 300);
-            void upsertBotMessage(
+            await redisConnection.set(clarKey, `${draftSubId}:amt:edit`, 'EX', 300);
+            // Byte budget: `{ULID}:amt:edit` = 35 chars in Redis value — no limit.
+            // Add «◀️ Назад» button so user can cancel without typing.
+            // Byte budget: draft:back:{26} = 37 ≤ 64 ✓
+            const editAmtMsgId = await upsertBotMessage(
               telegramUserId, chatId,
               '💰 Напиши новую сумму:',
+              { inline_keyboard: [[{ text: '◀️ Назад', callback_data: `draft:back:${draftSubId}` }]] },
             );
+            // Store msg_id so Step 5f-clar can delete it after amount is entered.
+            if (editAmtMsgId) {
+              void redisConnection.setex(
+                `midas:clar:msg:${telegramUserId}:${chatId}`,
+                300,
+                editAmtMsgId,
+              );
+            }
           } else if (isCat) {
             // Reuse existing category picker from clar:cat: flow
             const { getWorkspaceCategories } = await import('../services/edit.service.js');
@@ -4443,6 +4458,104 @@ Midas создан, чтобы сделать учет денег максима
           }
 
           request.log.info({ msg: '[midas:bot:webhook] clar: amt+cur patched', workspaceId: acResolved.workspaceId, hadCurrency: !!validCurrencyAC });
+          await reply.status(200).send({ ok: true });
+          return;
+        }
+
+        // ── Phase 1.35-fix: draft edit amount — returns to Скриншот 1, no currency prompt ──
+        // Triggered when user types a number after tapping «💰 Сумму» in the draft edit menu.
+        // Differs from clarField === 'amt' (new transaction flow) in that:
+        //   - The draft already has parsed_currency → no need to ask for it.
+        //   - After patching, we show the draft edit sub-menu (Скриншот 1), not the confirm card.
+        if (clarField === 'amt:edit' && /^[0-9A-Z]{26}$/.test(clarDraftId)) {
+          // 1. Validate amount (SEC-02: NUMERIC regex)
+          const editValidAmount = extractAmountFromText(message.text);
+          if (!editValidAmount) {
+            void upsertBotMessage(telegramUserId, chatId,
+              '⚠️ Неверная сумма. Напиши число, например: 380 или 1500.50',
+            );
+            // Keep Redis key alive — user can try again within TTL
+            await reply.status(200).send({ ok: true });
+            return;
+          }
+
+          // 2. Delete intercept key
+          await redisConnection.del(clarIntKey);
+
+          // 3. Delete «Напиши новую сумму:» message from chat (clean UX)
+          const editAmtClarMsgKey = `midas:clar:msg:${telegramUserId}:${chatId}`;
+          try {
+            const editAmtPrevMsgId = await redisConnection.get(editAmtClarMsgKey);
+            if (editAmtPrevMsgId) {
+              await redisConnection.del(editAmtClarMsgKey);
+              void deleteMessage(chatId, editAmtPrevMsgId);
+            }
+          } catch { /* non-fatal */ }
+
+          // 4. Resolve workspace
+          let editAmtResolved: { workspaceId: string; userId: string };
+          try {
+            editAmtResolved = await resolveWorkspace(telegramUserId, chatId);
+          } catch {
+            void upsertBotMessage(telegramUserId, chatId, '⚠️ Не удалось обработать. Попробуйте позже.');
+            await reply.status(200).send({ ok: true });
+            return;
+          }
+
+          // 5. Patch amount — parsed_currency is NOT touched (it already exists in the draft)
+          const editAmtPatch = await patchDraftAmount(
+            editAmtResolved.workspaceId, editAmtResolved.userId, clarDraftId, editValidAmount,
+          );
+
+          // 6. Re-fetch draft with the updated amount for display
+          const editAmtDraft = await getDraftFields(
+            editAmtResolved.workspaceId, editAmtResolved.userId, clarDraftId,
+          );
+
+          if (!editAmtDraft || (editAmtPatch.status !== 'ready' && editAmtPatch.status !== 'wrong_state')) {
+            void upsertBotMessage(telegramUserId, chatId, '⚠️ Транзакция не найдена или уже обработана.');
+            await reply.status(200).send({ ok: true });
+            return;
+          }
+
+          // 7. Build and show draft edit sub-menu (Скриншот 1) — same layout as draft:edit: handler
+          const { intentEmoji, intentLabel, formatAmount } = await import('../utils/screen-builder.js');
+          const editAmtILabel = editAmtDraft.parsed_intent
+            ? `${intentEmoji(editAmtDraft.parsed_intent)} ${intentLabel(editAmtDraft.parsed_intent)}`
+            : null;
+          const editAmtLines = ['✏️ <b>Что изменить?</b>', ''];
+          if (editAmtILabel) editAmtLines.push(editAmtILabel);
+          if (editAmtDraft.parsed_amount) {
+            editAmtLines.push(
+              `Сумма: <b>${formatAmount(editAmtDraft.parsed_amount)} ${editAmtDraft.parsed_currency ?? 'USDT'}</b>`,
+            );
+          }
+          if (editAmtDraft.item_name) editAmtLines.push(`Товар: ${editAmtDraft.item_name}`);
+
+          void upsertBotMessage(
+            telegramUserId, chatId,
+            editAmtLines.join('\n'),
+            {
+              inline_keyboard: [
+                [
+                  { text: '💰 Сумму',     callback_data: `draft:amt:${clarDraftId}` },
+                  { text: '📁 Категорию', callback_data: `draft:cat:${clarDraftId}` },
+                ],
+                [
+                  { text: '🔄 Тип',    callback_data: `draft:intent:${clarDraftId}` },
+                  { text: '💱 Валюту', callback_data: `draft:cur:${clarDraftId}` },
+                ],
+                [
+                  { text: '◀️ Назад', callback_data: `draft:back:${clarDraftId}` },
+                ],
+              ],
+            },
+          );
+
+          request.log.info({
+            msg: '[midas:bot:webhook] clar: amt:edit patched — returned to draft edit menu',
+            workspaceId: editAmtResolved.workspaceId,
+          });
           await reply.status(200).send({ ok: true });
           return;
         }
