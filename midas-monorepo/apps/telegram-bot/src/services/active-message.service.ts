@@ -1,13 +1,22 @@
 /**
- * Active Message Service — Phase 1.33
+ * Active Message Service — Phase 1.33 / Phase 2.9+
  *
- * Manages the "single active bot message" pointer per user/chat.
- * Redis key: midas:am:{telegramUserId}:{chatId} → message_id (string)
- * TTL: 24 hours (auto-cleanup).
+ * Manages two independent Redis pointers per user/chat:
  *
- * Core function: upsertBotMessage() — attempts edit-first, falls back to send,
- * and updates the Redis pointer. This is the single entry point for all bot
- * replies in the webhook route.
+ *   midas:am:{telegramUserId}:{chatId}  → message_id
+ *     The "active" bot message: draft pickers, confirmation previews,
+ *     account flows, clarification cards, etc.
+ *     Managed by upsertBotMessage() — edit-first, delete-on-fail.
+ *
+ *   midas:nav:{telegramUserId}:{chatId} → message_id
+ *     The navigation panel message: Баланс / Отчёт / Транзакции / Настройки.
+ *     Managed by sendNavMessage() — edit-first within nav key ONLY.
+ *     NEVER touches midas:am: — guarantees tx records with "Изменить запись"
+ *     are never overwritten or deleted by a nav button press.
+ *     Cleared by getNavMessageId()/clearNavMessageId() when user types a
+ *     free-text transaction so the nav panel is removed before the draft appears.
+ *
+ * TTL: 24 hours (auto-cleanup for both keys).
  *
  * SEC-12: No message text is logged. Only chatId, messageId, and success/failure.
  * SEC-03: Pointer is scoped per telegramUserId+chatId — no cross-tenant leak.
@@ -23,7 +32,7 @@ import {
 } from './telegram-api.js';
 
 // ─────────────────────────────────────────────────────────────
-// Redis key helpers
+// Redis key helpers — Active Message (midas:am:)
 // ─────────────────────────────────────────────────────────────
 
 const AM_KEY_PREFIX = 'midas:am:';
@@ -34,7 +43,18 @@ function amKey(telegramUserId: string, chatId: string): string {
 }
 
 // ─────────────────────────────────────────────────────────────
-// Pointer CRUD
+// Redis key helpers — Nav Message (midas:nav:)
+// ─────────────────────────────────────────────────────────────
+
+const NAV_KEY_PREFIX = 'midas:nav:';
+const NAV_TTL_SEC = 86400; // 24 hours
+
+function navKey(telegramUserId: string, chatId: string): string {
+  return `${NAV_KEY_PREFIX}${telegramUserId}:${chatId}`;
+}
+
+// ─────────────────────────────────────────────────────────────
+// Active Message pointer CRUD (midas:am:)
 // ─────────────────────────────────────────────────────────────
 
 /**
@@ -84,18 +104,71 @@ export async function clearActiveMessageId(
 }
 
 // ─────────────────────────────────────────────────────────────
-// upsertBotMessage — THE core function
+// Nav Message pointer CRUD (midas:nav:) — Phase 2.9+
 // ─────────────────────────────────────────────────────────────
 
 /**
- * Send or update the single active bot message.
+ * Get the nav panel message ID for a user/chat pair.
+ * Returns null if no nav message is open or Redis is unavailable.
+ */
+export async function getNavMessageId(
+  telegramUserId: string,
+  chatId: string,
+): Promise<string | null> {
+  try {
+    return await redisConnection.get(navKey(telegramUserId, chatId));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Store the nav panel message ID for a user/chat pair.
+ * Sets TTL to 24h.
+ */
+async function setNavMessageId(
+  telegramUserId: string,
+  chatId: string,
+  messageId: string,
+): Promise<void> {
+  try {
+    await redisConnection.set(navKey(telegramUserId, chatId), messageId, 'EX', NAV_TTL_SEC);
+  } catch {
+    // Non-fatal
+  }
+}
+
+/**
+ * Clear the nav panel message pointer.
+ * Called when user types a free-text transaction so the nav panel
+ * is deleted before the draft picker appears.
+ */
+export async function clearNavMessageId(
+  telegramUserId: string,
+  chatId: string,
+): Promise<void> {
+  try {
+    await redisConnection.del(navKey(telegramUserId, chatId));
+  } catch {
+    // Non-fatal
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// upsertBotMessage — THE core function for drafts/pickers/flows
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Send or update the single active bot message (midas:am: key).
  *
  * Strategy:
- *   1. Read pointer from Redis
+ *   1. Read pointer from Redis (midas:am:)
  *   2. If pointer exists → editMessageText(pointer, text, keyboard)
  *   3. If edit succeeds → done (pointer unchanged, TTL refreshed)
  *   4. If edit fails OR no pointer → sendMessage/sendMessageWithKeyboard
- *   5. Store new message_id as pointer
+ *   5. Store new message_id as pointer in midas:am:
+ *
+ * NEVER touches midas:nav: — nav messages are completely independent.
  *
  * Returns the message_id of the active message, or null on total failure.
  *
@@ -139,23 +212,31 @@ export async function upsertBotMessage(
 }
 
 // ─────────────────────────────────────────────────────────────
-// sendNavMessage — for main menu nav buttons (Баланс / Отчёт / Транзакции / Настройки)
+// sendNavMessage — Phase 2.9+: nav buttons (Баланс / Отчёт / Транзакции / Настройки)
 // ─────────────────────────────────────────────────────────────
 
 /**
- * Send a NEW message for main-menu navigation actions.
+ * Send or update the navigation panel message (midas:nav: key).
  *
- * Unlike upsertBotMessage, this function NEVER edits or deletes the previous
- * active message. This is critical: the previous message may be a confirmed
- * transaction card with an "✏️ Изменить запись" button — destroying it would
- * be a data-loss UX bug.
+ * Unlike upsertBotMessage, this function uses a SEPARATE Redis key (midas:nav:)
+ * and NEVER touches midas:am:. This guarantees that confirmed transaction cards
+ * with "✏️ Изменить запись" buttons are never overwritten or deleted when
+ * the user taps Баланс / Отчёт / Транзакции / Настройки.
  *
  * Strategy:
- *   1. Always send a brand-new message (sendMessage / sendMessageWithKeyboard).
- *   2. Update the Redis pointer to the new message.
- *   3. Do NOT touch the previous active message.
+ *   1. Read nav pointer from Redis (midas:nav:)
+ *   2. If pointer exists → editMessageText(pointer, text, keyboard)
+ *   3. If edit succeeds → refresh TTL, return same message_id (no new message sent)
+ *   4. If edit fails OR no pointer → sendMessage/sendMessageWithKeyboard
+ *   5. Store new message_id in midas:nav:
+ *   6. midas:am: is NEVER read or written.
  *
- * Returns the new message_id, or null on total failure.
+ * Nav message lifecycle:
+ *   - Created/edited here on each nav button press
+ *   - Deleted in webhook AI-parse path (Step 7) when user types a transaction
+ *   - Auto-expires after 24h via Redis TTL
+ *
+ * Returns the message_id of the nav message, or null on total failure.
  *
  * SEC-12: text content is NOT logged.
  */
@@ -165,7 +246,22 @@ export async function sendNavMessage(
   text: string,
   keyboard?: InlineKeyboardMarkup,
 ): Promise<string | null> {
-  // Always send a new message — never edit the existing active message
+  // Step 1: Read current nav pointer (midas:nav: — NOT midas:am:)
+  const currentNavMsgId = await getNavMessageId(telegramUserId, chatId);
+
+  // Step 2: Try edit if nav pointer exists
+  if (currentNavMsgId) {
+    const editOk = await editMessageText(chatId, currentNavMsgId, text, keyboard);
+    if (editOk) {
+      // Refresh TTL on successful edit — no new message sent
+      void setNavMessageId(telegramUserId, chatId, currentNavMsgId);
+      return currentNavMsgId;
+    }
+    // Edit failed (message deleted by user or expired) — fall through to send new message
+    // No delete needed: message is already gone if edit returned false
+  }
+
+  // Step 3: Send new nav message
   let newMsgId: string | null;
   if (keyboard) {
     newMsgId = await sendMessageWithKeyboard(chatId, text, keyboard);
@@ -173,9 +269,9 @@ export async function sendNavMessage(
     newMsgId = await sendMessage(chatId, text);
   }
 
-  // Update pointer to the new nav message
+  // Step 4: Update nav pointer (midas:nav:) — midas:am: is NOT touched
   if (newMsgId) {
-    void setActiveMessageId(telegramUserId, chatId, newMsgId);
+    void setNavMessageId(telegramUserId, chatId, newMsgId);
   }
 
   return newMsgId;

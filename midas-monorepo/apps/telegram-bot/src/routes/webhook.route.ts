@@ -248,6 +248,8 @@ import {
   setActiveMessageId,                // Phase 1.33
   clearActiveMessageId,              // Phase 1.33
   getActiveMessageId,                // Phase 1.37-UX: read old msg ID before /start reset
+  getNavMessageId,                   // Phase 2.9+: read nav panel pointer before tx parse
+  clearNavMessageId,                 // Phase 2.9+: clear nav panel pointer on tx input
 } from '../services/active-message.service.js';
 
 import { callbackConfirmQueue } from '../queues/callback-confirm-queue.js';
@@ -5383,18 +5385,29 @@ Midas создан, чтобы сделать учет денег максима
     // Phase LD++: When the user initiates a free-text transaction, delete the current Active UI
     // (Balance, Transactions, Settings, Report, empty_tx_msg, etc.) to prevent chat clutter
     // before the AI draft or clarification card appears.
+
+    // Phase 2.9+: Delete nav panel message (Баланс/Отчёт/Транзакции/Настройки) if open.
+    // midas:nav: is a separate key — NEVER mixes with midas:am: (tx records stay safe).
+    const navId = await getNavMessageId(telegramUserId, chatId);
+    if (navId) {
+      void deleteMessage(chatId, navId);
+      void clearNavMessageId(telegramUserId, chatId);
+    }
+
+    // Delete the active message pointer (draft pickers, previews, etc.)
     const amId = await getActiveMessageId(telegramUserId, chatId);
     if (amId) {
       void deleteMessage(chatId, amId);
       void clearActiveMessageId(telegramUserId, chatId);
     }
-    
+
     // Also clean up the explicit empty_tx_msg key just in case
     const emptyMsgId = await redisConnection.get(`midas:empty_tx_msg:${chatId}`).catch(() => null);
     if (emptyMsgId) {
       if (emptyMsgId !== amId) void deleteMessage(chatId, emptyMsgId);
       await redisConnection.del(`midas:empty_tx_msg:${chatId}`).catch(() => {});
     }
+
 
     await webhookIngestionQueue.add(QUEUE_NAMES.WEBHOOK_INGESTION, payload, {
       jobId: idempotencyKey,
