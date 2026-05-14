@@ -231,10 +231,16 @@ async function processNotification(job: Job<NotificationJobPayload>): Promise<vo
   //   - So midas:am: ALREADY points to the success card via the old previewMsgId.
   //   - Simply skipping the SET leaves stale pointer → step-7 cleanup would still delete it.
   //   - DEL-ing the key ensures no pointer exists → step-7 finds null → card stays intact.
+  //
+  //   Double-lock: also write midas:success_card:{msgId} sentinel (30d TTL).
+  //   Step-7 in webhook.route.ts checks this before calling deleteMessage — even if midas:am:
+  //   was not DEL'd in time (race condition), the sentinel prevents card deletion.
   if (job.data.telegramUserId && sentMessageId) {
     try {
       if (job.data.isSuccessCard) {
-        // DEL the pointer — success card must not be tracked in midas:am:
+        // Sentinel: mark this message as a permanent confirmed record
+        await redisConnection.set(`midas:success_card:${sentMessageId}`, '1', 'EX', 2_592_000); // 30 days
+        // DEL the active-message pointer so step-7 finds nothing
         await redisConnection.del(`midas:am:${job.data.telegramUserId}:${chatId}`);
       } else {
         await redisConnection.set(

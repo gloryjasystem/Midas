@@ -5432,9 +5432,15 @@ Midas создан, чтобы сделать учет денег максима
     }
 
     // Delete the active message pointer (draft pickers, previews, etc.)
+    // Phase 2.10: Guard — if amId points to a confirmed success card, do NOT delete it.
+    // midas:success_card:{msgId} is set by notifications.worker when isSuccessCard === true.
+    // This prevents the settled "✅ Записано" card from being wiped when the user types a new tx.
     const amId = await getActiveMessageId(telegramUserId, chatId);
     if (amId) {
-      void deleteMessage(chatId, amId);
+      const isConfirmedCard = await redisConnection.exists(`midas:success_card:${amId}`).catch(() => 0);
+      if (!isConfirmedCard) {
+        void deleteMessage(chatId, amId);
+      }
       void clearActiveMessageId(telegramUserId, chatId);
     }
 
