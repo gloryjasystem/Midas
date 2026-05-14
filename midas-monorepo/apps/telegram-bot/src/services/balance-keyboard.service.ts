@@ -317,12 +317,17 @@ export interface AccountRoleState {
  * Phase LD++: a single cyclical button for role assignment.
  *   Обычный -> Расходы -> Доходы -> Основной -> Обычный
  *
- * @param accountId - ULID of the account being viewed
- * @param roles     - current role state
+ * Phase B-5: hasChildren — если true, добавляет кнопку «➕ Добавить валюту»
+ *   (callback bl:ac:{accountId}, ≤32 байта — validated in parseBalanceCallback SEC-01).
+ *
+ * @param accountId   - ULID of the account being viewed
+ * @param roles       - current role state
+ * @param hasChildren - true if this is a parent account with sub-currency accounts
  */
 export function buildAccountActionsKeyboard(
   accountId: string,
   roles: AccountRoleState = { isExpenseDefault: false, isIncomeDefault: false },
+  hasChildren = false,
 ): InlineKeyboardMarkup {
   const isExp = roles.isExpenseDefault;
   const isInc = roles.isIncomeDefault;
@@ -344,9 +349,15 @@ export function buildAccountActionsKeyboard(
     nextRoleCode = 'e'; // next is expense (Расходы)
   }
 
+  // Phase B-5: parent accounts get an extra "Add currency" button
+  const addCurrencyRow = hasChildren
+    ? [[{ text: '➕ Добавить валюту', callback_data: `bl:ac:${accountId}` }]]
+    : [];
+
   return {
     inline_keyboard: [
       [{ text: roleLabel, callback_data: `bl:sr:${nextRoleCode}:${accountId}` }],
+      ...addCurrencyRow,
       [{ text: '✏️ Переименовать',      callback_data: `bl:rn:${accountId}` }],
       [{ text: '💱 Изменить валюту',    callback_data: `bl:cv:${accountId}` }],
       [{ text: '🔄 Установить баланс', callback_data: `bl:sb:${accountId}` }],

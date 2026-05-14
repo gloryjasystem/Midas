@@ -75,6 +75,7 @@ import {
   hasAccounts,                     // Phase 1.30
   addAccountWithCurrency,          // Phase 1.30 (used in cur_input text path)
   addAccountReturningId,           // Phase 2.2 (used in currency callback → bal_input)
+  addChildAccount,                 // Phase B-5/B-8: create child account under parent
   parseAddAccountArgs,
   renameAccount,                   // Phase 2.1
   changeAccountCurrency,           // Phase 2.1
@@ -3205,7 +3206,7 @@ Midas создан, чтобы сделать учет денег максима
               await upsertBotMessage(
                 telegramUserId, chatId,
                 formatAccountDetailText(detail, roles),
-                buildAccountActionsKeyboard(blCmd.accountId, roles),
+                buildAccountActionsKeyboard(blCmd.accountId, roles, detail.child_count > 0),
               );
             }
 
@@ -3257,7 +3258,35 @@ Midas создан, чтобы сделать учет денег максима
                   await upsertBotMessage(
                     telegramUserId, chatId,
                     `✅ Валюта изменена на <b>${escapeHtml(blCmd.code)}</b>.\n\n` + formatAccountDetailText(detail, roles),
-                    buildAccountActionsKeyboard(state.accountId, roles),
+                    buildAccountActionsKeyboard(state.accountId, roles, detail.child_count > 0),
+                  );
+                }
+
+              } else if (state.action === 'add_currency') {
+                // Phase B-5: create a child account under the parent
+                // SEC-01: parentId validated by parseBalanceCallback (ULID format)
+                // SEC-01: blCmd.code validated by bl:cs: prefix allowlist
+                // Phase B-8: addChildAccount uses withTenantTransaction — RLS enforced (SEC-03)
+                await redisConnection.del(blKey);
+                const parentDetail = await getAccountDetail(blResolved.workspaceId, blResolved.userId, state.accountId);
+                const parentName = parentDetail?.name ?? 'Счёт';
+                // Child name: "{parentName} · {CURRENCY}" — unique within workspace
+                const childName = `${parentName} · ${blCmd.code}`;
+                const childResult = await addChildAccount(
+                  blResolved.workspaceId, blResolved.userId,
+                  state.accountId, childName, blCmd.code,
+                );
+                // Return to parent account card
+                const roles = await getAccountRoles(blResolved.workspaceId, blResolved.userId, state.accountId);
+                const detail = await getAccountDetail(blResolved.workspaceId, blResolved.userId, state.accountId);
+                if (detail) {
+                  const prefix = childResult.status === 'duplicate'
+                    ? `⚠️ Счёт <b>${escapeHtml(childName)}</b> уже существует.\n\n`
+                    : `✅ Добавлен счёт <b>${escapeHtml(childName)}</b>.\n\n`;
+                  await upsertBotMessage(
+                    telegramUserId, chatId,
+                    prefix + formatAccountDetailText(detail, roles),
+                    buildAccountActionsKeyboard(state.accountId, roles, /* hasChildren */ true),
                   );
                 }
               }
@@ -3312,7 +3341,7 @@ Midas создан, чтобы сделать учет денег максима
                 await upsertBotMessage(
                   telegramUserId, chatId,
                   formatAccountDetailText(detail, roles),
-                  buildAccountActionsKeyboard(blCmd.accountId, roles),
+                  buildAccountActionsKeyboard(blCmd.accountId, roles, detail.child_count > 0),
                 );
               }
               // Toast message based on new role
@@ -3324,6 +3353,24 @@ Midas создан, чтобы сделать учет денег максима
               
               await answerCallbackQuery(cq.id, toastMsg);
             }
+
+          // ── Phase B-5: add child currency account ─────────────
+          // Triggered by «➕ Добавить валюту» button on a parent account card.
+          // Saves parentId in Redis bl:state, shows currency picker.
+          // On currency pick (bl:cs:) the currency_set handler will detect
+          // action='add_currency' and create a child account under parentId.
+          } else if (blCmd.cmd === 'add_currency') {
+            // SEC-01: accountId validated by parseBalanceCallback (ULID format)
+            await redisConnection.set(
+              blKey,
+              JSON.stringify({ action: 'add_currency', accountId: blCmd.accountId }),
+              'EX', 300,
+            );
+            await upsertBotMessage(
+              telegramUserId, chatId,
+              '💱 <b>Выбери валюту для нового счёта:</b>',
+              buildBalanceFiatCurrencyKeyboard(),
+            );
 
           } else if (blCmd.cmd === 'close') {
             // Phase 2.9+: Clean close of balance screen — delete message + clear nav pointer
@@ -3615,7 +3662,7 @@ Midas создан, чтобы сделать учет денег максима
                 void upsertBotMessage(
                   telegramUserId, chatId,
                   `✅ Счёт переименован.\n\n` + formatAccountDetailText(detail, roles),
-                  buildAccountActionsKeyboard(blState.accountId, roles),
+                  buildAccountActionsKeyboard(blState.accountId, roles, detail.child_count > 0),
                 );
               }
             }
@@ -3642,7 +3689,7 @@ Midas создан, чтобы сделать учет денег максима
                 void upsertBotMessage(
                   telegramUserId, chatId,
                   `✅ Баланс обновлён.\n\n` + formatAccountDetailText(detail, roles),
-                  buildAccountActionsKeyboard(blState.accountId, roles),
+                  buildAccountActionsKeyboard(blState.accountId, roles, detail.child_count > 0),
                 );
               }
             }
@@ -3666,7 +3713,7 @@ Midas создан, чтобы сделать учет денег максима
               void upsertBotMessage(
                 telegramUserId, chatId,
                 `✅ Валюта изменена на <b>${escapeHtml(code)}</b>.\n\n` + formatAccountDetailText(detail, roles),
-                buildAccountActionsKeyboard(blState.accountId, roles),
+                buildAccountActionsKeyboard(blState.accountId, roles, detail.child_count > 0),
               );
             }
           }

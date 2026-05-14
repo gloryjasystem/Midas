@@ -358,7 +358,12 @@ const ACCOUNT_DETAIL_SQL = `
           WHEN t.transaction_intent = 'debt_given'    AND t.base_currency = a.currency
           THEN t.base_amount END), 0)
       AS balance,
-    COUNT(t.id) AS tx_count
+    COUNT(t.id) AS tx_count,
+    (SELECT COUNT(*)::INT
+     FROM account_sources c
+     WHERE c.parent_account_id = a.id
+       AND c.workspace_id = $1
+       AND c.deleted_at IS NULL) AS child_count
   FROM account_sources a
   LEFT JOIN transactions t
     ON t.account_id = a.id
@@ -379,6 +384,7 @@ interface AccountDetailRow {
   created_at: string;
   balance: { toFixed: (dp: number) => string };
   tx_count: string;
+  child_count: number;  // Phase B-6: number of active child accounts
 }
 
 /** Structured account detail. */
@@ -390,6 +396,8 @@ export interface AccountDetailData {
   balance: string;
   tx_count: string;
   created_at: string;
+  /** Phase B-6: number of active child accounts (0 for leaf accounts). */
+  child_count: number;
 }
 
 /**
@@ -421,6 +429,7 @@ export async function getAccountDetail(
         balance: row.balance.toFixed(2),
         tx_count: row.tx_count,
         created_at: String(row.created_at),
+        child_count: Number(row.child_count ?? 0),  // Phase B-6
       };
     },
   );

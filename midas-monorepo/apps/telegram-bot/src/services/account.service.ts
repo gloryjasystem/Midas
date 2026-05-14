@@ -605,6 +605,61 @@ export async function addAccountReturningId(
 }
 
 // ─────────────────────────────────────────────────────────────
+// addChildAccount — Phase B-5/B-8
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Insert a new child account under an existing parent account.
+ *
+ * Phase B-8: child accounts:
+ *   - Have parent_account_id set to the parent's ULID.
+ *   - Do NOT update workspace default_expense/income pointers
+ *     (only top-level accounts should be workspace defaults).
+ *   - Name uniqueness enforced by account_sources_workspace_id_name_key.
+ *
+ * @param workspaceId     - Internal workspace ULID (SEC-03)
+ * @param userId          - Internal user ULID
+ * @param parentAccountId - ULID of the parent account (pre-validated by caller)
+ * @param name            - Child account name (pre-validated, non-empty, max 100 chars)
+ * @param currency        - Currency code (pre-validated)
+ * @returns { status: 'created', accountId } | { status: 'duplicate' }
+ *
+ * SEC-03: INSERT inside withTenantTransaction — RLS enforced.
+ * SEC-02: No financial arithmetic.
+ * SEC-12: Name/currency NOT logged.
+ */
+export async function addChildAccount(
+  workspaceId: string,
+  userId: string,
+  parentAccountId: string,
+  name: string,
+  currency: string,
+): Promise<AddAccountWithIdResult> {
+  const accountId = generateUlid();
+
+  const rowsInserted = await withTenantTransaction<number>(
+    workspaceId,
+    userId,
+    async (client) => {
+      const result = await client.query<{ id: string }>(
+        `INSERT INTO account_sources
+           (id, workspace_id, name, type, currency, parent_account_id)
+         VALUES ($1, $2, $3, 'manual'::account_source_type, $4, $5)
+         ON CONFLICT ON CONSTRAINT account_sources_workspace_id_name_key DO NOTHING
+         RETURNING id`,
+        [accountId, workspaceId, name, currency, parentAccountId],
+      );
+      // Phase B-8: do NOT update workspace defaults for child accounts.
+      // Only top-level (parent_account_id IS NULL) accounts are workspace defaults.
+      return result.rowCount ?? 0;
+    },
+  );
+
+  if (rowsInserted === 0) return { status: 'duplicate' };
+  return { status: 'created', accountId };
+}
+
+// ─────────────────────────────────────────────────────────────
 // getWorkspaceDefaultAccount — Phase LD+
 // ─────────────────────────────────────────────────────────────
 
