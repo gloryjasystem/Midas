@@ -417,6 +417,27 @@ async function processAiParse(job: Job<AiParseJobPayload>): Promise<void> {
       }
     } catch { /* non-fatal: status msg stays but gate still works */ }
 
+    // Phase 1.40: Also delete stale "❌ Отменено" / "⏰ Черновик истёк" dead card on gate path.
+    try {
+      const gateDeadCardKey = `midas:dead_card:${chatId}`;
+      const gateDeadCardMsgId = await redisConnection.get(gateDeadCardKey);
+      if (gateDeadCardMsgId) {
+        const delDeadAlertId = ulid();
+        await notificationsQueue.add(
+          QUEUE_NAMES.NOTIFICATIONS,
+          {
+            alertId: delDeadAlertId,
+            workspaceId,
+            chatId,
+            message: '',
+            deleteMessageId: gateDeadCardMsgId,
+          },
+          { jobId: IdempotencyKeyBuilder.notification(workspaceId, delDeadAlertId) },
+        );
+        void redisConnection.del(gateDeadCardKey);
+      }
+    } catch { /* non-fatal */ }
+
     console.log('[midas:ai-parse-worker] Gate: blocked new input, active draft exists', {
       jobId: job.id,
       workspaceId,
@@ -892,6 +913,17 @@ async function processAiParse(job: Job<AiParseJobPayload>): Promise<void> {
       prevClarMsgId = undefined; // non-fatal: will send fresh message
     }
 
+    // Phase 1.40: Delete stale "❌ Отменено" dead card on clarification path too.
+    // Without this, the card accumulates even when user sends a voice that needs clarification.
+    let clarDeadCardMsgId: string | undefined;
+    try {
+      const stored = await redisConnection.get(`midas:dead_card:${chatId}`);
+      if (stored) {
+        clarDeadCardMsgId = stored;
+        void redisConnection.del(`midas:dead_card:${chatId}`);
+      }
+    } catch { clarDeadCardMsgId = undefined; }
+
     await notificationsQueue.add(
       QUEUE_NAMES.NOTIFICATIONS,
       {
@@ -904,6 +936,7 @@ async function processAiParse(job: Job<AiParseJobPayload>): Promise<void> {
         telegramUserId,
         activeMessageId: prevClarMsgId,       // edit prev clarification msg if exists
         cacheStoreKey: clarMsgCacheKey,       // worker writes sentMessageId here after send
+        deleteMessageId: clarDeadCardMsgId,   // Phase 1.40: delete stale dead card
       },
       {
         jobId: IdempotencyKeyBuilder.notification(workspaceId, alertId),

@@ -1442,8 +1442,12 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
             // 1. Edit card in-place → "❌ Отменено" (no keyboard)
             // 2. Reject draft in DB (workspace-scoped, safe without full withTenantTransaction)
             // 3. Cleanup Redis keys
+            // 4. Mark the "❌ Отменено" card as dead_card so ai-parse auto-deletes it
+            //    when the user sends their next message (Phase 1.40 — same as confirmation.worker)
             if (iaMsgId) {
               void editMessageText(chatId, iaMsgId, buildRejectedScreen(), { inline_keyboard: [] });
+              // Store dead card so next preview card deletes it (TTL 24h — Telegram limit)
+              void redisConnection.set(`midas:dead_card:${chatId}`, iaMsgId, 'EX', 86400);
             }
             // Reject draft — simple SQL, workspace-scoped (SEC-03 RLS via workspace_id filter)
             void pool.query(
