@@ -1,7 +1,7 @@
 ﻿# WORKFLOW_STATE.MD — Диспетчер задач ИИ-агента Midas
 
 > **Тип:** MUTABLE — кратковременная память агента. Обновляется на каждом шаге работы.
-> **Обновлён:** 2026-05-15 02:27 (UTC+3)
+> **Обновлён:** 2026-05-15 10:20 (UTC+3)
 
 ---
 
@@ -9,13 +9,13 @@
 
 | Параметр | Значение |
 |---|---|
-| **PHASE** | `Balance UI Polish B-9+ ✅ — Professional Redesign (N26/Revolut style) + Add Currency fix` |
-| **STEP** | `Balance UI Polish DONE. Commits cb37de6→21e0a6f pushed to main. Railway auto-deploy triggered.` |
-| **AGENT STATUS** | `Phase B-2 complete: PER_ACCOUNT_SQL + parent_account_id; tree build in getBalanceData() with ├/└ ladder; buildBalanceListKeyboard — parent aggregation (N валют) + indented child rows (└ CURRENCY · balance) + ➕ Добавить валюту (bl:ac:); pluralizeCurrency() RU plural. tsc 0 errors.` |
+| **PHASE** | `Transaction Hub UX — 6-Filter Grid 2×3 + CCY Symbol Unification ✅ DEPLOYED` |
+| **STEP** | `Commit a9c0f52 pushed to main. Railway auto-deploy triggered.` |
+| **AGENT STATUS** | `tsc 0 errors. 23/23 feature checks PASS. IntentFilter 6 types (e/i/dg/dr/t/a), SQL patched in both getTransactionList + countFilteredTransactions, MonthMiniStats split, CCY_SYMBOL+fmtCurrency, 2×3 filter grid, pagination redesigned.` |
 | **DEPLOYMENT** | `Railway (spirited-happiness project)` — `Midas` ✅ Online · `background-workers` ✅ Online · `Postgres` ✅ · `Redis` ✅. Health: https://midas-production-f4f1.up.railway.app/health → {"status":"ok"} |
-| **LAST COMPLETED** | `Balance UI Polish B-9+: compact 1-line-per-account format, currency symbols ₽/$€₴, role suffix Variant A (⭐ основной) after name, header icon 💰, Add Currency button for all top-level accounts. Commits cb37de6→21e0a6f.` |
+| **LAST COMPLETED** | `Transaction Hub 2×3 Grid: CCY_SYMBOL map + fmtCurrency(), intentEmoji 📤/📥, 6 FILTER_LABELS, FILTER_ROW_1/ROW_2 layout, pagination «⬅️ Позже/Раньше ➡️», SQL filters dg/dr/t, MonthMiniStats debt_given/received/transfer split. Commit a9c0f52.` |
 | **BLOCKER** | None. |
-| **NEXT ACTION** | Smoke-test /balance в живом боте (убедиться что parent→children отображаются корректно). Затем — следующая фаза по роадмапу. |
+| **NEXT ACTION** | Проверить Transaction Hub в живом боте: сетка 2×3, фильтры, пагинация. Убедиться что stats за месяц корректны во всех 6 фильтрах. |
 
 
 ---
@@ -455,6 +455,7 @@ Phase B-1 (commit 75156b9, применено на live Railway Postgres):
 | 2026-05-14 20:10 | **Phase 2.5+ — Currency-Aware Picker: Worker Layer (background-workers). Root Cause Fix.** Обнаружено: начальный пикер строится ПОЛНОСТЬЮ в `ai-parse.worker.ts` (background-workers), а не в `telegram-bot`. Изменения в `account.service.ts` (telegram-bot) на initial picker не влияют никак. **Реализация (`ai-parse.worker.ts`):** Добавлены локальные классификаторы: `PICKER_STABLECOINS` (10 записей), `PICKER_KNOWN_CRYPTOS` (27 записей), `classifyPickerCcy(code)`, `filterPickerAccounts(accounts, txCurrency)` — аналог логики `account.service.ts`. Применено в 2 местах: (A) **Initial picker** (строка ~620) — фильтрует по `aiData?.currency` (когда AI вернул currency, например «USDT»); (B) **Gate picker** (строка ~340) — фильтрует по `pendingDraft.parsedCurrency` (восстановление пикера при gate-блокировке). Итог фильтрации: `{USD tx}` → [USD-счета] + [другие фиатные]; `{USDT tx}` → [только USDT-счета]. tsc 0 ошибок (оба приложения). git commit `0085d8f`, push origin main ✅. Railway auto-deploy triggered. |
 
 
+| 2026-05-15 10:20 | **Transaction Hub UX — 6-Filter Grid 2×3 + CCY Symbol Unification (DEPLOYED).** `transaction-hub.service.ts`: `TX_PAGE_SIZE` 6→5; `IntentFilter` расширен до 6 типов (`'e'|'i'|'dg'|'dr'|'t'|'a'`); `MonthMiniStats` — поле `debt_count` заменено тремя: `debt_given_count`, `debt_received_count`, `transfer_count`; SQL-запросы `getTransactionList` и `countFilteredTransactions` обновлены с полной поддержкой dg/dr/t (удалён устаревший фильтр `'d'`). `transaction-keyboard.service.ts`: `CCY_SYMBOL` Unicode-карта + `fmtCurrency()` (₽/$€₴ для фиата, ISO для крипты); `intentEmoji` обновлён (📤📥 вместо 🔴🟢); `FILTER_LABELS` 4→6; `FILTER_ROW_1=['e','i','t']` + `FILTER_ROW_2=['dr','dg','a']` — сетка 2×3; пагинация «⬅️ Позже · 📄 X/Y · Раньше ➡️»; `formatTxListHeader` для всех 6 фильтров; `VALID_FILTERS` обновлён; fallback `'d'→'a'`. tsc 0 ошибок. 23/23 проверок PASS. Commit `a9c0f52`, push origin main ✅. Railway auto-deploy triggered. |
 | 2026-05-14 23:50 | **Balance Phase B-5/B-6/B-8/B-9 � Add Currency Workflow ���������.** B-8: addChildAccount() � account.service.ts (withTenantTransaction, parent_account_id, no workspace defaults update). B-6: child_count subquery � ACCOUNT_DETAIL_SQL; AccountDetailData ������� child_count. B-5: buildAccountActionsKeyboard(hasChildren?) ���������� ������ bl:ac: (32 �����). webhook.route.ts: add_currency handler + currency_set ����� + 6 ������� � detail.child_count>0. B-9: parent_account_id � GROUP BY PER_ACCOUNT_SQL; ORDER BY �������������. tsc 0 ������. Commits 5ce9148+04e79b8. Railway auto-deploy. |
 
 
