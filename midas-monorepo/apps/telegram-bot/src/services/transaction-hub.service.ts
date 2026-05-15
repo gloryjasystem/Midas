@@ -50,14 +50,13 @@ export interface MonthMiniStats {
 
 /**
  * Intent filter for transaction list.
- *   'a'  = all
- *   'e'  = expense (расходы)
- *   'i'  = income (доходы)
- *   'dg' = debt_given (дал в долг — деньги ушли)
- *   'dr' = debt_received (взял в долг — деньги пришли)
- *   't'  = transfer (переводы между счетами)
+ *   'a' = all
+ *   'e' = expense (расходы)
+ *   'i' = income (доходы)
+ *   'd' = debt — merged (взял долг + дал долг)
+ *   't' = transfer (переводы между счетами)
  */
-export type IntentFilter = 'a' | 'e' | 'i' | 'dg' | 'dr' | 't';
+export type IntentFilter = 'a' | 'e' | 'i' | 'd' | 't';
 
 // ─────────────────────────────────────────────────────────────
 // Queries
@@ -92,8 +91,7 @@ export async function getTransactionList(
            $2 = 'a'
            OR ($2 = 'e'  AND t.transaction_intent = 'expense')
            OR ($2 = 'i'  AND t.transaction_intent = 'income')
-           OR ($2 = 'dg' AND t.transaction_intent = 'debt_given')
-           OR ($2 = 'dr' AND t.transaction_intent = 'debt_received')
+           OR ($2 = 'd'  AND t.transaction_intent IN ('debt_given', 'debt_received'))
            OR ($2 = 't'  AND t.transaction_intent = 'transfer')
          )
        ORDER BY t.transaction_time DESC
@@ -121,11 +119,10 @@ export async function countFilteredTransactions(
          AND deleted_at IS NULL
          AND (
            $2 = 'a'
-           OR ($2 = 'e'  AND transaction_intent = 'expense')
-           OR ($2 = 'i'  AND transaction_intent = 'income')
-           OR ($2 = 'dg' AND transaction_intent = 'debt_given')
-           OR ($2 = 'dr' AND transaction_intent = 'debt_received')
-           OR ($2 = 't'  AND transaction_intent = 'transfer')
+           OR ($2 = 'e' AND transaction_intent = 'expense')
+           OR ($2 = 'i' AND transaction_intent = 'income')
+           OR ($2 = 'd' AND transaction_intent IN ('debt_given', 'debt_received'))
+           OR ($2 = 't' AND transaction_intent = 'transfer')
          )`,
       [workspaceId, filter],
     );

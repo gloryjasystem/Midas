@@ -97,12 +97,11 @@ function shortDate(isoDate: string): string {
 // ─────────────────────────────────────────────────────────────
 
 const FILTER_LABELS: Record<IntentFilter, { text: string; active: string }> = {
-  e:  { text: '💸 Расходы',   active: '💸 Расходы ✓'   },
-  i:  { text: '💰 Доходы',    active: '💰 Доходы ✓'    },
-  t:  { text: '🔄 Переводы',  active: '🔄 Переводы ✓'  },
-  dr: { text: '📥 Взял долг', active: '📥 Взял долг ✓' },
-  dg: { text: '📤 Дал долг',  active: '📤 Дал долг ✓'  },
-  a:  { text: '📋 Все',       active: '📋 Все ✓'        },
+  e:  { text: '\uD83D\uDCB8 Расходы',   active: '\uD83D\uDCB8 Расходы ✓'  },
+  i:  { text: '\uD83D\uDCB0 Доходы',    active: '\uD83D\uDCB0 Доходы ✓'   },
+  d:  { text: '\uD83E\uDD1D Долги',     active: '\uD83E\uDD1D Долги ✓'    },
+  t:  { text: '\uD83D\uDD04 Переводы',  active: '\uD83D\uDD04 Переводы ✓' },
+  a:  { text: '\uD83D\uDCCB Все',       active: '\uD83D\uDCCB Все ✓'        },
 };
 
 // ─────────────────────────────────────────────────────────────
@@ -126,17 +125,17 @@ export function buildTxListKeyboard(
 ): InlineKeyboardMarkup {
   const rows: InlineKeyboardButton[][] = [];
 
-  // Filter grid — 2 rows × 3 buttons (Вариант 1: Двухстрочная сетка)
-  // Строка 1: основные финансовые потоки
-  // Строка 2: долговые операции + «Все»
-  const FILTER_ROW_1: IntentFilter[] = ['e', 'i', 't'];
-  const FILTER_ROW_2: IntentFilter[] = ['dr', 'dg', 'a'];
-  for (const filterRow of [FILTER_ROW_1, FILTER_ROW_2]) {
-    rows.push(filterRow.map((f) => ({
-      text: f === activeFilter ? FILTER_LABELS[f].active : FILTER_LABELS[f].text,
-      callback_data: `tx:l:0:${f}`,
-    })));
-  }
+  // ─── Filter row — Variant B: single row of 4 filters ───────────────────
+  // Layout: [\uD83D\uDCB8 Расходы] [\uDCB0 Доходы] [\uD83E\uDD1D Долги] [\uD83D\uDD04 Переводы]
+  // Clicking the active filter toggles back to 'a' (all) — like fintech app chips.
+  const FILTER_ROW: IntentFilter[] = ['e', 'i', 'd', 't'];
+  rows.push(FILTER_ROW.map((f) => {
+    const isActive = f === activeFilter;
+    const label = isActive ? FILTER_LABELS[f].active : FILTER_LABELS[f].text;
+    // Tapping the active filter deactivates it (returns to 'all')
+    const cbFilter = isActive ? 'a' : f;
+    return { text: label, callback_data: `tx:l:0:${cbFilter}` };
+  }));
 
   // Search button
   rows.push([{ text: '\uD83D\uDD0D Поиск', callback_data: 'tx:s' }]);
@@ -311,17 +310,16 @@ export function formatTxListHeader(
 
   if (filter === 'i') {
     const amt = formatAmountStr(stats.income_total);
-    return `<b>💰 Доходы за ${monthName}</b> (${String(stats.income_count)} шт. · ${amt} ${cur})`;
+    return `<b>\uD83D\uDCB0 Доходы за ${monthName}</b> (${String(stats.income_count)} шт. · ${amt} ${cur})`;
   }
 
-  if (filter === 'dg') {
-    return `<b>📤 Дал в долг за ${monthName}</b> (${String(stats.debt_given_count)} шт.)`;
+  if (filter === 'd') {
+    const total = stats.debt_given_count + stats.debt_received_count;
+    return `<b>\uD83E\uDD1D Долги за ${monthName}</b> (${String(total)} шт.)`;
   }
-  if (filter === 'dr') {
-    return `<b>📥 Взял в долг за ${monthName}</b> (${String(stats.debt_received_count)} шт.)`;
-  }
+
   // filter === 't'
-  return `<b>🔄 Переводы за ${monthName}</b> (${String(stats.transfer_count)} шт.)`;
+  return `<b>\uD83D\uDD04 Переводы за ${monthName}</b> (${String(stats.transfer_count)} шт.)`;
 }
 
 /**
@@ -371,7 +369,7 @@ export type TxCallbackCmd =
   | { cmd: 'close' }
   | { cmd: 'done'; txId: string };
 
-const VALID_FILTERS: readonly string[] = ['a', 'e', 'i', 'dg', 'dr', 't'];
+const VALID_FILTERS: readonly string[] = ['a', 'e', 'i', 'd', 't'];
 
 /**
  * Parse a tx: callback_data string into a typed command.
@@ -413,9 +411,9 @@ export function parseTxCallback(data: string): TxCallbackCmd | null {
     const page = parseInt(parts[2] ?? '0', 10);
     if (isNaN(page) || page < 0) return null;
     let filter = (parts[3] ?? 'a') as IntentFilter;
-    // Backward compat: stale cached Telegram buttons may send old 'd' (combined debts).
-    // Silently redirect to 'a' (All) to avoid null-return on stale keyboards.
-    if ((filter as string) === 'd') filter = 'a';
+    // Backward compat: stale cached buttons may send 'dg' or 'dr' (old split debt filters).
+    // Merge both into 'd' (combined debts) — Variant B.
+    if ((filter as string) === 'dg' || (filter as string) === 'dr') filter = 'd';
     if (!VALID_FILTERS.includes(filter)) return null;
     return { cmd: 'list', page, filter };
   }
