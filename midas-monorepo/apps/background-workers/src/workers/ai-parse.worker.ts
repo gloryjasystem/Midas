@@ -392,6 +392,31 @@ async function processAiParse(job: Job<AiParseJobPayload>): Promise<void> {
     }
     // else: gate already sent — silently ignore
 
+    // ── Delete the "⏳ Распознаю голосовое..." status message ──
+    // When the new input came from a voice message, voice-parse.worker
+    // stored the status message ID in midas:clar:msg so ai-parse can
+    // clean it up. On the gate path we must do this explicitly since
+    // we return early before the normal clarification/preview flow.
+    try {
+      const clarMsgKey = `midas:clar:msg:${telegramUserId}:${chatId}`;
+      const voiceStatusMsgId = await redisConnection.get(clarMsgKey);
+      if (voiceStatusMsgId) {
+        const delAlertId = ulid();
+        await notificationsQueue.add(
+          QUEUE_NAMES.NOTIFICATIONS,
+          {
+            alertId: delAlertId,
+            workspaceId,
+            chatId,
+            message: '',
+            deleteMessageId: voiceStatusMsgId,
+          },
+          { jobId: IdempotencyKeyBuilder.notification(workspaceId, delAlertId) },
+        );
+        void redisConnection.del(clarMsgKey);
+      }
+    } catch { /* non-fatal: status msg stays but gate still works */ }
+
     console.log('[midas:ai-parse-worker] Gate: blocked new input, active draft exists', {
       jobId: job.id,
       workspaceId,
