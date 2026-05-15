@@ -97,11 +97,11 @@ function shortDate(isoDate: string): string {
 // ─────────────────────────────────────────────────────────────
 
 const FILTER_LABELS: Record<IntentFilter, { text: string; active: string }> = {
-  e:  { text: '\uD83D\uDCB8 Расходы',   active: '\uD83D\uDCB8 Расходы ✓'  },
-  i:  { text: '\uD83D\uDCB0 Доходы',    active: '\uD83D\uDCB0 Доходы ✓'   },
-  d:  { text: '\uD83E\uDD1D Долги',     active: '\uD83E\uDD1D Долги ✓'    },
-  t:  { text: '\uD83D\uDD04 Переводы',  active: '\uD83D\uDD04 Переводы ✓' },
-  a:  { text: '\uD83D\uDCCB Все',       active: '\uD83D\uDCCB Все ✓'        },
+  e:  { text: '\uD83D\uDCB8',       active: '\uD83D\uDCB8 ✓'  },  // 💸  (расходы)
+  i:  { text: '\uD83D\uDCB0',       active: '\uD83D\uDCB0 ✓'  },  // 💰  (доходы)
+  d:  { text: '\uD83E\uDD1D',       active: '\uD83E\uDD1D ✓'  },  // 🤝  (долги)
+  t:  { text: '\uD83D\uDD04',       active: '\uD83D\uDD04 ✓'  },  // 🔄  (переводы)
+  a:  { text: '\uD83D\uDCCB Все',   active: '\uD83D\uDCCB Все ✓' },  // Все (активный по умолчанию)
 };
 
 // ─────────────────────────────────────────────────────────────
@@ -125,15 +125,14 @@ export function buildTxListKeyboard(
 ): InlineKeyboardMarkup {
   const rows: InlineKeyboardButton[][] = [];
 
-  // ─── Filter row — Variant B: single row of 4 filters ───────────────────
-  // Layout: [\uD83D\uDCB8 Расходы] [\uDCB0 Доходы] [\uD83E\uDD1D Долги] [\uD83D\uDD04 Переводы]
-  // Clicking the active filter toggles back to 'a' (all) — like fintech app chips.
-  const FILTER_ROW: IntentFilter[] = ['e', 'i', 'd', 't'];
+  // ─── Filter row — Variant D: icon-only chips in 1 row ────────────────
+  // Layout: [💸] [💰] [🤝] [🔄] [📋 Все]
+  // Active filter: emoji + ' ✓'. Clicking active non-'a' filter → deactivates to 'a'.
+  const FILTER_ROW: IntentFilter[] = ['e', 'i', 'd', 't', 'a'];
   rows.push(FILTER_ROW.map((f) => {
     const isActive = f === activeFilter;
     const label = isActive ? FILTER_LABELS[f].active : FILTER_LABELS[f].text;
-    // Tapping the active filter deactivates it (returns to 'all')
-    const cbFilter = isActive ? 'a' : f;
+    const cbFilter = (isActive && f !== 'a') ? 'a' : f;
     return { text: label, callback_data: `tx:l:0:${cbFilter}` };
   }));
 
