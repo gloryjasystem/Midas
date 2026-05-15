@@ -2868,23 +2868,46 @@ Midas создан, чтобы сделать учет денег максима
               );
             }
           } else if (isCat) {
-            // Reuse existing category picker from clar:cat: flow
-            const { getWorkspaceCategories } = await import('../services/edit.service.js');
-            const categories = await getWorkspaceCategories(dsResolved.workspaceId, dsResolved.userId);
-            // Build a clar:cat: keyboard so existing handlers process the result
-            const rows: { text: string; callback_data: string }[][] = [];
-            const top6 = categories.slice(0, 6);
-            for (let i = 0; i < top6.length; i += 2) {
-              const row = [{ text: top6[i]?.name ?? '', callback_data: `clar:cat:${top6[i]?.id ?? ''}:${draftSubId}` }];
-              if (top6[i + 1]) row.push({ text: top6[i + 1]?.name ?? '', callback_data: `clar:cat:${top6[i + 1]?.id ?? ''}:${draftSubId}` });
-              rows.push(row);
+            // ── Phase 2.X: 2-level AI-first category picker ──────────────────────
+            // Screen 1: AI hint (if present) + group tabs (Жизнь / Бизнес)
+            // Screen 2: rendered by draft:catg: handler below
+            // NOTE: getWorkspaceCategories is already statically imported at line 134.
+            const allCats = await getWorkspaceCategories(dsResolved.workspaceId, dsResolved.userId);
+
+            // Fetch draft to get parsed_category_hint for AI suggestion row.
+            // One extra DB round-trip, but avoids storing hint state in Redis.
+            const draftForHint = await getDraftFields(dsResolved.workspaceId, dsResolved.userId, draftSubId);
+            const hintName = draftForHint?.parsed_category_hint ?? null;
+            // Match hint name → category id (case-sensitive — all names are canonical)
+            const hintCat = hintName ? allCats.find(c => c.name === hintName) ?? null : null;
+
+            // Build Screen 1 keyboard
+            const s1Rows: { text: string; callback_data: string }[][] = [];
+
+            // Row 0: AI suggestion (full-width) — only if hint resolves to a real category
+            // Byte: clar:cat:{26}:{26} = 62 ✓
+            if (hintCat) {
+              s1Rows.push([{ text: `✨ ${hintCat.name}`, callback_data: `clar:cat:${hintCat.id}:${draftSubId}` }]);
             }
-            rows.push([{ text: '📋 Без категории', callback_data: `clar:nocat:${draftSubId}` }]);
-            rows.push([{ text: '◀️ Назад', callback_data: `draft:back:${draftSubId}` }]);
+
+            // Row 1: Group tabs — 2 buttons
+            // Byte: draft:catg:life:{26} = 42 ✓  draft:catg:biz:{26} = 41 ✓
+            s1Rows.push([
+              { text: '🛒 Жизнь',  callback_data: `draft:catg:life:${draftSubId}` },
+              { text: '💼 Бизнес', callback_data: `draft:catg:biz:${draftSubId}` },
+            ]);
+
+            // Row 2: utility row
+            // Byte: clar:nocat:{26} = 35 ✓  draft:back:{26} = 37 ✓
+            s1Rows.push([
+              { text: '📋 Без категории', callback_data: `clar:nocat:${draftSubId}` },
+              { text: '◀️ Назад',         callback_data: `draft:back:${draftSubId}` },
+            ]);
+
             void upsertBotMessage(
               telegramUserId, chatId,
-              '📁 <b>Выбери категорию:</b>',
-              { inline_keyboard: rows },
+              '📁 <b>Категория:</b>',
+              { inline_keyboard: s1Rows },
             );
           } else {
             // Intent picker — reuse clar:intent: keyboard
@@ -3006,6 +3029,137 @@ Midas создан, чтобы сделать учет денег максима
         } catch (err: unknown) {
           const errorClass = err instanceof Error ? err.constructor.name : 'UnknownError';
           request.log.error({ msg: '[midas:bot:webhook] draft:cur: failed', callbackId: cq.id, errorClass });
+        }
+
+        await answerCallbackQuery(cq.id);
+        await reply.status(200).send({ ok: true });
+        return;
+      }
+
+      // ── Phase 2.X: 2-level category group browser ───────────────────────────
+      // draft:catg:life:{draftId}  — show Жизнь category list (Screen 2)
+      // draft:catg:biz:{draftId}   — show Бизнес category list (Screen 2)
+      // draft:catg:back:{draftId}  — return to group picker (Screen 1)
+      // SAFETY: 'draft:catg:' does NOT match 'draft:cat:' (char[9] is 'g' not ':')
+      // Byte checks: draft:catg:life:{26}=42 ✓  draft:catg:biz:{26}=41 ✓  draft:catg:back:{26}=42 ✓
+      if (callbackData.startsWith('draft:catg:')) {
+        // Parse: draft:catg:{sub}:{draftId}
+        const catgAfterPrefix = callbackData.slice('draft:catg:'.length); // e.g. "life:XYZ..."
+        const catgColonIdx = catgAfterPrefix.indexOf(':');
+        const catgSub      = catgColonIdx >= 0 ? catgAfterPrefix.slice(0, catgColonIdx) : ''; // 'life'|'biz'|'back'
+        const catgDraftId  = catgColonIdx >= 0 ? catgAfterPrefix.slice(catgColonIdx + 1) : '';
+
+        // Validate draftId is a well-formed ULID (SEC-01)
+        if (!/^[0-9A-Z]{26}$/.test(catgDraftId) || !['life', 'biz', 'back'].includes(catgSub)) {
+          await answerCallbackQuery(cq.id);
+          await reply.status(200).send({ ok: true });
+          return;
+        }
+
+        // Emoji map for all 28 default categories (display only, never stored)
+        const CAT_EMOJI: Record<string, string> = {
+          'Продукты':           '🛒',
+          'Кафе и рестораны':   '☕',
+          'Транспорт':          '🚗',
+          'Жильё':              '🏠',
+          'Здоровье':           '💊',
+          'Одежда':             '👗',
+          'Красота':            '💄',
+          'Развлечения':        '🎮',
+          'Подписки':           '📱',
+          'Связь':              '📡',
+          'Образование':        '📚',
+          'Спорт':              '🏋️',
+          'Путешествия':        '✈️',
+          'Подарки':            '🎁',
+          'Дети':               '👶',
+          'Другое':             '📦',
+          'Зарплаты и выплаты': '💰',
+          'Фриланс':            '🤝',
+          'Реклама':            '📣',
+          'Софт и сервисы':     '💻',
+          'Оборудование':       '🖥️',
+          'Офис':               '🏢',
+          'Налоги':             '🧾',
+          'Комиссии':           '💸',
+          'Крипто-комиссии':    '⛽',
+          'Подрядчики':         '👷',
+          'Продажи':            '📈',
+          'Инвестиции':         '💹',
+        };
+
+        try {
+          const catgResolved = await resolveWorkspace(telegramUserId, chatId);
+          const allCatg = await getWorkspaceCategories(catgResolved.workspaceId, catgResolved.userId);
+
+          if (catgSub === 'back') {
+            // ── Restore Screen 1 (group picker) ────────────────────────────────
+            // Re-fetch hint so AI suggestion is still shown on back-navigation.
+            const draftForBack = await getDraftFields(catgResolved.workspaceId, catgResolved.userId, catgDraftId);
+            const backHintName = draftForBack?.parsed_category_hint ?? null;
+            const backHintCat  = backHintName ? allCatg.find(c => c.name === backHintName) ?? null : null;
+
+            const backRows: { text: string; callback_data: string }[][] = [];
+            if (backHintCat) {
+              backRows.push([{ text: `✨ ${backHintCat.name}`, callback_data: `clar:cat:${backHintCat.id}:${catgDraftId}` }]);
+            }
+            backRows.push([
+              { text: '🛒 Жизнь',  callback_data: `draft:catg:life:${catgDraftId}` },
+              { text: '💼 Бизнес', callback_data: `draft:catg:biz:${catgDraftId}` },
+            ]);
+            backRows.push([
+              { text: '📋 Без категории', callback_data: `clar:nocat:${catgDraftId}` },
+              { text: '◀️ Назад',         callback_data: `draft:back:${catgDraftId}` },
+            ]);
+            void upsertBotMessage(
+              telegramUserId, chatId,
+              '📁 <b>Категория:</b>',
+              { inline_keyboard: backRows },
+            );
+
+          } else {
+            // ── Screen 2: categories in selected group ──────────────────────────
+            // group value in DB is 'Жизнь' or 'Бизнес' (category_group enum)
+            const groupName  = catgSub === 'life' ? 'Жизнь' : 'Бизнес';
+            const groupEmoji = catgSub === 'life' ? '🛒' : '💼';
+            const groupCats  = allCatg.filter(c => c.group === groupName);
+
+            const s2Rows: { text: string; callback_data: string }[][] = [];
+            // 2 buttons per row, with emoji prefix
+            // Byte: clar:cat:{26}:{26} = 62 ✓
+            for (let i = 0; i < groupCats.length; i += 2) {
+              const a = groupCats[i]!;
+              const b = groupCats[i + 1];
+              const btnA = {
+                text: `${CAT_EMOJI[a.name] ?? '📂'} ${a.name}`,
+                callback_data: `clar:cat:${a.id}:${catgDraftId}`,
+              };
+              if (b) {
+                s2Rows.push([btnA, {
+                  text: `${CAT_EMOJI[b.name] ?? '📂'} ${b.name}`,
+                  callback_data: `clar:cat:${b.id}:${catgDraftId}`,
+                }]);
+              } else {
+                s2Rows.push([btnA]);
+              }
+            }
+
+            // Bottom navigation row
+            // Byte: draft:catg:back:{26} = 42 ✓  clar:nocat:{26} = 35 ✓
+            s2Rows.push([
+              { text: '◀️ К группам',     callback_data: `draft:catg:back:${catgDraftId}` },
+              { text: '📋 Без категории', callback_data: `clar:nocat:${catgDraftId}` },
+            ]);
+
+            void upsertBotMessage(
+              telegramUserId, chatId,
+              `📁 <b>${groupEmoji} ${groupName}:</b>`,
+              { inline_keyboard: s2Rows },
+            );
+          }
+        } catch (err: unknown) {
+          const errorClass = err instanceof Error ? err.constructor.name : 'UnknownError';
+          request.log.error({ msg: '[midas:bot:webhook] draft:catg: failed', callbackId: cq.id, errorClass });
         }
 
         await answerCallbackQuery(cq.id);
