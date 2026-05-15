@@ -794,9 +794,30 @@ async function processAiParse(job: Job<AiParseJobPayload>): Promise<void> {
       deadCardMsgId = undefined;
     }
 
-    // Prefer dead_card over clarification card — both can coexist,
-    // but only one deleteMessageId is supported per notification job.
-    const msgToDelete = deadCardMsgId ?? prevClarMsgIdForDelete;
+    // Phase 1.40: If BOTH a dead card AND a voice status message exist,
+    // we must delete both. The notification job only supports one deleteMessageId,
+    // so we fire an extra job for the second one before the main preview.
+    // Priority: voice status ("⏳ Распознаю...") goes in the main job (visual sync),
+    //           dead card ("❌ Отменено") gets its own fire-and-forget job.
+    if (deadCardMsgId && prevClarMsgIdForDelete) {
+      // Send a dedicated delete job for the dead card
+      const deadCardAlertId = ulid();
+      void notificationsQueue.add(
+        QUEUE_NAMES.NOTIFICATIONS,
+        {
+          alertId: deadCardAlertId,
+          workspaceId,
+          chatId,
+          message: '',
+          deleteMessageId: deadCardMsgId,
+        },
+        { jobId: IdempotencyKeyBuilder.notification(workspaceId, deadCardAlertId) },
+      );
+    }
+
+    // Main preview notification deletes the voice status message ("⏳ Распознаю голосовое...")
+    // so it disappears exactly when the draft card appears.
+    const msgToDelete = prevClarMsgIdForDelete ?? deadCardMsgId;
 
     await notificationsQueue.add(
       QUEUE_NAMES.NOTIFICATIONS,
