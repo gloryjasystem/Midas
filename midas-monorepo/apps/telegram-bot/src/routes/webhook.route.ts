@@ -2906,10 +2906,11 @@ Midas создан, чтобы сделать учет денег максима
             }
 
             if (useFlatList) {
-              // Flat list: render all categories 2-per-row directly
-              for (let i = 0; i < allCats.length; i += 2) {
-                const a = allCats[i]!;
-                const b = allCats[i + 1];
+              // Flat list: exclude hintCat to avoid showing it twice (already shown as ✨ row)
+              const catsToShow = hintCat ? allCats.filter(c => c.id !== hintCat.id) : allCats;
+              for (let i = 0; i < catsToShow.length; i += 2) {
+                const a = catsToShow[i]!;
+                const b = catsToShow[i + 1];
                 const btnA = { text: `${CAT_EMOJI_S1[a.name] ?? '📂'} ${a.name}`, callback_data: `clar:cat:${a.id}:${draftSubId}` };
                 s1Rows.push(b
                   ? [btnA, { text: `${CAT_EMOJI_S1[b.name] ?? '📂'} ${b.name}`, callback_data: `clar:cat:${b.id}:${draftSubId}` }]
