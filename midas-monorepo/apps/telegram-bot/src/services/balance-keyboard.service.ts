@@ -32,8 +32,7 @@
 import type { InlineKeyboardMarkup } from '../services/telegram-api.js';
 import { escapeHtml } from '../utils/html-escape.js';
 import {
-  FIAT_CURRENCY_PRESETS,
-  CRYPTO_CURRENCY_PRESETS,
+  getCurrencyFlag,
 } from '../services/account-onboard-keyboard.service.js';
 import { classifyCurrency } from './account-currency-validator.service.js';
 
@@ -92,6 +91,8 @@ export type BalanceCallbackCmd =
   | { cmd: 'close' }
   // Phase B-2: add a child currency account under a parent
   | { cmd: 'add_currency'; accountId: string }
+  // Phase B-2+: skip initial balance input when adding child account
+  | { cmd: 'add_currency_skip_bal'; accountId: string }
   // Phase LD++: default account role toggles (cyclical)
   | { cmd: 'set_role'; role: 'none' | 'expense' | 'income' | 'main'; accountId: string };
 
@@ -121,6 +122,13 @@ export function parseBalanceCallback(data: string): BalanceCallbackCmd | null {
     const accountId = parts[2] ?? '';
     if (accountId.length === 0) return null;
     return { cmd: 'add_currency', accountId };
+  }
+
+  // bl:acb0:{id} — Phase B-2+: skip balance input when adding child
+  if (sub === 'acb0') {
+    const accountId = parts[2] ?? '';
+    if (accountId.length === 0) return null;
+    return { cmd: 'add_currency_skip_bal', accountId };
   }
 
   if (sub === 'cs') {
@@ -269,21 +277,29 @@ export function buildBalanceListKeyboard(accounts: BalanceAccountRow[]): InlineK
     const children = childrenOf.get(acc.account_id) ?? [];
 
     if (children.length > 0) {
-      // Parent with children — aggregation button + child rows
-      const n = children.length;
-      // ⭐ only for primary (expense+income default), nothing otherwise
+      // Parent with children — show parent own balance + each child (N+1 total)
+      const total = children.length + 1; // parent itself is one currency
       const rs = (acc.isExpenseDefault && acc.isIncomeDefault) ? ' ⭐' : '';
       accountRows.push([{
-        text: `${emoji} ${acc.name}${rs}  ·  ${n}\u00a0${pluralizeCurrency(n)}`,
+        text: `${emoji} ${acc.name}${rs}  ·  ${total}\u00a0${pluralizeCurrency(total)}`,
         callback_data: `bl:v:${acc.account_id}`,
       }]);
 
-      // Child rows: indented, currency symbol + balance
-      for (const child of children) {
-        const balFmt = `${formatBalanceShort(child.balance)}\u00a0${sym(child.currency)}`;
+      // Build ladder: parent own balance first, then children
+      const allEntries = [
+        { balance: acc.balance, currency: acc.currency, accountId: acc.account_id, isParent: true },
+        ...children.map((c) => ({ balance: c.balance, currency: c.currency, accountId: c.account_id, isParent: false })),
+      ];
+      for (let i = 0; i < allEntries.length; i++) {
+        const entry = allEntries[i]!;
+        const isLast = i === allEntries.length - 1;
+        const connector = isLast ? '└' : '├';
+        const flag = getCurrencyFlag(entry.currency);
+        const balFmt = `${formatBalanceShort(entry.balance)}\u00a0${sym(entry.currency)}`;
+        const label = flag ? `${flag}\u00a0${entry.currency}` : entry.currency;
         accountRows.push([{
-          text: `  └ ${balFmt}`,
-          callback_data: `bl:v:${child.account_id}`,
+          text: `  ${connector} ${balFmt}  (${label})`,
+          callback_data: `bl:v:${entry.accountId}`,
         }]);
       }
 
@@ -388,21 +404,16 @@ export function buildCurrencyWarningKeyboard(accountId: string): InlineKeyboardM
 }
 
 /**
- * Build the currency change picker keyboard.
- * Uses fiat presets (since most currency changes are for fiat accounts).
- * For crypto accounts, user can pick [✏️ Другая].
+ * Build the currency change picker keyboard (fiat).
+ * 3×3 grid with flag emojis — top 9 fiat currencies.
  */
 export function buildBalanceFiatCurrencyKeyboard(): InlineKeyboardMarkup {
+  const TOP_FIAT = ['USD', 'EUR', 'RUB', 'UAH', 'GBP', 'PLN', 'CHF', 'KZT', 'AED'] as const;
   return {
     inline_keyboard: [
-      FIAT_CURRENCY_PRESETS.slice(0, 3).map((code) => ({
-        text: code,
-        callback_data: `bl:cs:${code}`,
-      })),
-      FIAT_CURRENCY_PRESETS.slice(3, 6).map((code) => ({
-        text: code,
-        callback_data: `bl:cs:${code}`,
-      })),
+      TOP_FIAT.slice(0, 3).map((code) => ({ text: `${getCurrencyFlag(code)} ${code}`, callback_data: `bl:cs:${code}` })),
+      TOP_FIAT.slice(3, 6).map((code) => ({ text: `${getCurrencyFlag(code)} ${code}`, callback_data: `bl:cs:${code}` })),
+      TOP_FIAT.slice(6, 9).map((code) => ({ text: `${getCurrencyFlag(code)} ${code}`, callback_data: `bl:cs:${code}` })),
       [{ text: '✏️ Другая валюта', callback_data: 'bl:ci' }],
       [{ text: '◀️ Назад', callback_data: 'bl:back' }],
     ],
@@ -411,20 +422,55 @@ export function buildBalanceFiatCurrencyKeyboard(): InlineKeyboardMarkup {
 
 /**
  * Build the currency change picker keyboard for crypto accounts.
+ * 3×3 grid with token symbol prefixes.
  */
 export function buildBalanceCryptoCurrencyKeyboard(): InlineKeyboardMarkup {
+  const TOP_CRYPTO = ['USDT', 'BTC', 'ETH', 'SOL', 'TON', 'BNB', 'XRP', 'TRX', 'USDC'] as const;
   return {
     inline_keyboard: [
-      CRYPTO_CURRENCY_PRESETS.slice(0, 3).map((code) => ({
-        text: code,
-        callback_data: `bl:cs:${code}`,
-      })),
-      CRYPTO_CURRENCY_PRESETS.slice(3, 6).map((code) => ({
-        text: code,
-        callback_data: `bl:cs:${code}`,
-      })),
+      TOP_CRYPTO.slice(0, 3).map((code) => ({ text: `${getCurrencyFlag(code)} ${code}`, callback_data: `bl:cs:${code}` })),
+      TOP_CRYPTO.slice(3, 6).map((code) => ({ text: `${getCurrencyFlag(code)} ${code}`, callback_data: `bl:cs:${code}` })),
+      TOP_CRYPTO.slice(6, 9).map((code) => ({ text: `${getCurrencyFlag(code)} ${code}`, callback_data: `bl:cs:${code}` })),
       [{ text: '✏️ Другая валюта', callback_data: 'bl:ci' }],
       [{ text: '◀️ Назад', callback_data: 'bl:back' }],
+    ],
+  };
+}
+
+/**
+ * Build the "add currency" picker for multi-currency accounts.
+ * Phase B-2+: Filters currencies already used (parent + children).
+ * Shows top mixed preset with flag emojis.
+ *
+ * @param parentAccountId - ULID of the parent account (for back navigation)
+ * @param usedCurrencies  - Currencies already present (to exclude from picker)
+ */
+export function buildAddCurrencyKeyboard(
+  parentAccountId: string,
+  usedCurrencies: ReadonlySet<string>,
+): InlineKeyboardMarkup {
+  const MIXED_PRESETS = [
+    'USD', 'EUR', 'RUB', 'UAH', 'GBP', 'PLN',
+    'CHF', 'KZT', 'AED', 'USDT', 'BTC', 'ETH',
+  ] as const;
+
+  const available = MIXED_PRESETS.filter((c) => !usedCurrencies.has(c));
+
+  // Up to 3 rows of 3
+  const rows: { text: string; callback_data: string }[][] = [];
+  for (let i = 0; i < available.length && rows.length < 3; i += 3) {
+    const row = available.slice(i, i + 3).map((code) => ({
+      text: `${getCurrencyFlag(code)} ${code}`,
+      callback_data: `bl:cs:${code}`,
+    }));
+    if (row.length > 0) rows.push(row);
+  }
+
+  return {
+    inline_keyboard: [
+      ...rows,
+      [{ text: '✏️ Другая валюта', callback_data: 'bl:ci' }],
+      [{ text: '◀️ Назад', callback_data: `bl:v:${parentAccountId}` }],
     ],
   };
 }

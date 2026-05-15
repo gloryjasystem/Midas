@@ -58,7 +58,7 @@ import { resolveWorkspace } from '../services/workspace-resolver.js';
 import { checkOnboardingRateLimit } from '../services/rate-limiter.js';
 // Phase 1.33: sendMessage no longer imported directly — all sends go via upsertBotMessage.
 import { getMonthlyReport } from '../services/report.service.js';
-import { getBalanceData, getAccountDetail, setAccountBalanceById, getAccountTxCount } from '../services/balance.service.js';
+import { getBalanceData, getAccountDetail, setAccountBalanceById, getAccountTxCount, getChildAccountCurrencies } from '../services/balance.service.js';
 import {
   setAccountBalance,
   parseSetBalanceArgs,
@@ -203,6 +203,7 @@ import {
   buildDeleteConfirmKeyboard as buildBalanceDeleteConfirmKeyboard, // Phase 2.1
   buildCurrencyWarningKeyboard,      // Phase 2.1
   buildBalanceFiatCurrencyKeyboard,  // Phase 2.1
+  buildAddCurrencyKeyboard,          // Phase B-2+: filtered add-currency picker
   formatAccountDetailText,           // Phase 2.1
   type BalanceAccountRow,            // Phase 2.1
 } from '../services/balance-keyboard.service.js';
@@ -3263,32 +3264,30 @@ Midas создан, чтобы сделать учет денег максима
                 }
 
               } else if (state.action === 'add_currency') {
-                // Phase B-5: create a child account under the parent
+                // Phase B-2+: don't create immediately — prompt for initial balance first
                 // SEC-01: parentId validated by parseBalanceCallback (ULID format)
                 // SEC-01: blCmd.code validated by bl:cs: prefix allowlist
-                // Phase B-8: addChildAccount uses withTenantTransaction — RLS enforced (SEC-03)
-                await redisConnection.del(blKey);
-                const parentDetail = await getAccountDetail(blResolved.workspaceId, blResolved.userId, state.accountId);
-                const parentName = parentDetail?.name ?? 'Счёт';
-                // Child name: "{parentName} · {CURRENCY}" — unique within workspace
-                const childName = `${parentName} · ${blCmd.code}`;
-                const childResult = await addChildAccount(
-                  blResolved.workspaceId, blResolved.userId,
-                  state.accountId, childName, blCmd.code,
+                const parentDetail2 = await getAccountDetail(blResolved.workspaceId, blResolved.userId, state.accountId);
+                const parentName = parentDetail2?.name ?? 'Счёт';
+                const childName = `${parentName} \u00b7 ${blCmd.code}`;
+
+                // Save pending state with currency for the balance input step
+                await redisConnection.set(
+                  blKey,
+                  JSON.stringify({ action: 'add_currency_bal', accountId: state.accountId, currency: blCmd.code, childName }),
+                  'EX', 300,
                 );
-                // Return to parent account card
-                const roles = await getAccountRoles(blResolved.workspaceId, blResolved.userId, state.accountId);
-                const detail = await getAccountDetail(blResolved.workspaceId, blResolved.userId, state.accountId);
-                if (detail) {
-                  const prefix = childResult.status === 'duplicate'
-                    ? `⚠️ Счёт <b>${escapeHtml(childName)}</b> уже существует.\n\n`
-                    : `✅ Добавлен счёт <b>${escapeHtml(childName)}</b>.\n\n`;
-                  await upsertBotMessage(
-                    telegramUserId, chatId,
-                    prefix + formatAccountDetailText(detail, roles),
-                    buildAccountActionsKeyboard(state.accountId, roles, detail.parent_account_id === null),
-                  );
-                }
+
+                await upsertBotMessage(
+                  telegramUserId, chatId,
+                  `\uD83D\uDCB0 <b>\u041D\u0430\u0447\u0430\u043B\u044C\u043D\u044B\u0439 \u0431\u0430\u043B\u0430\u043D\u0441 \u00b7 ${escapeHtml(blCmd.code)}</b>\n\n\u0421\u043A\u043E\u043B\u044C\u043A\u043E <b>${escapeHtml(blCmd.code)}</b> \u0441\u0435\u0439\u0447\u0430\u0441 \u043D\u0430 \u0441\u0447\u0451\u0442\u0435 <b>${escapeHtml(parentName)}</b>?\n\n<i>\u0412\u0432\u0435\u0434\u0438\u0442\u0435 \u0447\u0438\u0441\u043B\u043E \u0438\u043B\u0438 \u043D\u0430\u0436\u043C\u0438\u0442\u0435 \u00ab\u041F\u0440\u043E\u043F\u0443\u0441\u0442\u0438\u0442\u044C\u00bb.</i>`,
+                  {
+                    inline_keyboard: [
+                      [{ text: '\u23ED Пропустить (0)', callback_data: `bl:acb0:${state.accountId}` }],
+                      [{ text: '\u25C0\uFE0F Назад', callback_data: `bl:v:${state.accountId}` }],
+                    ],
+                  },
+                );
               }
             }
 
@@ -3350,23 +3349,62 @@ Midas создан, чтобы сделать учет денег максима
               await answerCallbackQuery(cq.id, toastMsg);
             }
 
-          // ── Phase B-5: add child currency account ─────────────
+          // ── Phase B-2+: add child currency account ─────────────
           // Triggered by «➕ Добавить валюту» button on a parent account card.
-          // Saves parentId in Redis bl:state, shows currency picker.
-          // On currency pick (bl:cs:) the currency_set handler will detect
-          // action='add_currency' and create a child account under parentId.
+          // Fetches existing currencies, saves parentId in Redis, shows filtered picker.
+          // On currency pick (bl:cs:) → balance prompt → create child with initial balance.
           } else if (blCmd.cmd === 'add_currency') {
             // SEC-01: accountId validated by parseBalanceCallback (ULID format)
+            const parentForPicker = await getAccountDetail(blResolved.workspaceId, blResolved.userId, blCmd.accountId);
+            const usedCurrencies = await getChildAccountCurrencies(blResolved.workspaceId, blResolved.userId, blCmd.accountId);
+            if (parentForPicker) usedCurrencies.add(parentForPicker.currency); // parent's own currency is already taken
+
             await redisConnection.set(
               blKey,
               JSON.stringify({ action: 'add_currency', accountId: blCmd.accountId }),
               'EX', 300,
             );
+
+            const usedList = [...usedCurrencies].join(', ');
+            const pickerHeader = parentForPicker
+              ? `\u2795 <b>\u0414\u043e\u0431\u0430\u0432\u0438\u0442\u044c \u0432\u0430\u043b\u044e\u0442\u0443 \u00b7 ${escapeHtml(parentForPicker.name)}</b>\n\n<i>\u0423\u0436\u0435 \u0435\u0441\u0442\u044c: ${escapeHtml(usedList)}</i>\n\n\u0412\u044b\u0431\u0435\u0440\u0438 \u043d\u043e\u0432\u0443\u044e \u0432\u0430\u043b\u044e\u0442\u0443:`
+              : '\uD83D\uDCB1 <b>\u0412\u044b\u0431\u0435\u0440\u0438 \u0432\u0430\u043b\u044e\u0442\u0443:</b>';
+
             await upsertBotMessage(
               telegramUserId, chatId,
-              '💱 <b>Выбери валюту для нового счёта:</b>',
-              buildBalanceFiatCurrencyKeyboard(),
+              pickerHeader,
+              buildAddCurrencyKeyboard(blCmd.accountId, usedCurrencies),
             );
+
+          // ── Phase B-2+: skip balance → create child with 0 ──────
+          } else if (blCmd.cmd === 'add_currency_skip_bal') {
+            const rawBalState = await redisConnection.get(blKey);
+            if (rawBalState) {
+              const balState = JSON.parse(rawBalState) as { action: string; accountId: string; currency: string; childName: string };
+              if (balState.action === 'add_currency_bal') {
+                await redisConnection.del(blKey);
+                const childResultSkip = await addChildAccount(
+                  blResolved.workspaceId, blResolved.userId,
+                  balState.accountId, balState.childName, balState.currency,
+                );
+                const rolesSkip = await getAccountRoles(blResolved.workspaceId, blResolved.userId, balState.accountId);
+                const detailSkip = await getAccountDetail(blResolved.workspaceId, blResolved.userId, balState.accountId);
+                if (detailSkip) {
+                  const prefixSkip = childResultSkip.status === 'duplicate'
+                    ? `\u26A0\uFE0F \u0421\u0447\u0451\u0442 <b>${escapeHtml(balState.childName)}</b> \u0443\u0436\u0435 \u0441\u0443\u0449\u0435\u0441\u0442\u0432\u0443\u0435\u0442.\n\n`
+                    : `\u2705 \u0421\u0447\u0451\u0442 <b>${escapeHtml(balState.childName)}</b> \u0434\u043e\u0431\u0430\u0432\u043b\u0435\u043d \u0441 \u043d\u0443\u043b\u0435\u0432\u044b\u043c \u0431\u0430\u043b\u0430\u043d\u0441\u043e\u043c.\n\n`;
+                  await upsertBotMessage(
+                    telegramUserId, chatId,
+                    prefixSkip + formatAccountDetailText(detailSkip, rolesSkip),
+                    buildAccountActionsKeyboard(balState.accountId, rolesSkip, detailSkip.parent_account_id === null),
+                  );
+                }
+              } else {
+                await answerCallbackQuery(cq.id, '\u26A0\uFE0F \u0421\u0435\u0441\u0441\u0438\u044f \u0438\u0441\u0442\u0435\u043a\u043b\u0430, \u043d\u0430\u0447\u043d\u0438\u0442\u0435 \u0437\u0430\u043d\u043e\u0432\u043e');
+              }
+            } else {
+              await answerCallbackQuery(cq.id, '\u26A0\uFE0F \u0421\u0435\u0441\u0441\u0438\u044f \u0438\u0441\u0442\u0435\u043a\u043b\u0430, \u043d\u0430\u0447\u043d\u0438\u0442\u0435 \u0437\u0430\u043d\u043e\u0432\u043e');
+            }
 
           } else if (blCmd.cmd === 'close') {
             // Phase 2.9+: Clean close of balance screen — delete message + clear nav pointer
@@ -3635,7 +3673,7 @@ Midas создан, чтобы сделать учет денег максима
     const rawBlState = await redisConnection.get(blStateKey);
     if (rawBlState && !commandToken) {
       try {
-        const blState = JSON.parse(rawBlState) as { action: string; accountId: string };
+        const blState = JSON.parse(rawBlState) as { action: string; accountId: string; currency?: string; childName?: string };
         const blResolved = await resolveWorkspace(telegramUserId, chatId);
         const userInput = message.text.trim();
 
@@ -3710,6 +3748,53 @@ Midas создан, чтобы сделать учет денег максима
                 telegramUserId, chatId,
                 `✅ Валюта изменена на <b>${escapeHtml(code)}</b>.\n\n` + formatAccountDetailText(detail, roles),
                 buildAccountActionsKeyboard(blState.accountId, roles, detail.parent_account_id === null),
+              );
+            }
+          }
+          await reply.status(200).send({ ok: true });
+          return;
+        }
+
+        if (blState.action === 'add_currency_bal') {
+          // Phase B-2+: user entered initial balance for a new child currency account
+          const amountStr = userInput.replace(/,/g, '.').replace(/\s/g, '');
+          if (!/^-?\d+(\.\d+)?$/.test(amountStr)) {
+            void upsertBotMessage(
+              telegramUserId, chatId,
+              '⚠️ Введите числовое значение (например: 1500 или 2847.50).\n\nИли нажмите «Пропустить» чтобы начать с нуля.',
+              {
+                inline_keyboard: [
+                  [{ text: '⏭ Пропустить (0)', callback_data: `bl:acb0:${blState.accountId}` }],
+                  [{ text: '◀️ Назад', callback_data: `bl:v:${blState.accountId}` }],
+                ],
+              },
+            );
+          } else {
+            const currency: string = blState.currency ?? '';
+            const childName: string = blState.childName ?? '';
+            await redisConnection.del(blStateKey);
+            // Create child account (initial_balance defaults to 0, then we sync it)
+            const childResultBal = await addChildAccount(
+              blResolved.workspaceId, blResolved.userId,
+              blState.accountId, childName, currency,
+            );
+            // If created successfully, set initial balance
+            if (childResultBal.status === 'created' && childResultBal.accountId) {
+              await setAccountBalanceById(
+                blResolved.workspaceId, blResolved.userId,
+                childResultBal.accountId, amountStr,
+              );
+            }
+            const rolesBal = await getAccountRoles(blResolved.workspaceId, blResolved.userId, blState.accountId);
+            const detailBal = await getAccountDetail(blResolved.workspaceId, blResolved.userId, blState.accountId);
+            if (detailBal) {
+              const prefixBal = childResultBal.status === 'duplicate'
+                ? `⚠️ Счёт <b>${escapeHtml(childName)}</b> уже существует.\n\n`
+                : `✅ Счёт <b>${escapeHtml(childName)}</b> добавлен с балансом ${amountStr}\u00a0${escapeHtml(currency)}.\n\n`;
+              void upsertBotMessage(
+                telegramUserId, chatId,
+                prefixBal + formatAccountDetailText(detailBal, rolesBal),
+                buildAccountActionsKeyboard(blState.accountId, rolesBal, detailBal.parent_account_id === null),
               );
             }
           }

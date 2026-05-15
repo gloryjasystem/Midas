@@ -320,18 +320,22 @@ export async function getBalanceData(
       const childrenOfRow = childrenMap.get(row.account_id) ?? [];
 
       if (childrenOfRow.length > 0) {
-        // Parent with children — compact ladder
-        const childLines = childrenOfRow.map((child, idx) => {
-          const isLast = idx === childrenOfRow.length - 1;
+        // Multi-currency parent: ladder with parent's own balance as first entry
+        const allCurrencyRows = [
+          { balance: row.balance.toFixed(2), currency: row.currency }, // parent itself
+          ...childrenOfRow.map((c) => ({ balance: c.balance.toFixed(2), currency: c.currency })),
+        ];
+        const ladderLines = allCurrencyRows.map((r, idx) => {
+          const isLast = idx === allCurrencyRows.length - 1;
           const connector = isLast ? '└' : '├';
-          const balStr = formatBalanceShort(child.balance.toFixed(2));
-          const sym = fmtCcy(child.currency);
-          const balDisplay = CCY_SYMBOL[child.currency]
-            ? `${balStr} ${sym}`
-            : `${balStr} ${escapeHtml(child.currency)}`;
+          const balStr = formatBalanceShort(r.balance);
+          const symStr = fmtCcy(r.currency);
+          const balDisplay = CCY_SYMBOL[r.currency]
+            ? `${balStr}\u00a0${symStr}`
+            : `${balStr}\u00a0${escapeHtml(r.currency)}`;
           return `${connector} ${balDisplay}`;
         });
-        return `<b>${escapeHtml(row.name)}</b>${roleSuffix}\n${childLines.join('\n')}`;
+        return `<b>${escapeHtml(row.name)}</b>${roleSuffix}\n${ladderLines.join('\n')}`;
       }
 
       // ── Leaf account: "Альфа-Банк (⭐ основной) · 22 010 213 ₽"
@@ -533,6 +537,37 @@ export async function getAccountTxCount(
         [accountId, workspaceId],
       );
       return parseInt(result.rows[0]?.cnt ?? '0', 10);
+    },
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// getChildAccountCurrencies — Phase B-2+
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Return a mutable Set of currency codes used by child accounts of a parent.
+ * Used to filter the "add currency" picker so duplicates are impossible.
+ *
+ * SEC-03: withTenantTransaction (RLS enforced).
+ */
+export async function getChildAccountCurrencies(
+  workspaceId: string,
+  userId: string,
+  parentAccountId: string,
+): Promise<Set<string>> {
+  return withTenantTransaction<Set<string>>(
+    workspaceId,
+    userId,
+    async (client) => {
+      const res = await client.query<{ currency: string }>(
+        `SELECT currency FROM account_sources
+         WHERE parent_account_id = $2
+           AND workspace_id = $1
+           AND deleted_at IS NULL`,
+        [workspaceId, parentAccountId],
+      );
+      return new Set(res.rows.map((r) => r.currency));
     },
   );
 }
