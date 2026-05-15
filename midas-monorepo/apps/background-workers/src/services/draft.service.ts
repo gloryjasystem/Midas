@@ -780,7 +780,7 @@ export async function getWorkspaceAccountsForPicker(
        a.id,
        a.name,
        a.currency,
-       a.is_expense_default,
+       (a.id = w.default_expense_account_id) AS is_expense_default,
        (
          a.initial_balance
          + COALESCE(SUM(CASE
@@ -793,6 +793,7 @@ export async function getWorkspaceAccountsForPicker(
              THEN t.base_amount END), 0)
        )::TEXT AS balance
      FROM account_sources a
+     JOIN workspaces w ON w.id = a.workspace_id
      LEFT JOIN transactions t
        ON t.account_id = a.id
       AND t.workspace_id = $1
@@ -800,7 +801,7 @@ export async function getWorkspaceAccountsForPicker(
      WHERE a.workspace_id = $1
        AND a.deleted_at IS NULL
        AND a.is_onboarding_placeholder = FALSE
-     GROUP BY a.id, a.name, a.currency, a.initial_balance, a.is_expense_default
+     GROUP BY a.id, a.name, a.currency, a.initial_balance, w.default_expense_account_id
      ORDER BY a.name`,
     [workspaceId],
   );
