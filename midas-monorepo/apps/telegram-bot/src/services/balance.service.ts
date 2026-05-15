@@ -284,11 +284,18 @@ export async function getBalanceData(
     CNY: '¥', JPY: '¥', HKD: 'HK$', SGD: 'S$', AUD: 'A$',
     CAD: 'C$', CHF: 'Fr',
   };
-  const fmtCcy = (code: string) => CCY_SYMBOL[code] ?? code;
 
+  // ── Russian section titles ──────────────────────────────────
+  const SECTION_TITLE: Record<GroupType, string> = {
+    bank:            'Банки',
+    crypto_exchange: 'Биржи',
+    crypto_wallet:   'Крипто',
+    cash:            'Наличные',
+    other:           'Прочее',
+  };
 
   // Phase V2: only top-level accounts define group structure;
-  // children are rendered inline as dot-separated balances.
+  // children are rendered inline as slash-separated balances.
   const grouped = new Map<GroupType, AccountBalanceRow[]>();
   for (const row of accounts) {
     if (row.parent_account_id !== null) continue; // inlined under parent
@@ -297,12 +304,25 @@ export async function getBalanceData(
     grouped.get(g)!.push(row);
   }
 
+  /**
+   * Format a single currency balance: proper −/+ sign, short number, currency symbol.
+   * Uses U+2212 (MINUS SIGN) instead of ASCII hyphen for negative values.
+   */
+  const fmtBal = (balance: string, currency: string): string => {
+    const raw = formatBalanceShort(balance);
+    const withSign = raw.startsWith('-') ? `\u2212${raw.slice(1)}` : raw;
+    const sym = CCY_SYMBOL[currency] ?? escapeHtml(currency);
+    return `${withSign}\u00a0${sym}`;
+  };
+
   const sections: string[] = [];
   for (const groupType of GROUP_ORDER) {
     const rows = grouped.get(groupType);
     if (!rows || rows.length === 0) continue;
 
     const emoji = GROUP_EMOJI[groupType];
+    // Section header: emoji + bold group name (e.g. "🏦 Банки")
+    const sectionHeader = `${emoji} <b>${SECTION_TITLE[groupType]}</b>`;
 
     const lines = rows.map((row) => {
       const isExp = Boolean(row.is_expense_default);
@@ -310,36 +330,30 @@ export async function getBalanceData(
 
       // ⭐ only for primary (expense+income default)
       const starSuffix = (isExp && isInc) ? ' ⭐' : '';
+      const name = escapeHtml(row.name);
 
       const childrenOfRow = childrenMap.get(row.account_id) ?? [];
 
       if (childrenOfRow.length > 0) {
-        // Multi-currency: parent own balance · child1 · child2 ...
+        // Multi-currency: Name ⭐ — <b>bal₁</b> / <b>bal₂</b>
         const allEntries = [
           { balance: row.balance.toFixed(2), currency: row.currency },
           ...childrenOfRow.map((c) => ({ balance: c.balance.toFixed(2), currency: c.currency })),
         ];
-        const dotParts = allEntries.map((r) => {
-          const balStr = formatBalanceShort(r.balance);
-          const sym = CCY_SYMBOL[r.currency] ? `${balStr}\u00a0${fmtCcy(r.currency)}` : `${balStr}\u00a0${escapeHtml(r.currency)}`;
-          return sym;
-        });
-        return `${emoji} <b>${escapeHtml(row.name)}</b>${starSuffix} · ${dotParts.join(' · ')}`;
+        const parts = allEntries.map((r) => `<b>${fmtBal(r.balance, r.currency)}</b>`);
+        return `${name}${starSuffix} \u2014 ${parts.join(' / ')}`;
       }
 
-      // ── Leaf account: emoji + name + star + balance
-      const balStr = formatBalanceShort(row.balance.toFixed(2));
-      const balDisplay = CCY_SYMBOL[row.currency]
-        ? `${balStr}\u00a0${fmtCcy(row.currency)}`
-        : `${balStr}\u00a0${escapeHtml(row.currency)}`;
-      return `${emoji} <b>${escapeHtml(row.name)}</b>${starSuffix} · ${balDisplay}`;
+      // ── Leaf account: Name ⭐ — <b>balance</b>
+      const balDisplay = fmtBal(row.balance.toFixed(2), row.currency);
+      return `${name}${starSuffix} \u2014 <b>${balDisplay}</b>`;
     });
 
-    // No section header — just the account lines, groups separated by blank line
-    sections.push(lines.join('\n'));
+    // Section header on first line, then account lines indented by one space for clarity
+    sections.push(sectionHeader + '\n' + lines.join('\n'));
   }
 
-  const text = '💰 <b>Баланс</b>\n\n' + sections.join('\n\n');
+  const text = '💼 <b>Баланс</b>\n\n' + sections.join('\n\n');
   return { text, accounts: accountRows };
 }
 
