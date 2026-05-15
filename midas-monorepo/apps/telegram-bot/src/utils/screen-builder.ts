@@ -758,7 +758,7 @@ export function buildPostConfirmKeyboard(transactionId: string): InlineKeyboard 
         { text: '✏️ Изменить запись', callback_data: `ed:v:${transactionId}` },
       ],
       [
-        { text: '💰 Баланс', callback_data: 'nav:balance' },
+        { text: '💼 Баланс', callback_data: 'nav:balance' },
         { text: '📊 Отчёт',  callback_data: 'nav:report' },
       ],
     ],
@@ -774,7 +774,7 @@ export function buildNavKeyboard(): InlineKeyboard {
   return {
     inline_keyboard: [
       [
-        { text: '💰 Баланс', callback_data: 'nav:balance' },
+        { text: '💼 Баланс', callback_data: 'nav:balance' },
         { text: '📊 Отчёт',  callback_data: 'nav:report' },
       ],
     ],
@@ -862,7 +862,7 @@ export interface ReplyKeyboardMarkup {
  *
  * Phase 2.0: unique icons per button (💰 📋 📊 ⚙️).
  */
-export const NAV_BTN_BALANCE      = '💰 Баланс';
+export const NAV_BTN_BALANCE      = '💼 Баланс';
 export const NAV_BTN_TRANSACTIONS = '📋 Транзакции';  // Phase 2.0
 export const NAV_BTN_REPORT       = '📊 Отчёт';
 export const NAV_BTN_SETTINGS     = '⚙️ Настройки';

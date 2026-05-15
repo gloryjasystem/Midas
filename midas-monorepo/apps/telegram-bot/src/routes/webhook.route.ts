@@ -3167,7 +3167,7 @@ Midas создан, чтобы сделать учет денег максима
             const reportMsg = await getMonthlyReport(navResolved.workspaceId, navResolved.userId);
             await upsertBotMessage(telegramUserId, chatId, reportMsg, {
               inline_keyboard: [[
-                { text: '💰 Баланс', callback_data: 'nav:balance' },
+                { text: '💼 Баланс', callback_data: 'nav:balance' },
                 { text: '⚙️ Настройки', callback_data: 'stg:main' },
               ]],
             });
