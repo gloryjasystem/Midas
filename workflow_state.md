@@ -1,243 +1,244 @@
-п»ї# WORKFLOW_STATE.MD вЂ” Р”РёСЃРїРµС‚С‡РµСЂ Р·Р°РґР°С‡ РР-Р°РіРµРЅС‚Р° Midas
+# WORKFLOW_STATE.MD — Диспетчер задач ИИ-агента Midas
 
-> **РўРёРї:** MUTABLE вЂ” РєСЂР°С‚РєРѕРІСЂРµРјРµРЅРЅР°СЏ РїР°РјСЏС‚СЊ Р°РіРµРЅС‚Р°. РћР±РЅРѕРІР»СЏРµС‚СЃСЏ РЅР° РєР°Р¶РґРѕРј С€Р°РіРµ СЂР°Р±РѕС‚С‹.
-> **РћР±РЅРѕРІР»С‘РЅ:** 2026-05-15 10:20 (UTC+3)
+> **Тип:** MUTABLE — кратковременная память агента. Обновляется на каждом шаге работы.
+> **Обновлён:** 2026-05-15 10:20 (UTC+3)
 
 ---
 
-## 1. РўР•РљРЈР©Р•Р• РЎРћРЎРўРћРЇРќРР•
+## 1. ТЕКУЩЕЕ СОСТОЯНИЕ
 
-| РџР°СЂР°РјРµС‚СЂ | Р—РЅР°С‡РµРЅРёРµ |
+| Параметр | Значение |
 |---|---|
-| **PHASE** | `Transaction Hub UX вЂ” 6-Filter Grid 2Г—3 + CCY Symbol Unification вњ… DEPLOYED` |
-| **STEP** | `Commit a9c0f52 pushed to main. Railway auto-deploy triggered.` |
-| **AGENT STATUS** | `tsc 0 errors. 23/23 feature checks PASS. IntentFilter 6 types (e/i/dg/dr/t/a), SQL patched in both getTransactionList + countFilteredTransactions, MonthMiniStats split, CCY_SYMBOL+fmtCurrency, 2Г—3 filter grid, pagination redesigned.` |
-| **DEPLOYMENT** | `Railway (spirited-happiness project)` вЂ” `Midas` вњ… Online В· `background-workers` вњ… Online В· `Postgres` вњ… В· `Redis` вњ…. Health: https://midas-production-f4f1.up.railway.app/health в†’ {"status":"ok"} |
-| **LAST COMPLETED** | `Transaction Hub 2Г—3 Grid: CCY_SYMBOL map + fmtCurrency(), intentEmoji рџ“¤/рџ“Ґ, 6 FILTER_LABELS, FILTER_ROW_1/ROW_2 layout, pagination В«в¬…пёЏ РџРѕР·Р¶Рµ/Р Р°РЅСЊС€Рµ вћЎпёЏВ», SQL filters dg/dr/t, MonthMiniStats debt_given/received/transfer split. Commit a9c0f52.` |
+| **PHASE** | `Transaction Hub UX — Variant D Icon Chips ? DEPLOYED` |
+| **STEP** | `Commit d770ca4 pushed to main. Railway auto-deploy triggered.` |
+| **AGENT STATUS** | `tsc 0 errors. IntentFilter 5 типов (e/i/d/t/a). 'd' = merged долги (debt_given + debt_received). Вариант D: 1 строка ? 5 иконочных кнопок [??][??][??][??][?? Все]. Toggle: нажатие на активный фильтр снимает его.` |
+| **DEPLOYMENT** | `Railway (spirited-happiness project)` — `Midas` ? Online · `background-workers` ? Online · `Postgres` ? · `Redis` ?. Health: https://midas-production-f4f1.up.railway.app/health > {"status":"ok"} |
+| **LAST COMPLETED** | `Transaction Hub Variant D: иконочные чипы фильтрации [??][??][??][??][?? Все] — 1 строка вместо 2?3 сетки. IntentFilter d = SQL IN ('debt_given','debt_received'). Toggle UX. Backward compat dg/dr>d. Commit d770ca4.` |
 | **BLOCKER** | None. |
-| **NEXT ACTION** | РџСЂРѕРІРµСЂРёС‚СЊ Transaction Hub РІ Р¶РёРІРѕРј Р±РѕС‚Рµ: СЃРµС‚РєР° 2Г—3, С„РёР»СЊС‚СЂС‹, РїР°РіРёРЅР°С†РёСЏ. РЈР±РµРґРёС‚СЊСЃСЏ С‡С‚Рѕ stats Р·Р° РјРµСЃСЏС† РєРѕСЂСЂРµРєС‚РЅС‹ РІРѕ РІСЃРµС… 6 С„РёР»СЊС‚СЂР°С…. |
+| **NEXT ACTION** | Smoke-test Transaction Hub в живом боте: убедиться что 5 чипов умещаются, фильтрация корректна, toggle работает. |
 
 
 ---
 
-## 2. Р—РђР’Р•Р РЁРЃРќРќР«Р• Р¤РђР—Р«
+## 2. ЗАВЕРШЁННЫЕ ФАЗЫ
 
-| Р¤Р°Р·Р° | РЎС‚Р°С‚СѓСЃ | РљР»СЋС‡РµРІС‹Рµ Р°СЂС‚РµС„Р°РєС‚С‹ |
+| Фаза | Статус | Ключевые артефакты |
 |---|---|---|
-| 0.1 Event Storming | вњ… | `docs/event_storming_part{1,2,3}.md` |
-| 0.2 ADR Generation | вњ… | `docs/adr/ADR-000` вЂ” `ADR-014` (15 ADR) |
-| 0.3 Implementation Readiness Gate | вњ… | `phase1_scope.md`, `database_model_draft.md`, `queue_model.md`, `mvp_acceptance_criteria.md` |
-| 0.3.1 Security & Traceability Patch | вњ… | SEC-01 вЂ” SEC-12 РІРЅРµСЃРµРЅС‹ РІ scope, DB model, queue model, acceptance criteria, ADR-009, ADR-013 |
-| 1.1 Project Infrastructure Foundation | вњ… | `midas-monorepo/` вЂ” РїРѕР»РЅР°СЏ СЃС‚СЂСѓРєС‚СѓСЂР° Turborepo, Docker Compose, ESLint, TypeScript |
-| 1.2 Database Foundation | вњ… | `packages/database/` вЂ” schema, RLS, withTenantTransaction, Decimal boundary |
-| 1.3 BullMQ Task Queue Foundation | вњ… | `apps/background-workers/src/queues/`, `workers/`, `packages/shared/` job types |
-| 1.4 Telegram Bot Foundation | вњ… | `apps/telegram-bot/src/` вЂ” Fastify server, SEC-04/05/06/12, webhook route, workspace resolver stub |
-| 1.5 User Onboarding & Workspace Resolution | вњ… | `services/onboarding.service.ts`, `rate-limiter.ts`, `telegram-api.ts`, real `resolveWorkspace()`, `/start` handler |
-| 1.6-A AI Parse Pipeline | вњ… | `packages/ai-core/`, `draft.service.ts`, `ai-parse.worker.ts`, 73/73 smoke tests, commit `7b393d2` |
-| 1.6-B HitL Draft Confirmation | вњ… ACCEPTED | `draft-confirmation.service.ts`, `confirmation.worker.ts`, `callback-confirm-queue.ts`, webhook callback_query handler, 30/30 smoke tests incl. race condition, commit `d49625b` |
-| 1.7 Draft Expiration & Lifecycle Cleanup | вњ… ACCEPTED | `migrations/1777973960000_draft-expiration.js` + `1777973970000_harden-expire-search-path.js` + `1777973980000_fix-expire-function-owner.js`, `draft-expiration.service.ts`, `draft-expiration.worker.ts`, `smoke-test-phase17.mjs` вЂ” 20/20 smoke tests PASS, commits `b9069ad`в†’`49e0cec` |
-| 1.8-A Transaction Intent Foundation | вњ… ACCEPTED | `migrations/1778008338096_transaction-intent.js`, `draft.service.ts` (parsed_intent propagation), `draft-confirmation.service.ts` (intent_missing outcome), `confirmation.worker.ts` (intent_missing messages), `smoke-test-phase18a.mjs` вЂ” 19/19 smoke tests PASS, 155/155 total regression PASS, commits `425df61`в†’`51b6aee` |
-| 1.8-B Runtime Consistency & Security Hardening | вњ… ACCEPTED | C-1: `draft.service.ts` `telegram_user_id`в†’`telegram_id` fix. C-2: `migrations/1778008400000_harden-onboarding-search-path.js` вЂ” `search_path` fixed for 2 SECDEF functions. M-1: `shared/index.ts` `TRANSACTION_TYPE` updated to 5 canonical values. `smoke-test-phase18b.mjs` вЂ” 16/16 PASS, 171/171 total regression PASS, commit `7af1692` |
-| 1.9 Basic Text /report Command | вњ… ACCEPTED | `apps/telegram-bot/src/services/report.service.ts`, `apps/telegram-bot/src/routes/webhook.route.ts`, `apps/telegram-bot/src/services/workspace-resolver.ts`, `packages/database/smoke-test-phase19.mjs` вЂ” /report command, current UTC month, grouped by transaction_intent, Russian text output вЂ” 47/47 Phase 1.9 tests, 218/218 total regression PASS, implementation commit `e060edb`; workflow sync `dffb53e`, `1ec649e`; tag `phase-1.9-accepted`. |
-| 1.10 Slash-Command Guard + Inline /help | вњ… ACCEPTED | `webhook.route.ts` (parseCommandToken, KNOWN_COMMANDS, /help, guard), `smoke-test-phase110.mjs` вЂ” 30/30 smoke tests PASS, 248/248 total regression PASS, commit `b321463`, tag `phase-1.10-accepted`. |
-| 1.11 /category Read-Only List Command | вњ… ACCEPTED | `apps/telegram-bot/src/services/category.service.ts` (new), `webhook.route.ts` (KNOWN_COMMANDS, HELP_TEXT, /category handler), `smoke-test-phase111.mjs` вЂ” 78/78 Phase 1.11 + 326/326 total regression PASS. Traceability вњ… Adversarial Security вњ… Scope Guard вњ…. Implementation commit `2e77362`, tag `phase-1.11-accepted` pushed. |
-| 1.12 Onboarding Default Data Seeding | вњ… ACCEPTED | `migrations/1778100000000_onboarding-default-seed.js` + `1778100010000_fix-onboarding-seed-conflict.js` (7-param SECDEF function), `onboarding.service.ts` (candidateAccountId + candidateCategoryId), `smoke-test-phase112.mjs` вЂ” 37/37 Phase 1.12 + 363/363 total regression PASS. Traceability вњ… Adversarial Security вњ… Scope Guard вњ…. Implementation commit `7b87eac`, tag `phase-1.12-accepted` pushed. |
-| 1.13 /add_category Strict-Format Command | вњ… ACCEPTED | `category.service.ts` (`parseAddCategoryArgs`, `resolveGroup`, `addCategory`, `AddCategoryResult`), `webhook.route.ts` (KNOWN_COMMANDS 4в†’5, HELP_TEXT, handler `5e-add`), `smoke-test-phase113.mjs` вЂ” 74/74 Phase 1.13 + 437/437 total regression PASS. Traceability вњ… Adversarial Security вњ… Scope Guard вњ…. Implementation commit `eac55a9`, tag `phase-1.13-accepted` pushed. |
-| 1.14 /accounts Read-Only List Command | вњ… ACCEPTED | `apps/telegram-bot/src/services/account.service.ts` (new), `webhook.route.ts` (KNOWN_COMMANDS 5в†’6, HELP_TEXT, handler `5d-acc`), `smoke-test-phase114.mjs` вЂ” 70/70 Phase 1.14 + 507/507 total regression PASS. Traceability вњ… Adversarial Security вњ… Scope Guard вњ…. Implementation commit `362b05b`, tag `phase-1.14-accepted` pushed. Note: HTML escaping for account/category names must be added before user-controlled write paths (/add_account). |
-| 1.15 HTML Escaping Hardening | вњ… ACCEPTED | `apps/telegram-bot/src/utils/html-escape.ts` (NEW), `account.service.ts` (MODIFY), `category.service.ts` (MODIFY), `webhook.route.ts` (MODIFY), `smoke-test-phase115.mjs` (NEW) вЂ” 52/52 Phase 1.15 + 559/559 total PASS. Traceability вњ… Adversarial Security вњ… Scope Guard вњ…. Traceability fix: `groupToken` escaped in error message. Implementation commit `4f63a91`; workflow_state sync commit `88ebae3`; test-count fix commit `45b1eec`. Tag `phase-1.15-accepted` pushed. |
-| 1.16 account_sources UNIQUE Constraint Migration | вњ… ACCEPTED | `packages/database/migrations/1778200000000_account-sources-unique-name.js` (NEW), `packages/database/smoke-test-phase116.mjs` (NEW) вЂ” UNIQUE(workspace_id, name) added; pre-flight 0 duplicates; 24/24 Phase 1.16 + 583/583 total PASS. Traceability вњ… Adversarial Security вњ… Scope Guard вњ…. Implementation commit `3ad45e3`. Tag `phase-1.16-accepted` pushed. |
-| 1.17 /add_account Strict-Format Command | вњ… ACCEPTED | `account.service.ts` (MODIFY), `webhook.route.ts` (MODIFY), `smoke-test-phase117.mjs` (NEW) вЂ” 27/27 Phase 1.17 + 610/610 total PASS. Traceability вњ… Adversarial Security вњ… Scope Guard вњ…. Implementation commit `8c370e3`. Tag `phase-1.17-accepted` pushed. |
-| 1.18 /report Currency Label (base_currency grouping) | вњ… ACCEPTED | `report.service.ts` (MODIFY), `smoke-test-phase118.mjs` (NEW), `smoke-test-phase19.mjs` (MODIFY вЂ” runReportQuery SQL helper sync) вЂ” 34/34 Phase 1.18 + 644/644 total PASS. Traceability вњ… Adversarial Security вњ… Scope Guard вњ…. Implementation commit `700a244`. Tag `phase-1.18-accepted` pushed. |
-| 1.19 account_sources.currency CHECK Constraint | вњ… ACCEPTED | `packages/database/migrations/1778300000000_account-sources-currency-check.js` (NEW), `packages/database/smoke-test-phase119.mjs` (NEW) вЂ” CHECK (currency ~ '^[A-Z]{3,5}$'); pre-flight 0 invalid rows; 24/24 Phase 1.19 + 668/668 total PASS. Traceability вњ… Adversarial Security вњ… Scope Guard вњ…. Implementation commit `9d288bd`. Tag `phase-1.19-accepted` pushed. |
-| 1.20 Balance Semantics Design Document | вњ… ACCEPTED | `docs/balance-semantics.md` (NEW) вЂ” 6 design decisions D1вЂ“D6 all approved. Formula: income+1/expenseв€’1/debt_givenв€’1/debt_received+1/transfer neutral. initial_balance NUMERIC(19,4) DEFAULT 0 approved (allow negative, account currency implicit, no date). Per-account output, all-time scope. Traceability вњ… Adversarial Security вњ… Scope Guard вњ…. No code. Tag `phase-1.20-accepted` pushed. |
-| 1.21 Unified Balance Implementation | вњ… ACCEPTED | `migrations/1778400000000_account-sources-initial-balance.js` (NEW), `balance.service.ts` (NEW), `webhook.route.ts` (MODIFY вЂ” /balance added, KNOWN_COMMANDS 7в†’8, HELP_TEXT), `smoke-test-phase121.mjs` (NEW). 28/28 Phase 1.21 + 655/655 regression smoke + 13/13 typecheck+lint = 696/696 PASS. Phase 1.5 server-dependent tests excluded from baseline (pre-existing). Tech debt: stale /balance comment in webhook.route.ts line 31 (cosmetic, not blocking). Traceability вњ… Adversarial Security вњ… Scope Guard вњ…. Implementation commit `976418a`. Tag `phase-1.21-accepted` pushed. |
-| 1.22 Stale Comment Cleanup | вњ… ACCEPTED | `webhook.route.ts` (MODIFY вЂ” comment-only: slash-command routing header updated, all 8 known commands listed, stale вЂњ(e.g. /balance)вЂќ example removed, Phase 1.21 added to phase refs). 0 logic changes. 13/13 typecheck+lint PASS (FULL TURBO). Traceability вњ… Adversarial Security вњ… Scope Guard вњ…. Implementation commit `d2ea3fd`. Tag `phase-1.22-accepted` pushed. |
-| 1.23 /set_balance Command | вњ… ACCEPTED | `setBalance.service.ts` (NEW), `webhook.route.ts` (MODIFY). Tag `phase-1.23-accepted` pushed. |
-| 1.24 /balance Formatting Polish | вњ… ACCEPTED | `balance.service.ts` (MODIFY). Tag `phase-1.24-accepted` pushed. |
-| 1.25 /settings Text Commands | вњ… ACCEPTED | `settings.service.ts` (NEW). /settings currency, /settings timezone. Tag `phase-1.25-accepted` pushed. |
-| 1.26 /settings UI | вњ… ACCEPTED | `settings-keyboard.service.ts` (NEW), `currencies.ts` (NEW). Inline keyboards, groups, pagination, Redis search state. 45/45 smoke. Tag `phase-1.26-accepted` pushed. |
-| 1.27 Multicurrency Balance Hardening | вњ… ACCEPTED | `balance.service.ts` (MODIFY). SQL-level mismatch exclusion, mismatch footnote. 27/27 smoke. Tag `phase-1.27-accepted` pushed. |
-| 1.28 /edit Transactions MVP | вњ… ACCEPTED | `edit.service.ts` (NEW), `edit-keyboard.service.ts` (NEW), `webhook.route.ts` (MODIFY), `confirmation.worker.ts` (MODIFY), `smoke-test-phase128.mjs` (NEW). /edit list+card+edit amount/category/account/intent. Permanent [вњЏпёЏ РР·РјРµРЅРёС‚СЊ] on confirmed msgs. Redis TTL 300s. ULID+workspace guards. Strict callback_data в‰¤62 bytes verified. No search/date/delete/soft-delete/GIN, no migrations, no /balance or /report changes. 43/43 Phase 1.28 smoke + 841/841 regression smoke + 13/13 typecheck/lint = 897/897 PASS. Traceability вњ… Adversarial Security вњ… Scope Guard вњ…. Implementation commit c8bbc7d. Tag `phase-1.28-accepted` pushed. |
-| 1.29 Transaction Soft Delete | вњ… ACCEPTED | `migrations/1778700000000_transactions-soft-delete.js` (NEW). deleted_at TIMESTAMPTZ DEFAULT NULL; soft delete via UPDATE; excluded from /edit, /balance (LEFT JOIN ON), /report, /set_balance; 941/941 gates PASS. Traceability вњ… Adversarial Security вњ… Scope Guard вњ…. impl commit 7082540. Tag `phase-1.29-accepted` pushed. |
-| 1.30 Smart Account Onboarding | вњ… ACCEPTED | `account-onboard-keyboard.service.ts` (NEW), `account.service.ts` (hasAccounts, addAccountWithCurrency), `webhook.route.ts` (MODIFY вЂ” ac: callbacks, /start onboarding, /accounts empty-state, text intercept). Redis TTL midas:ac: 300s. 64/64 Phase 1.30 smoke + 318/318 accessible gates PASS. impl commit 4593867. Tag `phase-1.30-accepted` pushed. |
-| 1.31 Inline Account Creation | вњ… ACCEPTED | `migrations/1778800000000_drafts-account-hint.js`, `account-fuzzy.service.ts`, `account-inline-keyboard.service.ts`, `account-resolver.service.ts` (bg-workers), `account.service.ts` (MODIFY), `draft.service.ts` (MODIFY), `ai-parse.worker.ts` (MODIFY), `webhook.route.ts` (MODIFY), `draft-confirmation.service.ts` (MODIFY), `schemas.ts`+`prompts.ts` (MODIFY). Option A: resolve before keyboard. ia: namespace в‰¤62 bytes. 27/27 smoke + 13/13 typecheck/lint PASS. Implementation commit 7c065f7. |
-| 1.32 Smart Text Input / Clarification Engine | вњ… ACCEPTED | `migrations/1778900000000_draft-clarification-state.js` (NEW), `schemas.ts` (amount/intent optional, PARTIAL_CONFIDENCE_THRESHOLD=0.3, MissingField), `claude-client.ts` ('partial' ParseResult, computeMissingFields), `prompts.ts` (partial examples), `draft.service.ts` (patchDraftAmount/Intent/Category), `ai-parse.worker.ts` (targeted clarification messages), `clarification.service.ts` (NEW, telegram-bot), `webhook.route.ts` (clar: callbacks, midas:clar: intercept), `smoke-test-phase132.mjs` (57/57 PASS). 0 lint/typecheck errors. Traceability вњ… Adversarial Security вњ… Scope Guard вњ…. Implementation commit e00f37e. Tag `phase-1.32-accepted` pushed. |
-| 1.33 Clean Chat / Single Active Message UX | вњ… ACCEPTED | UX-only phase. `active-message.service.ts` (NEW), `telegram-api.ts` (MODIFY), `shared/index.ts` (MODIFY), `webhook.route.ts` (MODIFY), `notifications.worker.ts` (MODIFY), `confirmation.worker.ts` (MODIFY), `ai-parse.worker.ts` (MODIFY). No migrations, no DB schema changes, no new deps. Redis pointer midas:am:{userId}:{chatId} (TTL 24h). upsertBotMessage() edit-first strategy. 0 typecheck errors. Batch-accepted by owner decision. Commit `36cacd7`. Tag `phase-1.33-accepted` pushed. |
-| 1.34 Rich Screen Cards вЂ” Single-Screen App UX | вњ… ACCEPTED | UX-only phase. `screen-builder.ts` (NEW вЂ” both apps), confirmation/preview card formatting. No migrations, no DB schema changes, no new deps. 0 typecheck errors. Batch-accepted by owner decision. Commit `6e899f0`. Tag `phase-1.34-accepted` pushed. |
-| 1.35 Intelligent Transaction Understanding | вњ… ACCEPTED | `migrations/1779000000000_intelligent-transactions.js` (NEW), `category-resolver.service.ts` (NEW), `draft.service.ts` (MODIFY), `draft-confirmation.service.ts` (MODIFY), `ai-parse.worker.ts` (MODIFY), `confirmation.worker.ts` (MODIFY), `settings.service.ts`+`settings-keyboard.service.ts` (MODIFY), `webhook.route.ts` (MODIFY), `screen-builder.ts` (MODIFY), `prompts.ts`+`schemas.ts` (MODIFY). smoke-test-phase135.mjs вЂ” 55 tests. Deployed to Railway production. |
-| 1.36-UX Persistent Navigation Keyboard | вњ… ACCEPTED | **Sub-steps 1вЂ“4 (commits c2f012f в†’ 062d40d):** Core nav keyboard + bug fixes + auto-activation + collapsibility. **FINAL state (commits e879dfc в†’ 2a15f31):** Transaction history workflow fully reworked. |
-| 1.37 AI Taxonomy & Zero-Clutter UX | вњ… ACCEPTED | Zero-clutter UX, 30-category taxonomy, 500+ anchors, multilingual, disambiguation, ALLOWED_CATEGORIES. Commits `5b02cf3` в†’ `641ad26`. |
-| 1.38 Currency Input UX Hardening | вњ… ACCEPTED | `confirmation.worker.ts` (reject in-place edit), `screen-builder.ts` both apps (blockquote design), `webhook.route.ts` (`normalizeCurrencyInput` fix + `awaiting_cur` token extraction). Commits `94b7cac` в†’ `c59f2e1`. |
-| 1.39 Gate UX вЂ” Edit-In-Place (Variant B) | вњ… DEPLOYED | `ai-parse.worker.ts` (gate block: one edit-in-place instead of 2 new messages), `screen-builder.ts` both apps (`buildGatePausedPreview`: вљ пёЏ alert banner + draft summary + keyboard stays). `formatAmount()` hardened: `String()` cast РґР»СЏ Postgres NUMERIC. `clarification.service.ts`: `::TEXT` cast РЅР° `parsed_amount`. Commits `8fa8f91` в†’ `089abf6`. |
-| 1.40 Dead Card Auto-Cleanup | вњ… DEPLOYED | `confirmation.worker.ts` (+dead_card write after reject/expired), `draft-expiration.worker.ts` (+dead_card write after CRON expire), `ai-parse.worker.ts` (+dead_card read+delete before new preview). Redis key `midas:dead_card:{chatId}` TTL 24h. Commit `51eaf10`. |
-| 2.0 Transaction Hub + Reports 2.0 + Settings 2.0 | вњ… DEPLOYED | `transaction-list.service.ts` (NEW), `transaction-keyboard.service.ts` (NEW), `report-keyboard.service.ts` (NEW), `settings-keyboard.service.ts` (MODIFY). Interactive paginated lists, period picker, filter tabs, /edit deprecation в†’ tx: namespace. Deployed from GitHub `main`. |
-| 2.1 Account Management Dashboard | вњ… DEPLOYED | `balance-keyboard.service.ts` (NEW вЂ” 450+ lines), `account-onboard-keyboard.service.ts` (MODIFY вЂ” bank/wallet presets, fiat/crypto pickers), `account.service.ts` (MODIFY вЂ” renameAccount, changeAccountCurrency, softDeleteAccount, deleted_at filters), `balance.service.ts` (MODIFY вЂ” getBalanceData, getAccountDetail, setAccountBalanceById, getAccountTxCount), `webhook.route.ts` (MODIFY вЂ” bl: handler, text intercepts, balance navigation update). DB migration: `updated_at` + `deleted_at` columns on `account_sources`. |
-| 2.2 Settings UI Overhaul | вњ… DEPLOYED | `settings-keyboard.service.ts` (MODIFY вЂ” 6-button 2x3 grid, URL РїРѕРґРґРµСЂР¶РєРё, РёРЅС„Рѕ Рѕ Р±РѕС‚Рµ), `currencies.ts` (MODIFY вЂ” Russian aliases, 5-pass search, FIAT 40+ / CRYPTO 48+), `settings.service.ts` (FIX вЂ” `deleted_at IS NULL` РІ `getWorkspaceAccounts`), `webhook.route.ts` (MODIFY вЂ” РєРЅРѕРїРєР° РЅР°Р·Р°Рґ РїРѕСЃР»Рµ РІС‹Р±РѕСЂР° РІР°Р»СЋС‚С‹, РµРґРёРЅС‹Р№ Main Account handler). Commit `3e650c1`. |
-| 2.3 Search Pagination + UX Polish | вњ… DEPLOYED | **Pagination:** `transaction-hub.service.ts` (SEARCH_PAGE_SIZE=8, РІСЃРµ 4 search-РјРµС‚РѕРґР° в†’ LIMIT/OFFSET + COUNT(*) = `{items, total}`). `transaction-keyboard.service.ts` (`buildSearchResultsKeyboard(items, page, totalPages)` СЃ в—ЂпёЏ/в–¶пёЏ РЅР°РІРёРіР°С†РёРµР№, `search_results_page` cmd, tx:sr:p:{page} parser). `webhook.route.ts` (Redis context `midas:tx:sr:ctx:{uid}:{cid}` TTL 600s, `search_results_page` handler, РІСЃРµ text intercepts в†’ paginated API). **Reports close:** `report-keyboard.service.ts` (вњ–пёЏ Р—Р°РєСЂС‹С‚СЊ = `rp:cl` РЅР° РІСЃРµС… 3 РєР»Р°РІРёР°С‚СѓСЂР°С…, type `close` РІ RpCallbackCmd). `webhook.route.ts` (`rp:close` handler в†’ deleteMessage). **Keyboard order:** `screen-builder.ts` вЂ” Row 1: [рџ’° Р‘Р°Р»Р°РЅСЃ][рџ“Љ РћС‚С‡С‘С‚], Row 2: [рџ“‹ РўСЂР°РЅР·Р°РєС†РёРё][вљ™пёЏ РќР°СЃС‚СЂРѕР№РєРё]. Commits `6da4464`, `049233d`, `70a5d41`. |
-| 2.3 Onboarding UX Polish | вњ… DEPLOYED | **РќРµС‚ РїСЂРѕРјРµР¶СѓС‚РѕС‡РЅРѕРіРѕ afterCreate СЌРєСЂР°РЅР°:** РїРѕСЃР»Рµ bal_input/bal_skip СЃСЂР°Р·Сѓ РїРѕРєР°Р·С‹РІР°РµС‚СЃСЏ `buildFinishOnboardKeyboard()` + `accountAddedText()`. **РќРѕРІР°СЏ РєРѕРјР°РЅРґР° `ac:fin`:** РєРЅРѕРїРєР° В«вњ… Р—Р°РІРµСЂС€РёС‚СЊВ» РІ РїРёРєРµСЂРµ С‚РёРїР° вЂ” С‡РёСЃС‚РёС‚ Redis, СѓРґР°Р»СЏРµС‚ СЃРѕРѕР±С‰РµРЅРёРµ, РѕС‚РїСЂР°РІР»СЏРµС‚ ReplyKeyboard. **Backward compat:** `ac:more` Рё `ac:done` РѕР±СЂР°Р±РѕС‚С‡РёРєРё СЃРѕС…СЂР°РЅРµРЅС‹ (СЃС‚Р°СЂС‹Рµ РєРЅРѕРїРєРё РІ С‡Р°С‚Рµ). **РРєРѕРЅРєРё:** `buildStartOnboardKeyboard()` РёСЃРїСЂР°РІР»РµРЅ: рџ”¶в†’рџ”„, в‚їв†’рџ”ђ, в†©пёЏРќР°Р·Р°Рґв†’вњЏпёЏРЎРІРѕС‘ РЅР°Р·РІР°РЅРёРµ. **Р”РµС„РѕР»С‚РЅС‹Р№ СЃС‡С‘С‚:** `ac:skip` С‚РёС…Рѕ СЃРѕР·РґР°С‘С‚ В«РљРѕС€РµР»С‘РєВ» (USD) РµСЃР»Рё Сѓ РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ 0 СЃС‡РµС‚РѕРІ. Commit `395e1f2`. Deploy `7089846c` вЂ” SUCCESS. |
-| Master Roadmap Ph.1 вЂ” Keyboard Service | вњ… DEPLOYED | `account-onboard-keyboard.service.ts` (+478 СЃС‚СЂРѕРє): `CURRENCY_FLAGS` registry (40+ РІР°Р»СЋС‚, С„Р»Р°РіРё+СЃРёРјРІРѕР»С‹: рџ‡·рџ‡єRUB рџ‡єрџ‡ёUSD в‚їBTC ОћTH TON Рё РґСЂ.), `getCurrencyFlag(code)`, `CURRENCY_NAMES` (СЂСѓСЃ. РЅР°Р·РІР°РЅРёСЏ). `buildPaginatedPicker()` вЂ” РІСЃРµРіРґР° 2 СЃС‚СЂРµР»РєРё в—ЂпёЏв–¶пёЏ (noop РЅР° РєСЂР°СЏС…). `buildCurrencyPickerText(name?,isCustom?)` вЂ” 3 РІРµС‚РєРё РІС‹РІРѕРґР°. `buildFiatCurrencyPage()` + `buildCryptoCurrencyPage()` вЂ” С„Р»Р°РіРѕРІС‹Рµ РєРЅРѕРїРєРё + `рџ”Ќ РќР°Р№С‚Рё РІР°Р»СЋС‚Сѓ` (ac:cur:search). `searchCurrencies(query,pool)` вЂ” fuzzy+С‚СЂР°РЅСЃР»РёС‚РµСЂР°С†РёСЏ (rub/СЂСѓР±в†’RUB, dollar/РґРѕР»Р»Р°СЂв†’USD). `buildNoMatchText(name,type)` + `buildNoMatchKeyboard(name,backTarget)` вЂ” СЌРєСЂР°РЅ В«РџРѕС…РѕР¶РµРіРѕ Р±Р°РЅРєР° РЅРµ РЅР°С€Р»РёВ» СЃ blockquote, 3 РєРЅРѕРїРєРё. `buildCurrencySearch*` С‚РµРєСЃС‚С‹ Рё РєР»Р°РІРёР°С‚СѓСЂС‹. РЈРґР°Р»РµРЅС‹ Р»РµРіР°СЃРё: `FIAT_ITEMS`, `CRYPTO_ITEMS`, `CURRENCY_PICKER_TEXT`. Commit `35c92e0`. |
-| Master Roadmap Ph.2 вЂ” Webhook FSM | вњ… DEPLOYED | `webhook.route.ts`: (1) `name_input` РїСЂРё fuzzy null в†’ `buildNoMatchText`+`buildNoMatchKeyboard`, С€Р°Рі `name_confirm_custom`. (2) `ac:cus:save` в†’ `pendingName` РєР°Рє `isCustomName=true` в†’ `cur_pick`. (3) `ac:cus:keep` в†’ `name_input` retry. (4) `ac:cur:search` в†’ `cur_search` С€Р°Рі + РїРѕРёСЃРєРѕРІС‹Р№ РїСЂРѕРјРїС‚. (5) `ac:cur:list` в†’ РІРѕР·РІСЂР°С‚ Рє РїР°РіРёРЅРёСЂРѕРІР°РЅРЅРѕРјСѓ СЃРїРёСЃРєСѓ. (6) `cur_search` text interceptor в†’ `searchCurrencies` в†’ СЂРµР·СѓР»СЊС‚Р°С‚С‹/no-results. (7) 3 success-screens: `{ inline_keyboard: [] }` (Р±РµР· РєРЅРѕРїРѕРє). `chooseCurKeyboard()` вЂ” module-level helper. Р’СЃРµ callback_data в‰¤64 Р±Р°Р№С‚. Commit `35c92e0`. |
-| 2.9 Nav Buttons Never Delete Tx Records | вњ… DEPLOYED | `active-message.service.ts` (NEW `sendNavMessage()` вЂ” always sends new message), `webhook.route.ts` (4 NAV_BTN_* handlers: NAV_BTN_BALANCE/REPORT/SETTINGS/TRANSACTIONS в†’ `sendNavMessage`). Commit `1477f55`. |
-| 2.9+ Smart Nav Message (midas:nav: key) | вњ… DEPLOYED | `active-message.service.ts` (РїРѕР»РЅР°СЏ РїРµСЂРµСЂР°Р±РѕС‚РєР° `sendNavMessage()` вЂ” edit-first С‡РµСЂРµР· `midas:nav:`, РЅРµ С‚СЂРѕРіР°РµС‚ `midas:am:`; РЅРѕРІС‹Рµ С„СѓРЅРєС†РёРё `getNavMessageId`, `setNavMessageId`, `clearNavMessageId`). `webhook.route.ts` (РёРјРїРѕСЂС‚ 2 РЅРѕРІС‹С… С„СѓРЅРєС†РёР№; AI-parse path вЂ” cleanup `midas:nav:` РїРµСЂРµРґ СЃС‚Р°РЅРґР°СЂС‚РЅС‹Рј `midas:am:` cleanup; `st:cancel` вЂ” silently deletes РІРјРµСЃС‚Рѕ СЂРµРґР°РєС‚РёСЂРѕРІР°РЅРёСЏ; `bl:close` вЂ” РґРѕР±Р°РІР»РµРЅ `clearNavMessageId`). Commits `4baac9c` в†’ `004966f`. |
-| 2.10 Transaction UI Persistence & Navigation Fixes | вњ… DEPLOYED | **РўСЂРё РЅРµР·Р°РІРёСЃРёРјС‹С… С„РёРєСЃР°:** (1) `notifications.worker.ts` + `confirmation.worker.ts` + `shared/index.ts` вЂ” `isSuccessCard?: boolean` С„Р»Р°Рі; РїСЂРё approve DEL `midas:am:` РІРјРµСЃС‚Рѕ SET (commit `df15a01`). (2) `transaction-keyboard.service.ts` вЂ” `parseTxCallback`: С‚РµРїРµСЂСЊ С‡РёС‚Р°РµС‚ `parts[4]` РєР°Рє `from` РґР»СЏ `tx:d:ask` Рё `tx:d:yes` вЂ” РєРѕРЅС‚РµРєСЃС‚ `:s` РїРµСЂРµРґР°С‘С‚СЃСЏ С‡РµСЂРµР· РІРµСЃСЊ delete flow; РєРЅРѕРїРєР° В«Р—Р°РєСЂС‹С‚СЊВ» РІ tx:view РєРѕСЂСЂРµРєС‚РЅРѕ РІРѕР·РІСЂР°С‰Р°РµС‚ РЅР° success card (commit `8894b92`). (3) `notifications.worker.ts` вЂ” Р·Р°РїРёСЃСЊ sentinel `midas:success_card:{msgId}` (TTL 30 РґРЅРµР№) РїСЂРё `isSuccessCard=true`; `webhook.route.ts` step-7 вЂ” РїСЂРѕРІРµСЂСЏРµС‚ `EXISTS midas:success_card:{amId}` РїРµСЂРµРґ `deleteMessage` вЂ” РґРІРѕР№РЅР°СЏ Р±Р»РѕРєРёСЂРѕРІРєР° СѓРґР°Р»РµРЅРёСЏ (commit `b869c03`). |
-| Balance Phase A вЂ” Grouped UI | вњ… DEPLOYED | `balance-keyboard.service.ts` (NEW: `classifyAccountGroup`, `GROUP_EMOJI`, `GROUP_ORDER`, `GroupType`, `buildBalanceListKeyboard` СЃ emoji-РїСЂРµС„РёРєСЃР°РјРё РїРѕ РіСЂСѓРїРїР°Рј, `export formatBalanceShort`). `balance.service.ts` (MODIFY: СЃРµРєС†РёРѕРЅРёСЂРѕРІР°РЅРЅС‹Р№ С‚РµРєСЃС‚ рџЏ¦/рџЄ™/рџ‘›/рџ’µ/рџ“Ѓ, СѓРґР°Р»С‘РЅ `CURRENCY_TOTALS_SQL`). Commit `4a1748c` pushed to main. Railway auto-deploy вњ…. |
-| Balance Phase B-1 вЂ” DB Schema | вњ… DEPLOYED | `packages/database/migrations/1779800000000_account-parent-and-subtype.js` (NEW). `account_sources`: `parent_account_id VARCHAR(26) FK REFERENCES account_sources(id) ON DELETE CASCADE` (NULL=top-level), `sub_type TEXT NOT NULL DEFAULT 'general'` CHECK constraint. Partial index `idx_account_sources_parent`. Applied on Railway live DB via `node-pg-migrate up --check-order false`. Commit `75156b9`. 100% Р°СѓРґРёС‚: formula вњ… FK 31/31 вњ… defaults safe вњ… |
-| Balance Phase B-2 вЂ” Hierarchical UI | вњ… DEPLOYED | `balance.service.ts` (MODIFY): `PER_ACCOUNT_SQL` + `parent_account_id`; `AccountBalanceRow` + `parentAccountId`; `getBalanceData()` builds childrenMap, renders в”њ/в”” ladder for parentв†’children, leaf accounts unchanged. `balance-keyboard.service.ts` (MODIFY): `BalanceAccountRow` + `parentAccountId?`+`childCount?`; `BalanceCallbackCmd` + `add_currency`; `parseBalanceCallback` handles `bl:ac:{id}`; `pluralizeCurrency()` RU plural; `buildBalanceListKeyboard()` вЂ” parent aggregation (N РІР°Р»СЋС‚) + indented child rows (в”” CURRENCY В· balance) + вћ• Р”РѕР±Р°РІРёС‚СЊ РІР°Р»СЋС‚Сѓ (bl:ac:{parentId} в‰¤32 bytes). tsc 0 errors. Commit `d04bcba`. |
-| 2.10+ Gate Fix вЂ” Frozen UI on Concurrent Input | вњ… DEPLOYED | **РџСЂРѕР±Р»РµРјР°:** РїРѕР»СЊР·РѕРІР°С‚РµР»СЊ РїРёС€РµС‚ TX1 (РїРёРєРµСЂ СЃС‡С‘С‚Р° РѕС‚РєСЂС‹С‚), TX2 в†’ step-7 СѓРґР°Р»СЏРµС‚ РїРёРєРµСЂ РґРѕ С‚РѕРіРѕ РєР°Рє gate СѓСЃС‚Р°РЅРѕРІРёС‚ `gate_sent` в†’ gate РїСЂРёСЃС‹Р»Р°РµС‚ РЅРѕРІСѓСЋ РєР°СЂС‚РѕС‡РєСѓ. TX3 в†’ step-7 СЃРЅРѕРІР° СѓРґР°Р»СЏРµС‚ gate-РєР°СЂС‚РѕС‡РєСѓ (gate_sent РќР• РїСЂРѕРІРµСЂСЏР»СЃСЏ) в†’ ai-parse РјРѕР»С‡РёС‚ (gate_sent СѓСЃС‚Р°РЅРѕРІР»РµРЅ) в†’ UI Р·Р°РІРёСЃР°РµС‚. **Р¤РёРєСЃ 1:** `webhook.route.ts` step-7 СЃС‚СЂРѕРєРё 5446вЂ“5458 вЂ” `EXISTS midas:gate_sent:` РїРµСЂРµРґ deleteMessage; РµСЃР»Рё Р°РєС‚РёРІРµРЅ вЂ” РєР°СЂС‚РѕС‡РєР° Рё `midas:am:` РЅРµ С‚СЂРѕРіР°СЋС‚СЃСЏ. **Р¤РёРєСЃ 2:** `webhook.route.ts` ia:pk: СЃС‚СЂРѕРєР° 1539 вЂ” `DEL midas:gate_sent:` РїРѕСЃР»Рµ РІС‹Р±РѕСЂР° СЃС‡С‘С‚Р° в†’ РЅРѕСЂРјР°Р»СЊРЅС‹Р№ flow РІРѕСЃСЃС‚Р°РЅР°РІР»РёРІР°РµС‚СЃСЏ. **Р¤РёРєСЃ 3:** `ai-parse.worker.ts` вЂ” gate СЂРµРєРѕРЅСЃС‚СЂСѓРёСЂСѓРµС‚ РїРѕР»РЅС‹Р№ РїРёРєРµСЂ СЃС‡РµС‚РѕРІ РєРѕРіРґР° `accountId = null`. **Р–РёР·РЅРµРЅРЅС‹Р№ С†РёРєР» gate_sent:** SET РІ ai-parse в†’ DEL РїСЂРё ia:cancel (СЃС‚СЂРѕРєР° 1432, РґРѕ С„РёРєСЃР°) / ia:pk: (СЃС‚СЂРѕРєР° 1539, РќРћР’РћР•) / approve/reject РІ confirmation.worker (СЃС‚СЂРѕРєР° 268, РґРѕ С„РёРєСЃР°) / TTL 1h. Commit `8d25ec1`. tsc 0 РѕС€РёР±РѕРє. Railway вњ… РѕР±Р° СЃРµСЂРІРёСЃР° Online. |
+| 0.1 Event Storming | ? | `docs/event_storming_part{1,2,3}.md` |
+| 0.2 ADR Generation | ? | `docs/adr/ADR-000` — `ADR-014` (15 ADR) |
+| 0.3 Implementation Readiness Gate | ? | `phase1_scope.md`, `database_model_draft.md`, `queue_model.md`, `mvp_acceptance_criteria.md` |
+| 0.3.1 Security & Traceability Patch | ? | SEC-01 — SEC-12 внесены в scope, DB model, queue model, acceptance criteria, ADR-009, ADR-013 |
+| 1.1 Project Infrastructure Foundation | ? | `midas-monorepo/` — полная структура Turborepo, Docker Compose, ESLint, TypeScript |
+| 1.2 Database Foundation | ? | `packages/database/` — schema, RLS, withTenantTransaction, Decimal boundary |
+| 1.3 BullMQ Task Queue Foundation | ? | `apps/background-workers/src/queues/`, `workers/`, `packages/shared/` job types |
+| 1.4 Telegram Bot Foundation | ? | `apps/telegram-bot/src/` — Fastify server, SEC-04/05/06/12, webhook route, workspace resolver stub |
+| 1.5 User Onboarding & Workspace Resolution | ? | `services/onboarding.service.ts`, `rate-limiter.ts`, `telegram-api.ts`, real `resolveWorkspace()`, `/start` handler |
+| 1.6-A AI Parse Pipeline | ? | `packages/ai-core/`, `draft.service.ts`, `ai-parse.worker.ts`, 73/73 smoke tests, commit `7b393d2` |
+| 1.6-B HitL Draft Confirmation | ? ACCEPTED | `draft-confirmation.service.ts`, `confirmation.worker.ts`, `callback-confirm-queue.ts`, webhook callback_query handler, 30/30 smoke tests incl. race condition, commit `d49625b` |
+| 1.7 Draft Expiration & Lifecycle Cleanup | ? ACCEPTED | `migrations/1777973960000_draft-expiration.js` + `1777973970000_harden-expire-search-path.js` + `1777973980000_fix-expire-function-owner.js`, `draft-expiration.service.ts`, `draft-expiration.worker.ts`, `smoke-test-phase17.mjs` — 20/20 smoke tests PASS, commits `b9069ad`>`49e0cec` |
+| 1.8-A Transaction Intent Foundation | ? ACCEPTED | `migrations/1778008338096_transaction-intent.js`, `draft.service.ts` (parsed_intent propagation), `draft-confirmation.service.ts` (intent_missing outcome), `confirmation.worker.ts` (intent_missing messages), `smoke-test-phase18a.mjs` — 19/19 smoke tests PASS, 155/155 total regression PASS, commits `425df61`>`51b6aee` |
+| 1.8-B Runtime Consistency & Security Hardening | ? ACCEPTED | C-1: `draft.service.ts` `telegram_user_id`>`telegram_id` fix. C-2: `migrations/1778008400000_harden-onboarding-search-path.js` — `search_path` fixed for 2 SECDEF functions. M-1: `shared/index.ts` `TRANSACTION_TYPE` updated to 5 canonical values. `smoke-test-phase18b.mjs` — 16/16 PASS, 171/171 total regression PASS, commit `7af1692` |
+| 1.9 Basic Text /report Command | ? ACCEPTED | `apps/telegram-bot/src/services/report.service.ts`, `apps/telegram-bot/src/routes/webhook.route.ts`, `apps/telegram-bot/src/services/workspace-resolver.ts`, `packages/database/smoke-test-phase19.mjs` — /report command, current UTC month, grouped by transaction_intent, Russian text output — 47/47 Phase 1.9 tests, 218/218 total regression PASS, implementation commit `e060edb`; workflow sync `dffb53e`, `1ec649e`; tag `phase-1.9-accepted`. |
+| 1.10 Slash-Command Guard + Inline /help | ? ACCEPTED | `webhook.route.ts` (parseCommandToken, KNOWN_COMMANDS, /help, guard), `smoke-test-phase110.mjs` — 30/30 smoke tests PASS, 248/248 total regression PASS, commit `b321463`, tag `phase-1.10-accepted`. |
+| 1.11 /category Read-Only List Command | ? ACCEPTED | `apps/telegram-bot/src/services/category.service.ts` (new), `webhook.route.ts` (KNOWN_COMMANDS, HELP_TEXT, /category handler), `smoke-test-phase111.mjs` — 78/78 Phase 1.11 + 326/326 total regression PASS. Traceability ? Adversarial Security ? Scope Guard ?. Implementation commit `2e77362`, tag `phase-1.11-accepted` pushed. |
+| 1.12 Onboarding Default Data Seeding | ? ACCEPTED | `migrations/1778100000000_onboarding-default-seed.js` + `1778100010000_fix-onboarding-seed-conflict.js` (7-param SECDEF function), `onboarding.service.ts` (candidateAccountId + candidateCategoryId), `smoke-test-phase112.mjs` — 37/37 Phase 1.12 + 363/363 total regression PASS. Traceability ? Adversarial Security ? Scope Guard ?. Implementation commit `7b87eac`, tag `phase-1.12-accepted` pushed. |
+| 1.13 /add_category Strict-Format Command | ? ACCEPTED | `category.service.ts` (`parseAddCategoryArgs`, `resolveGroup`, `addCategory`, `AddCategoryResult`), `webhook.route.ts` (KNOWN_COMMANDS 4>5, HELP_TEXT, handler `5e-add`), `smoke-test-phase113.mjs` — 74/74 Phase 1.13 + 437/437 total regression PASS. Traceability ? Adversarial Security ? Scope Guard ?. Implementation commit `eac55a9`, tag `phase-1.13-accepted` pushed. |
+| 1.14 /accounts Read-Only List Command | ? ACCEPTED | `apps/telegram-bot/src/services/account.service.ts` (new), `webhook.route.ts` (KNOWN_COMMANDS 5>6, HELP_TEXT, handler `5d-acc`), `smoke-test-phase114.mjs` — 70/70 Phase 1.14 + 507/507 total regression PASS. Traceability ? Adversarial Security ? Scope Guard ?. Implementation commit `362b05b`, tag `phase-1.14-accepted` pushed. Note: HTML escaping for account/category names must be added before user-controlled write paths (/add_account). |
+| 1.15 HTML Escaping Hardening | ? ACCEPTED | `apps/telegram-bot/src/utils/html-escape.ts` (NEW), `account.service.ts` (MODIFY), `category.service.ts` (MODIFY), `webhook.route.ts` (MODIFY), `smoke-test-phase115.mjs` (NEW) — 52/52 Phase 1.15 + 559/559 total PASS. Traceability ? Adversarial Security ? Scope Guard ?. Traceability fix: `groupToken` escaped in error message. Implementation commit `4f63a91`; workflow_state sync commit `88ebae3`; test-count fix commit `45b1eec`. Tag `phase-1.15-accepted` pushed. |
+| 1.16 account_sources UNIQUE Constraint Migration | ? ACCEPTED | `packages/database/migrations/1778200000000_account-sources-unique-name.js` (NEW), `packages/database/smoke-test-phase116.mjs` (NEW) — UNIQUE(workspace_id, name) added; pre-flight 0 duplicates; 24/24 Phase 1.16 + 583/583 total PASS. Traceability ? Adversarial Security ? Scope Guard ?. Implementation commit `3ad45e3`. Tag `phase-1.16-accepted` pushed. |
+| 1.17 /add_account Strict-Format Command | ? ACCEPTED | `account.service.ts` (MODIFY), `webhook.route.ts` (MODIFY), `smoke-test-phase117.mjs` (NEW) — 27/27 Phase 1.17 + 610/610 total PASS. Traceability ? Adversarial Security ? Scope Guard ?. Implementation commit `8c370e3`. Tag `phase-1.17-accepted` pushed. |
+| 1.18 /report Currency Label (base_currency grouping) | ? ACCEPTED | `report.service.ts` (MODIFY), `smoke-test-phase118.mjs` (NEW), `smoke-test-phase19.mjs` (MODIFY — runReportQuery SQL helper sync) — 34/34 Phase 1.18 + 644/644 total PASS. Traceability ? Adversarial Security ? Scope Guard ?. Implementation commit `700a244`. Tag `phase-1.18-accepted` pushed. |
+| 1.19 account_sources.currency CHECK Constraint | ? ACCEPTED | `packages/database/migrations/1778300000000_account-sources-currency-check.js` (NEW), `packages/database/smoke-test-phase119.mjs` (NEW) — CHECK (currency ~ '^[A-Z]{3,5}$'); pre-flight 0 invalid rows; 24/24 Phase 1.19 + 668/668 total PASS. Traceability ? Adversarial Security ? Scope Guard ?. Implementation commit `9d288bd`. Tag `phase-1.19-accepted` pushed. |
+| 1.20 Balance Semantics Design Document | ? ACCEPTED | `docs/balance-semantics.md` (NEW) — 6 design decisions D1–D6 all approved. Formula: income+1/expense?1/debt_given?1/debt_received+1/transfer neutral. initial_balance NUMERIC(19,4) DEFAULT 0 approved (allow negative, account currency implicit, no date). Per-account output, all-time scope. Traceability ? Adversarial Security ? Scope Guard ?. No code. Tag `phase-1.20-accepted` pushed. |
+| 1.21 Unified Balance Implementation | ? ACCEPTED | `migrations/1778400000000_account-sources-initial-balance.js` (NEW), `balance.service.ts` (NEW), `webhook.route.ts` (MODIFY — /balance added, KNOWN_COMMANDS 7>8, HELP_TEXT), `smoke-test-phase121.mjs` (NEW). 28/28 Phase 1.21 + 655/655 regression smoke + 13/13 typecheck+lint = 696/696 PASS. Phase 1.5 server-dependent tests excluded from baseline (pre-existing). Tech debt: stale /balance comment in webhook.route.ts line 31 (cosmetic, not blocking). Traceability ? Adversarial Security ? Scope Guard ?. Implementation commit `976418a`. Tag `phase-1.21-accepted` pushed. |
+| 1.22 Stale Comment Cleanup | ? ACCEPTED | `webhook.route.ts` (MODIFY — comment-only: slash-command routing header updated, all 8 known commands listed, stale “(e.g. /balance)” example removed, Phase 1.21 added to phase refs). 0 logic changes. 13/13 typecheck+lint PASS (FULL TURBO). Traceability ? Adversarial Security ? Scope Guard ?. Implementation commit `d2ea3fd`. Tag `phase-1.22-accepted` pushed. |
+| 1.23 /set_balance Command | ? ACCEPTED | `setBalance.service.ts` (NEW), `webhook.route.ts` (MODIFY). Tag `phase-1.23-accepted` pushed. |
+| 1.24 /balance Formatting Polish | ? ACCEPTED | `balance.service.ts` (MODIFY). Tag `phase-1.24-accepted` pushed. |
+| 1.25 /settings Text Commands | ? ACCEPTED | `settings.service.ts` (NEW). /settings currency, /settings timezone. Tag `phase-1.25-accepted` pushed. |
+| 1.26 /settings UI | ? ACCEPTED | `settings-keyboard.service.ts` (NEW), `currencies.ts` (NEW). Inline keyboards, groups, pagination, Redis search state. 45/45 smoke. Tag `phase-1.26-accepted` pushed. |
+| 1.27 Multicurrency Balance Hardening | ? ACCEPTED | `balance.service.ts` (MODIFY). SQL-level mismatch exclusion, mismatch footnote. 27/27 smoke. Tag `phase-1.27-accepted` pushed. |
+| 1.28 /edit Transactions MVP | ? ACCEPTED | `edit.service.ts` (NEW), `edit-keyboard.service.ts` (NEW), `webhook.route.ts` (MODIFY), `confirmation.worker.ts` (MODIFY), `smoke-test-phase128.mjs` (NEW). /edit list+card+edit amount/category/account/intent. Permanent [?? Изменить] on confirmed msgs. Redis TTL 300s. ULID+workspace guards. Strict callback_data ?62 bytes verified. No search/date/delete/soft-delete/GIN, no migrations, no /balance or /report changes. 43/43 Phase 1.28 smoke + 841/841 regression smoke + 13/13 typecheck/lint = 897/897 PASS. Traceability ? Adversarial Security ? Scope Guard ?. Implementation commit c8bbc7d. Tag `phase-1.28-accepted` pushed. |
+| 1.29 Transaction Soft Delete | ? ACCEPTED | `migrations/1778700000000_transactions-soft-delete.js` (NEW). deleted_at TIMESTAMPTZ DEFAULT NULL; soft delete via UPDATE; excluded from /edit, /balance (LEFT JOIN ON), /report, /set_balance; 941/941 gates PASS. Traceability ? Adversarial Security ? Scope Guard ?. impl commit 7082540. Tag `phase-1.29-accepted` pushed. |
+| 1.30 Smart Account Onboarding | ? ACCEPTED | `account-onboard-keyboard.service.ts` (NEW), `account.service.ts` (hasAccounts, addAccountWithCurrency), `webhook.route.ts` (MODIFY — ac: callbacks, /start onboarding, /accounts empty-state, text intercept). Redis TTL midas:ac: 300s. 64/64 Phase 1.30 smoke + 318/318 accessible gates PASS. impl commit 4593867. Tag `phase-1.30-accepted` pushed. |
+| 1.31 Inline Account Creation | ? ACCEPTED | `migrations/1778800000000_drafts-account-hint.js`, `account-fuzzy.service.ts`, `account-inline-keyboard.service.ts`, `account-resolver.service.ts` (bg-workers), `account.service.ts` (MODIFY), `draft.service.ts` (MODIFY), `ai-parse.worker.ts` (MODIFY), `webhook.route.ts` (MODIFY), `draft-confirmation.service.ts` (MODIFY), `schemas.ts`+`prompts.ts` (MODIFY). Option A: resolve before keyboard. ia: namespace ?62 bytes. 27/27 smoke + 13/13 typecheck/lint PASS. Implementation commit 7c065f7. |
+| 1.32 Smart Text Input / Clarification Engine | ? ACCEPTED | `migrations/1778900000000_draft-clarification-state.js` (NEW), `schemas.ts` (amount/intent optional, PARTIAL_CONFIDENCE_THRESHOLD=0.3, MissingField), `claude-client.ts` ('partial' ParseResult, computeMissingFields), `prompts.ts` (partial examples), `draft.service.ts` (patchDraftAmount/Intent/Category), `ai-parse.worker.ts` (targeted clarification messages), `clarification.service.ts` (NEW, telegram-bot), `webhook.route.ts` (clar: callbacks, midas:clar: intercept), `smoke-test-phase132.mjs` (57/57 PASS). 0 lint/typecheck errors. Traceability ? Adversarial Security ? Scope Guard ?. Implementation commit e00f37e. Tag `phase-1.32-accepted` pushed. |
+| 1.33 Clean Chat / Single Active Message UX | ? ACCEPTED | UX-only phase. `active-message.service.ts` (NEW), `telegram-api.ts` (MODIFY), `shared/index.ts` (MODIFY), `webhook.route.ts` (MODIFY), `notifications.worker.ts` (MODIFY), `confirmation.worker.ts` (MODIFY), `ai-parse.worker.ts` (MODIFY). No migrations, no DB schema changes, no new deps. Redis pointer midas:am:{userId}:{chatId} (TTL 24h). upsertBotMessage() edit-first strategy. 0 typecheck errors. Batch-accepted by owner decision. Commit `36cacd7`. Tag `phase-1.33-accepted` pushed. |
+| 1.34 Rich Screen Cards — Single-Screen App UX | ? ACCEPTED | UX-only phase. `screen-builder.ts` (NEW — both apps), confirmation/preview card formatting. No migrations, no DB schema changes, no new deps. 0 typecheck errors. Batch-accepted by owner decision. Commit `6e899f0`. Tag `phase-1.34-accepted` pushed. |
+| 1.35 Intelligent Transaction Understanding | ? ACCEPTED | `migrations/1779000000000_intelligent-transactions.js` (NEW), `category-resolver.service.ts` (NEW), `draft.service.ts` (MODIFY), `draft-confirmation.service.ts` (MODIFY), `ai-parse.worker.ts` (MODIFY), `confirmation.worker.ts` (MODIFY), `settings.service.ts`+`settings-keyboard.service.ts` (MODIFY), `webhook.route.ts` (MODIFY), `screen-builder.ts` (MODIFY), `prompts.ts`+`schemas.ts` (MODIFY). smoke-test-phase135.mjs — 55 tests. Deployed to Railway production. |
+| 1.36-UX Persistent Navigation Keyboard | ? ACCEPTED | **Sub-steps 1–4 (commits c2f012f > 062d40d):** Core nav keyboard + bug fixes + auto-activation + collapsibility. **FINAL state (commits e879dfc > 2a15f31):** Transaction history workflow fully reworked. |
+| 1.37 AI Taxonomy & Zero-Clutter UX | ? ACCEPTED | Zero-clutter UX, 30-category taxonomy, 500+ anchors, multilingual, disambiguation, ALLOWED_CATEGORIES. Commits `5b02cf3` > `641ad26`. |
+| 1.38 Currency Input UX Hardening | ? ACCEPTED | `confirmation.worker.ts` (reject in-place edit), `screen-builder.ts` both apps (blockquote design), `webhook.route.ts` (`normalizeCurrencyInput` fix + `awaiting_cur` token extraction). Commits `94b7cac` > `c59f2e1`. |
+| 1.39 Gate UX — Edit-In-Place (Variant B) | ? DEPLOYED | `ai-parse.worker.ts` (gate block: one edit-in-place instead of 2 new messages), `screen-builder.ts` both apps (`buildGatePausedPreview`: ?? alert banner + draft summary + keyboard stays). `formatAmount()` hardened: `String()` cast для Postgres NUMERIC. `clarification.service.ts`: `::TEXT` cast на `parsed_amount`. Commits `8fa8f91` > `089abf6`. |
+| 1.40 Dead Card Auto-Cleanup | ? DEPLOYED | `confirmation.worker.ts` (+dead_card write after reject/expired), `draft-expiration.worker.ts` (+dead_card write after CRON expire), `ai-parse.worker.ts` (+dead_card read+delete before new preview). Redis key `midas:dead_card:{chatId}` TTL 24h. Commit `51eaf10`. |
+| 2.0 Transaction Hub + Reports 2.0 + Settings 2.0 | ? DEPLOYED | `transaction-list.service.ts` (NEW), `transaction-keyboard.service.ts` (NEW), `report-keyboard.service.ts` (NEW), `settings-keyboard.service.ts` (MODIFY). Interactive paginated lists, period picker, filter tabs, /edit deprecation > tx: namespace. Deployed from GitHub `main`. **[UPD d770ca4]** Фильтры: Вариант D — 1 ряд иконочных чипов `[??][??][??][??][?? Все]`. IntentFilter: 5 типов (e/i/d/t/a), 'd' = merged долги. CCY_SYMBOL + fmtCurrency(). Пагинация «?? Позже · ?? X/Y · Раньше ??». |
+| 2.1 Account Management Dashboard | ? DEPLOYED | `balance-keyboard.service.ts` (NEW — 450+ lines), `account-onboard-keyboard.service.ts` (MODIFY — bank/wallet presets, fiat/crypto pickers), `account.service.ts` (MODIFY — renameAccount, changeAccountCurrency, softDeleteAccount, deleted_at filters), `balance.service.ts` (MODIFY — getBalanceData, getAccountDetail, setAccountBalanceById, getAccountTxCount), `webhook.route.ts` (MODIFY — bl: handler, text intercepts, balance navigation update). DB migration: `updated_at` + `deleted_at` columns on `account_sources`. |
+| 2.2 Settings UI Overhaul | ? DEPLOYED | `settings-keyboard.service.ts` (MODIFY — 6-button 2x3 grid, URL поддержки, инфо о боте), `currencies.ts` (MODIFY — Russian aliases, 5-pass search, FIAT 40+ / CRYPTO 48+), `settings.service.ts` (FIX — `deleted_at IS NULL` в `getWorkspaceAccounts`), `webhook.route.ts` (MODIFY — кнопка назад после выбора валюты, единый Main Account handler). Commit `3e650c1`. |
+| 2.3 Search Pagination + UX Polish | ? DEPLOYED | **Pagination:** `transaction-hub.service.ts` (SEARCH_PAGE_SIZE=8, все 4 search-метода > LIMIT/OFFSET + COUNT(*) = `{items, total}`). `transaction-keyboard.service.ts` (`buildSearchResultsKeyboard(items, page, totalPages)` с ??/?? навигацией, `search_results_page` cmd, tx:sr:p:{page} parser). `webhook.route.ts` (Redis context `midas:tx:sr:ctx:{uid}:{cid}` TTL 600s, `search_results_page` handler, все text intercepts > paginated API). **Reports close:** `report-keyboard.service.ts` (?? Закрыть = `rp:cl` на всех 3 клавиатурах, type `close` в RpCallbackCmd). `webhook.route.ts` (`rp:close` handler > deleteMessage). **Keyboard order:** `screen-builder.ts` — Row 1: [?? Баланс][?? Отчёт], Row 2: [?? Транзакции][?? Настройки]. Commits `6da4464`, `049233d`, `70a5d41`. |
+| 2.3 Onboarding UX Polish | ? DEPLOYED | **Нет промежуточного afterCreate экрана:** после bal_input/bal_skip сразу показывается `buildFinishOnboardKeyboard()` + `accountAddedText()`. **Новая команда `ac:fin`:** кнопка «? Завершить» в пикере типа — чистит Redis, удаляет сообщение, отправляет ReplyKeyboard. **Backward compat:** `ac:more` и `ac:done` обработчики сохранены (старые кнопки в чате). **Иконки:** `buildStartOnboardKeyboard()` исправлен: ??>??, ?>??, ??Назад>??Своё название. **Дефолтный счёт:** `ac:skip` тихо создаёт «Кошелёк» (USD) если у пользователя 0 счетов. Commit `395e1f2`. Deploy `7089846c` — SUCCESS. |
+| Master Roadmap Ph.1 — Keyboard Service | ? DEPLOYED | `account-onboard-keyboard.service.ts` (+478 строк): `CURRENCY_FLAGS` registry (40+ валют, флаги+символы: ????RUB ????USD ?BTC ?TH TON и др.), `getCurrencyFlag(code)`, `CURRENCY_NAMES` (рус. названия). `buildPaginatedPicker()` — всегда 2 стрелки ???? (noop на краях). `buildCurrencyPickerText(name?,isCustom?)` — 3 ветки вывода. `buildFiatCurrencyPage()` + `buildCryptoCurrencyPage()` — флаговые кнопки + `?? Найти валюту` (ac:cur:search). `searchCurrencies(query,pool)` — fuzzy+транслитерация (rub/руб>RUB, dollar/доллар>USD). `buildNoMatchText(name,type)` + `buildNoMatchKeyboard(name,backTarget)` — экран «Похожего банка не нашли» с blockquote, 3 кнопки. `buildCurrencySearch*` тексты и клавиатуры. Удалены легаси: `FIAT_ITEMS`, `CRYPTO_ITEMS`, `CURRENCY_PICKER_TEXT`. Commit `35c92e0`. |
+| Master Roadmap Ph.2 — Webhook FSM | ? DEPLOYED | `webhook.route.ts`: (1) `name_input` при fuzzy null > `buildNoMatchText`+`buildNoMatchKeyboard`, шаг `name_confirm_custom`. (2) `ac:cus:save` > `pendingName` как `isCustomName=true` > `cur_pick`. (3) `ac:cus:keep` > `name_input` retry. (4) `ac:cur:search` > `cur_search` шаг + поисковый промпт. (5) `ac:cur:list` > возврат к пагинированному списку. (6) `cur_search` text interceptor > `searchCurrencies` > результаты/no-results. (7) 3 success-screens: `{ inline_keyboard: [] }` (без кнопок). `chooseCurKeyboard()` — module-level helper. Все callback_data ?64 байт. Commit `35c92e0`. |
+| 2.9 Nav Buttons Never Delete Tx Records | ? DEPLOYED | `active-message.service.ts` (NEW `sendNavMessage()` — always sends new message), `webhook.route.ts` (4 NAV_BTN_* handlers: NAV_BTN_BALANCE/REPORT/SETTINGS/TRANSACTIONS > `sendNavMessage`). Commit `1477f55`. |
+| 2.9+ Smart Nav Message (midas:nav: key) | ? DEPLOYED | `active-message.service.ts` (полная переработка `sendNavMessage()` — edit-first через `midas:nav:`, не трогает `midas:am:`; новые функции `getNavMessageId`, `setNavMessageId`, `clearNavMessageId`). `webhook.route.ts` (импорт 2 новых функций; AI-parse path — cleanup `midas:nav:` перед стандартным `midas:am:` cleanup; `st:cancel` — silently deletes вместо редактирования; `bl:close` — добавлен `clearNavMessageId`). Commits `4baac9c` > `004966f`. |
+| 2.10 Transaction UI Persistence & Navigation Fixes | ? DEPLOYED | **Три независимых фикса:** (1) `notifications.worker.ts` + `confirmation.worker.ts` + `shared/index.ts` — `isSuccessCard?: boolean` флаг; при approve DEL `midas:am:` вместо SET (commit `df15a01`). (2) `transaction-keyboard.service.ts` — `parseTxCallback`: теперь читает `parts[4]` как `from` для `tx:d:ask` и `tx:d:yes` — контекст `:s` передаётся через весь delete flow; кнопка «Закрыть» в tx:view корректно возвращает на success card (commit `8894b92`). (3) `notifications.worker.ts` — запись sentinel `midas:success_card:{msgId}` (TTL 30 дней) при `isSuccessCard=true`; `webhook.route.ts` step-7 — проверяет `EXISTS midas:success_card:{amId}` перед `deleteMessage` — двойная блокировка удаления (commit `b869c03`). |
+| Balance Phase A — Grouped UI | ? DEPLOYED | `balance-keyboard.service.ts` (NEW: `classifyAccountGroup`, `GROUP_EMOJI`, `GROUP_ORDER`, `GroupType`, `buildBalanceListKeyboard` с emoji-префиксами по группам, `export formatBalanceShort`). `balance.service.ts` (MODIFY: секционированный текст ??/??/??/??/??, удалён `CURRENCY_TOTALS_SQL`). Commit `4a1748c` pushed to main. Railway auto-deploy ?. |
+| Balance Phase B-1 — DB Schema | ? DEPLOYED | `packages/database/migrations/1779800000000_account-parent-and-subtype.js` (NEW). `account_sources`: `parent_account_id VARCHAR(26) FK REFERENCES account_sources(id) ON DELETE CASCADE` (NULL=top-level), `sub_type TEXT NOT NULL DEFAULT 'general'` CHECK constraint. Partial index `idx_account_sources_parent`. Applied on Railway live DB via `node-pg-migrate up --check-order false`. Commit `75156b9`. 100% аудит: formula ? FK 31/31 ? defaults safe ? |
+| Balance Phase B-2 — Hierarchical UI | ? DEPLOYED | `balance.service.ts` (MODIFY): `PER_ACCOUNT_SQL` + `parent_account_id`; `AccountBalanceRow` + `parentAccountId`; `getBalanceData()` builds childrenMap, renders +/L ladder for parent>children, leaf accounts unchanged. `balance-keyboard.service.ts` (MODIFY): `BalanceAccountRow` + `parentAccountId?`+`childCount?`; `BalanceCallbackCmd` + `add_currency`; `parseBalanceCallback` handles `bl:ac:{id}`; `pluralizeCurrency()` RU plural; `buildBalanceListKeyboard()` — parent aggregation (N валют) + indented child rows (L CURRENCY · balance) + ? Добавить валюту (bl:ac:{parentId} ?32 bytes). tsc 0 errors. Commit `d04bcba`. |
+| 2.10+ Gate Fix — Frozen UI on Concurrent Input | ? DEPLOYED | **Проблема:** пользователь пишет TX1 (пикер счёта открыт), TX2 > step-7 удаляет пикер до того как gate установит `gate_sent` > gate присылает новую карточку. TX3 > step-7 снова удаляет gate-карточку (gate_sent НЕ проверялся) > ai-parse молчит (gate_sent установлен) > UI зависает. **Фикс 1:** `webhook.route.ts` step-7 строки 5446–5458 — `EXISTS midas:gate_sent:` перед deleteMessage; если активен — карточка и `midas:am:` не трогаются. **Фикс 2:** `webhook.route.ts` ia:pk: строка 1539 — `DEL midas:gate_sent:` после выбора счёта > нормальный flow восстанавливается. **Фикс 3:** `ai-parse.worker.ts` — gate реконструирует полный пикер счетов когда `accountId = null`. **Жизненный цикл gate_sent:** SET в ai-parse > DEL при ia:cancel (строка 1432, до фикса) / ia:pk: (строка 1539, НОВОЕ) / approve/reject в confirmation.worker (строка 268, до фикса) / TTL 1h. Commit `8d25ec1`. tsc 0 ошибок. Railway ? оба сервиса Online. |
 
 ---
 
-## 3. РџР РРќРЇРўР«Р• РђР РҐРРўР•РљРўРЈР РќР«Р• Р Р•РЁР•РќРРЇ
+## 3. ПРИНЯТЫЕ АРХИТЕКТУРНЫЕ РЕШЕНИЯ
 
-- **Runtime:** Node.js 24 + TypeScript (ADR-001). Python вЂ” С‚РѕР»СЊРєРѕ РёР·РѕР»РёСЂРѕРІР°РЅРЅС‹Р№ РјРёРєСЂРѕСЃРµСЂРІРёСЃ РїРѕР·Р¶Рµ.
-- **Frontend (future):** React 19 + Vite 8. Vue РѕС‚РєР»РѕРЅС‘РЅ (ADR-002).
-- **Workspace:** MVP = 1 default workspace РЅР° РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ. Р‘Р” multi-workspace-ready СЃ РїРµСЂРІРѕРіРѕ РґРЅСЏ (ADR-003).
-- **Auth:** WorkspaceMembership required. Telegram User ID = РёРґРµРЅС‚РёС„РёРєР°С‚РѕСЂ.
+- **Runtime:** Node.js 24 + TypeScript (ADR-001). Python — только изолированный микросервис позже.
+- **Frontend (future):** React 19 + Vite 8. Vue отклонён (ADR-002).
+- **Workspace:** MVP = 1 default workspace на пользователя. БД multi-workspace-ready с первого дня (ADR-003).
+- **Auth:** WorkspaceMembership required. Telegram User ID = идентификатор.
 - **Primary Keys:** ULID (ADR-004).
-- **DB Isolation:** PostgreSQL RLS. Low-privilege DB role. `BYPASSRLS` Р·Р°РїСЂРµС‰С‘РЅ.
-- **Tenant Context:** `SET LOCAL app.workspace_id` С‚РѕР»СЊРєРѕ РІРЅСѓС‚СЂРё `withTenantTransaction(workspaceId, fn)` (SEC-03).
+- **DB Isolation:** PostgreSQL RLS. Low-privilege DB role. `BYPASSRLS` запрещён.
+- **Tenant Context:** `SET LOCAL app.workspace_id` только внутри `withTenantTransaction(workspaceId, fn)` (SEC-03).
 - **Queue:** BullMQ (Redis-backed) (ADR-014).
-- **Financial Precision:** Decimal / NUMERIC only. `Number`, `parseFloat`, `Number()`, float arithmetic Р·Р°РїСЂРµС‰РµРЅС‹ (SEC-02).
-- **AI Output:** Strict Zod allowlist. AI РЅРµ РјРѕР¶РµС‚ РІРѕР·РІСЂР°С‰Р°С‚СЊ/РєРѕРЅС‚СЂРѕР»РёСЂРѕРІР°С‚СЊ СЃРёСЃС‚РµРјРЅС‹Рµ РїРѕР»СЏ (SEC-01).
-- **Draft Lifecycle:** TransactionDraft в†’ pending_user в†’ approved/rejected/expired/needs_clarification.
-- **Security:** SEC-01 вЂ” SEC-12 РѕР±СЏР·Р°С‚РµР»СЊРЅС‹ РґР»СЏ Phase 1.
+- **Financial Precision:** Decimal / NUMERIC only. `Number`, `parseFloat`, `Number()`, float arithmetic запрещены (SEC-02).
+- **AI Output:** Strict Zod allowlist. AI не может возвращать/контролировать системные поля (SEC-01).
+- **Draft Lifecycle:** TransactionDraft > pending_user > approved/rejected/expired/needs_clarification.
+- **Security:** SEC-01 — SEC-12 обязательны для Phase 1.
 - **AI Pipeline (claude-client.ts + prompts.ts):**
-  - РњРѕРґРµР»СЊ: `claude-haiku-4-5`, `temperature: 0` (РґРµС‚РµСЂРјРёРЅРёР·Рј), `max_tokens: 256`
-  - System prompt: OUTPUT RULES в†’ MULTILINGUAL RECOGNITION (RU/EN/UA) в†’ FUZZY MATCHING (РѕРїРµС‡Р°С‚РєРё, СЃР»РµРЅРі, С‚СЂР°РЅСЃР»РёС‚РµСЂР°С†РёСЏ) в†’ BILINGUAL PAIRS (РЅРµРѕС‡РµРІРёРґРЅС‹Рµ РїРµСЂРµРІРѕРґС‹) в†’ DISAMBIGUATION RULES (15 РїСЂР°РІРёР» РґР»СЏ РґРІСѓСЃРјС‹СЃР»РµРЅРЅС‹С… С‚РѕРІР°СЂРѕРІ) в†’ COMPOUND EXPRESSIONS в†’ DEFAULT INTENT PRIORITY в†’ 30-РєР°С‚РµРіРѕСЂРёР№РЅР°СЏ С‚Р°РєСЃРѕРЅРѕРјРёСЏ (18 personal + 12 business) Г— 500+ СЏРєРѕСЂРЅС‹С… С‚РѕРІР°СЂРѕРІ/СѓСЃР»СѓРі/Р±СЂРµРЅРґРѕРІ (РЎРќР“/EU/US) в†’ RUSSIAN LANGUAGE RULES (50+ РіР»Р°РіРѕР»РѕРІ СЂР°СЃС…РѕРґР°/РґРѕС…РѕРґР°) в†’ CATEGORYв†’INTENT defaults в†’ 25+ РїСЂРёРјРµСЂРѕРІ (РІСЃРµ 5 intent-С‚РёРїРѕРІ + partial + nonsense)
-  - Markdown fence strip: Claude РёРЅРѕРіРґР° РѕР±РѕСЂР°С‡РёРІР°РµС‚ JSON РІ ` ```json `, РїР°СЂСЃРµСЂ СЌС‚Рѕ СѓР±РёСЂР°РµС‚ РїРµСЂРµРґ `JSON.parse`
-  - Zod validation: strict allowlist вЂ” intent/amount/currency/category_hint/person_hint/account_hint/item_hint/note/confidence
-  - **Category validation (Phase 1.37):** `ALLOWED_CATEGORIES` Set вЂ” РµСЃР»Рё Claude РІРµСЂРЅСѓР» `category_hint` РЅРµ РёР· РґРѕРїСѓСЃС‚РёРјРѕРіРѕ СЃРїРёСЃРєР°, Р·Р°РјРµРЅСЏРµС‚СЃСЏ РЅР° `Р”СЂСѓРіРѕРµ`
-  - Post-processing (safety net, РџРћРЎР›Р• Claude): 7 РіСЂСѓРїРї regex СЃ word-boundary `\b`, negation guard, confidence boost (+0.15/+0.25), intent fallback
-  - Р РµР·СѓР»СЊС‚Р°С‚: `ok` | `partial` (missing fields) | `needs_clarification` (nonsense) | `rejected`
-  - **Phase 1.35:** `item_hint` (extracted product/merchant name), `category_hint` (AI category suggestion) в†’ `CategoryResolverService` (3-stage: exact в†’ 200+ alias map в†’ fallback В«Р”СЂСѓРіРѕРµВ»)
-  - **Phase 1.37:** Zero-clutter UX, РјСѓР»СЊС‚РёСЏР·С‹С‡РЅР°СЏ С‚Р°РєСЃРѕРЅРѕРјРёСЏ, РґРёСЃР°РјР±РёРіСѓР°С†РёСЏ, СЃС‚СЂРѕРіР°СЏ РІР°Р»РёРґР°С†РёСЏ РєР°С‚РµРіРѕСЂРёР№
-- **Deployment:** Railway (spirited-happiness) вЂ” Midas bot + background-workers + Postgres + Redis. Auto-deploy from GitHub main.
-- **UX Architecture (Phase 1.33вЂ“1.36-UX) вЂ” Р¤РРќРђР›Р¬РќРћР• Р РђР‘РћР§Р•Р• РЎРћРЎРўРћРЇРќРР•:**
-  - Rich Screen Cards: `screen-builder.ts` pure functions в†’ buildPreviewScreen, buildConfirmedScreen, buildClarificationScreen
+  - Модель: `claude-haiku-4-5`, `temperature: 0` (детерминизм), `max_tokens: 256`
+  - System prompt: OUTPUT RULES > MULTILINGUAL RECOGNITION (RU/EN/UA) > FUZZY MATCHING (опечатки, сленг, транслитерация) > BILINGUAL PAIRS (неочевидные переводы) > DISAMBIGUATION RULES (15 правил для двусмысленных товаров) > COMPOUND EXPRESSIONS > DEFAULT INTENT PRIORITY > 30-категорийная таксономия (18 personal + 12 business) ? 500+ якорных товаров/услуг/брендов (СНГ/EU/US) > RUSSIAN LANGUAGE RULES (50+ глаголов расхода/дохода) > CATEGORY>INTENT defaults > 25+ примеров (все 5 intent-типов + partial + nonsense)
+  - Markdown fence strip: Claude иногда оборачивает JSON в ` ```json `, парсер это убирает перед `JSON.parse`
+  - Zod validation: strict allowlist — intent/amount/currency/category_hint/person_hint/account_hint/item_hint/note/confidence
+  - **Category validation (Phase 1.37):** `ALLOWED_CATEGORIES` Set — если Claude вернул `category_hint` не из допустимого списка, заменяется на `Другое`
+  - Post-processing (safety net, ПОСЛЕ Claude): 7 групп regex с word-boundary `\b`, negation guard, confidence boost (+0.15/+0.25), intent fallback
+  - Результат: `ok` | `partial` (missing fields) | `needs_clarification` (nonsense) | `rejected`
+  - **Phase 1.35:** `item_hint` (extracted product/merchant name), `category_hint` (AI category suggestion) > `CategoryResolverService` (3-stage: exact > 200+ alias map > fallback «Другое»)
+  - **Phase 1.37:** Zero-clutter UX, мультиязычная таксономия, дисамбигуация, строгая валидация категорий
+- **Deployment:** Railway (spirited-happiness) — Midas bot + background-workers + Postgres + Redis. Auto-deploy from GitHub main.
+- **UX Architecture (Phase 1.33–1.36-UX) — ФИНАЛЬНОЕ РАБОЧЕЕ СОСТОЯНИЕ:**
+  - Rich Screen Cards: `screen-builder.ts` pure functions > buildPreviewScreen, buildConfirmedScreen, buildClarificationScreen
   - Centralized confirmKb/confirmPreview helpers (DRY, 8 entry points)
-  - Post-confirm card: `[вњЏпёЏ РР·РјРµРЅРёС‚СЊ Р·Р°РїРёСЃСЊ]` only вЂ” nav buttons removed (handled by Reply Keyboard)
-  - **Persistent Navigation:** `ReplyKeyboardMarkup` (`is_persistent: false`, `resize_keyboard: true`) вЂ” 2Г—2 grid: Row 1 `[рџ’° Р‘Р°Р»Р°РЅСЃ][рџ“Љ РћС‚С‡С‘С‚]`, Row 2 `[рџ“‹ РўСЂР°РЅР·Р°РєС†РёРё][вљ™пёЏ РќР°СЃС‚СЂРѕР№РєРё]`. Sent on `/start`. NAV_BTN_* intercepted before AI parse. **(Phase 2.3: РћС‚С‡С‘С‚ Рё РўСЂР°РЅР·Р°РєС†РёРё РїРѕРјРµРЅСЏРЅС‹ РјРµСЃС‚Р°РјРё вЂ” РћС‚С‡С‘С‚ С‚РµРїРµСЂСЊ РІРІРµСЂС…Сѓ СЃРїСЂР°РІР°)**
-  - **Keyboard Carrier:** Greeting message `вњ… Р’С‹ СѓР¶Рµ Р·Р°СЂРµРіРёСЃС‚СЂРёСЂРѕРІР°РЅС‹...` РѕСЃС‚Р°С‘С‚СЃСЏ РІ С‡Р°С‚Рµ **РЅР°РІСЃРµРіРґР°** вЂ” СЏРІР»СЏРµС‚СЃСЏ РїРѕСЃС‚РѕСЏРЅРЅС‹Рј РЅРѕСЃРёС‚РµР»РµРј ReplyKeyboardMarkup. РќРµ СѓРґР°Р»СЏРµС‚СЃСЏ РЅРё РїСЂРё РєР°РєРёС… СѓСЃР»РѕРІРёСЏС….
-  - **Transaction History (FINAL):** РљР°Р¶РґР°СЏ preview-РєР°СЂС‚РѕС‡РєР° вЂ” СЌС‚Рѕ **РЅРѕРІРѕРµ** СЃРѕРѕР±С‰РµРЅРёРµ (`sendMessage`), `activeMessageId` РќР• РїРµСЂРµРґР°С‘С‚СЃСЏ РёР· `ai-parse.worker`. РСЃС‚РѕСЂРёСЏ С‚СЂР°РЅР·Р°РєС†РёР№ РЅР°РєР°РїР»РёРІР°РµС‚СЃСЏ РІ С‡Р°С‚Рµ. РЎС‚Р°СЂС‹Р№ РјРµС…Р°РЅРёР·Рј `midas:am:{userId}:{chatId}` (active-message pointer) **СѓРґР°Р»С‘РЅ** РёР· notifications.worker.
-  - **Previewв†’Confirmed Edit:** РџСЂРё approve `confirmation.worker` С‡РёС‚Р°РµС‚ `midas:preview:{draftId}` (TTL 600s) вЂ” message_id preview-РєР°СЂС‚РѕС‡РєРё, Р·Р°РїРёСЃР°РЅРЅС‹Р№ `notifications.worker` РїСЂРё РѕС‚РїСЂР°РІРєРµ. Approve в†’ `editMessageText(previewMsgId, confirmedText, inlineKeyboard)`. Reject в†’ `editMessageText(previewMsgId, вќЊ РћС‚РјРµРЅРµРЅРѕ)` (Phase 1.38 fix).
-  - **Redis Keys (Р°РєС‚СѓР°Р»СЊРЅС‹Рµ):**
-    - `midas:preview:{draftId}` вЂ” message_id preview-РєР°СЂС‚РѕС‡РєРё, TTL 600s. Р—Р°РїРёСЃС‹РІР°РµС‚ notifications.worker. Р§РёС‚Р°РµС‚ Рё СѓРґР°Р»СЏРµС‚ confirmation.worker РЅР° approve Рё reject.
-    - `midas:greet:{userId}:{chatId}` вЂ” СЃРѕС…СЂР°РЅСЏРµС‚СЃСЏ РІ /start handler, РЅРѕ РќРРљРћР“Р”Рђ РЅРµ РёСЃРїРѕР»СЊР·СѓРµС‚СЃСЏ РґР»СЏ СѓРґР°Р»РµРЅРёСЏ (РєРѕРґ РѕСЃС‚Р°РІР»РµРЅ РєР°Рє Р°СЂС‚РµС„Р°РєС‚, Р±РµР·РІСЂРµРґРµРЅ).
-    - `midas:clar:{userId}:{chatId}` вЂ” intercept РґР»СЏ РІРІРѕРґР° СЃСѓРјРјС‹ РїСЂРё clarification. РЈРґР°Р»СЏРµС‚СЃСЏ РЅР° confirm/reject (race condition fix).
-    - `midas:clar:msg:{userId}:{chatId}` вЂ” message_id nonsense-СЃРѕРѕР±С‰РµРЅРёСЏ. РЈРґР°Р»СЏРµС‚СЃСЏ РїСЂРё СЃР»РµРґСѓСЋС‰РµРј СѓСЃРїРµС€РЅРѕРј РїР°СЂСЃРµ.
-    - `midas:ac:{userId}:{chatId}` вЂ” account onboarding state, TTL 300s.
-    - `midas:edit:{userId}:{chatId}` вЂ” edit amount intercept, TTL 300s.
-    - `midas:awaiting_cur:{chatId}` вЂ” TTL 600s. РЎРѕР·РґР°С‘С‚СЃСЏ РєРѕРіРґР° РµСЃС‚СЊ СЃСѓРјРјР° РЅРѕ РЅРµС‚ РІР°Р»СЋС‚С‹ Рё РЅРµС‚ `cur_set`. РҐСЂР°РЅРёС‚ `{draftId}:{workspaceId}:{userId}`. Webhook С‡РёС‚Р°РµС‚ РґР»СЏ intercept РІРІРѕРґР° РІР°Р»СЋС‚С‹.
-    - `midas:cur_set:{workspaceId}` вЂ” С„Р»Р°Рі С‚РѕРіРѕ, С‡С‚Рѕ РїРѕР»СЊР·РѕРІР°С‚РµР»СЊ СѓСЃС‚Р°РЅРѕРІРёР» Р±Р°Р·РѕРІСѓСЋ РІР°Р»СЋС‚Сѓ РІ РќР°СЃС‚СЂРѕР№РєР°С…. Р•СЃР»Рё РµСЃС‚СЊ вЂ” РІР°Р»СЋС‚Р° РЅРµ Р·Р°РїСЂР°С€РёРІР°РµС‚СЃСЏ.
-    - `midas:gate_sent:{telegramUserId}:{chatId}` вЂ” С„Р»Р°Рі С‡С‚Рѕ gate СѓР¶Рµ СЃСЂР°Р±РѕС‚Р°Р» (TTL 1h). РџСЂРµРґРѕС‚РІСЂР°С‰Р°РµС‚ РїРѕРІС‚РѕСЂРЅС‹Р№ edit РїСЂРё РєР°Р¶РґРѕРј РЅРѕРІРѕРј СЃРѕРѕР±С‰РµРЅРёРё.
-    - `midas:dead_card:{chatId}` вЂ” message_id РєР°СЂС‚РѕС‡РєРё "вќЊ РћС‚РјРµРЅРµРЅРѕ" РёР»Рё "вЏ° Р§РµСЂРЅРѕРІРёРє РёСЃС‚С‘Рє", TTL 24h. Р—Р°РїРёСЃС‹РІР°РµС‚СЃСЏ confirmation.worker (reject/expired) Рё draft-expiration.worker (CRON expire). Р§РёС‚Р°РµС‚СЃСЏ Рё СѓРґР°Р»СЏРµС‚СЃСЏ ai-parse.worker РїСЂРё РѕС‚РїСЂР°РІРєРµ СЃР»РµРґСѓСЋС‰РµР№ preview вЂ” РєР°СЂС‚РѕС‡РєР° Р°РІС‚РѕРјР°С‚РёС‡РµСЃРєРё СѓРґР°Р»СЏРµС‚СЃСЏ РёР· С‡Р°С‚Р°. (Phase 1.40)
-     - `midas:am:{userId}:{chatId}` вЂ” Phase 2.10: pointer РЅР° С‚РµРєСѓС‰РµРµ Р°РєС‚РёРІРЅРѕРµ СЃРѕРѕР±С‰РµРЅРёРµ (С‡РµСЂРЅРѕРІРёРєРё, РїРёРєРµСЂС‹ СЃС‡С‘С‚РѕРІ, clarification). TTL 24h. РџСЂРё approve С‚СЂР°РЅР·Р°РєС†РёРё вЂ” DEL (РЅРµ SET, С‡С‚РѕР±С‹ success card РЅРµ СѓРґР°Р»СЏР»Р°СЃСЊ). Step-7 РІ webhook.route.ts РїСЂРѕРІРµСЂСЏРµС‚ `midas:success_card:{amId}` РїРµСЂРµРґ СѓРґР°Р»РµРЅРёРµРј.
-     - `midas:success_card:{msgId}` вЂ” Phase 2.10: sentinel key, TTL 30 РґРЅРµР№. Р—Р°РїРёСЃС‹РІР°РµС‚СЃСЏ `notifications.worker` РїСЂРё `isSuccessCard=true` (РїРѕСЃР»Рµ approve). Р§РёС‚Р°РµС‚СЃСЏ step-7 РІ `webhook.route.ts` вЂ” РµСЃР»Рё EXISTS, СЃРѕРѕР±С‰РµРЅРёРµ РќР• СѓРґР°Р»СЏРµС‚СЃСЏ РїСЂРё РІРІРѕРґРµ СЃР»РµРґСѓСЋС‰РµР№ С‚СЂР°РЅР·Р°РєС†РёРё. Р”РІРѕР№РЅР°СЏ Р±Р»РѕРєРёСЂРѕРІРєР° РІРјРµСЃС‚Рµ СЃ DEL `midas:am:`.
-    - `bl:state:{telegramUserId}:{chatId}` вЂ” Phase 2.1: state РґР»СЏ С‚РµРєСЃС‚РѕРІС‹С… intercepts Р±Р°Р»Р°РЅСЃ-РјРµРЅРµРґР¶РјРµРЅС‚Р°. РҐСЂР°РЅРёС‚ `{action, accountId}`. Actions: `rename`, `set_balance`, `currency_input`. TTL 300s.
-    - `bl:source:{telegramUserId}:{chatId}` вЂ” Phase 2.1: С„Р»Р°Рі С‡С‚Рѕ РґРѕР±Р°РІР»РµРЅРёРµ СЃС‡С‘С‚Р° РёРЅРёС†РёРёСЂРѕРІР°РЅРѕ РёР· Р±Р°Р»Р°РЅСЃР°. РџСЂРё `ac:done` РІРѕР·РІСЂР°С‰Р°РµС‚ РІ balance dashboard РІРјРµСЃС‚Рѕ setup complete.
-     - `midas:tx:sr:ctx:{telegramUserId}:{chatId}` вЂ” Phase 2.3: РїРѕРёСЃРєРѕРІС‹Р№ РєРѕРЅС‚РµРєСЃС‚ РґР»СЏ РїР°РіРёРЅР°С†РёРё. РҐСЂР°РЅРёС‚ JSON `{t: 'name'|'amount'|'category'|'date', q?: string, f?: string, to?: string, lb?: string}` TTL 600s. РЎРѕР·РґР°С‘С‚СЃСЏ РїСЂРё РїРµСЂРІРѕРј РїРѕРёСЃРєРµ, С‡РёС‚Р°РµС‚СЃСЏ РїСЂРё РЅР°РІРёРіР°С†РёРё РїРѕ СЃС‚СЂР°РЅРёС†Р°Рј (tx:sr:p:{page}). РџСЂРё СѓСЃС‚Р°СЂРµРІР°РЅРёРё вЂ” РґСЂСѓР¶РµР»СЋР±РЅРѕРµ СЃРѕРѕР±С‰РµРЅРёРµ В«РїРѕРёСЃРє Р·Р°РЅРѕРІРѕВ».
-    - `bl:source:{telegramUserId}:{chatId}` вЂ” Phase 2.3: РїСЂРё `ac:fin`/`ac:done` РїСЂРѕРІРµСЂСЏРµС‚СЃСЏ РґР»СЏ РІРѕР·РІСЂР°С‚Р° РІ balance dashboard РІРјРµСЃС‚Рѕ setup complete.
-     - `midas:ac:{userId}:{chatId}` РїРѕР»Рµ `pendingName` вЂ” Master Roadmap: РІСЂРµРјРµРЅРЅРѕРµ РёРјСЏ РёР· no-match flow РґРѕ РїРѕРґС‚РІРµСЂР¶РґРµРЅРёСЏ С‡РµСЂРµР· `ac:cus:save`.
-     - `midas:ac:{userId}:{chatId}` РїРѕР»Рµ `isCustomName` вЂ” Master Roadmap: true РµСЃР»Рё РёРјСЏ СЃС‡С‘С‚Р° вЂ” СЃРІРѕР±РѕРґРЅС‹Р№ РІРІРѕРґ (РЅРµ preset). Р’Р»РёСЏРµС‚ РЅР° С‚РµРєСЃС‚ currency picker.
-     - `midas:ac:{userId}:{chatId}` С€Р°Рі `cur_search` вЂ” Master Roadmap: СЂРµР¶РёРј РїРѕРёСЃРєР° РІР°Р»СЋС‚С‹ Р°РєС‚РёРІРµРЅ. РЎР»РµРґСѓСЋС‰РёР№ С‚РµРєСЃС‚ РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ в†’ `searchCurrencies()`. РЎРЅРёРјР°РµС‚СЃСЏ РїСЂРё `ac:cur:list` РёР»Рё РІС‹Р±РѕСЂРµ РІР°Р»СЋС‚С‹.
+  - Post-confirm card: `[?? Изменить запись]` only — nav buttons removed (handled by Reply Keyboard)
+  - **Persistent Navigation:** `ReplyKeyboardMarkup` (`is_persistent: false`, `resize_keyboard: true`) — 2?2 grid: Row 1 `[?? Баланс][?? Отчёт]`, Row 2 `[?? Транзакции][?? Настройки]`. Sent on `/start`. NAV_BTN_* intercepted before AI parse. **(Phase 2.3: Отчёт и Транзакции поменяны местами — Отчёт теперь вверху справа)**
+  - **Transaction Hub Filter Row (Variant D — актуально):** 1 строка ? 5 иконочных кнопок-чипов: `[??]` расходы · `[??]` доходы · `[??]` долги (merged) · `[??]` переводы · `[?? Все]`. Активный фильтр: `emoji + ' ?'`. Нажатие на активный (не «Все») снимает фильтр > возврат к 'a'. SQL: `'d' AND intent IN ('debt_given','debt_received')`. Пагинация: `[?? Позже]  [?? X / Y]  [Раньше ??]`. IntentFilter: `'a' | 'e' | 'i' | 'd' | 't'`. Backward compat: `dg`/`dr` > `'d'`.
+  - **Keyboard Carrier:** Greeting message `? Вы уже зарегистрированы...` остаётся в чате **навсегда** — является постоянным носителем ReplyKeyboardMarkup. Не удаляется ни при каких условиях.
+  - **Transaction History (FINAL):** Каждая preview-карточка — это **новое** сообщение (`sendMessage`), `activeMessageId` НЕ передаётся из `ai-parse.worker`. История транзакций накапливается в чате. Старый механизм `midas:am:{userId}:{chatId}` (active-message pointer) **удалён** из notifications.worker.
+  - **Preview>Confirmed Edit:** При approve `confirmation.worker` читает `midas:preview:{draftId}` (TTL 600s) — message_id preview-карточки, записанный `notifications.worker` при отправке. Approve > `editMessageText(previewMsgId, confirmedText, inlineKeyboard)`. Reject > `editMessageText(previewMsgId, ? Отменено)` (Phase 1.38 fix).
+  - **Redis Keys (актуальные):**
+    - `midas:preview:{draftId}` — message_id preview-карточки, TTL 600s. Записывает notifications.worker. Читает и удаляет confirmation.worker на approve и reject.
+    - `midas:greet:{userId}:{chatId}` — сохраняется в /start handler, но НИКОГДА не используется для удаления (код оставлен как артефакт, безвреден).
+    - `midas:clar:{userId}:{chatId}` — intercept для ввода суммы при clarification. Удаляется на confirm/reject (race condition fix).
+    - `midas:clar:msg:{userId}:{chatId}` — message_id nonsense-сообщения. Удаляется при следующем успешном парсе.
+    - `midas:ac:{userId}:{chatId}` — account onboarding state, TTL 300s.
+    - `midas:edit:{userId}:{chatId}` — edit amount intercept, TTL 300s.
+    - `midas:awaiting_cur:{chatId}` — TTL 600s. Создаётся когда есть сумма но нет валюты и нет `cur_set`. Хранит `{draftId}:{workspaceId}:{userId}`. Webhook читает для intercept ввода валюты.
+    - `midas:cur_set:{workspaceId}` — флаг того, что пользователь установил базовую валюту в Настройках. Если есть — валюта не запрашивается.
+    - `midas:gate_sent:{telegramUserId}:{chatId}` — флаг что gate уже сработал (TTL 1h). Предотвращает повторный edit при каждом новом сообщении.
+    - `midas:dead_card:{chatId}` — message_id карточки "? Отменено" или "? Черновик истёк", TTL 24h. Записывается confirmation.worker (reject/expired) и draft-expiration.worker (CRON expire). Читается и удаляется ai-parse.worker при отправке следующей preview — карточка автоматически удаляется из чата. (Phase 1.40)
+     - `midas:am:{userId}:{chatId}` — Phase 2.10: pointer на текущее активное сообщение (черновики, пикеры счётов, clarification). TTL 24h. При approve транзакции — DEL (не SET, чтобы success card не удалялась). Step-7 в webhook.route.ts проверяет `midas:success_card:{amId}` перед удалением.
+     - `midas:success_card:{msgId}` — Phase 2.10: sentinel key, TTL 30 дней. Записывается `notifications.worker` при `isSuccessCard=true` (после approve). Читается step-7 в `webhook.route.ts` — если EXISTS, сообщение НЕ удаляется при вводе следующей транзакции. Двойная блокировка вместе с DEL `midas:am:`.
+    - `bl:state:{telegramUserId}:{chatId}` — Phase 2.1: state для текстовых intercepts баланс-менеджмента. Хранит `{action, accountId}`. Actions: `rename`, `set_balance`, `currency_input`. TTL 300s.
+    - `bl:source:{telegramUserId}:{chatId}` — Phase 2.1: флаг что добавление счёта инициировано из баланса. При `ac:done` возвращает в balance dashboard вместо setup complete.
+     - `midas:tx:sr:ctx:{telegramUserId}:{chatId}` — Phase 2.3: поисковый контекст для пагинации. Хранит JSON `{t: 'name'|'amount'|'category'|'date', q?: string, f?: string, to?: string, lb?: string}` TTL 600s. Создаётся при первом поиске, читается при навигации по страницам (tx:sr:p:{page}). При устаревании — дружелюбное сообщение «поиск заново».
+    - `bl:source:{telegramUserId}:{chatId}` — Phase 2.3: при `ac:fin`/`ac:done` проверяется для возврата в balance dashboard вместо setup complete.
+     - `midas:ac:{userId}:{chatId}` поле `pendingName` — Master Roadmap: временное имя из no-match flow до подтверждения через `ac:cus:save`.
+     - `midas:ac:{userId}:{chatId}` поле `isCustomName` — Master Roadmap: true если имя счёта — свободный ввод (не preset). Влияет на текст currency picker.
+     - `midas:ac:{userId}:{chatId}` шаг `cur_search` — Master Roadmap: режим поиска валюты активен. Следующий текст пользователя > `searchCurrencies()`. Снимается при `ac:cur:list` или выборе валюты.
 
-  - **Auto-Activation:** `replyKeyboardJson` РІ `NotificationJobPayload`. rejection/expiry/intent_missing sends ReplyKeyboard РЅР° `sendMessage` path. `editMessageText` path вЂ” С‚РѕР»СЊРєРѕ inline keyboard (Telegram API limitation).
-  - **Collapsibility:** `is_persistent: false` вЂ” Telegram РїРѕРєР°Р·С‹РІР°РµС‚ вЏ„ РёРєРѕРЅРєСѓ СЂСЏРґРѕРј СЃ рџЋ¤; РїРѕР»СЊР·РѕРІР°С‚РµР»СЊ РјРѕР¶РµС‚ СЃРєСЂС‹РІР°С‚СЊ/РІРѕСЃСЃС‚Р°РЅР°РІР»РёРІР°С‚СЊ РєР»Р°РІРёР°С‚СѓСЂСѓ.
-  - **Race Condition Fix:** `redisConnection.del(clarKey)` РЅР° confirm/reject в†’ stale `midas:clar:*` РЅРµ РїРµСЂРµС…РІР°С‚С‹РІР°РµС‚ СЃР»РµРґСѓСЋС‰РµРµ СЃРѕРѕР±С‰РµРЅРёРµ.
-  - **Keyboard Consistency:** Both screen-builders use вњ–пёЏ. confirmKb: вњ… full-width row + [вњЏпёЏ|вњ–пёЏ] split row.
+  - **Auto-Activation:** `replyKeyboardJson` в `NotificationJobPayload`. rejection/expiry/intent_missing sends ReplyKeyboard на `sendMessage` path. `editMessageText` path — только inline keyboard (Telegram API limitation).
+  - **Collapsibility:** `is_persistent: false` — Telegram показывает ? иконку рядом с ??; пользователь может скрывать/восстанавливать клавиатуру.
+  - **Race Condition Fix:** `redisConnection.del(clarKey)` на confirm/reject > stale `midas:clar:*` не перехватывает следующее сообщение.
+  - **Keyboard Consistency:** Both screen-builders use ??. confirmKb: ? full-width row + [??|??] split row.
 
 ---
 
 ## 4. PROJECT_CONFIG STATUS
 
-- `project_config.md` РІРµСЂСЃРёСЏ **v1.4**
-- v1.4 РІРєР»СЋС‡Р°РµС‚: Phase 1.37 AI Taxonomy & Zero-Clutter UX update, 30-category taxonomy, 500+ anchors, multilingual, disambiguation, ALLOWED_CATEGORIES validation, Phase 2.0 documented
-- SEC-01 вЂ” SEC-12 = РѕР±СЏР·Р°С‚РµР»СЊРЅС‹Рµ РѕРіСЂР°РЅРёС‡РµРЅРёСЏ СЂРµР°Р»РёР·Р°С†РёРё Phase 1
-- **рџ”’ Р—РђР‘Р›РћРљРР РћР’РђРќ** вЂ” РёР·РјРµРЅРµРЅРёРµ С‚РѕР»СЊРєРѕ РїРѕ РїСЂСЏРјРѕРјСѓ РїСЂРёРєР°Р·Сѓ РІР»Р°РґРµР»СЊС†Р°
+- `project_config.md` версия **v1.4**
+- v1.4 включает: Phase 1.37 AI Taxonomy & Zero-Clutter UX update, 30-category taxonomy, 500+ anchors, multilingual, disambiguation, ALLOWED_CATEGORIES validation, Phase 2.0 documented
+- SEC-01 — SEC-12 = обязательные ограничения реализации Phase 1
+- **?? ЗАБЛОКИРОВАН** — изменение только по прямому приказу владельца
 
 ---
 
-## 5. PHASE 1.1 вЂ” Р Р•Р—РЈР›Р¬РўРђРў
+## 5. PHASE 1.1 — РЕЗУЛЬТАТ
 
-**РЎС‚Р°С‚СѓСЃ:** вњ… COMPLETED
+**Статус:** ? COMPLETED
 
-РЎРѕР·РґР°РЅ Turborepo monorepo `midas-monorepo/`:
+Создан Turborepo monorepo `midas-monorepo/`:
 
 ```
 midas-monorepo/
-в”њв”Ђв”Ђ apps/
-в”‚   в”њв”Ђв”Ђ telegram-bot/          # @midas/telegram-bot
-в”‚   в””в”Ђв”Ђ background-workers/    # @midas/background-workers
-в”њв”Ђв”Ђ packages/
-## 6. РўР•РљРЈР©РђРЇ Р¤РђР—Рђ вЂ” PHASE 1.30: Smart Account Onboarding
++-- apps/
+¦   +-- telegram-bot/          # @midas/telegram-bot
+¦   L-- background-workers/    # @midas/background-workers
++-- packages/
+## 6. ТЕКУЩАЯ ФАЗА — PHASE 1.30: Smart Account Onboarding
 
-> вњ… **COMPLETED / ACCEPTED (Phase 1.30). See Section 10 history.**
+> ? **COMPLETED / ACCEPTED (Phase 1.30). See Section 10 history.**
 
 **Objective:**
-Replace the flat "РЎС‡РµС‚РѕРІ РїРѕРєР° РЅРµС‚." empty-state with a guided interactive keyboard when /accounts is empty (Scenario Р”) and show a guided account setup keyboard for new users after /start (Scenario Р•). UX layer only вЂ” no migration, no new commands, no AI changes.
+Replace the flat "Счетов пока нет." empty-state with a guided interactive keyboard when /accounts is empty (Scenario Д) and show a guided account setup keyboard for new users after /start (Scenario Е). UX layer only — no migration, no new commands, no AI changes.
 
 **Key decisions:**
-- `account-onboard-keyboard.service.ts` (NEW): `ac:` callback namespace, all payloads в‰¤ 17 bytes (в‰¤ 64 limit). `parseAccountCallback()` validates against strict allowlist (SEC-01). Keyboards: type picker, exchange presets (5 + custom), currency shortcuts (6 + custom), post-create.
-- `account.service.ts` (MODIFY): `hasAccounts()` added вЂ” lightweight COUNT query, no signature change to existing functions. `addAccountWithCurrency()` added вЂ” accepts explicit currency, type always 'manual'.
+- `account-onboard-keyboard.service.ts` (NEW): `ac:` callback namespace, all payloads ? 17 bytes (? 64 limit). `parseAccountCallback()` validates against strict allowlist (SEC-01). Keyboards: type picker, exchange presets (5 + custom), currency shortcuts (6 + custom), post-create.
+- `account.service.ts` (MODIFY): `hasAccounts()` added — lightweight COUNT query, no signature change to existing functions. `addAccountWithCurrency()` added — accepts explicit currency, type always 'manual'.
 - `webhook.route.ts` (MODIFY): `ac:` callback handler block (before `ed:`), `/accounts` empty-state detection via `hasAccounts()`, `/start` for new users sends `buildStartOnboardKeyboard()`, text intercept for `midas:ac:` state (before edit-amount intercept).
-- Redis state `midas:ac:{telegramUserId}:{chatId}` TTL 300s вЂ” isolates name_input and cur_input steps from AI parse.
-- Onboarding DB function (`system_find_or_create_user`) untouched вЂ” default account still created for new users.
-- `[вЏ© РџСЂРѕРїСѓСЃС‚РёС‚СЊ]` button on /start guided keyboard вЂ” clears state, no account created.
-- Cash auto-name: "РќР°Р»РёС‡РЅС‹Рµ {CURRENCY}" derived at creation time.
-- Exchange presets: Binance, Bybit, OKX, Kraken, Huobi + вњЏпёЏ Р”СЂСѓРіР°СЏ.
+- Redis state `midas:ac:{telegramUserId}:{chatId}` TTL 300s — isolates name_input and cur_input steps from AI parse.
+- Onboarding DB function (`system_find_or_create_user`) untouched — default account still created for new users.
+- `[? Пропустить]` button on /start guided keyboard — clears state, no account created.
+- Cash auto-name: "Наличные {CURRENCY}" derived at creation time.
+- Exchange presets: Binance, Bybit, OKX, Kraken, Huobi + ?? Другая.
 
-**Scope вЂ” 3 files changed:**
-- `apps/telegram-bot/src/services/account-onboard-keyboard.service.ts` (NEW вЂ” 240 lines)
-- `apps/telegram-bot/src/services/account.service.ts` (MODIFY вЂ” hasAccounts + addAccountWithCurrency)
-- `apps/telegram-bot/src/routes/webhook.route.ts` (MODIFY вЂ” ac: handler, /accounts empty-state, /start guided, text intercept)
-- `packages/database/smoke-test-phase130.mjs` (NEW вЂ” 64 tests)
+**Scope — 3 files changed:**
+- `apps/telegram-bot/src/services/account-onboard-keyboard.service.ts` (NEW — 240 lines)
+- `apps/telegram-bot/src/services/account.service.ts` (MODIFY — hasAccounts + addAccountWithCurrency)
+- `apps/telegram-bot/src/routes/webhook.route.ts` (MODIFY — ac: handler, /accounts empty-state, /start guided, text intercept)
+- `packages/database/smoke-test-phase130.mjs` (NEW — 64 tests)
 
 ---
 
 ## 7. MCP SERVERS & INFRASTRUCTURE (Production)
 
-### РџРѕРґРєР»СЋС‡С‘РЅРЅС‹Рµ MCP-СЃРµСЂРІРµСЂС‹
+### Подключённые MCP-серверы
 
-| MCP-СЃРµСЂРІРµСЂ | РЎС‚Р°С‚СѓСЃ | РќР°Р·РЅР°С‡РµРЅРёРµ |
+| MCP-сервер | Статус | Назначение |
 |---|---|---|
-| **Railway MCP** | вњ… Active | Р”РµРїР»РѕР№, Р»РѕРіРё, РїРµСЂРµРјРµРЅРЅС‹Рµ, СЃРµСЂРІРёСЃС‹. Project: `spirited-happiness`. |
-| **GitHub MCP** | вњ… Active | Repo: `gloryjasystem/Midas`. Auto-deploy on push to `main`. |
-| **Postgres MCP** | вњ… Active | Read-only SQL Рє production DB С‡РµСЂРµР· Railway proxy. |
-| **Filesystem MCP** | вњ… Active | Р§С‚РµРЅРёРµ/Р·Р°РїРёСЃСЊ С„Р°Р№Р»РѕРІ РІ workspace `C:\Users\secvency\Desktop\Midas` |
+| **Railway MCP** | ? Active | Деплой, логи, переменные, сервисы. Project: `spirited-happiness`. |
+| **GitHub MCP** | ? Active | Repo: `gloryjasystem/Midas`. Auto-deploy on push to `main`. |
+| **Postgres MCP** | ? Active | Read-only SQL к production DB через Railway proxy. |
+| **Filesystem MCP** | ? Active | Чтение/запись файлов в workspace `C:\Users\secvency\Desktop\Midas` |
 
 ### Railway Infrastructure
 
-| РЎРµСЂРІРёСЃ | Р РѕР»СЊ | Р”РѕРјРµРЅ |
+| Сервис | Роль | Домен |
 |---|---|---|
 | **Midas** | Telegram Bot (Fastify webhook) | `midas-production-f4f1.up.railway.app` |
 | **background-workers** | BullMQ workers (ai-parse, confirm, notify, draft-expire, webhook) | Internal only |
 | **Postgres** | PostgreSQL 17 (managed) | `postgres.railway.internal:5432` |
 | **Redis** | BullMQ + state (Redis 7) | `redis.railway.internal:6379` |
 
-### РљР»СЋС‡РµРІС‹Рµ РїРµСЂРµРјРµРЅРЅС‹Рµ (Railway Dashboard)
+### Ключевые переменные (Railway Dashboard)
 
-| РџРµСЂРµРјРµРЅРЅР°СЏ | Р“РґРµ | РџСЂРёРјРµС‡Р°РЅРёРµ |
+| Переменная | Где | Примечание |
 |---|---|---|
 | `DATABASE_URL` | Midas + background-workers | `postgres.railway.internal` (internal) |
 | `REDIS_URL` | Midas + background-workers | `redis.railway.internal` |
-| `TELEGRAM_BOT_TOKEN` | Midas | вљ пёЏ РўСЂРµР±СѓРµС‚ СЂРѕС‚Р°С†РёРё (Р±С‹Р» РІРёРґРµРЅ РІ Р»РѕРіР°С…) |
-| `ANTHROPIC_API_KEY` | background-workers | вљ пёЏ РўСЂРµР±СѓРµС‚ СЂРѕС‚Р°С†РёРё |
+| `TELEGRAM_BOT_TOKEN` | Midas | ?? Требует ротации (был виден в логах) |
+| `ANTHROPIC_API_KEY` | background-workers | ?? Требует ротации |
 | `TELEGRAM_WEBHOOK_SECRET` | Midas | `midas_wh_secret_2026_prod` |
 
 ---
 
-## 8. Р¤РђР™Р›Р« Р”Р›РЇ Р§РўР•РќРРЇ Р’ РќРћР’РћРњ Р§РђРўР• (Phase Balance-B-2 context)
+## 8. ФАЙЛЫ ДЛЯ ЧТЕНИЯ В НОВОМ ЧАТЕ (Phase Balance-B-2 context)
 
-**вљЎ РўР•РљРЈР©РР™ РљРћРќРўР•РљРЎРў: Balance Redesign Phase A вњ… + B-1 вњ…. РЎР»РµРґСѓСЋС‰Р°СЏ вЂ” Phase B-2 (Р»РµСЃРµРЅРєР° РІ getBalanceData + Р°РіСЂРµРіР°С†РёСЏ РґРѕС‡РµСЂРЅРёС… СЃС‡РµС‚РѕРІ).**
+**? ТЕКУЩИЙ КОНТЕКСТ: Balance Redesign Phase A ? + B-1 ?. Следующая — Phase B-2 (лесенка в getBalanceData + агрегация дочерних счетов).**
 
-**РћР‘РЇР—РђРўР•Р›Р¬РќРћ РїСЂРѕС‡РёС‚Р°С‚СЊ РІ РЅРѕРІРѕРј С‡Р°С‚Рµ:**
+**ОБЯЗАТЕЛЬНО прочитать в новом чате:**
 ```
-apps/telegram-bot/src/services/balance-keyboard.service.ts   в†ђ Р“СЂСѓРїРїРёСЂРѕРІРєР°, buildBalanceListKeyboard
-apps/telegram-bot/src/services/balance.service.ts            в†ђ PER_ACCOUNT_SQL, getBalanceData
-packages/database/migrations/1779800000000_account-parent-and-subtype.js в†ђ РЎС…РµРјР° B-1
+apps/telegram-bot/src/services/balance-keyboard.service.ts   < Группировка, buildBalanceListKeyboard
+apps/telegram-bot/src/services/balance.service.ts            < PER_ACCOUNT_SQL, getBalanceData
+packages/database/migrations/1779800000000_account-parent-and-subtype.js < Схема B-1
 ```
 
-**РќР• Р§РРўРђРўР¬ (РЅРµ РЅСѓР¶РЅС‹ РґР»СЏ Phase B-2):**
+**НЕ ЧИТАТЬ (не нужны для Phase B-2):**
 ```
 apps/telegram-bot/src/services/report.service.ts
 apps/telegram-bot/src/services/transaction-list.service.ts
@@ -245,230 +246,231 @@ apps/background-workers/*
 packages/database/smoke-test-phase*.mjs
 ```
 
-**РЎРѕСЃС‚РѕСЏРЅРёРµ Р‘Р” (РїСЂРѕРІРµСЂРµРЅРѕ SQL-Р°СѓРґРёС‚РѕРј):**
-- `parent_account_id` вЂ” РІСЃРµ NULL (РІСЃРµ СЃС‡РµС‚Р° top-level, РёРµСЂР°СЂС…РёСЏ РµС‰С‘ РЅРµ Р·Р°РїРѕР»РЅРµРЅР°)
-- `sub_type` вЂ” РІСЃРµ `'general'` (Phase A РёСЃРїРѕР»СЊР·СѓРµС‚ СЌРІСЂРёСЃС‚РёРєСѓ `classifyAccountGroup`)
-- 31 С‚СЂР°РЅР·Р°РєС†РёСЏ, С„РѕСЂРјСѓР»Р° Р±Р°Р»Р°РЅСЃР° РїСЂРѕРІРµСЂРµРЅР° (initial_balance + income в€’ expense)
+**Состояние БД (проверено SQL-аудитом):**
+- `parent_account_id` — все NULL (все счета top-level, иерархия ещё не заполнена)
+- `sub_type` — все `'general'` (Phase A использует эвристику `classifyAccountGroup`)
+- 31 транзакция, формула баланса проверена (initial_balance + income ? expense)
 
 ---
 
-## 9. РџР РћРњРџРў Р”Р›РЇ РЎРўРђР РўРђ РќРћР’РћР“Рћ Р§РђРўРђ
+## 9. ПРОМПТ ДЛЯ СТАРТА НОВОГО ЧАТА
 
 ```
-вљЎ Balance Redesign вЂ” Phase A вњ… + Phase B-1 вњ… Р—РђР’Р•Р РЁР•РќР«. РЎР»РµРґСѓСЋС‰Р°СЏ вЂ” Phase B-2.
+? Balance Redesign — Phase A ? + Phase B-1 ? ЗАВЕРШЕНЫ. Следующая — Phase B-2.
 
-РџР РћР•РљРў:
+ПРОЕКТ:
 Midas Telegram Bot. Railway (project: spirited-happiness). MCP: Railway, GitHub, Postgres, Filesystem.
-Auto-deploy: push to main в†’ GitHub в†’ Railway СЃС‚СЂРѕРёС‚ Midas + background-workers.
+Auto-deploy: push to main > GitHub > Railway строит Midas + background-workers.
 
-Р§РўРћ РЈР–Р• РЎР”Р•Р›РђРќРћ:
+ЧТО УЖЕ СДЕЛАНО:
 
-Phase A (commit 4a1748c, Р·Р°РґРµРїР»РѕРµРЅ):
-- balance-keyboard.service.ts: classifyAccountGroup(СЌРІСЂРёСЃС‚РёРєР° РїРѕ name/currency),
-  GROUP_EMOJI (рџЏ¦/рџЄ™/рџ‘›/рџ’µ/рџ“Ѓ), buildBalanceListKeyboard СЃ РіСЂСѓРїРїР°РјРё, export formatBalanceShort
-- balance.service.ts: СЃРµРєС†РёРѕРЅРёСЂРѕРІР°РЅРЅС‹Р№ С‚РµРєСЃС‚ getBalanceData(), СѓРґР°Р»С‘РЅ CURRENCY_TOTALS_SQL
+Phase A (commit 4a1748c, задеплоен):
+- balance-keyboard.service.ts: classifyAccountGroup(эвристика по name/currency),
+  GROUP_EMOJI (??/??/??/??/??), buildBalanceListKeyboard с группами, export formatBalanceShort
+- balance.service.ts: секционированный текст getBalanceData(), удалён CURRENCY_TOTALS_SQL
 
-Phase B-1 (commit 75156b9, РїСЂРёРјРµРЅРµРЅРѕ РЅР° live Railway Postgres):
+Phase B-1 (commit 75156b9, применено на live Railway Postgres):
 - migration 1779800000000_account-parent-and-subtype.js:
-  parent_account_id VARCHAR(26) FK (NULL=top-level СЃС‡С‘С‚)
+  parent_account_id VARCHAR(26) FK (NULL=top-level счёт)
   sub_type TEXT NOT NULL DEFAULT 'general' CHECK(card|cash|crypto_exchange|crypto_wallet|bank_account|general)
   idx_account_sources_parent (partial index)
 
-100% РђРЈР”РРў РўР РђРќР—РђРљР¦РР™:
-- Р¤РѕСЂРјСѓР»Р° initial_balance + income в€’ expense вЂ” РІРµСЂРЅР° (РїСЂРѕРІРµСЂРµРЅРѕ РЅР° СЂРµР°Р»СЊРЅС‹С… РґР°РЅРЅС‹С…)
-- FK-С†РµР»РѕСЃС‚РЅРѕСЃС‚СЊ: 31/31 С‚СЂР°РЅР·Р°РєС†РёР№ СЃРІСЏР·Р°РЅС‹ СЃ СЃСѓС‰РµСЃС‚РІСѓСЋС‰РёРјРё СЃС‡РµС‚Р°РјРё
-- draft-confirmation.service.ts (transaction INSERT) вЂ” РЅРµ Р·Р°С‚СЂРѕРЅСѓС‚ РЅР°С€РёРјРё РёР·РјРµРЅРµРЅРёСЏРјРё
+100% АУДИТ ТРАНЗАКЦИЙ:
+- Формула initial_balance + income ? expense — верна (проверено на реальных данных)
+- FK-целостность: 31/31 транзакций связаны с существующими счетами
+- draft-confirmation.service.ts (transaction INSERT) — не затронут нашими изменениями
 
-Р§РўРћ РќРЈР–РќРћ РЎР”Р•Р›РђРўСЊ (Р¤Р°Р·Р° B-2):
+ЧТО НУЖНО СДЕЛАТь (Фаза B-2):
 
-1. balance.service.ts вЂ” РѕР±РЅРѕРІРёС‚СЊ PER_ACCOUNT_SQL:
-   - Р”РѕР±Р°РІРёС‚СЊ parent_account_id РІ SELECT
-   - РЎС‚СЂРѕРёС‚СЊ РґРµСЂРµРІРѕ РІ getBalanceData(): parent СЃС‡РµС‚Р° + РЅРµСЃРєРѕР»СЊРєРѕ children
-   - РћС„РѕСЂРјРёС‚СЊ РѕС‚РѕР±СЂР°Р¶РµРЅРёРµ СЃ Р»РµСЃРµРЅРєРѕР№: в”њ OKX USDT В· 32 601 / в”” OKX BTC В· 0.5
+1. balance.service.ts — обновить PER_ACCOUNT_SQL:
+   - Добавить parent_account_id в SELECT
+   - Строить дерево в getBalanceData(): parent счета + несколько children
+   - Оформить отображение с лесенкой: + OKX USDT · 32 601 / L OKX BTC · 0.5
 
-2. balance-keyboard.service.ts вЂ” РѕР±РЅРѕРІРёС‚СЊ buildBalanceListKeyboard:
-   - Parent-СЃС‡С‘С‚: РїРѕРєР°Р·С‹РІР°С‚СЊ Р°РіСЂРµРіР°С†РёСЋ ("РєРѕР»РёС‡РµСЃС‚РІРѕ РІР°Р»СЋС‚")
-   - Child-СЃС‡С‘С‚: РѕС‚СЃС‚СѓРї + РґСЂСѓРіРёРµ СЌРјРѕРґР·Рё
-   - Р‘РћРќРЈРЎ: РєРЅРѕРїРєР° "вћ• Р”РѕР±Р°РІРёС‚СЊ РІР°Р»СЋС‚Сѓ" (bl:ac:{parentId})
+2. balance-keyboard.service.ts — обновить buildBalanceListKeyboard:
+   - Parent-счёт: показывать агрегацию ("количество валют")
+   - Child-счёт: отступ + другие эмодзи
+   - БОНУС: кнопка "? Добавить валюту" (bl:ac:{parentId})
 
-РљР›Р®Р§Р•Р’Р«Р• РџР РђР’РР›Рђ:
-- Р¤РёРЅР°РЅСЃРѕРІР°СЏ РјР°С‚РµРјР°С‚РёРєР°: РўРћР›Р¬РљРћ BigInt/NUMERIC, РЅРёРєР°РєРёС… float (SEC-02)
-- Р’СЃРµ РјСѓС‚Р°С†РёРё С‡РµСЂРµР· withTenantTransaction (SEC-03)
-- РќРµ С‚СЂРѕРіР°С‚СЊ project_config.md
-- РќРµ РјРµРЅСЏС‚СЊ draft-confirmation.service.ts вЂ” С‚СЂР°РЅР·Р°РєС†РёРё СЂР°Р±РѕС‚Р°СЋС‚ РёРґРµР°Р»СЊРЅРѕ
+КЛЮЧЕВЫЕ ПРАВИЛА:
+- Финансовая математика: ТОЛЬКО BigInt/NUMERIC, никаких float (SEC-02)
+- Все мутации через withTenantTransaction (SEC-03)
+- Не трогать project_config.md
+- Не менять draft-confirmation.service.ts — транзакции работают идеально
 
-РћР‘РЇР—РђРўР•Р›Р¬РќРћ РїСЂРѕС‡РёС‚Р°С‚СЊ workflow_state.md Р Р°Р·РґРµР» 16 (СЂРѕР°РґРјР°Рї) Рё Р¤Р°Р·Сѓ B-2 РїР»Р°РЅ.
+ОБЯЗАТЕЛЬНО прочитать workflow_state.md Раздел 16 (роадмап) и Фазу B-2 план.
 ```
 
 
-## 10. РРЎРўРћР РРЇ Р”Р•Р™РЎРўР’РР™ (РЎР–РђРўРђРЇ)
+## 10. ИСТОРИЯ ДЕЙСТВИЙ (СЖАТАЯ)
 
-| Р”Р°С‚Р° | РЎРѕР±С‹С‚РёРµ |
+| Дата | Событие |
 |---|---|
-| 2026-05-04 14:07 | РРЅРёС†РёР°Р»РёР·Р°С†РёСЏ РїСЂРѕРµРєС‚Р°: project_config.md v1.0 + workflow_state.md |
-| 2026-05-04 14:45 | Phase 0.1 Event Storming completed (46 СЃРѕР±С‹С‚РёР№, 10 Р°РіСЂРµРіР°С‚РѕРІ, 15 ADR planned) |
-| 2026-05-04 15:08 | Phase 0.2 ADR completed (15 ADR: ADR-000вЂ”ADR-014). project_config.md в†’ v1.1 |
+| 2026-05-04 14:07 | Инициализация проекта: project_config.md v1.0 + workflow_state.md |
+| 2026-05-04 14:45 | Phase 0.1 Event Storming completed (46 событий, 10 агрегатов, 15 ADR planned) |
+| 2026-05-04 15:08 | Phase 0.2 ADR completed (15 ADR: ADR-000—ADR-014). project_config.md > v1.1 |
 | 2026-05-04 15:45 | Phase 0.3 Readiness Gate completed (scope, DB model, queue model, acceptance criteria) |
-| 2026-05-04 17:02 | Security review: 2 CRITICAL, 2 HIGH в†’ Phase 0.3.1 Р·Р°РїСѓС‰РµРЅР° |
-| 2026-05-04 17:15 | Phase 0.3.1 Security Patch completed (SEC-01вЂ”SEC-12). project_config.md в†’ v1.2 |
+| 2026-05-04 17:02 | Security review: 2 CRITICAL, 2 HIGH > Phase 0.3.1 запущена |
+| 2026-05-04 17:15 | Phase 0.3.1 Security Patch completed (SEC-01—SEC-12). project_config.md > v1.2 |
 | 2026-05-04 18:30 | Client roadmap document created: `docs/client-roadmap-architecture-overview.md` |
 | 2026-05-04 21:12 | Phase 1.1 approved and started |
-| 2026-05-04 21:17 | Phase 1.1 completed: monorepo, Docker, ESLint, TypeScript вЂ” 8/8 typecheck passed |
+| 2026-05-04 21:17 | Phase 1.1 completed: monorepo, Docker, ESLint, TypeScript — 8/8 typecheck passed |
 | 2026-05-04 22:34 | Context checkpoint: workflow_state.md compressed for new chat handoff |
-| 2026-05-05 09:53 | Git init fixed: repo moved from `C:/Users/secvency` в†’ `Midas/`. Initial commit `cc91a47f` |
+| 2026-05-05 09:53 | Git init fixed: repo moved from `C:/Users/secvency` > `Midas/`. Initial commit `cc91a47f` |
 | 2026-05-05 10:22 | Docker readiness: port 5432 conflict resolved, `docker-compose.yml` volume path fixed for postgres:18 |
 | 2026-05-05 12:05 | Section 11 (Agent Operating Protocol, 13 sub-protocols) added to workflow_state.md |
 | 2026-05-05 12:11 | Self-audit applied: C1, C2, M1, M2, L2 fixes + Section 14 added |
 | 2026-05-05 12:55 | Phase 1.2 Database Foundation completed & accepted via Review Gate. Minor observation: onboarding workspace spam requires app-layer rate limiting. |
 | 2026-05-05 14:30 | Phase 1.3 BullMQ Task Queue Foundation completed & accepted. 13/13 typecheck+lint passed (0 errors). |
-| 2026-05-05 19:30 | Phase 1.4 Verification Gate FULL PASS (7/7 smoke tests). Bugs fixed: BullMQ jobId `:` в†’ `\|` separator, `/health` excluded from SEC-04 guard. Commit `6e0cfa1` pushed. |
+| 2026-05-05 19:30 | Phase 1.4 Verification Gate FULL PASS (7/7 smoke tests). Bugs fixed: BullMQ jobId `:` > `\|` separator, `/health` excluded from SEC-04 guard. Commit `6e0cfa1` pushed. |
 | 2026-05-05 19:35 | Phase 1.4 ACCEPTED by owner. **Prod note:** Redis must use `noeviction` policy in production; `allkeys-lru` is acceptable only for local dev. |
-| 2026-05-05 19:40 | workflow_state.md cleanup: stale Phase 1.2/1.4 references corrected in Sections 6вЂ“9. Sections now describe Phase 1.5 scope, MCP needs, required files, and handoff prompt. No code written. |
+| 2026-05-05 19:40 | workflow_state.md cleanup: stale Phase 1.2/1.4 references corrected in Sections 6–9. Sections now describe Phase 1.5 scope, MCP needs, required files, and handoff prompt. No code written. |
 | 2026-05-05 19:45 | Phase 1.5 scope narrowed by owner: User Onboarding & Workspace Resolution only. Removed from scope: callback_query, /add /balance /report /category, CRON, AI, full notifications. Sections 6, 8, 9 updated. |
 | 2026-05-05 20:00 | Phase 1.5 implementation complete. `findOrCreateUser` (atomic, ON CONFLICT race-safe), `resolveWorkspace` real DB, `/start` handler, Redis anti-spam, `sendMessage` wrapper. 13/13 typecheck+lint pass. Commit `8f88f22`. |
-| 2026-05-05 20:30 | Phase 1.5 Verification Gate PASS (39/39 smoke tests). Fix applied: RLS chicken-and-egg вЂ” `midas_app` cannot INSERT into `workspaces` without a pre-existing `workspace_memberships` row. Added migration `1777973900000`: `system_find_or_create_user` SECURITY DEFINER (executes as `midas_migrator`, exempt from RLS; `pg_advisory_xact_lock` for race safety). **Documentation note:** SECURITY DEFINER onboarding pattern was introduced in Phase 1.2 migration (`1777973795878_rls-and-policies.js`) as `system_create_onboarding_workspace` but is not covered by any existing ADR. ADR-009 covers Exchange Rate Snapshot only. A future ADR documenting the SECURITY DEFINER onboarding bootstrap pattern is recommended. Commits `b60f7ac`, `9307800` pushed. |
+| 2026-05-05 20:30 | Phase 1.5 Verification Gate PASS (39/39 smoke tests). Fix applied: RLS chicken-and-egg — `midas_app` cannot INSERT into `workspaces` without a pre-existing `workspace_memberships` row. Added migration `1777973900000`: `system_find_or_create_user` SECURITY DEFINER (executes as `midas_migrator`, exempt from RLS; `pg_advisory_xact_lock` for race safety). **Documentation note:** SECURITY DEFINER onboarding pattern was introduced in Phase 1.2 migration (`1777973795878_rls-and-policies.js`) as `system_create_onboarding_workspace` but is not covered by any existing ADR. ADR-009 covers Exchange Rate Snapshot only. A future ADR documenting the SECURITY DEFINER onboarding bootstrap pattern is recommended. Commits `b60f7ac`, `9307800` pushed. |
 | 2026-05-05 20:35 | Phase 1.5 ACCEPTED by owner. Status set to WAITING_FOR_OWNER_APPROVAL_TO_START_PHASE_1_6. |
 | 2026-05-05 21:00 | Phase 1.6-A AI Parse Pipeline implementation complete. `parseTransaction()` (Claude Haiku + Zod strict allowlist SEC-01), `createDraft()` (withTenantTransaction SEC-03), date-scoped AI budget guard SEC-09, SEC-12 `job.updateData('[REDACTED]')` + `removeOnFail: { age: 86400 }`. Commit `305e0f6`. |
-| 2026-05-05 21:30 | Phase 1.6-A Final Acceptance Check. Fix: NUMERIC(19,4) boundary вЂ” regex `\d*` в†’ `\d{0,14}` caps integer part at 15 digits. 73/73 smoke tests pass. 13/13 typecheck+lint pass. Commit `7b393d2` pushed. Phase 1.6-A ACCEPTED. |
-| 2026-05-05 22:55 | Phase 1.6-B HitL Draft Confirmation implementation complete. `draft-confirmation.service.ts` (SELECT FOR UPDATE SKIP LOCKED), `confirmation.worker.ts`, `callback-confirm-queue.ts`, `webhook.route.ts` callback_query handler (ULID validation, SEC-03/06), real Telegram `sendMessage` with inline keyboard. 30/30 smoke tests PASS (incl. mandatory race condition test: parallel approve Г— 2 в†’ exactly 1 Transaction). Phase 1.6-A regression: 73/73 PASS. 13/13 typecheck+lint clean. Commit `d49625b` pushed. **Status: READY_FOR_OWNER_ACCEPTANCE.** Note: CRON draft expiration (SEC-08) intentionally deferred to Phase 1.7. No SEC-08 claim in Phase 1.6-B. |
-| 2026-05-05 19:07 | Phase 1.6-B Final Acceptance Audit run (agent self-audit). All checks PASS: SEC-03 tenant isolation вњ”, atomic approval вњ”, race condition вњ”, rejection no-op вњ”, UNIQUE constraint вњ”, no SEC-08 false claim вњ”. workflow_state.md ACCEPTED wording corrected to READY_FOR_OWNER_ACCEPTANCE. Awaiting owner decision. |
+| 2026-05-05 21:30 | Phase 1.6-A Final Acceptance Check. Fix: NUMERIC(19,4) boundary — regex `\d*` > `\d{0,14}` caps integer part at 15 digits. 73/73 smoke tests pass. 13/13 typecheck+lint pass. Commit `7b393d2` pushed. Phase 1.6-A ACCEPTED. |
+| 2026-05-05 22:55 | Phase 1.6-B HitL Draft Confirmation implementation complete. `draft-confirmation.service.ts` (SELECT FOR UPDATE SKIP LOCKED), `confirmation.worker.ts`, `callback-confirm-queue.ts`, `webhook.route.ts` callback_query handler (ULID validation, SEC-03/06), real Telegram `sendMessage` with inline keyboard. 30/30 smoke tests PASS (incl. mandatory race condition test: parallel approve ? 2 > exactly 1 Transaction). Phase 1.6-A regression: 73/73 PASS. 13/13 typecheck+lint clean. Commit `d49625b` pushed. **Status: READY_FOR_OWNER_ACCEPTANCE.** Note: CRON draft expiration (SEC-08) intentionally deferred to Phase 1.7. No SEC-08 claim in Phase 1.6-B. |
+| 2026-05-05 19:07 | Phase 1.6-B Final Acceptance Audit run (agent self-audit). All checks PASS: SEC-03 tenant isolation ?, atomic approval ?, race condition ?, rejection no-op ?, UNIQUE constraint ?, no SEC-08 false claim ?. workflow_state.md ACCEPTED wording corrected to READY_FOR_OWNER_ACCEPTANCE. Awaiting owner decision. |
 | 2026-05-05 21:14 | Phase 1.6-B ACCEPTED by owner after Final Acceptance Audit PASS WITH FIXES. Code unchanged. 30/30 Phase 1.6-B smoke tests PASS, 73/73 Phase 1.6-A regression PASS, 13/13 typecheck/lint PASS. Commit `f205e09` pushed. CRON expiration (SEC-08) intentionally deferred to Phase 1.7. |
 | 2026-05-05 21:32 | Phase 1.7 ACCEPTED by owner. `system_expire_pending_drafts()` owner fixed to `midas_migrator`; `search_path = public, pg_catalog` fixed; EXECUTE revoked from PUBLIC; 20/20 smoke tests PASS; 13/13 typecheck+lint PASS; git pushed and clean. Commit `49e0cec`. |
-| 2026-05-05 22:30 | Phase 1.8-A Transaction Intent Foundation implementation complete. Migration `1778008338096_transaction-intent.js`: `parsed_intent` (nullable TEXT + CHECK) added to `transaction_drafts`; `transaction_intent` (NOT NULL TEXT + CHECK, backfilled 'expense', no DEFAULT) added to `transactions`. `draft.service.ts`: `AiOutput.intent` propagated to `parsed_intent`. `draft-confirmation.service.ts`: `parsed_intent` fetched in SELECT FOR UPDATE, new `intent_missing` outcome if NULL, `transaction_intent` written to transactions INSERT (explicit, no default). `confirmation.worker.ts`: `intent_missing` case handled with user message. 19/19 Phase 1.8-A tests PASS. 20/20 Phase 1.7 regression PASS. 30/30 Phase 1.6-B regression PASS. 73/73 Phase 1.6-A regression PASS. 13/13 typecheck+lint PASS. Traceability вњ… Security вњ… Scope Guard вњ…. Status: READY_FOR_OWNER_ACCEPTANCE. |
+| 2026-05-05 22:30 | Phase 1.8-A Transaction Intent Foundation implementation complete. Migration `1778008338096_transaction-intent.js`: `parsed_intent` (nullable TEXT + CHECK) added to `transaction_drafts`; `transaction_intent` (NOT NULL TEXT + CHECK, backfilled 'expense', no DEFAULT) added to `transactions`. `draft.service.ts`: `AiOutput.intent` propagated to `parsed_intent`. `draft-confirmation.service.ts`: `parsed_intent` fetched in SELECT FOR UPDATE, new `intent_missing` outcome if NULL, `transaction_intent` written to transactions INSERT (explicit, no default). `confirmation.worker.ts`: `intent_missing` case handled with user message. 19/19 Phase 1.8-A tests PASS. 20/20 Phase 1.7 regression PASS. 30/30 Phase 1.6-B regression PASS. 73/73 Phase 1.6-A regression PASS. 13/13 typecheck+lint PASS. Traceability ? Security ? Scope Guard ?. Status: READY_FOR_OWNER_ACCEPTANCE. |
 | 2026-05-05 23:39 | Phase 1.8-A ACCEPTED by owner after independent verification. Local and origin/main both at `51b6aee`. Implementation commit `425df61`. Migration `1778008338096_transaction-intent.js` tracked in git. Live DB verified: `parsed_intent` nullable, `transaction_intent` NOT NULL, no DEFAULT, CHECK constraints confirmed for exactly 5 values. 155/155 tests PASS (19 Phase 1.8-A + 20 Phase 1.7 + 30 Phase 1.6-B + 73 Phase 1.6-A + 13 typecheck+lint). No cleanup needed. |
-| 2026-05-05 23:50 | Phase 1.8-B Runtime Consistency & Security Hardening implementation complete. C-1 fix: `draft.service.ts` L41 `telegram_user_id`в†’`telegram_id` (critical runtime bug вЂ” would crash every AI parse job). C-2 fix: migration `1778008400000_harden-onboarding-search-path.js` вЂ” `SET search_path = 'public', 'pg_catalog'` added to `system_create_onboarding_workspace` and `system_find_or_create_user`. M-1 fix: `shared/index.ts` `TRANSACTION_TYPE` updated from 3 stale values to 5 canonical intent values. 16/16 Phase 1.8-B tests PASS. 19/19 Phase 1.8-A PASS. 20/20 Phase 1.7 PASS. 30/30 Phase 1.6-B PASS. 73/73 Phase 1.6-A PASS. 13/13 typecheck+lint PASS. Total: 171/171. Traceability вњ… Security вњ… Scope Guard вњ…. Status: READY_FOR_OWNER_ACCEPTANCE. |
-| 2026-05-06 00:02 | Phase 1.8-B ACCEPTED by owner after PASS. C-1: resolveUserId fixed `telegram_user_id`в†’`telegram_id`. C-2: onboarding SECURITY DEFINER functions hardened with `search_path = public, pg_catalog`. M-1: `TRANSACTION_TYPE` updated to canonical 5 intent values. 171/171 tests PASS. origin/main at `7af1692`. Working tree clean. |
-| 2026-05-06 00:07 | workflow_state.md cleanup after Phase 1.8-B acceptance. Stale Sections 6вЂ“9 corrected: Section 6 updated to Phase 1.8-B results; Section 7 set to advisory-only MCP access; Section 8 refreshed with advisory file list; Section 9 updated with COMPLETED/ACCEPTED handoff. No code changes. |
-| 2026-05-06 00:27 | Phase 1.9 Basic Text /report Command implementation complete. `report.service.ts`: monthly report grouped by `transaction_intent`, `SUM(base_amount)` via NUMERIC, UTC month boundaries, Russian text output. `webhook.route.ts`: `/report` command intercepted before AI parse, resolves workspace+userId, calls report service. `workspace-resolver.ts`: `userId` added to `WorkspaceResolverResult`. Defense-in-depth: explicit `WHERE workspace_id = $1` alongside RLS. 47/47 Phase 1.9 tests PASS. 16/16 Phase 1.8-B PASS. 19/19 Phase 1.8-A PASS. 20/20 Phase 1.7 PASS. 30/30 Phase 1.6-B PASS. 73/73 Phase 1.6-A PASS. 13/13 typecheck+lint PASS. Total: 218/218. Traceability вњ… Security вњ… Scope Guard вњ…. Status: READY_FOR_OWNER_ACCEPTANCE. |
-| 2026-05-06 09:08 | workflow_state.md sync after Phase 1.9 implementation. Sections 1, 2, 6вЂ“9 corrected: Section 1 set to WAITING_FOR_OWNER_ACCEPTANCE_OF_PHASE_1_9; Section 2 Phase 1.9 row expanded with full artifact paths; Section 6 updated to Phase 1.9 results; Section 7 set to acceptance-audit-only MCP access; Section 8 refreshed with Phase 1.9 audit file list; Section 9 updated with acceptance handoff. No code changes. |
-| 2026-05-06 10:00 | Phase 1.9 ACCEPTED by owner after final verification. Full test run: 47/47 Phase 1.9 + 16/16 Phase 1.8-B + 19/19 Phase 1.8-A + 20/20 Phase 1.7 + 30/30 Phase 1.6-B + 73/73 Phase 1.6-A + 13/13 typecheck+lint = 218/218 PASS. Git clean pre/post tests. origin/main in sync. project_config.md unchanged (v1.2). Section 14 self-audit: all вњ…. Committed workflow_state.md, pushed tag phase-1.9-accepted. Status: WAITING_FOR_OWNER_APPROVAL_TO_START_NEXT_PHASE. |
-| 2026-05-06 11:45 | Phase 1.10 Slash-Command Guard + Inline /help implementation complete. `parseCommandToken()` (exact first-token, @BotName strip), `KNOWN_COMMANDS` set, `/help` handler (Russian, lists /start /report /help), unknown-slash guard (5e). No command-registry, no new deps, no migrations, no AI changes. 30/30 Phase 1.10 + 47/47 Phase 1.9 + 16/16 Phase 1.8-B + 19/19 Phase 1.8-A + 20/20 Phase 1.7 + 30/30 Phase 1.6-B + 73/73 Phase 1.6-A + 13/13 typecheck+lint = 248/248 PASS. Traceability вњ… Adversarial Security вњ… Scope Guard вњ…. Status: READY_FOR_OWNER_ACCEPTANCE. |
-| 2026-05-06 11:55 | Phase 1.10 ACCEPTED by owner after final acceptance verification. Full test run: 30/30 Phase 1.10 + 47/47 Phase 1.9 + 16/16 Phase 1.8-B + 19/19 Phase 1.8-A + 20/20 Phase 1.7 + 30/30 Phase 1.6-B + 73/73 Phase 1.6-A + 13/13 typecheck+lint = 248/248 PASS. Git clean pre/post tests. origin/main in sync. project_config.md unchanged (v1.2, last touched cc91a47). Commit b321463: 3 files only (webhook.route.ts, smoke-test-phase110.mjs, workflow_state.md). No command-registry.ts, no /balance, no migrations, no new deps. Section 14 self-audit: all вњ…. Tag phase-1.10-accepted pushed. Status: WAITING_FOR_OWNER_APPROVAL_TO_START_NEXT_PHASE. |
-| 2026-05-06 12:18 | Phase 1.11 /category Read-Only List Command implementation complete. `category.service.ts`: `getCategoryList()` read-only, `withTenantTransaction`, explicit `WHERE workspace_id = $1`, grouped by `category_group` (`Р‘РёР·РЅРµСЃ` before `Р–РёР·РЅСЊ`), Russian pluralization, empty-state message. `webhook.route.ts`: `/category` added to KNOWN_COMMANDS (4 commands), HELP_TEXT updated, handler block added after `/report`. DB audit: RLS `tenant_isolation_categories` (`cmd: ALL`) вњ…; `account_sources` not seeded on onboarding (debt item, no fix in Phase 1.11). 78/78 Phase 1.11 + 30/30 Phase 1.10 + 47/47 Phase 1.9 + 16/16 Phase 1.8-B + 19/19 Phase 1.8-A + 20/20 Phase 1.7 + 30/30 Phase 1.6-B + 73/73 Phase 1.6-A + 13/13 typecheck+lint = 326/326 PASS. Traceability вњ… Adversarial Security вњ… Scope Guard вњ…. Status: READY_FOR_OWNER_ACCEPTANCE. |
-| 2026-05-06 13:50 | Phase 1.11 ACCEPTED by owner after final verification. /category read-only command implemented; no write path, no migrations, no new deps, no AI changes. Final independent verification: 78/78 Phase 1.11 + 30/30 Phase 1.10 + 47/47 Phase 1.9 + 16/16 Phase 1.8-B + 19/19 Phase 1.8-A + 20/20 Phase 1.7 + 30/30 Phase 1.6-B + 73/73 Phase 1.6-A + 13/13 typecheck+lint = 326/326 PASS. Traceability вњ… Adversarial Security вњ… Scope Guard вњ…. Implementation commit 2e77362. Tag phase-1.11-accepted pushed. Status: WAITING_FOR_OWNER_APPROVAL_TO_START_NEXT_PHASE. |
-| 2026-05-06 17:20 | Phase 1.12 Onboarding Default Data Seeding implementation complete. Currency finding: `workspaces.default_currency DEFAULT 'RUB'` confirmed вЂ” no hardcoding beyond existing onboarding pattern. Migrations: `1778100000000_onboarding-default-seed.js` (7-param SECDEF function) + `1778100010000_fix-onboarding-seed-conflict.js` (PL/pgSQL ON CONFLICT ambiguity fix using named constraint). `onboarding.service.ts` extended to pass candidateAccountId + candidateCategoryId ($6/$7). Lazy fallback in `draft-confirmation.service.ts` preserved untouched (defense-in-depth). No route changes, no new slash commands, no queue/worker changes, no AI changes, no new deps. DB audit: 157 workspaces, 71 missing account_sources, 55 missing categories вЂ” no backfill (lazy fallback covers them). 37/37 Phase 1.12 + 78/78 Phase 1.11 + 30/30 Phase 1.10 + 47/47 Phase 1.9 + 16/16 Phase 1.8-B + 19/19 Phase 1.8-A + 20/20 Phase 1.7 + 30/30 Phase 1.6-B + 73/73 Phase 1.6-A + 13/13 typecheck+lint = 363/363 PASS. Traceability вњ… Adversarial Security вњ… Scope Guard вњ…. Status: READY_FOR_OWNER_ACCEPTANCE. |
-| 2026-05-06 17:45 | workflow_state.md test-count fix: 344/344 в†’ 363/363 (Phase 1.8-A 19 tests omitted from arithmetic sum). Commit 1b9a32a. No code changes. |
-| 2026-05-06 18:40 | Phase 1.13 /add_category Strict-Format Command implementation complete. `category.service.ts`: `parseAddCategoryArgs()` (group case-insensitive normalization via ALLOWED_GROUPS, name trim+length validation), `resolveGroup()`, `addCategory()` (withTenantTransaction, INSERT ON CONFLICT ON CONSTRAINT categories_workspace_id_name_key DO NOTHING, ULID id, returns 'created'\|'duplicate'), `AddCategoryResult` type. `webhook.route.ts`: KNOWN_COMMANDS 4в†’5, HELP_TEXT updated with /add_category line + groups + example, handler `5e-add` (parseAddCategoryArgs в†’ resolveWorkspace в†’ addCategory в†’ Russian reply; duplicate: В«РљР°С‚РµРіРѕСЂРёСЏ СЃ С‚Р°РєРёРј РёРјРµРЅРµРј СѓР¶Рµ СЃСѓС‰РµСЃС‚РІСѓРµС‚.В»). No migrations, no new deps, no AI changes. Empty-state /category message updated. midas_app RLS WITH CHECK verified via separate appPool in Test 8. 74/74 Phase 1.13 + 37/37 Phase 1.12 + 78/78 Phase 1.11 + 30/30 Phase 1.10 + 47/47 Phase 1.9 + 16/16 Phase 1.8-B + 19/19 Phase 1.8-A + 20/20 Phase 1.7 + 30/30 Phase 1.6-B + 73/73 Phase 1.6-A + 13/13 typecheck+lint = 437/437 PASS. Traceability вњ… Adversarial Security вњ… Scope Guard вњ…. Implementation commit `eac55a9`. Status: READY_FOR_OWNER_ACCEPTANCE. |
+| 2026-05-05 23:50 | Phase 1.8-B Runtime Consistency & Security Hardening implementation complete. C-1 fix: `draft.service.ts` L41 `telegram_user_id`>`telegram_id` (critical runtime bug — would crash every AI parse job). C-2 fix: migration `1778008400000_harden-onboarding-search-path.js` — `SET search_path = 'public', 'pg_catalog'` added to `system_create_onboarding_workspace` and `system_find_or_create_user`. M-1 fix: `shared/index.ts` `TRANSACTION_TYPE` updated from 3 stale values to 5 canonical intent values. 16/16 Phase 1.8-B tests PASS. 19/19 Phase 1.8-A PASS. 20/20 Phase 1.7 PASS. 30/30 Phase 1.6-B PASS. 73/73 Phase 1.6-A PASS. 13/13 typecheck+lint PASS. Total: 171/171. Traceability ? Security ? Scope Guard ?. Status: READY_FOR_OWNER_ACCEPTANCE. |
+| 2026-05-06 00:02 | Phase 1.8-B ACCEPTED by owner after PASS. C-1: resolveUserId fixed `telegram_user_id`>`telegram_id`. C-2: onboarding SECURITY DEFINER functions hardened with `search_path = public, pg_catalog`. M-1: `TRANSACTION_TYPE` updated to canonical 5 intent values. 171/171 tests PASS. origin/main at `7af1692`. Working tree clean. |
+| 2026-05-06 00:07 | workflow_state.md cleanup after Phase 1.8-B acceptance. Stale Sections 6–9 corrected: Section 6 updated to Phase 1.8-B results; Section 7 set to advisory-only MCP access; Section 8 refreshed with advisory file list; Section 9 updated with COMPLETED/ACCEPTED handoff. No code changes. |
+| 2026-05-06 00:27 | Phase 1.9 Basic Text /report Command implementation complete. `report.service.ts`: monthly report grouped by `transaction_intent`, `SUM(base_amount)` via NUMERIC, UTC month boundaries, Russian text output. `webhook.route.ts`: `/report` command intercepted before AI parse, resolves workspace+userId, calls report service. `workspace-resolver.ts`: `userId` added to `WorkspaceResolverResult`. Defense-in-depth: explicit `WHERE workspace_id = $1` alongside RLS. 47/47 Phase 1.9 tests PASS. 16/16 Phase 1.8-B PASS. 19/19 Phase 1.8-A PASS. 20/20 Phase 1.7 PASS. 30/30 Phase 1.6-B PASS. 73/73 Phase 1.6-A PASS. 13/13 typecheck+lint PASS. Total: 218/218. Traceability ? Security ? Scope Guard ?. Status: READY_FOR_OWNER_ACCEPTANCE. |
+| 2026-05-06 09:08 | workflow_state.md sync after Phase 1.9 implementation. Sections 1, 2, 6–9 corrected: Section 1 set to WAITING_FOR_OWNER_ACCEPTANCE_OF_PHASE_1_9; Section 2 Phase 1.9 row expanded with full artifact paths; Section 6 updated to Phase 1.9 results; Section 7 set to acceptance-audit-only MCP access; Section 8 refreshed with Phase 1.9 audit file list; Section 9 updated with acceptance handoff. No code changes. |
+| 2026-05-06 10:00 | Phase 1.9 ACCEPTED by owner after final verification. Full test run: 47/47 Phase 1.9 + 16/16 Phase 1.8-B + 19/19 Phase 1.8-A + 20/20 Phase 1.7 + 30/30 Phase 1.6-B + 73/73 Phase 1.6-A + 13/13 typecheck+lint = 218/218 PASS. Git clean pre/post tests. origin/main in sync. project_config.md unchanged (v1.2). Section 14 self-audit: all ?. Committed workflow_state.md, pushed tag phase-1.9-accepted. Status: WAITING_FOR_OWNER_APPROVAL_TO_START_NEXT_PHASE. |
+| 2026-05-06 11:45 | Phase 1.10 Slash-Command Guard + Inline /help implementation complete. `parseCommandToken()` (exact first-token, @BotName strip), `KNOWN_COMMANDS` set, `/help` handler (Russian, lists /start /report /help), unknown-slash guard (5e). No command-registry, no new deps, no migrations, no AI changes. 30/30 Phase 1.10 + 47/47 Phase 1.9 + 16/16 Phase 1.8-B + 19/19 Phase 1.8-A + 20/20 Phase 1.7 + 30/30 Phase 1.6-B + 73/73 Phase 1.6-A + 13/13 typecheck+lint = 248/248 PASS. Traceability ? Adversarial Security ? Scope Guard ?. Status: READY_FOR_OWNER_ACCEPTANCE. |
+| 2026-05-06 11:55 | Phase 1.10 ACCEPTED by owner after final acceptance verification. Full test run: 30/30 Phase 1.10 + 47/47 Phase 1.9 + 16/16 Phase 1.8-B + 19/19 Phase 1.8-A + 20/20 Phase 1.7 + 30/30 Phase 1.6-B + 73/73 Phase 1.6-A + 13/13 typecheck+lint = 248/248 PASS. Git clean pre/post tests. origin/main in sync. project_config.md unchanged (v1.2, last touched cc91a47). Commit b321463: 3 files only (webhook.route.ts, smoke-test-phase110.mjs, workflow_state.md). No command-registry.ts, no /balance, no migrations, no new deps. Section 14 self-audit: all ?. Tag phase-1.10-accepted pushed. Status: WAITING_FOR_OWNER_APPROVAL_TO_START_NEXT_PHASE. |
+| 2026-05-06 12:18 | Phase 1.11 /category Read-Only List Command implementation complete. `category.service.ts`: `getCategoryList()` read-only, `withTenantTransaction`, explicit `WHERE workspace_id = $1`, grouped by `category_group` (`Бизнес` before `Жизнь`), Russian pluralization, empty-state message. `webhook.route.ts`: `/category` added to KNOWN_COMMANDS (4 commands), HELP_TEXT updated, handler block added after `/report`. DB audit: RLS `tenant_isolation_categories` (`cmd: ALL`) ?; `account_sources` not seeded on onboarding (debt item, no fix in Phase 1.11). 78/78 Phase 1.11 + 30/30 Phase 1.10 + 47/47 Phase 1.9 + 16/16 Phase 1.8-B + 19/19 Phase 1.8-A + 20/20 Phase 1.7 + 30/30 Phase 1.6-B + 73/73 Phase 1.6-A + 13/13 typecheck+lint = 326/326 PASS. Traceability ? Adversarial Security ? Scope Guard ?. Status: READY_FOR_OWNER_ACCEPTANCE. |
+| 2026-05-06 13:50 | Phase 1.11 ACCEPTED by owner after final verification. /category read-only command implemented; no write path, no migrations, no new deps, no AI changes. Final independent verification: 78/78 Phase 1.11 + 30/30 Phase 1.10 + 47/47 Phase 1.9 + 16/16 Phase 1.8-B + 19/19 Phase 1.8-A + 20/20 Phase 1.7 + 30/30 Phase 1.6-B + 73/73 Phase 1.6-A + 13/13 typecheck+lint = 326/326 PASS. Traceability ? Adversarial Security ? Scope Guard ?. Implementation commit 2e77362. Tag phase-1.11-accepted pushed. Status: WAITING_FOR_OWNER_APPROVAL_TO_START_NEXT_PHASE. |
+| 2026-05-06 17:20 | Phase 1.12 Onboarding Default Data Seeding implementation complete. Currency finding: `workspaces.default_currency DEFAULT 'RUB'` confirmed — no hardcoding beyond existing onboarding pattern. Migrations: `1778100000000_onboarding-default-seed.js` (7-param SECDEF function) + `1778100010000_fix-onboarding-seed-conflict.js` (PL/pgSQL ON CONFLICT ambiguity fix using named constraint). `onboarding.service.ts` extended to pass candidateAccountId + candidateCategoryId ($6/$7). Lazy fallback in `draft-confirmation.service.ts` preserved untouched (defense-in-depth). No route changes, no new slash commands, no queue/worker changes, no AI changes, no new deps. DB audit: 157 workspaces, 71 missing account_sources, 55 missing categories — no backfill (lazy fallback covers them). 37/37 Phase 1.12 + 78/78 Phase 1.11 + 30/30 Phase 1.10 + 47/47 Phase 1.9 + 16/16 Phase 1.8-B + 19/19 Phase 1.8-A + 20/20 Phase 1.7 + 30/30 Phase 1.6-B + 73/73 Phase 1.6-A + 13/13 typecheck+lint = 363/363 PASS. Traceability ? Adversarial Security ? Scope Guard ?. Status: READY_FOR_OWNER_ACCEPTANCE. |
+| 2026-05-06 17:45 | workflow_state.md test-count fix: 344/344 > 363/363 (Phase 1.8-A 19 tests omitted from arithmetic sum). Commit 1b9a32a. No code changes. |
+| 2026-05-06 18:40 | Phase 1.13 /add_category Strict-Format Command implementation complete. `category.service.ts`: `parseAddCategoryArgs()` (group case-insensitive normalization via ALLOWED_GROUPS, name trim+length validation), `resolveGroup()`, `addCategory()` (withTenantTransaction, INSERT ON CONFLICT ON CONSTRAINT categories_workspace_id_name_key DO NOTHING, ULID id, returns 'created'\|'duplicate'), `AddCategoryResult` type. `webhook.route.ts`: KNOWN_COMMANDS 4>5, HELP_TEXT updated with /add_category line + groups + example, handler `5e-add` (parseAddCategoryArgs > resolveWorkspace > addCategory > Russian reply; duplicate: «Категория с таким именем уже существует.»). No migrations, no new deps, no AI changes. Empty-state /category message updated. midas_app RLS WITH CHECK verified via separate appPool in Test 8. 74/74 Phase 1.13 + 37/37 Phase 1.12 + 78/78 Phase 1.11 + 30/30 Phase 1.10 + 47/47 Phase 1.9 + 16/16 Phase 1.8-B + 19/19 Phase 1.8-A + 20/20 Phase 1.7 + 30/30 Phase 1.6-B + 73/73 Phase 1.6-A + 13/13 typecheck+lint = 437/437 PASS. Traceability ? Adversarial Security ? Scope Guard ?. Implementation commit `eac55a9`. Status: READY_FOR_OWNER_ACCEPTANCE. |
 | 2026-05-06 19:22 | Phase 1.14 /accounts Read-Only List Command implementation started. Owner APPROVED. |
-| 2026-05-06 19:35 | Phase 1.14 implementation complete. `account.service.ts` (NEW): `getAccountList()` (withTenantTransaction, explicit WHERE workspace_id = $1, flat list ORDER BY type name, Russian labels, pluralization, empty-state). `webhook.route.ts`: KNOWN_COMMANDS 5в†’6, HELP_TEXT updated, handler `5d-acc`. `smoke-test-phase114.mjs`: 70 tests PASS. No migrations, no new deps, no AI/queue changes. 70/70 Phase 1.14 + 437/437 regression + 13/13 typecheck+lint = 507/507 PASS. Traceability вњ… Adversarial Security вњ… Scope Guard вњ…. Implementation commit `362b05b`. |
+| 2026-05-06 19:35 | Phase 1.14 implementation complete. `account.service.ts` (NEW): `getAccountList()` (withTenantTransaction, explicit WHERE workspace_id = $1, flat list ORDER BY type name, Russian labels, pluralization, empty-state). `webhook.route.ts`: KNOWN_COMMANDS 5>6, HELP_TEXT updated, handler `5d-acc`. `smoke-test-phase114.mjs`: 70 tests PASS. No migrations, no new deps, no AI/queue changes. 70/70 Phase 1.14 + 437/437 regression + 13/13 typecheck+lint = 507/507 PASS. Traceability ? Adversarial Security ? Scope Guard ?. Implementation commit `362b05b`. |
 | 2026-05-06 19:46 | Phase 1.14 ACCEPTED by owner after final verification. /accounts read-only command implemented; 507/507 tests PASS; Traceability Review PASS; Adversarial Security Review PASS; Scope Guard Review PASS; implementation commit `362b05b`. HTML escaping for account/category names must be considered before implementing user-controlled write paths such as /add_account. Tag `phase-1.14-accepted` pushed. Status: WAITING_FOR_OWNER_APPROVAL_TO_START_NEXT_PHASE. |
-| 2026-05-06 21:32 | Phase 1.15 HTML Escaping Hardening implementation complete. Owner APPROVED. `html-escape.ts` (NEW): `escapeHtml()` вЂ” 5 chars escaped (`&`, `<`, `>`, `"`, `'`). `account.service.ts`: `escapeHtml` on `row.name`, `resolveTypeLabel(row.type)`, `row.currency`. `category.service.ts`: `escapeHtml` on category names, group labels, and `groupToken` in unknown-group error message (Traceability fix). `webhook.route.ts`: `escapeHtml` on `parsed.canonicalGroup` and `parsed.name` in `/add_category` success message. `smoke-test-phase115.mjs`: 52/52 PASS. No migrations, no new deps, no AI/queue changes. 52/52 Phase 1.15 + 494/494 regression smoke tests + 13/13 typecheck+lint = 559/559 PASS. Traceability вњ… Adversarial Security вњ… Scope Guard вњ…. Status: READY_FOR_OWNER_ACCEPTANCE. |
-| 2026-05-06 21:56 | workflow_state.md test-count fix: 557/557 в†’ 559/559 (final audit confirmed actual total; prior count incorrectly treated 507 as pure smoke-test baseline, double-counting 13 typecheck+lint tasks). Correct breakdown: 52 (Ph1.15) + 494 (Ph1.6-A through Ph1.14 smoke) + 13 (typecheck+lint) = 559. No code changes. |
+| 2026-05-06 21:32 | Phase 1.15 HTML Escaping Hardening implementation complete. Owner APPROVED. `html-escape.ts` (NEW): `escapeHtml()` — 5 chars escaped (`&`, `<`, `>`, `"`, `'`). `account.service.ts`: `escapeHtml` on `row.name`, `resolveTypeLabel(row.type)`, `row.currency`. `category.service.ts`: `escapeHtml` on category names, group labels, and `groupToken` in unknown-group error message (Traceability fix). `webhook.route.ts`: `escapeHtml` on `parsed.canonicalGroup` and `parsed.name` in `/add_category` success message. `smoke-test-phase115.mjs`: 52/52 PASS. No migrations, no new deps, no AI/queue changes. 52/52 Phase 1.15 + 494/494 regression smoke tests + 13/13 typecheck+lint = 559/559 PASS. Traceability ? Adversarial Security ? Scope Guard ?. Status: READY_FOR_OWNER_ACCEPTANCE. |
+| 2026-05-06 21:56 | workflow_state.md test-count fix: 557/557 > 559/559 (final audit confirmed actual total; prior count incorrectly treated 507 as pure smoke-test baseline, double-counting 13 typecheck+lint tasks). Correct breakdown: 52 (Ph1.15) + 494 (Ph1.6-A through Ph1.14 smoke) + 13 (typecheck+lint) = 559. No code changes. |
 | 2026-05-06 22:04 | Phase 1.15 accepted after final verification and workflow_state test-count fix; HTML escaping hardening implemented; 559/559 tests passed; Traceability Review PASS WITH FIXES; Adversarial Security Review PASS; Scope Guard Review PASS; implementation commit 4f63a91; workflow_state sync commit 88ebae3; test-count fix commit 45b1eec. Tag phase-1.15-accepted pushed. Status: WAITING_FOR_OWNER_APPROVAL_TO_START_NEXT_PHASE. |
-| 2026-05-06 22:50 | Phase 1.16 account_sources UNIQUE Constraint Migration implementation complete. Owner APPROVED. Migration `1778200000000_account-sources-unique-name.js`: `up()` pre-flight duplicate check (0 found в†’ safe) + `ALTER TABLE account_sources ADD CONSTRAINT account_sources_workspace_id_name_key UNIQUE(workspace_id, name)`. `down()` uses DROP CONSTRAINT IF EXISTS. `smoke-test-phase116.mjs`: 24/24 PASS. No TypeScript/route/service/worker/AI changes. 24/24 Phase 1.16 + 559/559 regression + 13/13 typecheck+lint = 583/583 PASS. Traceability вњ… Adversarial Security вњ… Scope Guard вњ…. Status: READY_FOR_OWNER_ACCEPTANCE. |
+| 2026-05-06 22:50 | Phase 1.16 account_sources UNIQUE Constraint Migration implementation complete. Owner APPROVED. Migration `1778200000000_account-sources-unique-name.js`: `up()` pre-flight duplicate check (0 found > safe) + `ALTER TABLE account_sources ADD CONSTRAINT account_sources_workspace_id_name_key UNIQUE(workspace_id, name)`. `down()` uses DROP CONSTRAINT IF EXISTS. `smoke-test-phase116.mjs`: 24/24 PASS. No TypeScript/route/service/worker/AI changes. 24/24 Phase 1.16 + 559/559 regression + 13/13 typecheck+lint = 583/583 PASS. Traceability ? Adversarial Security ? Scope Guard ?. Status: READY_FOR_OWNER_ACCEPTANCE. |
 | 2026-05-06 22:46 | Phase 1.16 accepted after final verification; account_sources UNIQUE(workspace_id, name) constraint implemented; 583/583 tests passed; Traceability Review PASS; Adversarial Security Review PASS; Scope Guard Review PASS; implementation commit 3ad45e3. Tag phase-1.16-accepted pushed. Status: WAITING_FOR_OWNER_APPROVAL_TO_START_NEXT_PHASE. |
-| 2026-05-06 23:05 | Phase 1.17 /add_account Strict-Format Command implementation complete. Owner APPROVED. `account.service.ts` (MODIFY): `parseAddAccountArgs()` (first-space split, trim, empty check, max 100 char guard), `addAccount()` (withTenantTransaction, INSERT INTO account_sources VALUES ... 'manual'::account_source_type, 'RUB' ON CONFLICT ON CONSTRAINT account_sources_workspace_id_name_key DO NOTHING RETURNING id, returns created/duplicate), `AddAccountResult` type, `monotonicFactory` ULID. `webhook.route.ts` (MODIFY): KNOWN_COMMANDS 6в†’7, HELP_TEXT updated (`/add_account <РЅР°Р·РІР°РЅРёРµ> вЂ” Р”РѕР±Р°РІРёС‚СЊ СЃС‡С‘С‚`), handler `5e-add-acc` (parseAddAccountArgs в†’ resolveWorkspace в†’ addAccount в†’ duplicate Russian message / success `escapeHtml` reply). `smoke-test-phase117.mjs` (NEW): 27/27 PASS. No migrations, no new deps, no AI/queue changes. 27/27 Phase 1.17 + 583/583 regression + 8/8 typecheck + 8/8 lint = 610/610 PASS. Traceability вњ… Adversarial Security вњ… Scope Guard вњ…. Status: READY_FOR_OWNER_ACCEPTANCE. |
+| 2026-05-06 23:05 | Phase 1.17 /add_account Strict-Format Command implementation complete. Owner APPROVED. `account.service.ts` (MODIFY): `parseAddAccountArgs()` (first-space split, trim, empty check, max 100 char guard), `addAccount()` (withTenantTransaction, INSERT INTO account_sources VALUES ... 'manual'::account_source_type, 'RUB' ON CONFLICT ON CONSTRAINT account_sources_workspace_id_name_key DO NOTHING RETURNING id, returns created/duplicate), `AddAccountResult` type, `monotonicFactory` ULID. `webhook.route.ts` (MODIFY): KNOWN_COMMANDS 6>7, HELP_TEXT updated (`/add_account <название> — Добавить счёт`), handler `5e-add-acc` (parseAddAccountArgs > resolveWorkspace > addAccount > duplicate Russian message / success `escapeHtml` reply). `smoke-test-phase117.mjs` (NEW): 27/27 PASS. No migrations, no new deps, no AI/queue changes. 27/27 Phase 1.17 + 583/583 regression + 8/8 typecheck + 8/8 lint = 610/610 PASS. Traceability ? Adversarial Security ? Scope Guard ?. Status: READY_FOR_OWNER_ACCEPTANCE. |
 | 2026-05-06 23:24 | Phase 1.17 accepted after final verification; /add_account strict-format command implemented; 610/610 tests passed; Traceability Review PASS; Adversarial Security Review PASS; Scope Guard Review PASS; implementation commit 8c370e3. Tag phase-1.17-accepted pushed. Status: WAITING_FOR_OWNER_APPROVAL_TO_START_NEXT_PHASE. |
-| 2026-05-07 00:08 | Phase 1.18 accepted after final verification; /report now shows base_currency labels and groups by transaction_intent + base_currency; smoke-test-phase19 runReportQuery() helper synced to production SQL; smoke-test-phase118.mjs (34 tests) added; 644/644 tests passed (34 Ph1.18 + 47 Ph1.9 + 563 Ph1.6-AвЂ“Ph1.17 + 13 typecheck+lint); Traceability Review PASS; Adversarial Security Review PASS; Scope Guard Review PASS; implementation commit 700a244. Tag phase-1.18-accepted pushed. Status: WAITING_FOR_OWNER_APPROVAL_TO_START_NEXT_PHASE. |
-| 2026-05-07 02:00 | Phase 1.19 account_sources.currency CHECK Constraint implementation complete. Owner APPROVED. Migration `1778300000000_account-sources-currency-check.js` (NEW): pre-flight check (0 invalid rows found in 553 existing rows) + `ALTER TABLE account_sources ADD CONSTRAINT account_sources_currency_check CHECK (currency ~ '^[A-Z]{3,5}$')`. `smoke-test-phase119.mjs` (NEW): 24/24 PASS вЂ” constraint existence, type, definition, valid codes (RUB/USD/EUR/GBP/BTC/ETH/USDT), invalid rejection (empty/lowercase/digits/spaces/6-char/2-char), no backfill, scope guard. No TypeScript/route/dep/AI/queue changes. 24/24 Phase 1.19 + 644/644 regression + 13/13 typecheck+lint = 668/668 PASS. Traceability вњ… Adversarial Security вњ… Scope Guard вњ…. Status: READY_FOR_OWNER_ACCEPTANCE. |
+| 2026-05-07 00:08 | Phase 1.18 accepted after final verification; /report now shows base_currency labels and groups by transaction_intent + base_currency; smoke-test-phase19 runReportQuery() helper synced to production SQL; smoke-test-phase118.mjs (34 tests) added; 644/644 tests passed (34 Ph1.18 + 47 Ph1.9 + 563 Ph1.6-A–Ph1.17 + 13 typecheck+lint); Traceability Review PASS; Adversarial Security Review PASS; Scope Guard Review PASS; implementation commit 700a244. Tag phase-1.18-accepted pushed. Status: WAITING_FOR_OWNER_APPROVAL_TO_START_NEXT_PHASE. |
+| 2026-05-07 02:00 | Phase 1.19 account_sources.currency CHECK Constraint implementation complete. Owner APPROVED. Migration `1778300000000_account-sources-currency-check.js` (NEW): pre-flight check (0 invalid rows found in 553 existing rows) + `ALTER TABLE account_sources ADD CONSTRAINT account_sources_currency_check CHECK (currency ~ '^[A-Z]{3,5}$')`. `smoke-test-phase119.mjs` (NEW): 24/24 PASS — constraint existence, type, definition, valid codes (RUB/USD/EUR/GBP/BTC/ETH/USDT), invalid rejection (empty/lowercase/digits/spaces/6-char/2-char), no backfill, scope guard. No TypeScript/route/dep/AI/queue changes. 24/24 Phase 1.19 + 644/644 regression + 13/13 typecheck+lint = 668/668 PASS. Traceability ? Adversarial Security ? Scope Guard ?. Status: READY_FOR_OWNER_ACCEPTANCE. |
 | 2026-05-07 02:25 | Phase 1.19 accepted after final verification; account_sources.currency CHECK constraint added with regex ^[A-Z]{3,5}$; 668/668 tests passed; Traceability Review PASS; Adversarial Security Review PASS; Scope Guard Review PASS; implementation commit 9d288bd. Tag phase-1.19-accepted pushed. Status: WAITING_FOR_OWNER_APPROVAL_TO_START_NEXT_PHASE. |
-| 2026-05-07 09:40 | Phase 1.20 Balance Semantics Design Document complete. Owner APPROVED. docs/balance-semantics.md created: 6 design decisions D1вЂ“D6 with recommended options (D1=A standard signed formula, D2=A integrated debt, D3=B transfer neutral, D4a=Yes add initial_balance, D4b=Yes allow negative, D4c=Yes account currency implicit, D4d=No defer initial_balance_at, D5=B per-account breakdown, D6=A all-time). Traceability вњ… Adversarial Security вњ… Scope Guard вњ…. No TypeScript, no migrations, no new commands. Status: READY_FOR_OWNER_ACCEPTANCE. |
-| 2026-05-07 09:45 | Phase 1.20 ACCEPTED by owner. D1вЂ“D6 all confirmed as recommended. Owner Choice column filled in docs/balance-semantics.md. Approved formula and schema changes documented. No code, no migrations, no DB changes made in this phase. Tag phase-1.20-accepted pushed. Status: WAITING_FOR_OWNER_APPROVAL_TO_START_NEXT_PHASE. |
-| 2026-05-07 10:00 | Phase 1.21 Unified Balance Implementation complete. Owner APPROVED. Files: migrations/1778400000000_account-sources-initial-balance.js (NEW, migration applied, initial_balance NUMERIC(19,4) NOT NULL DEFAULT 0), balance.service.ts (NEW, two-query NUMERIC arithmetic in SQL, withTenantTransaction, escapeHtml), webhook.route.ts (MODIFY, /balance handler added, KNOWN_COMMANDS 7в†’8, HELP_TEXT updated). smoke-test-phase121.mjs (NEW, 28/28 PASS). 28/28 Phase 1.21 + 655/655 regression smoke (Ph1.6-AвЂ“Ph1.19) + 13/13 typecheck+lint = 696/696 PASS (corrected from 709/709; Phase 1.5 server-dependent tests excluded from baseline, same as all prior phases). Traceability вњ… Adversarial Security вњ… Scope Guard вњ…. Status: READY_FOR_OWNER_ACCEPTANCE. |
+| 2026-05-07 09:40 | Phase 1.20 Balance Semantics Design Document complete. Owner APPROVED. docs/balance-semantics.md created: 6 design decisions D1–D6 with recommended options (D1=A standard signed formula, D2=A integrated debt, D3=B transfer neutral, D4a=Yes add initial_balance, D4b=Yes allow negative, D4c=Yes account currency implicit, D4d=No defer initial_balance_at, D5=B per-account breakdown, D6=A all-time). Traceability ? Adversarial Security ? Scope Guard ?. No TypeScript, no migrations, no new commands. Status: READY_FOR_OWNER_ACCEPTANCE. |
+| 2026-05-07 09:45 | Phase 1.20 ACCEPTED by owner. D1–D6 all confirmed as recommended. Owner Choice column filled in docs/balance-semantics.md. Approved formula and schema changes documented. No code, no migrations, no DB changes made in this phase. Tag phase-1.20-accepted pushed. Status: WAITING_FOR_OWNER_APPROVAL_TO_START_NEXT_PHASE. |
+| 2026-05-07 10:00 | Phase 1.21 Unified Balance Implementation complete. Owner APPROVED. Files: migrations/1778400000000_account-sources-initial-balance.js (NEW, migration applied, initial_balance NUMERIC(19,4) NOT NULL DEFAULT 0), balance.service.ts (NEW, two-query NUMERIC arithmetic in SQL, withTenantTransaction, escapeHtml), webhook.route.ts (MODIFY, /balance handler added, KNOWN_COMMANDS 7>8, HELP_TEXT updated). smoke-test-phase121.mjs (NEW, 28/28 PASS). 28/28 Phase 1.21 + 655/655 regression smoke (Ph1.6-A–Ph1.19) + 13/13 typecheck+lint = 696/696 PASS (corrected from 709/709; Phase 1.5 server-dependent tests excluded from baseline, same as all prior phases). Traceability ? Adversarial Security ? Scope Guard ?. Status: READY_FOR_OWNER_ACCEPTANCE. |
 | 2026-05-07 10:15 | Phase 1.21 accepted after final verification; initial_balance migration and /balance command implemented; actual applicable tests 696/696 passed; Traceability Review PASS; Adversarial Security Review PASS; Scope Guard Review PASS; implementation commit 976418a; note: stale /balance comment in webhook.route.ts line 31 is cosmetic tech debt, not fixed in this acceptance step. Tag phase-1.21-accepted pushed. Status: WAITING_FOR_OWNER_APPROVAL_TO_START_NEXT_PHASE. |
-| 2026-05-07 10:30 | Phase 1.22 Stale Comment Cleanup implementation complete. Owner APPROVED. `webhook.route.ts` (MODIFY, comment-only): slash-command routing header updated вЂ” Phase 1.21 added to phase refs, all 8 known commands listed, stale вЂњ(e.g. /balance)вЂќ example removed. 0 logic changes. 13/13 typecheck+lint PASS. 696/696 regression baseline unchanged. Traceability вњ… Adversarial Security вњ… Scope Guard вњ…. Status: READY_FOR_OWNER_ACCEPTANCE. |
+| 2026-05-07 10:30 | Phase 1.22 Stale Comment Cleanup implementation complete. Owner APPROVED. `webhook.route.ts` (MODIFY, comment-only): slash-command routing header updated — Phase 1.21 added to phase refs, all 8 known commands listed, stale “(e.g. /balance)” example removed. 0 logic changes. 13/13 typecheck+lint PASS. 696/696 regression baseline unchanged. Traceability ? Adversarial Security ? Scope Guard ?. Status: READY_FOR_OWNER_ACCEPTANCE. |
 | 2026-05-07 10:35 | Phase 1.22 accepted after final verification; stale /balance comment in webhook.route.ts fixed; comment-only change; 13/13 typecheck+lint PASS; Traceability Review PASS; Adversarial Security Review PASS; Scope Guard Review PASS; implementation commit d2ea3fd. Tag phase-1.22-accepted pushed. Status: WAITING_FOR_OWNER_APPROVAL_TO_START_NEXT_PHASE. |
-| 2026-05-07 14:00 | Phase 1.23 /set_balance implementation complete. Owner APPROVED. `setBalance.service.ts` (NEW): `parseSetBalanceArgs()` (last-token-as-amount, AMOUNT_REGEX 15-digit cap, SEC-02), `setAccountBalance()` (LOWER() exact match, formula `new_initial_balance = target в€’ SUM(txns)` in PostgreSQL NUMERIC, withTenantTransaction SEC-03, defensive undefined guard replacing `!` non-null assertion), `formatSetBalanceResult()` (escapeHtml for all user strings). `webhook.route.ts` (MODIFY): import 3 functions from setBalance.service.js, KNOWN_COMMANDS 8в†’9, HELP_TEXT updated with /set_balance line, handler `5c-setbal` added (parseSetBalanceArgs в†’ resolveWorkspace в†’ setAccountBalance в†’ formatSetBalanceResult). `smoke-test-phase123.mjs` (NEW): 34/34 PASS вЂ” Groups A (10 parse tests), B (12 DB formula tests including negative/idempotent/resync/precision), C (8 security/scope tests), D (4 regression). 13/13 typecheck+lint PASS. No migrations, no new tables, no transactions created, no /report changes. Commit 65a8e56 pushed. Status: READY_FOR_OWNER_ACCEPTANCE. |
+| 2026-05-07 14:00 | Phase 1.23 /set_balance implementation complete. Owner APPROVED. `setBalance.service.ts` (NEW): `parseSetBalanceArgs()` (last-token-as-amount, AMOUNT_REGEX 15-digit cap, SEC-02), `setAccountBalance()` (LOWER() exact match, formula `new_initial_balance = target ? SUM(txns)` in PostgreSQL NUMERIC, withTenantTransaction SEC-03, defensive undefined guard replacing `!` non-null assertion), `formatSetBalanceResult()` (escapeHtml for all user strings). `webhook.route.ts` (MODIFY): import 3 functions from setBalance.service.js, KNOWN_COMMANDS 8>9, HELP_TEXT updated with /set_balance line, handler `5c-setbal` added (parseSetBalanceArgs > resolveWorkspace > setAccountBalance > formatSetBalanceResult). `smoke-test-phase123.mjs` (NEW): 34/34 PASS — Groups A (10 parse tests), B (12 DB formula tests including negative/idempotent/resync/precision), C (8 security/scope tests), D (4 regression). 13/13 typecheck+lint PASS. No migrations, no new tables, no transactions created, no /report changes. Commit 65a8e56 pushed. Status: READY_FOR_OWNER_ACCEPTANCE. |
 | 2026-05-07 14:51 | Phase 1.23 accepted after final verification; /set_balance implemented; synchronizes account balance by recalculating account_sources.initial_balance; no transactions created; no categories used; /report unaffected; 730/730 tests passed; Traceability Review PASS; Adversarial Security Review PASS; Scope Guard Review PASS; implementation commit 65a8e56; workflow_state sync commit 6b1df77. Tag phase-1.23-accepted pushed. Status: WAITING_FOR_OWNER_APPROVAL_TO_START_NEXT_PHASE. |
-| 2026-05-07 15:15 | Phase 1.24 Default Currency RUB в†’ USDT implementation complete. Owner APPROVED. Migration 1778500000000_default-currency-usdt.js (NEW): ALTER TABLE workspaces SET DEFAULT 'USDT' + CREATE OR REPLACE FUNCTION system_find_or_create_user (7-param) with 'USDT' for workspace and account_sources INSERTs. ccount.service.ts (MODIFY): addAccount() reads workspace.default_currency dynamically via SELECT inside withTenantTransaction (SEC-03) вЂ” fallback 'USDT'. smoke-test-phase112.mjs (MODIFY): 1 assertion USDT. smoke-test-phase117.mjs (MODIFY): doc comment + assertion updated. smoke-test-phase124.mjs (NEW): 20/20 PASS. No backfill. 1184 RUB workspaces untouched. 13/13 typecheck+lint PASS. 20/20 Phase 1.24 + 717/717 regression smoke (Ph1.6-AвЂ“Ph1.23) + 13/13 typecheck+lint = 750/750 PASS. Traceability вњ… Adversarial Security вњ… Scope Guard вњ…. Status: READY_FOR_OWNER_ACCEPTANCE. |
+| 2026-05-07 15:15 | Phase 1.24 Default Currency RUB > USDT implementation complete. Owner APPROVED. Migration 1778500000000_default-currency-usdt.js (NEW): ALTER TABLE workspaces SET DEFAULT 'USDT' + CREATE OR REPLACE FUNCTION system_find_or_create_user (7-param) with 'USDT' for workspace and account_sources INSERTs. ccount.service.ts (MODIFY): addAccount() reads workspace.default_currency dynamically via SELECT inside withTenantTransaction (SEC-03) — fallback 'USDT'. smoke-test-phase112.mjs (MODIFY): 1 assertion USDT. smoke-test-phase117.mjs (MODIFY): doc comment + assertion updated. smoke-test-phase124.mjs (NEW): 20/20 PASS. No backfill. 1184 RUB workspaces untouched. 13/13 typecheck+lint PASS. 20/20 Phase 1.24 + 717/717 regression smoke (Ph1.6-A–Ph1.23) + 13/13 typecheck+lint = 750/750 PASS. Traceability ? Adversarial Security ? Scope Guard ?. Status: READY_FOR_OWNER_ACCEPTANCE. |
 | 2026-05-07 15:54 | Phase 1.24 accepted after final verification; default currency changed from RUB to USDT for new users; system_find_or_create_user creates USDT workspace and Default account; /add_account now uses workspace.default_currency dynamically; existing users/workspaces/transactions were not backfilled or recalculated; 750/750 tests passed; Traceability Review PASS; Adversarial Security Review PASS; Scope Guard Review PASS; implementation commit 97a4331. Tag phase-1.24-accepted pushed. |
 | 2026-05-07 17:26 | Phase 1.25 accepted after final verification; /settings text mode implemented; timezone column added; default_currency and timezone settings supported; draft fallback now uses workspace.default_currency instead of hardcoded USD; existing transactions/accounts were not recalculated or backfilled; 782/782 tests passed; Traceability Review PASS; Adversarial Security Review PASS; Scope Guard Review PASS; implementation commit f6307a1; test fix commit 2eaccc7; workflow sync commit f79dc7b. Tag phase-1.25-accepted pushed. |
 | 2026-05-07 18:03 | Phase 1.26 accepted after final verification; /settings UI with inline keyboards implemented; stablecoins/crypto/fiat pagination added; Redis-backed search state with strict TTL implemented securely; timezone UI deferred; 100 currency constants isolated; 827/827 tests passed; Traceability Review PASS; Adversarial Security Review PASS; Scope Guard Review PASS; implementation commit fb338db; docs fix commit d8d896b. Tag phase-1.26-accepted pushed. |
 | 2026-05-07 18:33 | Phase 1.27 accepted after final verification; /balance currency-mixing defect fixed via SQL-level exclusion where transactions.base_currency != account_sources.currency; mismatch warning footnote added; roadmap output format improved; no conversion, no backfill, no migration, no /report changes; 854/854 tests passed; Traceability Review PASS; Adversarial Security Review PASS; Scope Guard Review PASS; implementation commit 12e70d9; docs fix commit dec0a52. Tag phase-1.27-accepted pushed. |
-| 2026-05-07 19:25 | Phase 1.28 accepted after final verification; /edit command implemented with recent paginated list (10/page), transaction card, amount/category/account/intent edit flows, Redis TTL 300s state for amount input (key midas:edit:{userId}:{chatId}), permanent [вњЏпёЏ РР·РјРµРЅРёС‚СЊ] button after approval, strict callback_data limit verified at max 62 bytes (ed:c:cat:<26>:<26>), no search/date/delete/soft-delete/GIN index, no migrations, no /balance or /report changes, no new dependencies; amount edits blocked for cross-currency (exchange_rate в‰  1.0); all DB mutations via withTenantTransaction + explicit workspace_id filter; 43/43 Phase 1.28 smoke + 841/841 regression smoke + 13/13 typecheck/lint = 897/897 total gates PASS; Traceability Review PASS; Adversarial Security Review PASS; Scope Guard Review PASS; implementation commit c8bbc7d; workflow commit 1807d93. Tag phase-1.28-accepted pushed. Status: WAITING_FOR_OWNER_APPROVAL_TO_START_NEXT_PHASE. |
-| 2026-05-07 22:06 | Phase 1.29 implemented: soft delete for transactions. Migration 1778700000000_transactions-soft-delete applied (deleted_at TIMESTAMPTZ DEFAULT NULL). deleted_at IS NULL guard added to 11 query locations (7 in edit.service, 2 JOIN ON in balance.service, 1 in report.service, 1 subquery in setBalance.service). Double-confirmation UX: [рџ—‘пёЏ РЈРґР°Р»РёС‚СЊ] в†’ warning в†’ [рџ—‘пёЏ Р”Р°, СѓРґР°Р»РёС‚СЊ]/[в—ЂпёЏ РћС‚РјРµРЅР°]. softDeleteTransaction() with D1+D6 fetch-before-update. callback_data max 35 bytes (ed:d:ask:<ULID> в‰¤ 64 вњ…). Graceful fallback for old edit buttons on already-deleted transactions. smoke-test-phase128.mjs A3/J1 scope guards updated to reflect Phase 1.29. smoke-test-phase129.mjs: 44/44 PASS. Full regression: 44/44 Phase 1.29 + 43/43 Phase 1.28 + 841/841 prior phases + 13/13 typecheck/lint = 941/941 total gates PASS (excl. Phase 1.5 bot-server tests вЂ” pre-existing). No hard delete. No restore. No new deps. No project_config.md changes. Implementation commit 7082540. Status: READY_FOR_OWNER_ACCEPTANCE. |
+| 2026-05-07 19:25 | Phase 1.28 accepted after final verification; /edit command implemented with recent paginated list (10/page), transaction card, amount/category/account/intent edit flows, Redis TTL 300s state for amount input (key midas:edit:{userId}:{chatId}), permanent [?? Изменить] button after approval, strict callback_data limit verified at max 62 bytes (ed:c:cat:<26>:<26>), no search/date/delete/soft-delete/GIN index, no migrations, no /balance or /report changes, no new dependencies; amount edits blocked for cross-currency (exchange_rate ? 1.0); all DB mutations via withTenantTransaction + explicit workspace_id filter; 43/43 Phase 1.28 smoke + 841/841 regression smoke + 13/13 typecheck/lint = 897/897 total gates PASS; Traceability Review PASS; Adversarial Security Review PASS; Scope Guard Review PASS; implementation commit c8bbc7d; workflow commit 1807d93. Tag phase-1.28-accepted pushed. Status: WAITING_FOR_OWNER_APPROVAL_TO_START_NEXT_PHASE. |
+| 2026-05-07 22:06 | Phase 1.29 implemented: soft delete for transactions. Migration 1778700000000_transactions-soft-delete applied (deleted_at TIMESTAMPTZ DEFAULT NULL). deleted_at IS NULL guard added to 11 query locations (7 in edit.service, 2 JOIN ON in balance.service, 1 in report.service, 1 subquery in setBalance.service). Double-confirmation UX: [??? Удалить] > warning > [??? Да, удалить]/[?? Отмена]. softDeleteTransaction() with D1+D6 fetch-before-update. callback_data max 35 bytes (ed:d:ask:<ULID> ? 64 ?). Graceful fallback for old edit buttons on already-deleted transactions. smoke-test-phase128.mjs A3/J1 scope guards updated to reflect Phase 1.29. smoke-test-phase129.mjs: 44/44 PASS. Full regression: 44/44 Phase 1.29 + 43/43 Phase 1.28 + 841/841 prior phases + 13/13 typecheck/lint = 941/941 total gates PASS (excl. Phase 1.5 bot-server tests — pre-existing). No hard delete. No restore. No new deps. No project_config.md changes. Implementation commit 7082540. Status: READY_FOR_OWNER_ACCEPTANCE. |
 | 2026-05-07 20:23 | Phase 1.29 accepted after final verification; soft delete (transactions.deleted_at) added; double-confirmation delete UX implemented; deleted txs safely excluded from /edit, /balance (LEFT JOIN preserved), /report, /set_balance; zero hard deletes/restores; 941/941 gates PASS; Traceability, Adversarial Security & Scope Guard PASS; impl commit 7082540; workflow commit 723a89b. Tag phase-1.29-accepted pushed. Status: WAITING_FOR_OWNER_APPROVAL_TO_START_NEXT_PHASE. |
-| 2026-05-07 20:55 | Phase 1.30 implemented: Smart Account Onboarding. account-onboard-keyboard.service.ts (NEW): ac: namespace, parseAccountCallback() allowlist, keyboards for type/exchange/currency/post-create. account.service.ts (MODIFY): hasAccounts() lightweight COUNT, addAccountWithCurrency() explicit currency. webhook.route.ts (MODIFY): ac: callback block, /accounts empty-state в†’ guided keyboard, /start new users в†’ buildStartOnboardKeyboard(), midas:ac: text intercept for name/currency steps. No migration, no enum changes, no new deps, no new slash commands. Max callback_data 17 bytes (ac:cur:AAAAAAAAAA). Redis TTL 300s. 64/64 Phase 1.30 smoke + 197/197 accessible regression + 13/13 typecheck/lint PASS. Traceability вњ… Adversarial Security вњ… Scope Guard вњ…. Status: READY_FOR_OWNER_ACCEPTANCE. |
+| 2026-05-07 20:55 | Phase 1.30 implemented: Smart Account Onboarding. account-onboard-keyboard.service.ts (NEW): ac: namespace, parseAccountCallback() allowlist, keyboards for type/exchange/currency/post-create. account.service.ts (MODIFY): hasAccounts() lightweight COUNT, addAccountWithCurrency() explicit currency. webhook.route.ts (MODIFY): ac: callback block, /accounts empty-state > guided keyboard, /start new users > buildStartOnboardKeyboard(), midas:ac: text intercept for name/currency steps. No migration, no enum changes, no new deps, no new slash commands. Max callback_data 17 bytes (ac:cur:AAAAAAAAAA). Redis TTL 300s. 64/64 Phase 1.30 smoke + 197/197 accessible regression + 13/13 typecheck/lint PASS. Traceability ? Adversarial Security ? Scope Guard ?. Status: READY_FOR_OWNER_ACCEPTANCE. |
 | 2026-05-07 21:10 | Phase 1.30 accepted after final verification; smart account onboarding UX added for /start and empty /accounts; ac: callback namespace implemented; Redis TTL state midas:ac:{telegramUserId}:{chatId} added; existing silent Default account creation preserved; all new accounts remain type='manual'; no migrations, no DB function changes, no new deps, no new slash commands; 64/64 Phase 1.30 smoke passed; accessible gates 318/318 passed; legacy host-limited suites unchanged from prior baseline; Traceability Review PASS; Adversarial Security Review PASS; Scope Guard Review PASS; implementation commit 4593867; workflow commit 99a2964. Tag phase-1.30-accepted pushed. Status: WAITING_FOR_OWNER_APPROVAL_TO_START_NEXT_PHASE. |
-| 2026-05-07 21:20 | Phase 1.31 advisory delivered: Inline account creation during transaction input. Scope: account_hint optional field in AI schema; parsed_account_hint TEXT column in transaction_drafts (1 migration); account-fuzzy.service.ts (NEW, Jaro-Winkler, short-ticker exact-only); account-inline-keyboard.service.ts (NEW, ia: namespace); midas:ia:{draftId} Redis TTL 300s for rename sub-flow; addAccountWithCurrency() reused from Phase 1.30; max callback_data 60 bytes (ia:use:{accountId}:{draftId}); Scenario Р‘ (transfer) excluded вЂ” Phase 1.32+; Option A architecture (resolve in ai-parse worker before first keyboard). No code changes. Awaiting owner APPROVED. |
-| 2026-05-07 22:00 | Phase 1.31 accepted after final verification; parsed_account_hint added to transaction_drafts; optional AI account_hint added; Option A implemented вЂ” account resolution before final draft confirmation; exact match sets draft.account_id silently; fuzzy/no-match account UX added; ia: callback namespace implemented with max 62 bytes; Redis rename state used only for temporary custom-name flow; transfer dual-account excluded; no to_account_id; no new deps; no Mini App; Phase 1.31 smoke 27/27 PASS; key regression gates PASS; typecheck/lint 13/13 PASS; Traceability Review PASS; Adversarial Security Review PASS; Scope Guard Review PASS; implementation commit 7c065f7; workflow commit 04209fc. Tag phase-1.31-accepted pushed. Status: WAITING_FOR_OWNER_APPROVAL_TO_START_NEXT_PHASE. |
-| 2026-05-08 08:00 | Phase 1.32 Smart Text Input / Clarification Engine implemented and accepted. Migration 1778900000000_draft-clarification-state.js: `needs_clarification` status added to transaction_drafts state machine trigger. AI pipeline updated: amount/intent optional in schema, `PARTIAL_CONFIDENCE_THRESHOLD=0.3`, `MissingField` type, `partial` ParseResult status, `computeMissingFields()`. New `clarification.service.ts` in telegram-bot: `clar:` callback namespace for intent/category selection, `midas:clar:` Redis TTL 300s for amount text intercept. `webhook.route.ts`: clar: callback handler, clarification text intercept, buildClarificationScreen usage. `draft.service.ts`: `patchDraftAmount()`, `patchDraftIntent()`, `patchDraftCategory()` вЂ” atomic field patches returning `{status: 'ready'\|'still_needs', field}`. 57/57 Phase 1.32 smoke PASS. 0 lint/typecheck errors. Implementation commit e00f37e. Tag `phase-1.32-accepted` pushed. |
-| 2026-05-08 09:00 | Phase 1.33 Clean Chat / Single Active Message UX implemented and accepted. UX-only phase вЂ” no migrations, no DB schema changes. `active-message.service.ts` (NEW): Redis pointer `midas:am:{userId}:{chatId}` (TTL 24h) tracks the current bot message per chat. `telegram-api.ts` (MODIFY): `upsertBotMessage()` edit-first strategy вЂ” tries `editMessageText`, falls back to `sendMessage`, updates Redis pointer. All workers (ai-parse, confirmation, notifications) now use edit-first pattern. `shared/index.ts` (MODIFY): `NotificationJobPayload` extended with `telegramUserId` + `activeMessageId`. Result: bot edits its last message instead of sending new ones вЂ” clean single-screen app UX. 0 typecheck errors. Batch-accepted by owner decision. Commit 36cacd7. Tag `phase-1.33-accepted` pushed. |
-| 2026-05-08 09:30 | Phase 1.34 Rich Screen Cards implemented and accepted. UX-only phase вЂ” no migrations, no DB schema changes. `screen-builder.ts` (NEW in both `telegram-bot` and `background-workers`): pure functions for all UI screens вЂ” `buildPreviewScreen()`, `buildConfirmedScreen()`, `buildClarificationScreen()`, `buildConfirmKeyboard()`, `buildPostConfirmKeyboard()`, `buildNavKeyboard()`, `intentEmoji()`, `intentLabel()`, `escapeHtml()`. Replaces hardcoded text strings across all workers and route handlers with standardized card templates. 0 typecheck errors. Batch-accepted by owner decision. Commit 6e899f0. Tag `phase-1.34-accepted` pushed. |
-| 2026-05-08 11:00 | Phase 1.35 Intelligent Transaction Understanding вЂ” core implementation complete. Migration `1779000000000_intelligent-transactions.js`: `item_name TEXT` + `parsed_category_hint TEXT` columns on transaction_drafts; `item_name TEXT` on transactions; `default_expense_account_id` + `default_income_account_id` FK columns on workspaces; `category_group` ENUM; 28-category taxonomy backfill; SECDEF onboarding function updated. `category-resolver.service.ts` (NEW): 3-stage pipeline вЂ” exact DB match в†’ 200+ alias map в†’ fallback В«Р”СЂСѓРіРѕРµВ». `prompts.ts` + `schemas.ts`: `item_hint` + `category_hint` added to AI schema with examples. `draft.service.ts`: propagates item_name, parsed_category_hint. `draft-confirmation.service.ts`: CategoryResolver integration, resolveDefaultAccount() with workspace defaults в†’ LIMIT 1 в†’ auto-create. `confirmation.worker.ts`: rich post-confirm cards with item/category. smoke-test-phase135.mjs: 55 tests PASS. 5/5 typecheck PASS. Deployed to Railway. |
-| 2026-05-08 16:20 | Phase 1.35 hotfix #1: Rich preview cards across all confirmation entry points. Problem: after clarification (amount/intent/category selection), generic text like В«рџ“ќ Р“РѕС‚РѕРІРѕ. РџРѕРґС‚РІРµСЂРґРёС‚Рµ РёР»Рё РѕС‚РєР»РѕРЅРёС‚Рµ:В» was shown instead of the rich transaction card. Fix: introduced `confirmKb(draftId)` centralized keyboard helper (DRY pattern replacing 8 hardcoded keyboards) and `confirmPreview(workspaceId, userId, draftId)` helper (fetches draft data via `getDraftFields` в†’ builds rich card via `buildPreviewScreen`). All 8 confirmation entry points updated: ia:skip, ia:create (new account), ia:use (select account), clar:intent, clar:category, clar:nocat, clarification amount text intercept, ia rename text intercept. Typecheck 5/5 PASS. Commit d037f75. Deployed to Railway. |
-| 2026-05-08 16:29 | Phase 1.35 hotfix #2: Defensive String() coercion for Postgres NUMERIC amounts. Problem: `fetchApprovedTransactionCard` and `approveDraft` returned `amount` as raw Postgres NUMERIC (JavaScript `number`), but `buildConfirmedScreen` passed it to `escapeHtml()` which calls `.replace()` вЂ” crashed with `TypeError: input.replace is not a function`. Root cause: pg driver returns NUMERIC as `number`, not `string`. Fix: (1) `approveDraft`: `amount: String(draft.parsed_amount ?? '0')`, (2) `fetchApprovedTransactionCard`: `amount: String(tx.original_amount)`, (3) `escapeHtml`: defensive `typeof input === 'string' ? input : String(input)`. Also fixed incorrect SQL column names in `fetchApprovedTransactionCard`: `amount` в†’ `original_amount`, `account_source_id` в†’ `account_id`. Typecheck 5/5 PASS. Commit 6db3d69. Deployed to Railway. |
-| 2026-05-09 09:46 | Phase 1.36-UX Sub-step 1: Persistent Navigation Keyboard (core). `telegram-api.ts` вЂ” `ReplyKeyboardMarkup` interface + `sendMessageWithReplyKeyboard()`. `screen-builder.ts` (telegram-bot) вЂ” `buildMainMenuKeyboard()`, `NAV_BTN_BALANCE/REPORT/SETTINGS`, `input_field_placeholder`. `webhook.route.ts` вЂ” Reply Keyboard sent on /start (new+existing users), 3 text intercepts before AI parse for [рџ“Љ Р‘Р°Р»Р°РЅСЃ]/[рџ“‹ РћС‚С‡С‘С‚]/[вљ™пёЏ РќР°СЃС‚СЂРѕР№РєРё] buttons. Collateral lint: `ai-core/claude-client.ts` (no-useless-assignment), `draft-confirmation.service.ts` (no-unnecessary-type-conversion Г—3), both `screen-builder.ts` (restrict-template-expressions). 13/13 PASS. |
-| 2026-05-09 10:00 | Phase 1.36-UX Sub-step 2: UX Bug Fixes & Consistency. (1) `webhook.route.ts` confirmKb layout standardized: вњ… full-width top row + [вњЏпёЏ РР·РјРµРЅРёС‚СЊ|вњ–пёЏ РћС‚РјРµРЅР°] split row вЂ” matches workers layout. (2) `redisConnection.del(clarKey)` added on approve/reject in `webhook.route.ts` вЂ” prevents stale `midas:clar:*` key intercepting next user message after confirmation (silent message discard race condition fixed). (3) `screen-builder.ts` both apps вЂ” emoji вњ•в†’вњ–пёЏ for visual weight parity with вњ… and вњЏпёЏ. 13/13 PASS. Commit `c2f012f`. |
-| 2026-05-09 10:12 | Phase 1.36-UX Sub-step 3: Reply Keyboard auto-activation. `shared/index.ts` вЂ” `replyKeyboardJson?` added to `NotificationJobPayload` (documented: only valid on sendMessage, not editMessageText). `background-workers/screen-builder.ts` вЂ” `buildNavKeyboard()` replaced by `buildMainMenuReplyKeyboard()` (returns plain JS object with `keyboard` array, not InlineKeyboard); `buildPostConfirmKeyboard()` nav row [рџ“Љ Р‘Р°Р»Р°РЅСЃ][рџ“‹ РћС‚С‡С‘С‚] removed вЂ” only [вњЏпёЏ РР·РјРµРЅРёС‚СЊ Р·Р°РїРёСЃСЊ] remains. `confirmation.worker.ts` вЂ” import updated (buildNavKeyboardв†’buildMainMenuReplyKeyboard); rejected/expired/intent_missing now pass `replyKeyboardJson` (not `inlineKeyboardJson`). `notifications.worker.ts` вЂ” keyboard routing split: `inlineReplyMarkup` for editMessageText path, `freshReplyMarkup` (prefers replyKeyboardJson) for sendMessage path. Reply Keyboard auto-activates on first new message without /start. 13/13 PASS. Commit `f10aa22`. |
-| 2026-05-09 10:20 | Phase 1.36-UX Sub-step 4: Keyboard collapsibility. `screen-builder.ts` both apps вЂ” `is_persistent: true` в†’ `is_persistent: false`. Result: Telegram displays standard вЏ„ collapse icon next to рџЋ¤ microphone button; user can hide/restore keyboard at will; keyboard re-appears on next bot sendMessage. 13/13 PASS. Commit `062d40d`. Deployed to Railway. |
-| 2026-05-09 12:57 | Phase 1.36-UX FINAL (accepted): Transaction history workflow + permanent keyboard. **РџСЂРѕР±Р»РµРјР°:** edit-first СЃС‚СЂР°С‚РµРіРёСЏ С‡РµСЂРµР· `midas:am:` pointer РїРµСЂРµР·Р°РїРёСЃС‹РІР°Р»Р° РїСЂРµРґС‹РґСѓС‰СѓСЋ РєР°СЂС‚РѕС‡РєСѓ РІРјРµСЃС‚Рѕ СЃРѕР·РґР°РЅРёСЏ РЅРѕРІРѕР№ вЂ” РёСЃС‚РѕСЂРёСЏ С‚СЂР°РЅР·Р°РєС†РёР№ РЅРµ РЅР°РєР°РїР»РёРІР°Р»Р°СЃСЊ. **Р РµС€РµРЅРёРµ:** (1) `ai-parse.worker.ts` вЂ” СѓР±СЂР°РЅ `activeMessageId` РёР· preview notifications; РєР°Р¶РґР°СЏ preview-РєР°СЂС‚РѕС‡РєР° РІСЃРµРіРґР° РѕС‚РїСЂР°РІР»СЏРµС‚СЃСЏ РєР°Рє РЅРѕРІРѕРµ СЃРѕРѕР±С‰РµРЅРёРµ. (2) `notifications.worker.ts` вЂ” РїСЂРё РѕС‚РїСЂР°РІРєРµ preview (draftId РїСЂРёСЃСѓС‚СЃС‚РІСѓРµС‚) Р·Р°РїРёСЃС‹РІР°РµС‚ `sentMessageId` РІ Redis `midas:preview:{draftId}` TTL 600s; СѓРґР°Р»С‘РЅ `setActiveMessagePointer` Рё РІРµСЃСЊ AM-pointer РјРµС…Р°РЅРёР·Рј. (3) `confirmation.worker.ts` вЂ” РЅР° approve С‡РёС‚Р°РµС‚ `midas:preview:{draftId}` в†’ РїРµСЂРµРґР°С‘С‚ РєР°Рє `activeMessageId` РІ notifications (edit previewв†’confirmed in-place); РЅР° reject вЂ” `activeMessageId` РЅРµ РїРµСЂРµРґР°С‘С‚СЃСЏ в†’ РЅРѕРІРѕРµ СЃРѕРѕР±С‰РµРЅРёРµ. (4) Greeting: РќР• СѓРґР°Р»СЏРµС‚СЃСЏ вЂ” РѕСЃС‚Р°С‘С‚СЃСЏ РїРѕСЃС‚РѕСЏРЅРЅС‹Рј РЅРѕСЃРёС‚РµР»РµРј ReplyKeyboard; РІРµСЃСЊ РєРѕРґ СѓРґР°Р»РµРЅРёСЏ (deleteMessage + nav carrier) СѓР±СЂР°РЅ. `greetingMsgId` СѓРґР°Р»С‘РЅ РёР· `NotificationJobPayload`. `shared` РїРµСЂРµСЃРѕР±СЂР°РЅ. Typecheck 0 errors (РѕР±Р° РїСЂРёР»РѕР¶РµРЅРёСЏ). Commits `e879dfc` в†’ `2cb86c4` в†’ `8941c6d` в†’ `2a15f31`. Deployed to Railway. РџСЂРѕС‚РµСЃС‚РёСЂРѕРІР°РЅРѕ: 4 С‚СЂР°РЅР·Р°РєС†РёРё Р·Р°РїРёСЃР°РЅС‹, РёСЃС‚РѕСЂРёСЏ РЅР°РєР°РїР»РёРІР°РµС‚СЃСЏ, РєР»Р°РІРёР°С‚СѓСЂР° [рџ“Љ Р‘Р°Р»Р°РЅСЃ][рџ“‹ РћС‚С‡С‘С‚][вљ™пёЏ РќР°СЃС‚СЂРѕР№РєРё] РїРѕСЃС‚РѕСЏРЅРЅРѕ РІРёРґРЅР°. |
-| 2026-05-09 13:09 | Phase 1.37 Step 1: Zero-clutter UX. `screen-builder.ts` (background-workers): `buildNonsenseScreen()` rewritten вЂ” removed all inline buttons ([рџ’ё Р Р°СЃС…РѕРґ][рџ’° Р”РѕС…РѕРґ][рџ¤ќ Р”РѕР»Рі РґР°Р»][рџ¤ќ Р”РѕР»Рі РІР·СЏР»]), replaced with Variant 5 text-only prompt with input examples (`РєРѕС„Рµ 150 UAH В· Р·Р°СЂРїР»Р°С‚Р° 5000 USDT`). `ai-parse.worker.ts`: added stale "РќРµ РїРѕРЅСЏР»" message deletion вЂ” stores `midas:clar:msg:{userId}:{chatId}` Redis key pointing to nonsense message_id; on next successful parse, deletes the old nonsense message via `deleteMessage()` API before sending new preview. `telegram-api.ts`: `editTelegramMessage()` вЂ” treats "message is not modified" 400 error as success (no redundant message generation). Typecheck 8/8 PASS. Commits `a4d49a9` в†’ `ee85e5f`. |
-| 2026-05-09 13:34 | Phase 1.37 Step 2: Category taxonomy expansion. `prompts.ts`: Expanded from 28 to 30 categories (added РџРёС‚РѕРјС†С‹, Р”РѕРј). International 500+ anchor items mapping: every category now has typical items across CIS (РџСЏС‚С‘СЂРѕС‡РєР°, РђРўР‘, РЎС–Р»СЊРїРѕ), EU (Lidl, Biedronka, IKEA), US (Walmart, Costco, Amazon, Starbucks) markets. Business categories expanded with global services: AWS, Stripe, Upwork, Fiverr, Google Ads, Facebook Ads, Notion, Figma, etc. Pet category: Royal Canin, Whiskas, Pro Plan, РЅР°РїРѕР»РЅРёС‚РµР»СЊ, РІРµС‚РµСЂРёРЅР°СЂ. Р”РѕРј: РјРѕСЋС‰РёРµ СЃСЂРµРґСЃС‚РІР°, С‚СЂСЏРїРєРё, РїРѕР»РѕС‚РµРЅС†Р°, С€С‚РѕСЂС‹, РјРµР±РµР»СЊ. Typecheck 8/8 PASS. Commits `77a0ad9` в†’ `5b02cf3`. |
-| 2026-05-09 14:09 | Phase 1.37 Step 3: Multilingual recognition + fuzzy matching. `prompts.ts`: Added MULTILINGUAL RECOGNITION section (RU/EN/UA вЂ” any language maps to correct category). FUZZY MATCHING section (typos: РєРѕС„СЌв†’РєРѕС„Рµ, РЅРµС‚С„Р»РёРєСЃв†’Netflix; slang: РєРѕРјСѓРЅР°Р»РєР°в†’РєРѕРјРјСѓРЅР°Р»РєР°в†’Р–РёР»СЊС‘; transliteration: kafeв†’РєР°С„Рµ, taksiв†’С‚Р°РєСЃРё). KEY BILINGUAL PAIRS for non-obvious translations (С€РёРЅРѕРјРѕРЅС‚Р°Р¶=tire service, СЌРєРІР°Р№СЂРёРЅРі=payment processing, РїРѕРґРіСѓР·РЅРёРєРё=diapers, РЅР°РїРѕР»РЅРёС‚РµР»СЊ=cat litter, etc.). Commit `e147240`. |
-| 2026-05-09 14:10 | Phase 1.37 Step 4: Disambiguation rules + compound expressions + default intent priority. `prompts.ts`: Added 15 DISAMBIGUATION RULES (С‚РѕСЂС‚в†’РџСЂРѕРґСѓРєС‚С‹/РџРѕРґР°СЂРєРё/РљР°С„Рµ by context; РєРѕС„Рµв†’РљР°С„Рµ/РџСЂРѕРґСѓРєС‚С‹; СЃС‚СЂР°С…РѕРІРєР°в†’РўСЂР°РЅСЃРїРѕСЂС‚/Р—РґРѕСЂРѕРІСЊРµ/РџСѓС‚РµС€РµСЃС‚РІРёСЏ; СЂРµРјРѕРЅС‚в†’Р–РёР»СЊС‘/РўСЂР°РЅСЃРїРѕСЂС‚/РћР±РѕСЂСѓРґРѕРІР°РЅРёРµ; РІРёС‚Р°РјРёРЅС‹в†’Р—РґРѕСЂРѕРІСЊРµ/РџРёС‚РѕРјС†С‹; etc.). COMPOUND EXPRESSIONS (РїРѕРґР°СЂРѕРє Р¶РµРЅРµв†’РџРѕРґР°СЂРєРё, РєРѕСЂРј РґР»СЏ РєРѕС‚Р°в†’РџРёС‚РѕРјС†С‹, Р±РёР»РµС‚ РІ РєРёРЅРѕв†’Р Р°Р·РІР»РµС‡РµРЅРёСЏ). DEFAULT INTENT PRIORITY (item+amount without verb = expense by default; income/transfer require explicit signal). Commit `03981d7`. |
-| 2026-05-09 14:14 | Phase 1.37 Step 5: ALLOWED_CATEGORIES code validation. `claude-client.ts`: Added `ALLOWED_CATEGORIES` Set (30 categories вЂ” 18 personal + 12 business). Post-Zod validation step: if `aiData.category_hint` is not in the set, replace with `Р”СЂСѓРіРѕРµ`. Prevents hallucinated categories from reaching CategoryResolverService. Typecheck 8/8 PASS. |
-| 2026-05-09 14:16 | Phase 1.37 Step 6: Documentation updates. `product-roadmap.md`: Added Phase 2.0 вЂ” AI Intelligence Evolution (3 components: 2.0-A self-learning from user edits, 2.0-B custom category recognition, 2.0-C regional bias from currency). Phase 1.37 + 2.0 added to summary table. Block 4 renamed from "Р“РѕР»РѕСЃ Рё Vision" to "AI Intelligence Рё Voice". `project_config.md`: Updated to v1.4, changelog v1.4 added, Section 2.8 AI Pipeline updated with multilingual/disambiguation/validation info. Commit `06bccb0`. Deployed to Railway. |
-| 2026-05-09 15:18 | Phase 1.37 complete. `workflow_state.md` updated: Section 1 (status в†’ COMPLETE), Section 2 (Phase 1.37 row added), Section 3 (AI Pipeline updated), Section 4 (project_config v1.4), Section 10 (7 history entries). All documents synchronized. |
-| 2026-05-09 15:38 | Phase 1.37 VERIFICATION & ACCEPTANCE. 13/13 typecheck+lint PASS. CategoryResolver: РџРёС‚РѕРјС†С‹/Р”РѕРј aliases added. Commit `641ad26`. Deployed to Railway. |
-| 2026-05-09 19:00 | **Phase 1.38 Fix #1:** Confirmation card not deleted on Cancel. `confirmation.worker.ts` reads `midas:preview:{draftId}` on both approve and reject paths вЂ” in-place edit to вќЊ РћС‚РјРµРЅРµРЅРѕ. |
-| 2026-05-09 19:04 | **Phase 1.38 Fix #2:** Unified blockquote currency prompt (Variant B). `screen-builder.ts` both apps: `<code>` tags replaced with blockquote text вЂ” no more green tap-able capsules. |
-| 2026-05-09 19:05 | **Phase 1.38 Fix #3:** `amt+cur` handler used `validateCurrencyCode()` (ISO-only) instead of `normalizeCurrencyInput()`. Fixed. `awaiting_cur` now extracts currency token from mixed input (e.g. В«50 РµРІСЂРѕВ»). Commit `d59025f`. |
-| 2026-05-09 19:18 | **Phase 1.38 Rollback:** PRICE vs QUANTITY AI prompt rule reverted. Caused regressions (В«150 РєСѓСЂС‚РѕРєВ» not extracted as amount). Design decision: personal finance bots ALWAYS treat any number as a price. Original rule restored: В«If ANY number present в†’ ALWAYS extract as amountВ». Final commit `c59f2e1`. |
-| 2026-05-10 10:08 | **Phase 1.39 вЂ” Gate UX Edit-In-Place (Variant B).** `formatAmount()` РІ РѕР±РѕРёС… screen-builder.ts РёСЃРїСЂР°РІР»РµРЅ: `String()` cast РґР»СЏ Postgres NUMERIC С‚РёРїР° вЂ” СѓСЃС‚СЂР°РЅС‘РЅ TypeError (`raw.includes is not a function`). `clarification.service.ts`: `::TEXT` cast РЅР° `parsed_amount` РІ 2 SQL-Р·Р°РїСЂРѕСЃР°С…. `buildGatePausedPreview()` РѕР±РЅРѕРІР»С‘РЅ: вљ пёЏ Р°Р»РµСЂС‚-Р±Р°РЅРЅРµСЂ + summary С‡РµСЂРЅРѕРІРёРєР° (РІРјРµСЃС‚Рѕ СЃС‚Р°СЂРѕРіРѕ С‚РµРєСЃС‚Р° Р±РµР· РґР°РЅРЅС‹С…). Р‘Р»РѕРє gate РІ `ai-parse.worker.ts` РїРµСЂРµСЂР°Р±РѕС‚Р°РЅ: РІРјРµСЃС‚Рѕ 2 РЅРѕРІС‹С… СЃРѕРѕР±С‰РµРЅРёР№ (paused edit + gate card) вЂ” **РѕРґРёРЅ** edit-in-place СЃСѓС‰РµСЃС‚РІСѓСЋС‰РµР№ preview-РєР°СЂС‚РѕС‡РєРё СЃ Р°Р»РµСЂС‚РѕРј Рё СЃРѕС…СЂР°РЅРµРЅРёРµРј РєР»Р°РІРёР°С‚СѓСЂС‹ РїРѕРґС‚РІРµСЂР¶РґРµРЅРёСЏ. Commits `8fa8f91` в†’ `089abf6`. Deployed to Railway вЂ” SUCCESS. |
-| 2026-05-10 10:30 | **Phase 1.40 вЂ” Dead Card Auto-Cleanup.** Р›РѕРіРёРєР°: РєР°СЂС‚РѕС‡РєРё В«вќЊ РћС‚РјРµРЅРµРЅРѕВ» Рё В«вЏ° Р§РµСЂРЅРѕРІРёРє РёСЃС‚С‘РєВ» Р°РІС‚РѕРјР°С‚РёС‡РµСЃРєРё СѓРґР°Р»СЏСЋС‚СЃСЏ РёР· С‡Р°С‚Р° РєРѕРіРґР° РїРѕСЏРІР»СЏРµС‚СЃСЏ СЃР»РµРґСѓСЋС‰Р°СЏ preview-РєР°СЂС‚РѕС‡РєР°. Р’ С‡Р°С‚Рµ РѕСЃС‚Р°СЋС‚СЃСЏ С‚РѕР»СЊРєРѕ: pending (Р¶РґС‘С‚ РїРѕРґС‚РІРµСЂР¶РґРµРЅРёСЏ) + approved (вњ… Р—Р°РїРёСЃР°РЅРѕ). Р РµР°Р»РёР·Р°С†РёСЏ: `confirmation.worker.ts` вЂ” РїРѕСЃР»Рµ reject/expired СЃРѕС…СЂР°РЅСЏРµС‚ `previewMsgId` РІ Redis `midas:dead_card:{chatId}` TTL 24h. `draft-expiration.worker.ts` вЂ” CRON expiry С‚РѕР¶Рµ РїРёС€РµС‚ dead_card. `ai-parse.worker.ts` вЂ” РїРµСЂРµРґ РѕС‚РїСЂР°РІРєРѕР№ РЅРѕРІРѕР№ preview С‡РёС‚Р°РµС‚ dead_card, РїРµСЂРµРґР°С‘С‚ РєР°Рє `deleteMessageId`, СѓРґР°Р»СЏРµС‚ РєР»СЋС‡. Р•СЃР»Рё РѕРґРЅРѕРІСЂРµРјРµРЅРЅРѕ РµСЃС‚СЊ dead_card Рё clar_msg вЂ” РїСЂРёРѕСЂРёС‚РµС‚ Сѓ dead_card. TypeScript: 0 РѕС€РёР±РѕРє. Commit `51eaf10`. Deployed to Railway вЂ” SUCCESS. |
-| 2026-05-10 15:30 | **Phase 2.0 вЂ” Transaction Hub + Reports 2.0 + Settings 2.0 deployed.** GitHub auto-deploy from `main`. |
-| 2026-05-10 18:44 | **Phase 2.1 вЂ” Account Management Dashboard.** РџРѕР»РЅР°СЏ СЂРµР°Р»РёР·Р°С†РёСЏ РёРЅС‚РµСЂР°РєС‚РёРІРЅРѕРіРѕ СѓРїСЂР°РІР»РµРЅРёСЏ СЃС‡РµС‚Р°РјРё С‡РµСЂРµР· Р±Р°Р»Р°РЅСЃ. **РќРѕРІС‹Рµ С„Р°Р№Р»С‹:** `balance-keyboard.service.ts` (450+ СЃС‚СЂРѕРє вЂ” parseBalanceCallback, buildBalanceListKeyboard, buildAccountActionsKeyboard, buildDeleteConfirmKeyboard, buildCurrencyWarningKeyboard, buildBalanceFiatCurrencyKeyboard, formatAccountDetailText, BalanceAccountRow type). **РњРѕРґРёС„РёС†РёСЂРѕРІР°РЅРЅС‹Рµ С„Р°Р№Р»С‹:** (1) `account-onboard-keyboard.service.ts` вЂ” СЂР°СЃС€РёСЂРµРЅ РїСЂРµСЃРµС‚Р°РјРё Р±Р°РЅРєРѕРІ (10: РўРёРЅСЊРєРѕС„С„, РЎР±РµСЂР±Р°РЅРє, РђР»СЊС„Р°, Р’РўР‘, РњРѕРЅРѕ, РџСЂРёРІР°С‚, РљР°СЃРїРё, N26, Revolut, Wise) Рё РєРѕС€РµР»СЊРєРѕРІ (9: Trust Wallet, MetaMask, Exodus, Ledger, Trezor, Phantom, Coinbase Wallet, SafePal, Tangem). (2) `account.service.ts` вЂ” `renameAccount()`, `changeAccountCurrency()`, `softDeleteAccount()`. (3) `balance.service.ts` вЂ” `getBalanceData()`, `getAccountDetail()`, `setAccountBalanceById()`, `getAccountTxCount()`. (4) `webhook.route.ts` вЂ” bl: callback handler, text intercepts, ac:done РїСЂРѕРІРµСЂСЏРµС‚ bl:source. **DB Migration:** updated_at + deleted_at РЅР° account_sources. Build+Deploy: 0 РѕС€РёР±РѕРє. |
-| 2026-05-10 19:58 | **Phase 2.2 вЂ” Settings UI Overhaul (DEPLOYED).** (1) `currencies.ts`: СЂР°СЃС€РёСЂРµРЅ СЃРїРёСЃРѕРє (FIAT 40+, CRYPTO 48+); `CURRENCY_RU_ALIASES` вЂ” 50+ СЂСѓСЃСЃРєРёС… Р°Р»РёР°СЃРѕРІ (Р±РёС‚РєРѕРёРЅ, РґРѕР»Р»Р°СЂ, РµРІСЂРѕ, СЂСѓР±Р»СЊ, РіСЂРёРІРЅР°, С‚РµРЅРіРµ, Р»РёСЂР° Рё РґСЂ.); `searchCurrencies()` вЂ” 5-pass Р°Р»РіРѕСЂРёС‚Рј (exact/startsWith/includes/EN-name/RU-alias), Р»РёРјРёС‚ 10. (2) `settings.service.ts`: `getWorkspaceAccounts()` + `deleted_at IS NULL` (soft-deleted СЃС‡РµС‚Р° РЅРµ РїРѕРєР°Р·С‹РІР°СЋС‚СЃСЏ); `setDefaultAccount()` Р°С‚РѕРјР°СЂРЅРѕ РѕР±РЅРѕРІР»СЏРµС‚ РѕР±Р° РїРѕР»СЏ (expense+income). (3) `settings-keyboard.service.ts`: `buildSettingsMainKeyboard()` вЂ” СЃС‚СЂРѕРіРёР№ 2x3 РіСЂРёРґ; РІС‹Р±РѕСЂ РІР°Р»СЋС‚С‹ СЃ РѕР±СЉСЏРІР»РµРЅРёРµРј; РЅРѕРІС‹Р№ С‚РµРєСЃС‚ РІС‹Р±РѕСЂР° РѕСЃРЅРѕРІРЅРѕР№ РІР°Р»СЋС‚С‹. (4) `webhook.route.ts`: РїРѕСЃР»Рµ РІС‹Р±РѕСЂР° РІР°Р»СЋС‚С‹ РєРЅРѕРїРєР° `[вљ™пёЏ РќР°Р·Р°Рґ РІ РЅР°СЃС‚СЂРѕР№РєРё]`; РµРґРёРЅС‹Р№ РѕР±СЂР°Р±РѕС‚С‡РёРє `st:da:sa:` вЂ” РѕРґРёРЅ Main Account РґР»СЏ income+expense. Build: `tsc` 0 РѕС€РёР±РѕРє. Commit `3e650c1`. Deployed to Railway (auto-deploy). |
-| 2026-05-10 22:00 | **Phase 2.3 вЂ” Paginated Transaction Search.** `transaction-hub.service.ts`: РґРѕР±Р°РІР»РµРЅ `SEARCH_PAGE_SIZE=8`; РІСЃРµ 4 search-С„СѓРЅРєС†РёРё (`searchByName`, `searchByAmount`, `searchByCategory`, `searchByDateRange`) РїРµСЂРµСЂР°Р±РѕС‚Р°РЅС‹ вЂ” РїСЂРёРЅРёРјР°СЋС‚ `page: number`, РїР°СЂР°Р»Р»РµР»СЊРЅС‹Р№ `COUNT(*)` в†’ РІРѕР·РІСЂР°С‰Р°СЋС‚ `{items: TxListItem[], total: number}`. РЈРґР°Р»РµРЅР° РєРѕРЅСЃС‚Р°РЅС‚Р° `SEARCH_LIMIT=200`. `transaction-keyboard.service.ts`: `buildSearchResultsKeyboard(items, page, totalPages)` вЂ” РєРЅРѕРїРєРё С‚РѕРІР°СЂРѕРІ + СЃС‚СЂРѕРєР° РЅР°РІРёРіР°С†РёРё `[в—ЂпёЏ][p/total][в–¶пёЏ]` + footer `[рџ”Ќ РќРѕРІС‹Р№ РїРѕРёСЃРє][в—ЂпёЏ Рљ СЃРїРёСЃРєСѓ]`; `search_results_page` РІ `TxCallbackCmd`; РїР°СЂСЃРµСЂ `tx:sr:p:{page}`. `webhook.route.ts`: РІСЃРµ search-handlers СЃРѕС…СЂР°РЅСЏСЋС‚ РєРѕРЅС‚РµРєСЃС‚ РІ Redis `midas:tx:sr:ctx:{uid}:{cid}` TTL 600s; `search_results_page` handler вЂ” С‡РёС‚Р°РµС‚ РєРѕРЅС‚РµРєСЃС‚, РїРµСЂРµСЃС‡РёС‚С‹РІР°РµС‚ offset, РѕР±РЅРѕРІР»СЏРµС‚ СЃРѕРѕР±С‰РµРЅРёРµ; text intercepts (name/amount/date) в†’ paginated API; РїСЂРё СѓСЃС‚Р°СЂРµРІС€РµРј РєРѕРЅС‚РµРєСЃС‚Рµ вЂ” РґСЂСѓР¶РµР»СЋР±РЅРѕРµ В«РџРѕРёС‰РёС‚Рµ СЃРЅРѕРІР°В»; СѓРґР°Р»С‘РЅ РґСѓР±Р»РёСЂСѓСЋС‰РёР№ СЃС‚Р°СЂС‹Р№ text intercept Р±Р»РѕРє. Build: `tsc` 0 РѕС€РёР±РѕРє. Commit `6da4464`. |
-| 2026-05-10 22:10 | **Phase 2.3 вЂ” Reports Close Button.** `report-keyboard.service.ts`: РґРѕР±Р°РІР»РµРЅ `rp:cl` callback (`вњ–пёЏ Р—Р°РєСЂС‹С‚СЊ`) РєР°Рє РїРѕСЃР»РµРґРЅСЏСЏ СЃС‚СЂРѕРєР° РЅР° РІСЃРµС… 3 РєР»Р°РІРёР°С‚СѓСЂР°С… (`buildPeriodPickerKeyboard`, `buildReportSubMenuKeyboard`, `buildReportBackKeyboard`); С‚РёРї `{ cmd: 'close' }` РґРѕР±Р°РІР»РµРЅ РІ `RpCallbackCmd`; `parseRpCallback`: `rp:cl в†’ { cmd: 'close' }`; РѕР±РЅРѕРІР»С‘РЅ docstring. `webhook.route.ts`: РІ Р±Р»РѕРєРµ `rp:` РґРѕР±Р°РІР»РµРЅ handler `else if (rpCmd.cmd === 'close')` в†’ `deleteMessage(chatId, rpMsgId)` вЂ” РїРѕР»РЅРѕСЃС‚СЊСЋ СѓР±РёСЂР°РµС‚ СЃРѕРѕР±С‰РµРЅРёРµ РёР· С‡Р°С‚Р°. Build: `tsc` 0 РѕС€РёР±РѕРє. Commit `049233d`. |
-| 2026-05-10 22:11 | **Phase 2.3 вЂ” Persistent Keyboard Button Order.** `screen-builder.ts` (`buildMainMenuKeyboard`): РїРѕСЂСЏРґРѕРє РєРЅРѕРїРѕРє РёР·РјРµРЅС‘РЅ вЂ” Row 1: `[рџ’° Р‘Р°Р»Р°РЅСЃ][рџ“Љ РћС‚С‡С‘С‚]`, Row 2: `[рџ“‹ РўСЂР°РЅР·Р°РєС†РёРё][вљ™пёЏ РќР°СЃС‚СЂРѕР№РєРё]` (РґРѕ: Row 1 Р‘Р°Р»Р°РЅСЃ+РўСЂР°РЅР·Р°РєС†РёРё, Row 2 РћС‚С‡С‘С‚+РќР°СЃС‚СЂРѕР№РєРё). РћР±РЅРѕРІР»С‘РЅ docstring. Build: `tsc` 0 РѕС€РёР±РѕРє. Commit `70a5d41`. Deployed to Railway (auto-deploy). |
-| 2026-05-11 09:00 | **Phase 2.2 Onboarding Pagination (Phase 2.2).** `account-onboard-keyboard.service.ts` РїРѕР»РЅРѕСЃС‚СЊСЋ РїРµСЂРµРїРёСЃР°РЅ СЃ СѓРЅРёРІРµСЂСЃР°Р»СЊРЅС‹Рј РґРІРёР¶РєРѕРј РїР°РіРёРЅР°С†РёРё `buildPaginatedPicker()`. Р РµР°Р»РёР·РѕРІР°РЅС‹: paginated banks (70+ Р·Р°РїРёСЃРµР№, 6/СЃС‚СЂР°РЅРёС†Р°, 3 РєРѕР»РѕРЅРєРё, ac:bp:{N}), paginated exchanges (ac:xp:{N}), paginated fiat currencies (ac:cfp:{N}), paginated crypto currencies (ac:ccp:{N}). `OnboardStep` СЂР°СЃС€РёСЂРµРЅ: `bal_input`. `AccountOnboardState` вЂ” РїРѕР»СЏ `accountId`, `currency`. `addAccountReturningId()` РґРѕР±Р°РІР»РµРЅ РІ `account.service.ts`. `webhook.route.ts`: FSM handlers РґР»СЏ bank_page, exchange_page, fiat_page, crypto_page, bal_skip. Р‘Р°Р»Р°РЅСЃ РІРІРѕРґРёС‚СЃСЏ С‚РµРєСЃС‚РѕРј (validateAmountFromText intercept) РёР»Рё РїСЂРѕРїСѓСЃРєР°РµС‚СЃСЏ (ac:bal:s). РљРѕРјРјРёС‚ РІ phase 2.2 СЃРµСЂРёРё. tsc 0 РѕС€РёР±РѕРє. |
-| 2026-05-11 12:00 | **Phase 2.3 Onboarding UX Polish (PLAN APPROVED).** РџРѕР»СЊР·РѕРІР°С‚РµР»СЊ СѓС‚РІРµСЂРґРёР» РїР»Р°РЅ: (1) СѓР±СЂР°С‚СЊ РїСЂРѕРјРµР¶СѓС‚РѕС‡РЅС‹Р№ afterCreate СЌРєСЂР°РЅ, (2) РґРѕР±Р°РІРёС‚СЊ РєРЅРѕРїРєСѓ В«вњ… Р—Р°РІРµСЂС€РёС‚СЊВ» (ac:fin) РїСЂСЏРјРѕ РІ РїРёРєРµСЂ С‚РёРїР°, (3) buildStartOnboardKeyboard вЂ” РёСЃРїСЂР°РІРёС‚СЊ РёРєРѕРЅРєРё (рџ”¶в†’рџ”„, в‚їв†’рџ”ђ), (4) РїСЂРё В«в–¶пёЏ РќР°С‡Р°С‚СЊ Р±РµР· СЃС‡С‘С‚Р°В» С‚РёС…Рѕ СЃРѕР·РґР°РІР°С‚СЊ В«РљРѕС€РµР»С‘РєВ» (USD). Р РµР°Р»РёР·Р°С†РёСЏ РїРѕРґРµР»РµРЅР° РЅР° 4 СЌС‚Р°РїР° СЃ tsc-РїСЂРѕРІРµСЂРєРѕР№ РїРѕСЃР»Рµ РєР°Р¶РґРѕРіРѕ. |
-| 2026-05-11 14:07 | **Phase 2.3 Onboarding UX Polish вЂ” Р­РўРђРџ 1 (account-onboard-keyboard.service.ts).** Р”РѕР±Р°РІР»РµРЅ `{ cmd: 'fin' }` РІ `AccountOnboardCmd` union + РїР°СЂСЃРµСЂ `if (sub === 'fin')`. Р”РѕР±Р°РІР»РµРЅР° `buildFinishOnboardKeyboard()` вЂ” РїРёРєРµСЂ С‚РёРїР° + В«вњ… Р—Р°РІРµСЂС€РёС‚СЊВ» (ac:fin), РёРєРѕРЅРєРё рџ”„рџ”ђ. Р”РѕР±Р°РІР»РµРЅР° `accountAddedText(name, currency)`. `buildStartOnboardKeyboard()` РёСЃРїСЂР°РІР»РµРЅ: рџ”¶в†’рџ”„, в‚їв†’рџ”ђ, в†©пёЏРќР°Р·Р°Рґв†’вњЏпёЏРЎРІРѕС‘ РЅР°Р·РІР°РЅРёРµ. tsc 0 РѕС€РёР±РѕРє. |
-| 2026-05-11 14:08 | **Phase 2.3 Onboarding UX Polish вЂ” Р­РўРђРџ 2 (imports).** `webhook.route.ts`: РґРѕР±Р°РІР»РµРЅС‹ РёРјРїРѕСЂС‚С‹ `buildFinishOnboardKeyboard`, `accountAddedText` РёР· account-onboard-keyboard.service.js. tsc РїРѕРєР° 2 РїСЂРµРґСѓРїСЂРµР¶РґРµРЅРёСЏ (unused вЂ” РѕР¶РёРґР°РµРјРѕ РґРѕ СЌС‚Р°РїР° 3). |
-| 2026-05-11 14:10 | **Phase 2.3 Onboarding UX Polish вЂ” Р­РўРђРџ 3 (handlers).** `webhook.route.ts`: (1) `ac:fin` handler вЂ” РёРґРµРЅС‚РёС‡РµРЅ `ac:done`, backward compat; (2) `ac:more` в†’ redirect to fin flow (deleteMessage + sendMessageWithReplyKeyboard); (3) `ac:bal:s` вЂ” С‡РёС‚Р°РµС‚ СЃРѕСЃС‚РѕСЏРЅРёРµ Redis, Р·Р°С‚РµРј РїРѕРєР°Р·С‹РІР°РµС‚ `accountAddedText` + `buildFinishOnboardKeyboard` РІРјРµСЃС‚Рѕ СЃС‚Р°СЂРѕРіРѕ afterCreate; (4) `bal_input` text intercept вЂ” `buildFinishOnboardKeyboard` РІРјРµСЃС‚Рѕ `buildAfterCreateKeyboard`, `accountAddedText` РІРјРµСЃС‚Рѕ СЃС‚Р°СЂРѕР№ СЃС‚СЂРѕРєРё СЃ Р±Р°Р»Р°РЅСЃРѕРј; (5) safety fallback РІ `bal_input` в†’ `buildFinishOnboardKeyboard`. tsc 0 РѕС€РёР±РѕРє. |
-| 2026-05-11 14:13 | **Phase 2.3 Onboarding UX Polish вЂ” Р­РўРђРџ 4 (default account).** `webhook.route.ts` `ac:skip` handler: РїРµСЂРµРґ СѓРґР°Р»РµРЅРёРµРј Redis-РєР»СЋС‡Р° РІС‹Р·С‹РІР°РµС‚ `hasAccounts()` вЂ” РµСЃР»Рё 0 СЃС‡РµС‚РѕРІ, СЃРѕР·РґР°С‘С‚ `addAccountWithCurrency(workspaceId, userId, 'РљРѕС€РµР»С‘Рє', 'USD')` РІ Р±Р»РѕРєРµ try/catch (non-fatal). tsc 0 РѕС€РёР±РѕРє. Commit `395e1f2`. git push origin main. Deploy Railway: `7089846c вЂ” SUCCESS`. |
-| 2026-05-11 16:30 | **master_roadmap Phase 1 вЂ” Keyboard Service.** `account-onboard-keyboard.service.ts` +478 СЃС‚СЂРѕРє: `CURRENCY_FLAGS` (40+ РІР°Р»СЋС‚: рџ‡·рџ‡єRUB рџ‡єрџ‡ёUSD в‚їBTC Оћ ETH TON Рё РґСЂ.), `getCurrencyFlag(code)`, `CURRENCY_NAMES`. `buildPaginatedPicker()` СЂРµС„Р°РєС‚РѕСЂРёРЅРі вЂ” РѕР±Рµ СЃС‚СЂРµР»РєРё РІСЃРµРіРґР°, noop РЅР° РєСЂР°СЏС…. `buildCurrencyPickerText(name?,isCustom?)` вЂ” 3 РІРµС‚РєРё. `buildFiatCurrencyPage()` + `buildCryptoCurrencyPage()` вЂ” С„Р»Р°РіРё + ac:cur:search. `searchCurrencies()` вЂ” fuzzy+С‚СЂР°РЅСЃР»РёС‚РµСЂР°С†РёСЏ. `buildNoMatchText/Keyboard`. `buildCurrencySearch*`. РЈРґР°Р»РµРЅС‹ FIAT_ITEMS, CRYPTO_ITEMS, CURRENCY_PICKER_TEXT. tsc 0 РѕС€РёР±РѕРє. |
-| 2026-05-11 16:33 | **master_roadmap Phase 2 вЂ” Webhook FSM.** `webhook.route.ts`: `name_input` в†’ no-match screen РїСЂРё fuzzy null. `ac:cus:save` в†’ isCustomName=true в†’ cur_pick. `ac:cus:keep` в†’ name_input retry. `ac:cur:search` в†’ cur_search step. `ac:cur:list` в†’ РІРѕР·РІСЂР°С‚ Рє СЃРїРёСЃРєСѓ. `cur_search` text interceptor в†’ searchCurrencies в†’ СЂРµР·СѓР»СЊС‚Р°С‚С‹ РёР»Рё no-results. 3 success-screens button-free `{ inline_keyboard: [] }`. `chooseCurKeyboard()` module-level. Р’СЃРµ callback_data в‰¤64 Р±Р°Р№С‚. tsc 0 РѕС€РёР±РѕРє. |
-| 2026-05-11 16:43 | **master_roadmap Phase 3 вЂ” Smoke Tests.** `smoke-test-master-roadmap.mjs` (NEW): 70 РїСЂРѕРІРµСЂРѕРє, Р·Р°РїСѓСЃРє `node apps/telegram-bot/smoke-test-master-roadmap.mjs` (РїСЂРѕС‚РёРІ СЃРєРѕРјРїРёР»РёСЂРѕРІР°РЅРЅРѕРіРѕ dist/). РџРѕРєСЂС‹С‚С‹ РІСЃРµ 14 СЃС†РµРЅР°СЂРёРµРІ. Р РµР·СѓР»СЊС‚Р°С‚: **70/70 вњ… / 0 вќЊ**. |
-| 2026-05-11 16:44 | **master_roadmap Phase 4 вЂ” Deploy.** Git commit `35c92e0` `feat(onboard): no-match screen, cur-search, flags, nav-arrows, button-free success [master_roadmap]`. Push в†’ Railway auto-deploy. Status: Midas в—Џ Online, background-workers в—Џ Online. Deploy logs: clean start, Redis connected, no errors. |
-| 2026-05-12 15:05 | **workflow_state.md Р°РєС‚СѓР°Р»РёР·РёСЂРѕРІР°РЅ. РўРµСЃС‚С‹ Р·Р°РїСѓС‰РµРЅС‹.** `smoke-test-master-roadmap.mjs`: РёСЃРїСЂР°РІР»РµРЅ СѓСЃС‚Р°СЂРµРІС€РёР№ assert РґР»СЏ `buildCurrencySearchNoResultsText`. РС‚РѕРі: 76/76 вњ…. `smoke-test-lazy-default.mjs`: 39/39 вњ…. `tsc --noEmit`: 0 РѕС€РёР±РѕРє. Phase LD++ РїРѕР»РЅРѕСЃС‚СЊСЋ РїРѕРґС‚РІРµСЂР¶РґРµРЅР°. |
-| 2026-05-12 19:35 | **Phase 2.4 PR 2 - vпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅ пїЅпїЅпїЅпїЅпїЅпїЅ.** `account.service.ts`: пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ `AccountWithBalance` interface + `getAccountWithBalance()` + `getWorkspaceAccountsWithBalances()`. tsc 0 пїЅпїЅпїЅпїЅпїЅпїЅ. GitHub PR #2 merged squash пїЅ main (commit 7cc8528). |
-| 2026-05-12 17:27 | **Phase 2.4 вЂ” UX Design СЃРµСЃСЃРёСЏ Рё РїР»Р°РЅРёСЂРѕРІР°РЅРёРµ.** РЎРїСЂРѕРµРєС‚РёСЂРѕРІР°РЅС‹: С‡РµСЂРЅРѕРІРёРє + РјР°С‚РµРјР°С‚РёРєР° Р±Р°Р»Р°РЅСЃР° (В«рџЏ¦ Bybit USDВ» + В«рџ’і 15 400 в€’ 10 000 = 5 400 USDВ»), РїРёРєРµСЂ СЃС‡РµС‚РѕРІ (РєРЅРѕРїРєР° В«рџ”„ РЎРјРµРЅРёС‚СЊ СЃС‡С‘С‚В»), РєСЂРѕСЃСЃ-РІР°Р»СЋС‚Р° (РІРІРѕРґ СЃСѓРјРјС‹ РєРѕРЅРІРµСЂС‚Р°С†РёРё), confirmed card Р±РµР· РєРЅРѕРїРѕРє Р‘Р°Р»Р°РЅСЃ/РћС‚С‡С‘С‚. UX-РёР·РјРµРЅРµРЅРёСЏ ia:list/ia:back РёР· С‚РµРєСѓС‰РµРіРѕ С‡Р°С‚Р° РћРўРњР•РќР•РќР« (РєРѕРґРѕРІР°СЏ Р±Р°Р·Р° РІРѕР·РІСЂР°С‰РµРЅР° РІ stable). 16 Р°С‚РѕРјР°СЂРЅС‹С… PR СЃРїСЂРѕРµРєС‚РёСЂРѕРІР°РЅС‹. РђРЅР°Р»РёР· РєРѕРЅС„Р»РёРєС‚РѕРІ: 1 breaking change (PR 7 buildConfirmKeyboard), 1 РЅРѕРІС‹Р№ Redis-РїСЂРµС„РёРєСЃ (midas:xfx:ptr). РџРѕР»РЅС‹Р№ РїР»Р°РЅ: `account_debit_ux_plan.md`. workflow_state.md РѕР±РЅРѕРІР»С‘РЅ. |
-| 2026-05-12 21:00 | **Phase 2.4 вЂ” Account Picker UX Hotfixes.** РСЃРїСЂР°РІР»РµРЅРёРµ РєСЂРёС‚РёС‡РµСЃРєРѕРіРѕ Р±Р°РіР° РѕС‚СЃСѓС‚СЃС‚РІРёСЏ РїРёРєРµСЂР° РїСЂРё AI parse Р±РµР· account_hint. Р’ `ai-parse.worker.ts` РґРѕР±Р°РІР»РµРЅ РїСЂРёРЅСѓРґРёС‚РµР»СЊРЅС‹Р№ РїРѕРєР°Р· РїРёРєРµСЂР°. Р’ `draft.service.ts` РґРѕР±Р°РІР»РµРЅР° `getWorkspaceAccountsForPicker` РґР»СЏ РІРѕСЂРєРµСЂР°. Р’ `draft-confirmation.service.ts` РґРѕР±Р°РІР»РµРЅР° Р·Р°С‰РёС‚Р° (`accountWasExplicitlyChosen`) РѕС‚ С‚РёС…РѕР№ Р°РІС‚РѕРєРѕРЅРІРµСЂС‚Р°С†РёРё XFX РїСЂРё РЅРµСЃРѕРІРїР°РґРµРЅРёРё РІР°Р»СЋС‚С‹ РґРµС„РѕР»С‚РЅРѕРіРѕ СЃС‡РµС‚Р°. Р’РЅРµРґСЂРµРЅС‹ intent-aware С‚РµРєСЃС‚С‹ (РґРѕС…РѕРґ/СЂР°СЃС…РѕРґ) РґР»СЏ РїРёРєРµСЂР° СЃС‡РµС‚РѕРІ РІ `account-inline-keyboard.service.ts`. Р’СЃРµ 103/103 smoke-С‚РµСЃС‚Р° РїСЂРѕС€Р»Рё. |
-| 2026-05-13 08:17 | **Phase 2.5 РЁР°Рі 1 вЂ” Smart Itemв†’Category Auto-Detector.** `item-category-detector.service.ts` (NEW): 200+ Р±СЂРµРЅРґРѕРІ Рё РєР»СЋС‡РµРІС‹С… СЃР»РѕРІ, 9 РєР°С‚РµРіРѕСЂРёР№ (РўСЂР°РЅСЃРїРѕСЂС‚/Р•РґР°/Р­Р»РµРєС‚СЂРѕРЅРёРєР°/РћРґРµР¶РґР°/Р—РґРѕСЂРѕРІСЊРµ/Р”РѕРј/Р Р°Р·РІР»РµС‡РµРЅРёСЏ/РћР±СЂР°Р·РѕРІР°РЅРёРµ/РћР±РѕСЂСѓРґРѕРІР°РЅРёРµ), longest-phrase-first matching. `patchDraftCategoryHint()` РІ `clarification.service.ts`: atomic idempotent DB patch (РїРµСЂРµР·Р°РїРёСЃС‹РІР°РµС‚ С‚РѕР»СЊРєРѕ РµСЃР»Рё `parsed_category_hint IS NULL` РёР»Рё `= 'Р”СЂСѓРіРѕРµ'`). РРЅС‚РµРіСЂР°С†РёСЏ РІ `webhook.route.ts` в†’ `sendAndStorePreview`: non-blocking, РЅРµ Р±Р»РѕРєРёСЂСѓРµС‚ flow РїСЂРё РѕС€РёР±РєРµ. РўРµСЃС‚: В«РјР°Р№Р±Р°С…В» в†’ РўСЂР°РЅСЃРїРѕСЂС‚, В«starbucksВ» в†’ Р•РґР°. tsc 0 РѕС€РёР±РѕРє. |
-| 2026-05-13 08:20 | **Phase 2.5 РЁР°Рі 2 вЂ” Account-Currency Compatibility Validation Gate.** `account-currency-validator.service.ts` (NEW): РјР°С‚СЂРёС†Р° 8 РїСЂР°РІРёР», `classifyCurrency()`, `HYBRID_EWALLET_KEYS`, `TON_ASSETS`. РРЅС‚РµРіСЂРёСЂРѕРІР°РЅ РІ 2 С‚РѕС‡РєРё `webhook.route.ts`: (1) `cmd=currency` callback вЂ” editMessageText СЃ РѕС€РёР±РєРѕР№, FSM state СЃРѕС…СЂР°РЅСЏРµС‚СЃСЏ РІ Redis; (2) `cur_input` text interceptor вЂ” upsertBotMessage СЃ РѕС€РёР±РєРѕР№, `redisConnection.del` РќР• РІС‹Р·С‹РІР°РµС‚СЃСЏ. Р‘Р»РѕРєРёСЂСѓРµС‚: РњРѕРЅРѕР±Р°РЅРє+USDT, РќР°Р»РёС‡РЅС‹Рµ+ETH, Lightning+USDC. Р Р°Р·СЂРµС€Р°РµС‚: Bybit+USDT, Payeer+USDT (РіРёР±СЂРёРґ), MetaMask+BTC. Commit `d9ad480`. tsc 0 РѕС€РёР±РѕРє. git push в†’ Railway deployed. |
-| 2026-05-13 08:24 | **Phase 2.5 РЁР°Рі 3 вЂ” Anomaly Badge РІ РїРёРєРµСЂР°С….** `account-inline-keyboard.service.ts` (MODIFY): РёРјРїРѕСЂС‚ `classifyCurrency`. `anomalyBadge(emoji, currency)` вЂ” РІРѕР·РІСЂР°С‰Р°РµС‚ `'вљ пёЏ '` РµСЃР»Рё emoji=`рџЏ¦` Рё РІР°Р»СЋС‚Р° РЅРµ С„РёР°С‚. `buildAccountPickerV2Keyboard` СѓР»СѓС‡С€РµРЅ: `рџ’Ћ` РґР»СЏ РєСЂРёРїС‚Рѕ, `рџЏ¦` РґР»СЏ С„РёР°С‚Р°, `вљ пёЏ` С‚РѕР»СЊРєРѕ РґР»СЏ Р±Р°РЅРє+РєСЂРёРїС‚Рѕ Р°РЅРѕРјР°Р»РёР№ РїРѕ РёРјРµРЅРё СЃС‡С‘С‚Р°. `buildAccountPickerForDraft`: `вљ пёЏ` С‡РµСЂРµР· `anomalyBadge()` РїРѕ `accountTypeEmoji()`. Commit `f543c5e`. tsc 0 РѕС€РёР±РѕРє. git push в†’ Railway deployed. Phase 2.5 COMPLETE. |
-| 2026-05-13 15:20 | **Phase 2.7 вЂ” Account Picker Fix & Cancellation UX.** РСЃРїСЂР°РІР»РµРЅР° СЂРµРіСЂРµСЃСЃРёСЏ РєРѕРјРјРёС‚Р° `6efe173` (always show account picker), РёР·-Р·Р° РєРѕС‚РѕСЂРѕР№ С‚СЂР°РЅР·Р°РєС†РёРё Р±РµР· СЃРѕР·РґР°РЅРЅС‹С… СЃС‡РµС‚РѕРІ Р·Р°РІРёСЃР°Р»Рё. РљРЅРѕРїРєР° В«Р—Р°РїРёСЃР°С‚СЊ Р±РµР· СЃС‡С‘С‚Р°В» РЅР° no-match РєР°СЂС‚РѕС‡РєРµ Р·Р°РјРµРЅРµРЅР° РЅР° `вњ–пёЏ РћС‚РјРµРЅР°` (`ia:cancel`). РџСЂРё РѕС‚РјРµРЅРµ: СЃС‚Р°С‚СѓСЃ С‡РµСЂРЅРѕРІРёРєР° РІ Р‘Р” РјРµРЅСЏРµС‚СЃСЏ РЅР° `rejected`, СЃРѕРѕР±С‰РµРЅРёРµ in-place РјРµРЅСЏРµС‚СЃСЏ РЅР° "вќЊ РћС‚РјРµРЅРµРЅРѕ" Р±РµР· РєРЅРѕРїРѕРє, СѓРґР°Р»СЏСЋС‚СЃСЏ СЃС‚РµР№С‚С‹ РёР· Redis. |
-| 2026-05-13 15:25 | **Infrastructure вЂ” AI Token Budget Fix.** РћР±РЅР°СЂСѓР¶РµРЅРѕ, С‡С‚Рѕ РѕС‡РµСЂРµРґСЊ С‚СЂР°РЅР·Р°РєС†РёР№ РїРѕР»РЅРѕСЃС‚СЊСЋ РІСЃС‚Р°Р»Р° РёР·-Р·Р° РёСЃС‡РµСЂРїР°РЅРёСЏ РґРЅРµРІРЅРѕРіРѕ Р»РёРјРёС‚Р° С‚РѕРєРµРЅРѕРІ Claude (`AI daily token budget exceeded: 506188 >= 500000`). Р§РµСЂРµР· Railway CLI РїРµСЂРµРјРµРЅРЅР°СЏ `AI_BUDGET_MAX_DAILY_TOKENS` РґР»СЏ `background-workers` СѓРІРµР»РёС‡РµРЅР° СЃ 500 000 РґРѕ 2 000 000. Р’РѕСЂРєРµСЂС‹ РїРµСЂРµСЃРѕР±СЂР°РЅС‹, РѕР±СЂР°Р±РѕС‚РєР° С‚СЂР°РЅР·Р°РєС†РёР№ РІРѕСЃСЃС‚Р°РЅРѕРІР»РµРЅР°. |
-| 2026-05-13 21:30 | **Phase 2.8 вЂ” Р­С‚Р°Рї 1: Callback Fix (ia:newac).** `account-inline-keyboard.service.ts`: РёСЃРїСЂР°РІР»РµРЅ РєСЂРёС‚РёС‡РµСЃРєРёР№ Р±Р°Рі вЂ” РєРЅРѕРїРєР° В«вћ• РЎРѕР·РґР°С‚СЊ СЃС‡С‘С‚В» РІ РїРёРєРµСЂРµ С‡РµСЂРЅРѕРІРёРєР° РІС‹Р·С‹РІР°Р»Р° `ia:rename` РІРјРµСЃС‚Рѕ РєРѕСЂСЂРµРєС‚РЅРѕРіРѕ `ia:newac`. Р”РѕР±Р°РІР»РµРЅ С‚РёРї `showpicker` РІ `InlineAccountCmd` union Рё СЃРѕРѕС‚РІРµС‚СЃС‚РІСѓСЋС‰РёР№ РїР°СЂСЃРµСЂ РґР»СЏ РѕР±СЂР°С‚РЅРѕР№ РЅР°РІРёРіР°С†РёРё. |
-| 2026-05-13 21:35 | **Phase 2.8 вЂ” Р­С‚Р°Рї 2: РЎС‚Р°РЅРґР°СЂС‚РёР·Р°С†РёСЏ С‚РµРєСЃС‚Р° РѕРЅР±РѕСЂРґРёРЅРіР°.** `webhook.route.ts`: Р·Р°РіРѕР»РѕРІРѕРє СЌРєСЂР°РЅР° РІС‹Р±РѕСЂР° С‚РёРїР° СЃС‡С‘С‚Р° (РІС‹Р·С‹РІР°РµРјРѕРіРѕ С‡РµСЂРµР· `ia:newac`) РёР·РјРµРЅС‘РЅ СЃ Р¶С‘СЃС‚РєРѕ РїСЂРѕРїРёСЃР°РЅРЅРѕРіРѕ С‚РµРєСЃС‚Р° РЅР° РєРѕРЅСЃС‚Р°РЅС‚Сѓ `ACCOUNTS_EMPTY_TEXT` вЂ” СЃРѕРѕС‚РІРµС‚СЃС‚РІСѓРµС‚ СЃС‚РёР»СЋ СЌРєСЂР°РЅР° `/start` РґР»СЏ РЅРѕРІС‹С… РїРѕР»СЊР·РѕРІР°С‚РµР»РµР№. |
-| 2026-05-13 21:45 | **Phase 2.8 вЂ” Р­С‚Р°Рї 3: Back Navigation (ia:showpicker).** `account-onboard-keyboard.service.ts`: РєРЅРѕРїРєР° В«в—ЂпёЏ РќР°Р·Р°РґВ» РЅР° СЌРєСЂР°РЅРµ РІС‹Р±РѕСЂР° С‚РёРїР° СЃС‡С‘С‚Р° С‚РµРїРµСЂСЊ РіРµРЅРµСЂРёСЂСѓРµС‚ callback `ia:showpicker` РІРјРµСЃС‚Рѕ `ia:pk:back`. `webhook.route.ts`: СЂРµР°Р»РёР·РѕРІР°РЅ РЅРѕРІС‹Р№ handler `ia:showpicker` вЂ” РІРѕСЃСЃС‚Р°РЅР°РІР»РёРІР°РµС‚ `midas:prev_acct` (РєСЌС€РёСЂРѕРІР°РЅРЅС‹Р№ accountId РёР· Redis), СЂРµРЅРґРµСЂРёС‚ Account Picker V2 СЃ СЃРѕС…СЂР°РЅРµРЅРёРµРј `linkedDraftId`. РџРѕР»СЊР·РѕРІР°С‚РµР»СЊ РјРѕР¶РµС‚ РІРµСЂРЅСѓС‚СЊСЃСЏ Рє РїРёРєРµСЂСѓ Р±РµР· РїРѕС‚РµСЂРё РєРѕРЅС‚РµРєСЃС‚Р° С‡РµСЂРЅРѕРІРёРєР°. |
-| 2026-05-13 22:00 | **Phase 2.8 вЂ” Р­С‚Р°Рї 4: РЈРґР°Р»РµРЅРёРµ success-Р±Р°РЅРЅРµСЂРѕРІ.** `webhook.route.ts`: СѓРґР°Р»РµРЅС‹ СЃС‚СЂРѕРєРё В«вњ… РЎС‡С‘С‚ ... СЃРѕР·РґР°РЅ!В» РІРѕ РІСЃРµС… С‚СЂС‘С… РїСѓС‚СЏС… Р·Р°РІРµСЂС€РµРЅРёСЏ РѕРЅР±РѕСЂРґРёРЅРіР° РёР· С‡РµСЂРЅРѕРІРёРєР°: `bal_skip`, `bal_input`, `cur_input`. РўРµРїРµСЂСЊ РїРѕСЃР»Рµ СЃРѕР·РґР°РЅРёСЏ СЃС‡С‘С‚Р° СЃСЂР°Р·Сѓ РїРѕРєР°Р·С‹РІР°РµС‚СЃСЏ preview-РєР°СЂС‚РѕС‡РєР° С‡РµСЂРЅРѕРІРёРєР° С‡РµСЂРµР· `confirmPreviewFull()` вЂ” С‡РёСЃС‚С‹Р№ seamless UX Р±РµР· РїСЂРѕРјРµР¶СѓС‚РѕС‡РЅС‹С… СЌРєСЂР°РЅРѕРІ. |
-| 2026-05-13 22:30 | **Phase 2.8 вЂ” TS Build Fix.** РћР±РЅР°СЂСѓР¶РµРЅС‹ РѕС€РёР±РєРё СЃР±РѕСЂРєРё РЅР° Railway: `TS6133: 'linkedAccountNameBal' / 'acNameBi2' is declared but its value is never read` вЂ” РїРµСЂРµРјРµРЅРЅС‹Рµ СЃС‚Р°Р»Рё РЅРµРёСЃРїРѕР»СЊР·СѓРµРјС‹РјРё РїРѕСЃР»Рµ СѓРґР°Р»РµРЅРёСЏ success-Р±Р°РЅРЅРµСЂРѕРІ РІ Р­С‚Р°РїРµ 4. РЈРґР°Р»РµРЅС‹ РѕР±Р° РѕР±СЉСЏРІР»РµРЅРёСЏ. `tsc --noEmit`: 0 РѕС€РёР±РѕРє. Commit `56991be` pushed to main. Railway re-deploy: Midas вњ… Online. |
-| 2026-05-14 10:43 | **Phase 2.9 вЂ” Nav Buttons Never Delete Tx Records.** РџСЂРѕР±Р»РµРјР°: РїРѕСЃР»Рµ СЃРѕР·РґР°РЅРёСЏ С‚СЂР°РЅР·Р°РєС†РёРё РµС‘ message_id (В«вњ… Р—Р°РїРёСЃР°РЅРѕВ» + В«вњЏпёЏ РР·РјРµРЅРёС‚СЊ Р·Р°РїРёСЃСЊВ») С…СЂР°РЅРёР»СЃСЏ РІ Redis РєР°Рє `midas:am:` pointer. РџСЂРё РЅР°Р¶Р°С‚РёРё Р‘Р°Р»Р°РЅСЃ/РћС‚С‡С‘С‚/РўСЂР°РЅР·Р°РєС†РёРё/РќР°СЃС‚СЂРѕР№РєРё вЂ” `upsertBotMessage()` СЂРµРґР°РєС‚РёСЂРѕРІР°Р» РёР»Рё СѓРґР°Р»СЏР» СЌС‚Рѕ СЃРѕРѕР±С‰РµРЅРёРµ. Р РµС€РµРЅРёРµ: РґРѕР±Р°РІР»РµРЅ `sendNavMessage()` РІ `active-message.service.ts` вЂ” РІСЃРµРіРґР° РѕС‚РїСЂР°РІР»СЏРµС‚ РќРћР’РћР• СЃРѕРѕР±С‰РµРЅРёРµ, РЅРµ С‚СЂРѕРіР°РµС‚ `midas:am:`. 4 NAV_BTN_* РѕР±СЂР°Р±РѕС‚С‡РёРєР° РІ `webhook.route.ts` РїРµСЂРµРєР»СЋС‡РµРЅС‹ РЅР° `sendNavMessage`. Commit `1477f55` pushed to main. |
-| 2026-05-14 10:57 | **Phase 2.9+ вЂ” Smart Nav Message (Рјidas:nav: key).** РџСЂРѕР±Р»РµРјР°: РєР°Р¶РґРѕРµ РЅР°Р¶Р°С‚РёРµ nav-РєРЅРѕРїРєРё РѕС‚РїСЂР°РІР»СЏР»Рѕ РЅРѕРІРѕРµ СЃРѕРѕР±С‰РµРЅРёРµ (Р·Р°СЃРѕСЂРµРЅРёРµ С‡Р°С‚Р°). Р РµС€РµРЅРёРµ: РґРІР° РЅРµР·Р°РІРёСЃРёРјС‹С… Redis-РєР»СЋС‡Р°. `midas:am:` вЂ” С‡РµСЂРЅРѕРІРёРєРё/РїРёРєРµСЂС‹/РїРѕРґС‚РІРµСЂР¶РґРµРЅРёСЏ (РЅРµ С‚СЂРѕРіР°РµРј РІ nav). `midas:nav:` вЂ” nav-РїР°РЅРµР»СЊ (Р‘Р°Р»Р°РЅСЃ/РћС‚С‡С‘С‚/etc.). `sendNavMessage()` РїРѕР»РЅРѕСЃС‚СЊСЋ РїРµСЂРµРїРёСЃР°РЅ: edit-first С‡РµСЂРµР· `midas:nav:`, РїСЂРё СѓСЃРїРµС…Рµ вЂ” СЂРµРґР°РєС‚РёСЂСѓРµС‚ С‚Рѕ Р¶Рµ СЃРѕРѕР±С‰РµРЅРёРµ (С‡Р°С‚ РЅРµ Р·Р°СЃРѕСЂСЏРµС‚СЃСЏ), РїСЂРё РЅРµСѓРґР°С‡Рµ вЂ” РѕС‚РїСЂР°РІР»СЏРµС‚ РЅРѕРІРѕРµ. РџСЂРё РІРІРѕРґРµ С‚СЂР°РЅР·Р°РєС†РёРё: `getNavMessageId` в†’ `deleteMessage` в†’ `clearNavMessageId` РїРµСЂРµРґ СЃС‚Р°РЅРґР°СЂС‚РЅС‹Рј cleanup `midas:am:`. Commits `4baac9c`. |
-| 2026-05-14 11:04 | **Phase 2.9+ вЂ” Silent Close Button.** РљРЅРѕРїРєР° В«вњ• Р—Р°РєСЂС‹С‚СЊВ» РІ РќР°СЃС‚СЂРѕР№РєР°С… (`st:cancel`) СЂР°РЅРµРµ СЂРµРґР°РєС‚РёСЂРѕРІР°Р»Р° СЃРѕРѕР±С‰РµРЅРёРµ РЅР° В«вљ™пёЏ РќР°СЃС‚СЂРѕР№РєРё Р·Р°РєСЂС‹С‚С‹.В» (Р»РёС€РЅРµРµ). РўРµРїРµСЂСЊ: `deleteMessage(chatId, messageId)` + `clearNavMessageId()` вЂ” РїР°РЅРµР»СЊ РїСЂРѕСЃС‚Рѕ РёСЃС‡РµР·Р°РµС‚, РЅРёРєР°РєРѕРіРѕ РЅРѕРІРѕРіРѕ С‚РµРєСЃС‚Р°. РљРЅРѕРїРєР° В«вњ• Р—Р°РєСЂС‹С‚СЊВ» РІ Р‘Р°Р»Р°РЅСЃРµ (`bl:close`) СѓР¶Рµ СѓРґР°Р»СЏР»Р° СЃРѕРѕР±С‰РµРЅРёРµ, РЅРѕ РЅРµ РѕС‡РёС‰Р°Р»Р° `midas:nav:` вЂ” РёСЃРїСЂР°РІР»РµРЅРѕ. Commit `004966f` pushed to main. Railway auto-deploy triggered. |
-| 2026-05-14 12:28 | **Phase 2.10 вЂ” Fix 1: isSuccessCard вЂ” DEL midas:am: РїСЂРё РїРѕРґС‚РІРµСЂР¶РґРµРЅРёРё С‚СЂР°РЅР·Р°РєС†РёРё.** РџСЂРѕР±Р»РµРјР°: РїРѕСЃР»Рµ РїРѕРґС‚РІРµСЂР¶РґРµРЅРёСЏ С‚СЂР°РЅР·Р°РєС†РёРё success card СЃРѕС…СЂР°РЅСЏР»Р°СЃСЊ РІ `midas:am:` pointer. РџСЂРё РІРІРѕРґРµ СЃР»РµРґСѓСЋС‰РµР№ С‚СЂР°РЅР·Р°РєС†РёРё step-7 РІ webhook.route.ts СѓРґР°Р»СЏР» СЃРѕРѕР±С‰РµРЅРёРµ РёР· `midas:am:` вЂ” success card СѓРґР°Р»СЏР»Р°СЃСЊ. Р РµС€РµРЅРёРµ: `shared/index.ts` вЂ” РґРѕР±Р°РІР»РµРЅ `isSuccessCard?: boolean` РІ `NotificationJobPayload`. `confirmation.worker.ts` вЂ” РїСЂРё approve: `isSuccessCard: true` РІ payload. `notifications.worker.ts` вЂ” РµСЃР»Рё `isSuccessCard`: `DEL midas:am:` РІРјРµСЃС‚Рѕ `SET`. Commit `df15a01`. |
-| 2026-05-14 12:28 | **Phase 2.10 вЂ” Fix 2: from-context РІ delete flow parser.** РџСЂРѕР±Р»РµРјР°: РїСЂРё РЅР°Р¶Р°С‚РёРё В«РР·РјРµРЅРёС‚СЊ Р·Р°РїРёСЃСЊВ» в†’ В«РЈРґР°Р»РёС‚СЊВ» в†’ В«РћС‚РјРµРЅР°В» в†’ В«Р—Р°РєСЂС‹С‚СЊВ» вЂ” РєРЅРѕРїРєР° Р—Р°РєСЂС‹С‚СЊ СѓРґР°Р»СЏР»Р° РєР°СЂС‚РѕС‡РєСѓ РІРјРµСЃС‚Рѕ РІРѕСЃСЃС‚Р°РЅРѕРІР»РµРЅРёСЏ success card. РљРѕСЂРµРЅСЊ: `parseTxCallback` РЅРµ С‡РёС‚Р°Р» `parts[4]` РґР»СЏ `tx:d:ask` Рё `tx:d:yes` вЂ” РєРѕРЅС‚РµРєСЃС‚ `from='s'` С‚РµСЂСЏР»СЃСЏ РїСЂРё РїР°СЂСЃРёРЅРіРµ. Fix: `transaction-keyboard.service.ts` вЂ” `const from = parts[4]`; return СЃ `from` РґР»СЏ РѕР±РѕРёС… action. РўРµРїРµСЂСЊ `tx:view` РєРѕСЂСЂРµРєС‚РЅРѕ РІРёРґРёС‚ `from==='s'` Рё СЃС‚Р°РІРёС‚ `closeCallback = tx:done:{txId}`. Commit `8894b92`. |
-| 2026-05-14 12:37 | **Phase 2.10 вЂ” Fix 3: Double-lock sentinel key.** РџСЂРѕР±Р»РµРјР°: РґР°Р¶Рµ РїРѕСЃР»Рµ Fix 1 success card РёРЅРѕРіРґР° СѓРґР°Р»СЏР»Р°СЃСЊ (race condition РјРµР¶РґСѓ background-workers Рё telegram-bot, РёР»Рё РѕС‚СЃС‚Р°РІР°РЅРёРµ РґРµРїР»РѕСЏ). Р РµС€РµРЅРёРµ вЂ” РґРІРѕР№РЅР°СЏ Р±Р»РѕРєРёСЂРѕРІРєР°: (1) `notifications.worker.ts` РїСЂРё `isSuccessCard`: SET `midas:success_card:{sentMessageId}` = '1' (TTL 30 РґРЅРµР№), Р·Р°С‚РµРј DEL `midas:am:`. (2) `webhook.route.ts` step-7: РїРµСЂРµРґ `deleteMessage(amId)` РїСЂРѕРІРµСЂСЏРµС‚ `EXISTS midas:success_card:{amId}` вЂ” РµСЃР»Рё sentinel РµСЃС‚СЊ, СЃРѕРѕР±С‰РµРЅРёРµ РќР• СѓРґР°Р»СЏРµС‚СЃСЏ (С‚РѕР»СЊРєРѕ РѕС‡РёС‰Р°РµС‚СЃСЏ pointer). Р”РІР° Р·Р°РјРєР° СЂР°Р±РѕС‚Р°СЋС‚ РЅРµР·Р°РІРёСЃРёРјРѕ. tsc 0 РѕС€РёР±РѕРє РѕР±Р° РїСЂРёР»РѕР¶РµРЅРёСЏ. Commit `b869c03`. |
-| 2026-05-14 17:30 | **Phase 2.10+ Gate Fix вЂ” Frozen UI РїСЂРё РїР°СЂР°Р»Р»РµР»СЊРЅРѕРј РІРІРѕРґРµ С‚СЂР°РЅР·Р°РєС†РёР№.** РџСЂРѕР±Р»РµРјР°: TX1 РѕС‚РєСЂС‹РІР°РµС‚ РїРёРєРµСЂ СЃС‡С‘С‚Р° в†’ TX2 (webhook step-7) СѓРґР°Р»СЏРµС‚ РїРёРєРµСЂ (gate_sent РµС‰С‘ РЅРµ СѓСЃС‚Р°РЅРѕРІР»РµРЅ) в†’ ai-parse gate РїСЂРёСЃС‹Р»Р°РµС‚ РЅРѕРІСѓСЋ РєР°СЂС‚РѕС‡РєСѓ СЃ РїРёРєРµСЂРѕРј Рё СѓСЃС‚Р°РЅР°РІР»РёРІР°РµС‚ gate_sent в†’ TX3 (webhook step-7) СѓРґР°Р»СЏРµС‚ gate-РєР°СЂС‚РѕС‡РєСѓ (gate_sent РЅРµ РїСЂРѕРІРµСЂСЏР»СЃСЏ!) в†’ ai-parse РјРѕР»С‡РёС‚ (gate_sent SET в†’ silently ignore) в†’ TX4, TX5... С†РёРєР»: СЃРѕРѕР±С‰РµРЅРёРµ РїСЂРёС…РѕРґРёС‚, СѓРґР°Р»СЏРµС‚СЃСЏ, РѕС‚РІРµС‚Р° РЅРµС‚ вЂ” **Р—РђР’РРЎРћРќ**. **Fix 1 (webhook.route.ts СЃС‚СЂРѕРєРё 5446вЂ“5458):** `const gateSentActive = await redisConnection.exists('midas:gate_sent:...')`. Р•СЃР»Рё Р°РєС‚РёРІРµРЅ вЂ” `deleteMessage` Рё `clearActiveMessageId` РќР• РІС‹Р·С‹РІР°СЋС‚СЃСЏ. Gate-РєР°СЂС‚РѕС‡РєР° РѕСЃС‚Р°С‘С‚СЃСЏ РІРёРґРёРјРѕР№ РїСЂРё TX3, TX4... **Fix 2 (webhook.route.ts СЃС‚СЂРѕРєР° 1539, ia:pk: handler):** `redisConnection.del('midas:gate_sent:...')` РїРѕСЃР»Рµ `setDraftAccountId` вЂ” РЅРѕСЂРјР°Р»СЊРЅС‹Р№ flow РІРѕСЃСЃС‚Р°РЅР°РІР»РёРІР°РµС‚СЃСЏ СЃСЂР°Р·Сѓ РїРѕСЃР»Рµ РІС‹Р±РѕСЂР° СЃС‡С‘С‚Р°. **Fix 3 (ai-parse.worker.ts):** Gate СЂРµРєРѕРЅСЃС‚СЂСѓРёСЂСѓРµС‚ РїРѕР»РЅС‹Р№ РїРёРєРµСЂ СЃС‡РµС‚РѕРІ (inline keyboard СЃ РєРЅРѕРїРєР°РјРё СЃС‡РµС‚РѕРІ + вњ–пёЏ РћС‚РјРµРЅР°) РєРѕРіРґР° `pendingDraft.accountId === null` вЂ” РІРјРµСЃС‚Рѕ РїСѓСЃС‚РѕР№ confirm-РєР»Р°РІРёР°С‚СѓСЂС‹. **Р–РёР·РЅРµРЅРЅС‹Р№ С†РёРєР» gate_sent:** SET ai-parse.worker (РїСЂРё gate) в†’ DEL ia:cancel (СЃС‚СЂРѕРєР° 1432, РґРѕ С„РёРєСЃР°) / ia:pk: (Р”РћР‘РђР’Р›Р•РќРћ) / approve/reject confirmation.worker (СЃС‚СЂРѕРєР° 268, РґРѕ С„РёРєСЃР°) / TTL auto 1h. Scope: 2 С„Р°Р№Р»Р° (webhook.route.ts, ai-parse.worker.ts) + СѓС‚РёР»РёС‚Р° fix-stuck-draft.mjs. tsc 0 РѕС€РёР±РѕРє. git commit `8d25ec1`, push origin main вњ…. Railway: Midas вњ… Online, background-workers вњ… Online. |
-| 2026-05-14 20:00 | **Phase 2.5+ вЂ” Currency-Aware Picker: Bot Layer (telegram-bot).** РџСЂРѕР±Р»РµРјР°: РІ РїРёРєРµСЂРµ СЃС‡С‘С‚РѕРІ РїСЂРё USD-С‚СЂР°РЅР·Р°РєС†РёРё РїРѕРєР°Р·С‹РІР°Р»СЃСЏ USDT-СЃС‡С‘С‚, С…РѕС‚СЏ СЌС‚Рѕ СЃС‚РµР№Р±Р»РєРѕРёРЅ Рё РѕРЅ РЅРµ РєРѕРЅРІРµСЂС‚РёСЂСѓРµС‚СЃСЏ РІ С„РёР°С‚. **Р РµР°Р»РёР·Р°С†РёСЏ (4 С„Р°Р№Р»Р°):** (1) `account-currency-validator.service.ts` вЂ” РґРѕР±Р°РІР»РµРЅР° С„СѓРЅРєС†РёСЏ `isKnownCurrency(code)`: РїСЂРѕРІРµСЂСЏРµС‚ РєРѕРґ РїРѕ С‚СЂС‘Рј РІР°Р№С‚Р»РёСЃС‚Р°Рј (FIAT_SET + STABLECOINS + CRYPTO_SET). РџСЂРµРґРѕС‚РІСЂР°С‰Р°РµС‚ СЃРѕР·РґР°РЅРёРµ С„Р°РЅС‚РѕРјРЅС‹С… РІР°Р»СЋС‚ С‚РёРїР° В«UDSВ» РёР»Рё В«Р•Р’Р В». (2) `clarification.service.ts` вЂ” РІ `validateCurrencyCode()` РґРѕР±Р°РІР»РµРЅР° СЂР°РЅРЅСЏСЏ РїСЂРѕРІРµСЂРєР° `!isKnownCurrency(upper)` в†’ РІРѕР·РІСЂР°С‚ `null` РґРѕ Р·Р°РїРёСЃРё РІ Р‘Р”. (3) `account.service.ts` вЂ” `getWorkspaceAccountsWithBalances()` РїРѕР»СѓС‡Р°РµС‚ РѕРїС†РёРѕРЅР°Р»СЊРЅС‹Р№ 4-Р№ РїР°СЂР°РјРµС‚СЂ `parsedCurrency?`. РџРѕСЃР»Рµ SQL-Р·Р°РїСЂРѕСЃР°: РµСЃР»Рё tx вЂ” С„РёР°С‚ в†’ exact-match СЃРЅР°С‡Р°Р»Р° + РѕСЃС‚Р°Р»СЊРЅС‹Рµ С„РёР°С‚РЅС‹Рµ; РµСЃР»Рё СЃС‚РµР№Р±Р»РєРѕРёРЅ/РєСЂРёРїС‚Рѕ в†’ С‚РѕР»СЊРєРѕ exact match. (4) `account-inline-keyboard.service.ts` вЂ” `getPickerScreenText(intent, parsedCurrency?)` РґРѕР±Р°РІР»СЏРµС‚ РєРѕРЅС‚РµРєСЃС‚РЅСѓСЋ РїРѕРґСЃРєР°Р·РєСѓ; `getPickerEmptyText(parsedCurrency?)` вЂ” В«РќРµС‚ USDT-СЃС‡РµС‚РѕРІВ» РІРјРµСЃС‚Рѕ РѕР±С‰РµРіРѕ СЃРѕРѕР±С‰РµРЅРёСЏ. `webhook.route.ts` вЂ” РїСЂРѕР±СЂР°СЃС‹РІР°РµС‚ `draft.parsed_currency` РІ 3 entry points (sendAndStorePreview, ia:delink, ia:showpicker). РџРµСЂРІС‹Р№ РґРµРїР»РѕР№ СѓРїР°Р» вЂ” TS6133 (ACCOUNT_PICKER_EMPTY_TEXT РІ РёРјРїРѕСЂС‚Рµ РЅРѕ РЅРµ РёСЃРїРѕР»СЊР·СѓРµС‚СЃСЏ). РСЃРїСЂР°РІР»РµРЅРѕ РєРѕРјРјРёС‚РѕРј `04f7e81`. |
-| 2026-05-14 20:10 | **Phase 2.5+ вЂ” Currency-Aware Picker: Worker Layer (background-workers). Root Cause Fix.** РћР±РЅР°СЂСѓР¶РµРЅРѕ: РЅР°С‡Р°Р»СЊРЅС‹Р№ РїРёРєРµСЂ СЃС‚СЂРѕРёС‚СЃСЏ РџРћР›РќРћРЎРўР¬Р® РІ `ai-parse.worker.ts` (background-workers), Р° РЅРµ РІ `telegram-bot`. РР·РјРµРЅРµРЅРёСЏ РІ `account.service.ts` (telegram-bot) РЅР° initial picker РЅРµ РІР»РёСЏСЋС‚ РЅРёРєР°Рє. **Р РµР°Р»РёР·Р°С†РёСЏ (`ai-parse.worker.ts`):** Р”РѕР±Р°РІР»РµРЅС‹ Р»РѕРєР°Р»СЊРЅС‹Рµ РєР»Р°СЃСЃРёС„РёРєР°С‚РѕСЂС‹: `PICKER_STABLECOINS` (10 Р·Р°РїРёСЃРµР№), `PICKER_KNOWN_CRYPTOS` (27 Р·Р°РїРёСЃРµР№), `classifyPickerCcy(code)`, `filterPickerAccounts(accounts, txCurrency)` вЂ” Р°РЅР°Р»РѕРі Р»РѕРіРёРєРё `account.service.ts`. РџСЂРёРјРµРЅРµРЅРѕ РІ 2 РјРµСЃС‚Р°С…: (A) **Initial picker** (СЃС‚СЂРѕРєР° ~620) вЂ” С„РёР»СЊС‚СЂСѓРµС‚ РїРѕ `aiData?.currency` (РєРѕРіРґР° AI РІРµСЂРЅСѓР» currency, РЅР°РїСЂРёРјРµСЂ В«USDTВ»); (B) **Gate picker** (СЃС‚СЂРѕРєР° ~340) вЂ” С„РёР»СЊС‚СЂСѓРµС‚ РїРѕ `pendingDraft.parsedCurrency` (РІРѕСЃСЃС‚Р°РЅРѕРІР»РµРЅРёРµ РїРёРєРµСЂР° РїСЂРё gate-Р±Р»РѕРєРёСЂРѕРІРєРµ). РС‚РѕРі С„РёР»СЊС‚СЂР°С†РёРё: `{USD tx}` в†’ [USD-СЃС‡РµС‚Р°] + [РґСЂСѓРіРёРµ С„РёР°С‚РЅС‹Рµ]; `{USDT tx}` в†’ [С‚РѕР»СЊРєРѕ USDT-СЃС‡РµС‚Р°]. tsc 0 РѕС€РёР±РѕРє (РѕР±Р° РїСЂРёР»РѕР¶РµРЅРёСЏ). git commit `0085d8f`, push origin main вњ…. Railway auto-deploy triggered. |
-| 2026-05-15 02:00 | **Balance Phase A вЂ” Grouped UI Р—РђР”Р•РџР›РћР•Рќ.** `balance-keyboard.service.ts` (MODIFY): `GroupType` union, `GROUP_EMOJI` map, `GROUP_ORDER` priority, `classifyAccountGroup(name, currency)` СЌРІСЂРёСЃС‚РёРєР° (Р‘Р°РЅРєРё/РљСЂРёРїС‚РѕР±РёСЂР¶Рё/РљСЂРёРїС‚Рѕ-РєРѕС€РµР»СЊРєРё/РќР°Р»РёС‡РЅС‹Рµ/РџСЂРѕС‡РµРµ), `buildBalanceListKeyboard` СЃ РіСЂСѓРїРїРёСЂРѕРІРєРѕР№ Рё emoji-РїСЂРµС„РёРєСЃР°РјРё, `export formatBalanceShort`. `balance.service.ts` (MODIFY): СЃРµРєС†РёРѕРЅРёСЂРѕРІР°РЅРЅС‹Р№ С‚РµРєСЃС‚ getBalanceData() СЃ СЌРјРѕРґР·Рё РіСЂСѓРїРї, СѓРґР°Р»С‘РЅ CURRENCY_TOTALS_SQL. tsc 0 РѕС€РёР±РѕРє. Commit `4a1748c` push to main. Railway auto-deploy вњ…. |
-| 2026-05-15 02:27 | **Balance Phase B-1 вЂ” DB Migration РџР РРњР•РќР•РќРђ.** `packages/database/migrations/1779800000000_account-parent-and-subtype.js` (NEW): `parent_account_id VARCHAR(26) FK ON DELETE CASCADE`, `sub_type TEXT NOT NULL DEFAULT 'general'` CHECK constraint, `idx_account_sources_parent` (partial). Р РµС€РµРЅР° ESM-РїСЂРѕР±Р»РµРјР° `1779400000000` (exports в†’ export const). РњРёРіСЂР°С†РёСЏ РїСЂРёРјРµРЅРµРЅР° `node-pg-migrate up --check-order false`. РђСѓРґРёС‚: FK 31/31 вњ…, С„РѕСЂРјСѓР»Р° initial_balance+incomeв€’expense вњ…, INSERT С‚СЂР°РЅР·Р°РєС†РёР№ РЅРµ Р·Р°С‚СЂРѕРЅСѓС‚ вњ…. Commit `75156b9`. |
-| 2026-05-15 02:30 | **РћР±РЅРѕРІР»РµРЅ workflow_state.md РґР»СЏ Phase B-2 handoff.** Section 1 (status), Section 2 (С„Р°Р·С‹), Section 8 (С„Р°Р№Р»С‹), Section 9 (РїСЂРѕРјРїС‚), Section 10 (РёСЃС‚РѕСЂРёСЏ). РЎР»РµРґСѓСЋС‰РёР№ С€Р°Рі: Phase B-2 (PER_ACCOUNT_SQL + Р»РµСЃРµРЅРєР° в”њ/в”” + Р°РіСЂРµРіР°С†РёСЏ РґРѕС‡РµСЂРЅРёС…). |
-| 2026-05-15 23:40 | **Balance Phase B-2 вЂ” Hierarchical Ladder View Р—РђР”Р•РџР›РћР•Рќ.** `balance.service.ts`: `PER_ACCOUNT_SQL` РґРѕР±Р°РІР»РµРЅ `a.parent_account_id`; `AccountBalanceRow` + `parent_account_id: string | null`; `getBalanceData()` СЃС‚СЂРѕРёС‚ childrenMap/childCountMap, СЂРµРЅРґРµСЂРёС‚ в”њ/в”” Р»РµСЃРµРЅРєСѓ РґР»СЏ parentв†’children; Р»РёСЃС‚РѕРІС‹Рµ СЃС‡РµС‚Р° Р±РµР· РёР·РјРµРЅРµРЅРёР№ (backward compat). `balance-keyboard.service.ts`: `BalanceAccountRow` + `parentAccountId?`+`childCount?`; `BalanceCallbackCmd` + `add_currency`; `parseBalanceCallback` `bl:ac:{id}` вЂ” SEC-01 compliant; `pluralizeCurrency()` (РІР°Р»СЋС‚Р°/РІР°Р»СЋС‚С‹/РІР°Р»СЋС‚, mod10/mod100); `buildBalanceListKeyboard()` РїРµСЂРµРїРёСЃР°РЅ вЂ” РѕС‚РґРµР»СЏРµС‚ parents/children, parent СЃ РґРµС‚СЊРјРё: aggregation button + indented `в”” CURRENCY В· balance` child rows + `вћ• Р”РѕР±Р°РІРёС‚СЊ РІР°Р»СЋС‚Сѓ` (bl:ac:{parentId}); Р»РёСЃС‚РѕРІС‹Рµ СЃС‡РµС‚Р° вЂ” Phase A/LD++ rendering. tsc 0 errors. Commit `d04bcba` pushed to main. Railway auto-deploy triggered. |
-| 2026-05-14 22:00 | **Hotfix: РєРЅРѕРїРєР° "вњ–пёЏ РћС‚РјРµРЅР°" РІ РїРёРєРµСЂРµ СЃС‡РµС‚РѕРІ + "СЋР·РґС‚" Р°Р»РёР°СЃ USDT + РїСЂРѕРјРїС‚-РїСЂРёРјРµСЂС‹.** (1) `account-inline-keyboard.service.ts` (MODIFY) СЃС‚СЂРѕРєР° 381вЂ“383: РєРЅРѕРїРєР° `buildAccountPickerV2Keyboard` В«вњ–пёЏ РћС‚РјРµРЅР°В» РёР·РјРµРЅРµРЅР° СЃ `ia:pk:back:{draftId}` в†’ `ia:cancel:{draftId}`. Р”Рѕ С„РёРєСЃР°: РЅР°Р¶Р°С‚РёРµ В«РћС‚РјРµРЅР°В» РІРѕР·РІСЂР°С‰Р°Р»Рѕ Рє РєР°СЂС‚РѕС‡РєРµ РїСЂРµРІСЊСЋ СЃ РєРЅРѕРїРєР°РјРё [вњЏпёЏ РР·РјРµРЅРёС‚СЊ|вњ–пёЏ РћС‚РјРµРЅР°]+[рџЏ¦ Р’С‹Р±СЂР°С‚СЊ СЃС‡С‘С‚]. РџРѕСЃР»Рµ С„РёРєСЃР°: `ia:cancel` handler СЂРµРґР°РєС‚РёСЂСѓРµС‚ СЃРѕРѕР±С‰РµРЅРёРµ в†’ В«вќЊ РћС‚РјРµРЅРµРЅРѕВ» Р±РµР· РєРЅРѕРїРѕРє, СЃС‚Р°РІРёС‚ С‡РµСЂРЅРѕРІРёРєСѓ СЃС‚Р°С‚СѓСЃ `rejected`, С‡РёСЃС‚РёС‚ Redis. (2) `packages/ai-core/src/prompts.ts` вЂ” РґРѕР±Р°РІР»РµРЅ `"СЋР·РґС‚"` РІ СЃРїРёСЃРѕРє Р°Р»РёР°СЃРѕРІ USDT (СЃС‚СЂРѕРєР° 37): Р±С‹Р»Рѕ `"СЋСЃРґС‚", "С‚РµР·РµСЂ", "tether", "usdt"` в†’ СЃС‚Р°Р»Рѕ `"СЋСЃРґС‚", "СЋР·РґС‚", "С‚РµР·РµСЂ", "tether", "usdt"`. (3) `packages/ai-core/src/prompts.ts` вЂ” РґРѕР±Р°РІР»РµРЅС‹ 2 РїСЂРёРјРµСЂР° РІ СЃРµРєС†РёСЋ `-- Partial (amount missing) --`: `"РєСѓРїРёР» РєРІР°СЂС‚РёСЂСѓ СЋР·РґС‚"` в†’ `{intent:expense,currency:USDT,item_hint:РєРІР°СЂС‚РёСЂР°,confidence:0.75}` Рё `"РєСѓРїРёР» РЅРµРґРІРёР¶РєСѓ usdt"` в†’ `{intent:expense,currency:USDT,item_hint:РЅРµРґРІРёР¶РёРјРѕСЃС‚СЊ,confidence:0.75}`. Р¦РµР»СЊ: Claude С‚РµРїРµСЂСЊ РІРѕР·РІСЂР°С‰Р°РµС‚ `item_hint` РґР°Р¶Рµ РєРѕРіРґР° РЅРµС‚ `amount`. tsc 0 РѕС€РёР±РѕРє. git commit `ccaec87`, push origin main вњ…. Railway auto-deploy triggered. |
-| 2026-05-14 20:00 | **Phase 2.5+ вЂ” Currency-Aware Picker: Bot Layer (telegram-bot).** РџСЂРѕР±Р»РµРјР°: РІ РїРёРєРµСЂРµ СЃС‡С‘С‚РѕРІ РїСЂРё USD-С‚СЂР°РЅР·Р°РєС†РёРё РїРѕРєР°Р·С‹РІР°Р»СЃСЏ USDT-СЃС‡С‘С‚, С…РѕС‚СЏ СЌС‚Рѕ СЃС‚РµР№Р±Р»РєРѕРёРЅ Рё РѕРЅ РЅРµ РєРѕРЅРІРµСЂС‚РёСЂСѓРµС‚СЃСЏ РІ С„РёР°С‚. **Р РµР°Р»РёР·Р°С†РёСЏ (4 С„Р°Р№Р»Р°):** (1) `account-currency-validator.service.ts` вЂ” РґРѕР±Р°РІР»РµРЅР° С„СѓРЅРєС†РёСЏ `isKnownCurrency(code)`: РїСЂРѕРІРµСЂСЏРµС‚ РєРѕРґ РїРѕ С‚СЂС‘Рј РІР°Р№С‚Р»РёСЃС‚Р°Рј (FIAT_SET + STABLECOINS + CRYPTO_SET). РџСЂРµРґРѕС‚РІСЂР°С‰Р°РµС‚ СЃРѕР·РґР°РЅРёРµ С„Р°РЅС‚РѕРјРЅС‹С… РІР°Р»СЋС‚ С‚РёРїР° В«UDSВ» РёР»Рё В«Р•Р’Р В». (2) `clarification.service.ts` вЂ” РІ `validateCurrencyCode()` РґРѕР±Р°РІР»РµРЅР° СЂР°РЅРЅСЏСЏ РїСЂРѕРІРµСЂРєР° `!isKnownCurrency(upper)` в†’ РІРѕР·РІСЂР°С‚ `null` РґРѕ Р·Р°РїРёСЃРё РІ Р‘Р”. (3) `account.service.ts` вЂ” `getWorkspaceAccountsWithBalances()` РїРѕР»СѓС‡Р°РµС‚ РѕРїС†РёРѕРЅР°Р»СЊРЅС‹Р№ 4-Р№ РїР°СЂР°РјРµС‚СЂ `parsedCurrency?`. РџРѕСЃР»Рµ SQL-Р·Р°РїСЂРѕСЃР°: РµСЃР»Рё tx вЂ” С„РёР°С‚ в†’ exact-match СЃРЅР°С‡Р°Р»Р° + РѕСЃС‚Р°Р»СЊРЅС‹Рµ С„РёР°С‚РЅС‹Рµ; РµСЃР»Рё СЃС‚РµР№Р±Р»РєРѕРёРЅ/РєСЂРёРїС‚Рѕ в†’ С‚РѕР»СЊРєРѕ exact match. (4) `account-inline-keyboard.service.ts` вЂ” `getPickerScreenText(intent, parsedCurrency?)` РґРѕР±Р°РІР»СЏРµС‚ РєРѕРЅС‚РµРєСЃС‚РЅСѓСЋ РїРѕРґСЃРєР°Р·РєСѓ; `getPickerEmptyText(parsedCurrency?)` вЂ” В«РќРµС‚ USDT-СЃС‡РµС‚РѕРІВ» РІРјРµСЃС‚Рѕ РѕР±С‰РµРіРѕ СЃРѕРѕР±С‰РµРЅРёСЏ. `webhook.route.ts` вЂ” РїСЂРѕР±СЂР°СЃС‹РІР°РµС‚ `draft.parsed_currency` РІ 3 entry points (sendAndStorePreview, ia:delink, ia:showpicker). РџРµСЂРІС‹Р№ РґРµРїР»РѕР№ СѓРїР°Р» вЂ” TS6133 (ACCOUNT_PICKER_EMPTY_TEXT РІ РёРјРїРѕСЂС‚Рµ РЅРѕ РЅРµ РёСЃРїРѕР»СЊР·СѓРµС‚СЃСЏ). РСЃРїСЂР°РІР»РµРЅРѕ РєРѕРјРјРёС‚РѕРј `04f7e81`. |
-| 2026-05-14 20:10 | **Phase 2.5+ вЂ” Currency-Aware Picker: Worker Layer (background-workers). Root Cause Fix.** РћР±РЅР°СЂСѓР¶РµРЅРѕ: РЅР°С‡Р°Р»СЊРЅС‹Р№ РїРёРєРµСЂ СЃС‚СЂРѕРёС‚СЃСЏ РџРћР›РќРћРЎРўР¬Р® РІ `ai-parse.worker.ts` (background-workers), Р° РЅРµ РІ `telegram-bot`. РР·РјРµРЅРµРЅРёСЏ РІ `account.service.ts` (telegram-bot) РЅР° initial picker РЅРµ РІР»РёСЏСЋС‚ РЅРёРєР°Рє. **Р РµР°Р»РёР·Р°С†РёСЏ (`ai-parse.worker.ts`):** Р”РѕР±Р°РІР»РµРЅС‹ Р»РѕРєР°Р»СЊРЅС‹Рµ РєР»Р°СЃСЃРёС„РёРєР°С‚РѕСЂС‹: `PICKER_STABLECOINS` (10 Р·Р°РїРёСЃРµР№), `PICKER_KNOWN_CRYPTOS` (27 Р·Р°РїРёСЃРµР№), `classifyPickerCcy(code)`, `filterPickerAccounts(accounts, txCurrency)` вЂ” Р°РЅР°Р»РѕРі Р»РѕРіРёРєРё `account.service.ts`. РџСЂРёРјРµРЅРµРЅРѕ РІ 2 РјРµСЃС‚Р°С…: (A) **Initial picker** (СЃС‚СЂРѕРєР° ~620) вЂ” С„РёР»СЊС‚СЂСѓРµС‚ РїРѕ `aiData?.currency` (РєРѕРіРґР° AI РІРµСЂРЅСѓР» currency, РЅР°РїСЂРёРјРµСЂ В«USDTВ»); (B) **Gate picker** (СЃС‚СЂРѕРєР° ~340) вЂ” С„РёР»СЊС‚СЂСѓРµС‚ РїРѕ `pendingDraft.parsedCurrency` (РІРѕСЃСЃС‚Р°РЅРѕРІР»РµРЅРёРµ РїРёРєРµСЂР° РїСЂРё gate-Р±Р»РѕРєРёСЂРѕРІРєРµ). РС‚РѕРі С„РёР»СЊС‚СЂР°С†РёРё: `{USD tx}` в†’ [USD-СЃС‡РµС‚Р°] + [РґСЂСѓРіРёРµ С„РёР°С‚РЅС‹Рµ]; `{USDT tx}` в†’ [С‚РѕР»СЊРєРѕ USDT-СЃС‡РµС‚Р°]. tsc 0 РѕС€РёР±РѕРє (РѕР±Р° РїСЂРёР»РѕР¶РµРЅРёСЏ). git commit `0085d8f`, push origin main вњ…. Railway auto-deploy triggered. |
+| 2026-05-07 21:20 | Phase 1.31 advisory delivered: Inline account creation during transaction input. Scope: account_hint optional field in AI schema; parsed_account_hint TEXT column in transaction_drafts (1 migration); account-fuzzy.service.ts (NEW, Jaro-Winkler, short-ticker exact-only); account-inline-keyboard.service.ts (NEW, ia: namespace); midas:ia:{draftId} Redis TTL 300s for rename sub-flow; addAccountWithCurrency() reused from Phase 1.30; max callback_data 60 bytes (ia:use:{accountId}:{draftId}); Scenario Б (transfer) excluded — Phase 1.32+; Option A architecture (resolve in ai-parse worker before first keyboard). No code changes. Awaiting owner APPROVED. |
+| 2026-05-07 22:00 | Phase 1.31 accepted after final verification; parsed_account_hint added to transaction_drafts; optional AI account_hint added; Option A implemented — account resolution before final draft confirmation; exact match sets draft.account_id silently; fuzzy/no-match account UX added; ia: callback namespace implemented with max 62 bytes; Redis rename state used only for temporary custom-name flow; transfer dual-account excluded; no to_account_id; no new deps; no Mini App; Phase 1.31 smoke 27/27 PASS; key regression gates PASS; typecheck/lint 13/13 PASS; Traceability Review PASS; Adversarial Security Review PASS; Scope Guard Review PASS; implementation commit 7c065f7; workflow commit 04209fc. Tag phase-1.31-accepted pushed. Status: WAITING_FOR_OWNER_APPROVAL_TO_START_NEXT_PHASE. |
+| 2026-05-08 08:00 | Phase 1.32 Smart Text Input / Clarification Engine implemented and accepted. Migration 1778900000000_draft-clarification-state.js: `needs_clarification` status added to transaction_drafts state machine trigger. AI pipeline updated: amount/intent optional in schema, `PARTIAL_CONFIDENCE_THRESHOLD=0.3`, `MissingField` type, `partial` ParseResult status, `computeMissingFields()`. New `clarification.service.ts` in telegram-bot: `clar:` callback namespace for intent/category selection, `midas:clar:` Redis TTL 300s for amount text intercept. `webhook.route.ts`: clar: callback handler, clarification text intercept, buildClarificationScreen usage. `draft.service.ts`: `patchDraftAmount()`, `patchDraftIntent()`, `patchDraftCategory()` — atomic field patches returning `{status: 'ready'\|'still_needs', field}`. 57/57 Phase 1.32 smoke PASS. 0 lint/typecheck errors. Implementation commit e00f37e. Tag `phase-1.32-accepted` pushed. |
+| 2026-05-08 09:00 | Phase 1.33 Clean Chat / Single Active Message UX implemented and accepted. UX-only phase — no migrations, no DB schema changes. `active-message.service.ts` (NEW): Redis pointer `midas:am:{userId}:{chatId}` (TTL 24h) tracks the current bot message per chat. `telegram-api.ts` (MODIFY): `upsertBotMessage()` edit-first strategy — tries `editMessageText`, falls back to `sendMessage`, updates Redis pointer. All workers (ai-parse, confirmation, notifications) now use edit-first pattern. `shared/index.ts` (MODIFY): `NotificationJobPayload` extended with `telegramUserId` + `activeMessageId`. Result: bot edits its last message instead of sending new ones — clean single-screen app UX. 0 typecheck errors. Batch-accepted by owner decision. Commit 36cacd7. Tag `phase-1.33-accepted` pushed. |
+| 2026-05-08 09:30 | Phase 1.34 Rich Screen Cards implemented and accepted. UX-only phase — no migrations, no DB schema changes. `screen-builder.ts` (NEW in both `telegram-bot` and `background-workers`): pure functions for all UI screens — `buildPreviewScreen()`, `buildConfirmedScreen()`, `buildClarificationScreen()`, `buildConfirmKeyboard()`, `buildPostConfirmKeyboard()`, `buildNavKeyboard()`, `intentEmoji()`, `intentLabel()`, `escapeHtml()`. Replaces hardcoded text strings across all workers and route handlers with standardized card templates. 0 typecheck errors. Batch-accepted by owner decision. Commit 6e899f0. Tag `phase-1.34-accepted` pushed. |
+| 2026-05-08 11:00 | Phase 1.35 Intelligent Transaction Understanding — core implementation complete. Migration `1779000000000_intelligent-transactions.js`: `item_name TEXT` + `parsed_category_hint TEXT` columns on transaction_drafts; `item_name TEXT` on transactions; `default_expense_account_id` + `default_income_account_id` FK columns on workspaces; `category_group` ENUM; 28-category taxonomy backfill; SECDEF onboarding function updated. `category-resolver.service.ts` (NEW): 3-stage pipeline — exact DB match > 200+ alias map > fallback «Другое». `prompts.ts` + `schemas.ts`: `item_hint` + `category_hint` added to AI schema with examples. `draft.service.ts`: propagates item_name, parsed_category_hint. `draft-confirmation.service.ts`: CategoryResolver integration, resolveDefaultAccount() with workspace defaults > LIMIT 1 > auto-create. `confirmation.worker.ts`: rich post-confirm cards with item/category. smoke-test-phase135.mjs: 55 tests PASS. 5/5 typecheck PASS. Deployed to Railway. |
+| 2026-05-08 16:20 | Phase 1.35 hotfix #1: Rich preview cards across all confirmation entry points. Problem: after clarification (amount/intent/category selection), generic text like «?? Готово. Подтвердите или отклоните:» was shown instead of the rich transaction card. Fix: introduced `confirmKb(draftId)` centralized keyboard helper (DRY pattern replacing 8 hardcoded keyboards) and `confirmPreview(workspaceId, userId, draftId)` helper (fetches draft data via `getDraftFields` > builds rich card via `buildPreviewScreen`). All 8 confirmation entry points updated: ia:skip, ia:create (new account), ia:use (select account), clar:intent, clar:category, clar:nocat, clarification amount text intercept, ia rename text intercept. Typecheck 5/5 PASS. Commit d037f75. Deployed to Railway. |
+| 2026-05-08 16:29 | Phase 1.35 hotfix #2: Defensive String() coercion for Postgres NUMERIC amounts. Problem: `fetchApprovedTransactionCard` and `approveDraft` returned `amount` as raw Postgres NUMERIC (JavaScript `number`), but `buildConfirmedScreen` passed it to `escapeHtml()` which calls `.replace()` — crashed with `TypeError: input.replace is not a function`. Root cause: pg driver returns NUMERIC as `number`, not `string`. Fix: (1) `approveDraft`: `amount: String(draft.parsed_amount ?? '0')`, (2) `fetchApprovedTransactionCard`: `amount: String(tx.original_amount)`, (3) `escapeHtml`: defensive `typeof input === 'string' ? input : String(input)`. Also fixed incorrect SQL column names in `fetchApprovedTransactionCard`: `amount` > `original_amount`, `account_source_id` > `account_id`. Typecheck 5/5 PASS. Commit 6db3d69. Deployed to Railway. |
+| 2026-05-09 09:46 | Phase 1.36-UX Sub-step 1: Persistent Navigation Keyboard (core). `telegram-api.ts` — `ReplyKeyboardMarkup` interface + `sendMessageWithReplyKeyboard()`. `screen-builder.ts` (telegram-bot) — `buildMainMenuKeyboard()`, `NAV_BTN_BALANCE/REPORT/SETTINGS`, `input_field_placeholder`. `webhook.route.ts` — Reply Keyboard sent on /start (new+existing users), 3 text intercepts before AI parse for [?? Баланс]/[?? Отчёт]/[?? Настройки] buttons. Collateral lint: `ai-core/claude-client.ts` (no-useless-assignment), `draft-confirmation.service.ts` (no-unnecessary-type-conversion ?3), both `screen-builder.ts` (restrict-template-expressions). 13/13 PASS. |
+| 2026-05-09 10:00 | Phase 1.36-UX Sub-step 2: UX Bug Fixes & Consistency. (1) `webhook.route.ts` confirmKb layout standardized: ? full-width top row + [?? Изменить|?? Отмена] split row — matches workers layout. (2) `redisConnection.del(clarKey)` added on approve/reject in `webhook.route.ts` — prevents stale `midas:clar:*` key intercepting next user message after confirmation (silent message discard race condition fixed). (3) `screen-builder.ts` both apps — emoji ?>?? for visual weight parity with ? and ??. 13/13 PASS. Commit `c2f012f`. |
+| 2026-05-09 10:12 | Phase 1.36-UX Sub-step 3: Reply Keyboard auto-activation. `shared/index.ts` — `replyKeyboardJson?` added to `NotificationJobPayload` (documented: only valid on sendMessage, not editMessageText). `background-workers/screen-builder.ts` — `buildNavKeyboard()` replaced by `buildMainMenuReplyKeyboard()` (returns plain JS object with `keyboard` array, not InlineKeyboard); `buildPostConfirmKeyboard()` nav row [?? Баланс][?? Отчёт] removed — only [?? Изменить запись] remains. `confirmation.worker.ts` — import updated (buildNavKeyboard>buildMainMenuReplyKeyboard); rejected/expired/intent_missing now pass `replyKeyboardJson` (not `inlineKeyboardJson`). `notifications.worker.ts` — keyboard routing split: `inlineReplyMarkup` for editMessageText path, `freshReplyMarkup` (prefers replyKeyboardJson) for sendMessage path. Reply Keyboard auto-activates on first new message without /start. 13/13 PASS. Commit `f10aa22`. |
+| 2026-05-09 10:20 | Phase 1.36-UX Sub-step 4: Keyboard collapsibility. `screen-builder.ts` both apps — `is_persistent: true` > `is_persistent: false`. Result: Telegram displays standard ? collapse icon next to ?? microphone button; user can hide/restore keyboard at will; keyboard re-appears on next bot sendMessage. 13/13 PASS. Commit `062d40d`. Deployed to Railway. |
+| 2026-05-09 12:57 | Phase 1.36-UX FINAL (accepted): Transaction history workflow + permanent keyboard. **Проблема:** edit-first стратегия через `midas:am:` pointer перезаписывала предыдущую карточку вместо создания новой — история транзакций не накапливалась. **Решение:** (1) `ai-parse.worker.ts` — убран `activeMessageId` из preview notifications; каждая preview-карточка всегда отправляется как новое сообщение. (2) `notifications.worker.ts` — при отправке preview (draftId присутствует) записывает `sentMessageId` в Redis `midas:preview:{draftId}` TTL 600s; удалён `setActiveMessagePointer` и весь AM-pointer механизм. (3) `confirmation.worker.ts` — на approve читает `midas:preview:{draftId}` > передаёт как `activeMessageId` в notifications (edit preview>confirmed in-place); на reject — `activeMessageId` не передаётся > новое сообщение. (4) Greeting: НЕ удаляется — остаётся постоянным носителем ReplyKeyboard; весь код удаления (deleteMessage + nav carrier) убран. `greetingMsgId` удалён из `NotificationJobPayload`. `shared` пересобран. Typecheck 0 errors (оба приложения). Commits `e879dfc` > `2cb86c4` > `8941c6d` > `2a15f31`. Deployed to Railway. Протестировано: 4 транзакции записаны, история накапливается, клавиатура [?? Баланс][?? Отчёт][?? Настройки] постоянно видна. |
+| 2026-05-09 13:09 | Phase 1.37 Step 1: Zero-clutter UX. `screen-builder.ts` (background-workers): `buildNonsenseScreen()` rewritten — removed all inline buttons ([?? Расход][?? Доход][?? Долг дал][?? Долг взял]), replaced with Variant 5 text-only prompt with input examples (`кофе 150 UAH · зарплата 5000 USDT`). `ai-parse.worker.ts`: added stale "Не понял" message deletion — stores `midas:clar:msg:{userId}:{chatId}` Redis key pointing to nonsense message_id; on next successful parse, deletes the old nonsense message via `deleteMessage()` API before sending new preview. `telegram-api.ts`: `editTelegramMessage()` — treats "message is not modified" 400 error as success (no redundant message generation). Typecheck 8/8 PASS. Commits `a4d49a9` > `ee85e5f`. |
+| 2026-05-09 13:34 | Phase 1.37 Step 2: Category taxonomy expansion. `prompts.ts`: Expanded from 28 to 30 categories (added Питомцы, Дом). International 500+ anchor items mapping: every category now has typical items across CIS (Пятёрочка, АТБ, Сільпо), EU (Lidl, Biedronka, IKEA), US (Walmart, Costco, Amazon, Starbucks) markets. Business categories expanded with global services: AWS, Stripe, Upwork, Fiverr, Google Ads, Facebook Ads, Notion, Figma, etc. Pet category: Royal Canin, Whiskas, Pro Plan, наполнитель, ветеринар. Дом: моющие средства, тряпки, полотенца, шторы, мебель. Typecheck 8/8 PASS. Commits `77a0ad9` > `5b02cf3`. |
+| 2026-05-09 14:09 | Phase 1.37 Step 3: Multilingual recognition + fuzzy matching. `prompts.ts`: Added MULTILINGUAL RECOGNITION section (RU/EN/UA — any language maps to correct category). FUZZY MATCHING section (typos: кофэ>кофе, нетфликс>Netflix; slang: комуналка>коммуналка>Жильё; transliteration: kafe>кафе, taksi>такси). KEY BILINGUAL PAIRS for non-obvious translations (шиномонтаж=tire service, эквайринг=payment processing, подгузники=diapers, наполнитель=cat litter, etc.). Commit `e147240`. |
+| 2026-05-09 14:10 | Phase 1.37 Step 4: Disambiguation rules + compound expressions + default intent priority. `prompts.ts`: Added 15 DISAMBIGUATION RULES (торт>Продукты/Подарки/Кафе by context; кофе>Кафе/Продукты; страховка>Транспорт/Здоровье/Путешествия; ремонт>Жильё/Транспорт/Оборудование; витамины>Здоровье/Питомцы; etc.). COMPOUND EXPRESSIONS (подарок жене>Подарки, корм для кота>Питомцы, билет в кино>Развлечения). DEFAULT INTENT PRIORITY (item+amount without verb = expense by default; income/transfer require explicit signal). Commit `03981d7`. |
+| 2026-05-09 14:14 | Phase 1.37 Step 5: ALLOWED_CATEGORIES code validation. `claude-client.ts`: Added `ALLOWED_CATEGORIES` Set (30 categories — 18 personal + 12 business). Post-Zod validation step: if `aiData.category_hint` is not in the set, replace with `Другое`. Prevents hallucinated categories from reaching CategoryResolverService. Typecheck 8/8 PASS. |
+| 2026-05-09 14:16 | Phase 1.37 Step 6: Documentation updates. `product-roadmap.md`: Added Phase 2.0 — AI Intelligence Evolution (3 components: 2.0-A self-learning from user edits, 2.0-B custom category recognition, 2.0-C regional bias from currency). Phase 1.37 + 2.0 added to summary table. Block 4 renamed from "Голос и Vision" to "AI Intelligence и Voice". `project_config.md`: Updated to v1.4, changelog v1.4 added, Section 2.8 AI Pipeline updated with multilingual/disambiguation/validation info. Commit `06bccb0`. Deployed to Railway. |
+| 2026-05-09 15:18 | Phase 1.37 complete. `workflow_state.md` updated: Section 1 (status > COMPLETE), Section 2 (Phase 1.37 row added), Section 3 (AI Pipeline updated), Section 4 (project_config v1.4), Section 10 (7 history entries). All documents synchronized. |
+| 2026-05-09 15:38 | Phase 1.37 VERIFICATION & ACCEPTANCE. 13/13 typecheck+lint PASS. CategoryResolver: Питомцы/Дом aliases added. Commit `641ad26`. Deployed to Railway. |
+| 2026-05-09 19:00 | **Phase 1.38 Fix #1:** Confirmation card not deleted on Cancel. `confirmation.worker.ts` reads `midas:preview:{draftId}` on both approve and reject paths — in-place edit to ? Отменено. |
+| 2026-05-09 19:04 | **Phase 1.38 Fix #2:** Unified blockquote currency prompt (Variant B). `screen-builder.ts` both apps: `<code>` tags replaced with blockquote text — no more green tap-able capsules. |
+| 2026-05-09 19:05 | **Phase 1.38 Fix #3:** `amt+cur` handler used `validateCurrencyCode()` (ISO-only) instead of `normalizeCurrencyInput()`. Fixed. `awaiting_cur` now extracts currency token from mixed input (e.g. «50 евро»). Commit `d59025f`. |
+| 2026-05-09 19:18 | **Phase 1.38 Rollback:** PRICE vs QUANTITY AI prompt rule reverted. Caused regressions («150 курток» not extracted as amount). Design decision: personal finance bots ALWAYS treat any number as a price. Original rule restored: «If ANY number present > ALWAYS extract as amount». Final commit `c59f2e1`. |
+| 2026-05-10 10:08 | **Phase 1.39 — Gate UX Edit-In-Place (Variant B).** `formatAmount()` в обоих screen-builder.ts исправлен: `String()` cast для Postgres NUMERIC типа — устранён TypeError (`raw.includes is not a function`). `clarification.service.ts`: `::TEXT` cast на `parsed_amount` в 2 SQL-запросах. `buildGatePausedPreview()` обновлён: ?? алерт-баннер + summary черновика (вместо старого текста без данных). Блок gate в `ai-parse.worker.ts` переработан: вместо 2 новых сообщений (paused edit + gate card) — **один** edit-in-place существующей preview-карточки с алертом и сохранением клавиатуры подтверждения. Commits `8fa8f91` > `089abf6`. Deployed to Railway — SUCCESS. |
+| 2026-05-10 10:30 | **Phase 1.40 — Dead Card Auto-Cleanup.** Логика: карточки «? Отменено» и «? Черновик истёк» автоматически удаляются из чата когда появляется следующая preview-карточка. В чате остаются только: pending (ждёт подтверждения) + approved (? Записано). Реализация: `confirmation.worker.ts` — после reject/expired сохраняет `previewMsgId` в Redis `midas:dead_card:{chatId}` TTL 24h. `draft-expiration.worker.ts` — CRON expiry тоже пишет dead_card. `ai-parse.worker.ts` — перед отправкой новой preview читает dead_card, передаёт как `deleteMessageId`, удаляет ключ. Если одновременно есть dead_card и clar_msg — приоритет у dead_card. TypeScript: 0 ошибок. Commit `51eaf10`. Deployed to Railway — SUCCESS. |
+| 2026-05-10 15:30 | **Phase 2.0 — Transaction Hub + Reports 2.0 + Settings 2.0 deployed.** GitHub auto-deploy from `main`. |
+| 2026-05-10 18:44 | **Phase 2.1 — Account Management Dashboard.** Полная реализация интерактивного управления счетами через баланс. **Новые файлы:** `balance-keyboard.service.ts` (450+ строк — parseBalanceCallback, buildBalanceListKeyboard, buildAccountActionsKeyboard, buildDeleteConfirmKeyboard, buildCurrencyWarningKeyboard, buildBalanceFiatCurrencyKeyboard, formatAccountDetailText, BalanceAccountRow type). **Модифицированные файлы:** (1) `account-onboard-keyboard.service.ts` — расширен пресетами банков (10: Тинькофф, Сбербанк, Альфа, ВТБ, Моно, Приват, Каспи, N26, Revolut, Wise) и кошельков (9: Trust Wallet, MetaMask, Exodus, Ledger, Trezor, Phantom, Coinbase Wallet, SafePal, Tangem). (2) `account.service.ts` — `renameAccount()`, `changeAccountCurrency()`, `softDeleteAccount()`. (3) `balance.service.ts` — `getBalanceData()`, `getAccountDetail()`, `setAccountBalanceById()`, `getAccountTxCount()`. (4) `webhook.route.ts` — bl: callback handler, text intercepts, ac:done проверяет bl:source. **DB Migration:** updated_at + deleted_at на account_sources. Build+Deploy: 0 ошибок. |
+| 2026-05-10 19:58 | **Phase 2.2 — Settings UI Overhaul (DEPLOYED).** (1) `currencies.ts`: расширен список (FIAT 40+, CRYPTO 48+); `CURRENCY_RU_ALIASES` — 50+ русских алиасов (биткоин, доллар, евро, рубль, гривна, тенге, лира и др.); `searchCurrencies()` — 5-pass алгоритм (exact/startsWith/includes/EN-name/RU-alias), лимит 10. (2) `settings.service.ts`: `getWorkspaceAccounts()` + `deleted_at IS NULL` (soft-deleted счета не показываются); `setDefaultAccount()` атомарно обновляет оба поля (expense+income). (3) `settings-keyboard.service.ts`: `buildSettingsMainKeyboard()` — строгий 2x3 грид; выбор валюты с объявлением; новый текст выбора основной валюты. (4) `webhook.route.ts`: после выбора валюты кнопка `[?? Назад в настройки]`; единый обработчик `st:da:sa:` — один Main Account для income+expense. Build: `tsc` 0 ошибок. Commit `3e650c1`. Deployed to Railway (auto-deploy). |
+| 2026-05-10 22:00 | **Phase 2.3 — Paginated Transaction Search.** `transaction-hub.service.ts`: добавлен `SEARCH_PAGE_SIZE=8`; все 4 search-функции (`searchByName`, `searchByAmount`, `searchByCategory`, `searchByDateRange`) переработаны — принимают `page: number`, параллельный `COUNT(*)` > возвращают `{items: TxListItem[], total: number}`. Удалена константа `SEARCH_LIMIT=200`. `transaction-keyboard.service.ts`: `buildSearchResultsKeyboard(items, page, totalPages)` — кнопки товаров + строка навигации `[??][p/total][??]` + footer `[?? Новый поиск][?? К списку]`; `search_results_page` в `TxCallbackCmd`; парсер `tx:sr:p:{page}`. `webhook.route.ts`: все search-handlers сохраняют контекст в Redis `midas:tx:sr:ctx:{uid}:{cid}` TTL 600s; `search_results_page` handler — читает контекст, пересчитывает offset, обновляет сообщение; text intercepts (name/amount/date) > paginated API; при устаревшем контексте — дружелюбное «Поищите снова»; удалён дублирующий старый text intercept блок. Build: `tsc` 0 ошибок. Commit `6da4464`. |
+| 2026-05-10 22:10 | **Phase 2.3 — Reports Close Button.** `report-keyboard.service.ts`: добавлен `rp:cl` callback (`?? Закрыть`) как последняя строка на всех 3 клавиатурах (`buildPeriodPickerKeyboard`, `buildReportSubMenuKeyboard`, `buildReportBackKeyboard`); тип `{ cmd: 'close' }` добавлен в `RpCallbackCmd`; `parseRpCallback`: `rp:cl > { cmd: 'close' }`; обновлён docstring. `webhook.route.ts`: в блоке `rp:` добавлен handler `else if (rpCmd.cmd === 'close')` > `deleteMessage(chatId, rpMsgId)` — полностью убирает сообщение из чата. Build: `tsc` 0 ошибок. Commit `049233d`. |
+| 2026-05-10 22:11 | **Phase 2.3 — Persistent Keyboard Button Order.** `screen-builder.ts` (`buildMainMenuKeyboard`): порядок кнопок изменён — Row 1: `[?? Баланс][?? Отчёт]`, Row 2: `[?? Транзакции][?? Настройки]` (до: Row 1 Баланс+Транзакции, Row 2 Отчёт+Настройки). Обновлён docstring. Build: `tsc` 0 ошибок. Commit `70a5d41`. Deployed to Railway (auto-deploy). |
+| 2026-05-11 09:00 | **Phase 2.2 Onboarding Pagination (Phase 2.2).** `account-onboard-keyboard.service.ts` полностью переписан с универсальным движком пагинации `buildPaginatedPicker()`. Реализованы: paginated banks (70+ записей, 6/страница, 3 колонки, ac:bp:{N}), paginated exchanges (ac:xp:{N}), paginated fiat currencies (ac:cfp:{N}), paginated crypto currencies (ac:ccp:{N}). `OnboardStep` расширен: `bal_input`. `AccountOnboardState` — поля `accountId`, `currency`. `addAccountReturningId()` добавлен в `account.service.ts`. `webhook.route.ts`: FSM handlers для bank_page, exchange_page, fiat_page, crypto_page, bal_skip. Баланс вводится текстом (validateAmountFromText intercept) или пропускается (ac:bal:s). Коммит в phase 2.2 серии. tsc 0 ошибок. |
+| 2026-05-11 12:00 | **Phase 2.3 Onboarding UX Polish (PLAN APPROVED).** Пользователь утвердил план: (1) убрать промежуточный afterCreate экран, (2) добавить кнопку «? Завершить» (ac:fin) прямо в пикер типа, (3) buildStartOnboardKeyboard — исправить иконки (??>??, ?>??), (4) при «?? Начать без счёта» тихо создавать «Кошелёк» (USD). Реализация поделена на 4 этапа с tsc-проверкой после каждого. |
+| 2026-05-11 14:07 | **Phase 2.3 Onboarding UX Polish — ЭТАП 1 (account-onboard-keyboard.service.ts).** Добавлен `{ cmd: 'fin' }` в `AccountOnboardCmd` union + парсер `if (sub === 'fin')`. Добавлена `buildFinishOnboardKeyboard()` — пикер типа + «? Завершить» (ac:fin), иконки ????. Добавлена `accountAddedText(name, currency)`. `buildStartOnboardKeyboard()` исправлен: ??>??, ?>??, ??Назад>??Своё название. tsc 0 ошибок. |
+| 2026-05-11 14:08 | **Phase 2.3 Onboarding UX Polish — ЭТАП 2 (imports).** `webhook.route.ts`: добавлены импорты `buildFinishOnboardKeyboard`, `accountAddedText` из account-onboard-keyboard.service.js. tsc пока 2 предупреждения (unused — ожидаемо до этапа 3). |
+| 2026-05-11 14:10 | **Phase 2.3 Onboarding UX Polish — ЭТАП 3 (handlers).** `webhook.route.ts`: (1) `ac:fin` handler — идентичен `ac:done`, backward compat; (2) `ac:more` > redirect to fin flow (deleteMessage + sendMessageWithReplyKeyboard); (3) `ac:bal:s` — читает состояние Redis, затем показывает `accountAddedText` + `buildFinishOnboardKeyboard` вместо старого afterCreate; (4) `bal_input` text intercept — `buildFinishOnboardKeyboard` вместо `buildAfterCreateKeyboard`, `accountAddedText` вместо старой строки с балансом; (5) safety fallback в `bal_input` > `buildFinishOnboardKeyboard`. tsc 0 ошибок. |
+| 2026-05-11 14:13 | **Phase 2.3 Onboarding UX Polish — ЭТАП 4 (default account).** `webhook.route.ts` `ac:skip` handler: перед удалением Redis-ключа вызывает `hasAccounts()` — если 0 счетов, создаёт `addAccountWithCurrency(workspaceId, userId, 'Кошелёк', 'USD')` в блоке try/catch (non-fatal). tsc 0 ошибок. Commit `395e1f2`. git push origin main. Deploy Railway: `7089846c — SUCCESS`. |
+| 2026-05-11 16:30 | **master_roadmap Phase 1 — Keyboard Service.** `account-onboard-keyboard.service.ts` +478 строк: `CURRENCY_FLAGS` (40+ валют: ????RUB ????USD ?BTC ? ETH TON и др.), `getCurrencyFlag(code)`, `CURRENCY_NAMES`. `buildPaginatedPicker()` рефакторинг — обе стрелки всегда, noop на краях. `buildCurrencyPickerText(name?,isCustom?)` — 3 ветки. `buildFiatCurrencyPage()` + `buildCryptoCurrencyPage()` — флаги + ac:cur:search. `searchCurrencies()` — fuzzy+транслитерация. `buildNoMatchText/Keyboard`. `buildCurrencySearch*`. Удалены FIAT_ITEMS, CRYPTO_ITEMS, CURRENCY_PICKER_TEXT. tsc 0 ошибок. |
+| 2026-05-11 16:33 | **master_roadmap Phase 2 — Webhook FSM.** `webhook.route.ts`: `name_input` > no-match screen при fuzzy null. `ac:cus:save` > isCustomName=true > cur_pick. `ac:cus:keep` > name_input retry. `ac:cur:search` > cur_search step. `ac:cur:list` > возврат к списку. `cur_search` text interceptor > searchCurrencies > результаты или no-results. 3 success-screens button-free `{ inline_keyboard: [] }`. `chooseCurKeyboard()` module-level. Все callback_data ?64 байт. tsc 0 ошибок. |
+| 2026-05-11 16:43 | **master_roadmap Phase 3 — Smoke Tests.** `smoke-test-master-roadmap.mjs` (NEW): 70 проверок, запуск `node apps/telegram-bot/smoke-test-master-roadmap.mjs` (против скомпилированного dist/). Покрыты все 14 сценариев. Результат: **70/70 ? / 0 ?**. |
+| 2026-05-11 16:44 | **master_roadmap Phase 4 — Deploy.** Git commit `35c92e0` `feat(onboard): no-match screen, cur-search, flags, nav-arrows, button-free success [master_roadmap]`. Push > Railway auto-deploy. Status: Midas ? Online, background-workers ? Online. Deploy logs: clean start, Redis connected, no errors. |
+| 2026-05-12 15:05 | **workflow_state.md актуализирован. Тесты запущены.** `smoke-test-master-roadmap.mjs`: исправлен устаревший assert для `buildCurrencySearchNoResultsText`. Итог: 76/76 ?. `smoke-test-lazy-default.mjs`: 39/39 ?. `tsc --noEmit`: 0 ошибок. Phase LD++ полностью подтверждена. |
+| 2026-05-12 19:35 | **Phase 2.4 PR 2 - v??????? ? ??????.** `account.service.ts`: ???????? `AccountWithBalance` interface + `getAccountWithBalance()` + `getWorkspaceAccountsWithBalances()`. tsc 0 ??????. GitHub PR #2 merged squash ? main (commit 7cc8528). |
+| 2026-05-12 17:27 | **Phase 2.4 — UX Design сессия и планирование.** Спроектированы: черновик + математика баланса («?? Bybit USD» + «?? 15 400 ? 10 000 = 5 400 USD»), пикер счетов (кнопка «?? Сменить счёт»), кросс-валюта (ввод суммы конвертации), confirmed card без кнопок Баланс/Отчёт. UX-изменения ia:list/ia:back из текущего чата ОТМЕНЕНЫ (кодовая база возвращена в stable). 16 атомарных PR спроектированы. Анализ конфликтов: 1 breaking change (PR 7 buildConfirmKeyboard), 1 новый Redis-префикс (midas:xfx:ptr). Полный план: `account_debit_ux_plan.md`. workflow_state.md обновлён. |
+| 2026-05-12 21:00 | **Phase 2.4 — Account Picker UX Hotfixes.** Исправление критического бага отсутствия пикера при AI parse без account_hint. В `ai-parse.worker.ts` добавлен принудительный показ пикера. В `draft.service.ts` добавлена `getWorkspaceAccountsForPicker` для воркера. В `draft-confirmation.service.ts` добавлена защита (`accountWasExplicitlyChosen`) от тихой автоконвертации XFX при несовпадении валюты дефолтного счета. Внедрены intent-aware тексты (доход/расход) для пикера счетов в `account-inline-keyboard.service.ts`. Все 103/103 smoke-теста прошли. |
+| 2026-05-13 08:17 | **Phase 2.5 Шаг 1 — Smart Item>Category Auto-Detector.** `item-category-detector.service.ts` (NEW): 200+ брендов и ключевых слов, 9 категорий (Транспорт/Еда/Электроника/Одежда/Здоровье/Дом/Развлечения/Образование/Оборудование), longest-phrase-first matching. `patchDraftCategoryHint()` в `clarification.service.ts`: atomic idempotent DB patch (перезаписывает только если `parsed_category_hint IS NULL` или `= 'Другое'`). Интеграция в `webhook.route.ts` > `sendAndStorePreview`: non-blocking, не блокирует flow при ошибке. Тест: «майбах» > Транспорт, «starbucks» > Еда. tsc 0 ошибок. |
+| 2026-05-13 08:20 | **Phase 2.5 Шаг 2 — Account-Currency Compatibility Validation Gate.** `account-currency-validator.service.ts` (NEW): матрица 8 правил, `classifyCurrency()`, `HYBRID_EWALLET_KEYS`, `TON_ASSETS`. Интегрирован в 2 точки `webhook.route.ts`: (1) `cmd=currency` callback — editMessageText с ошибкой, FSM state сохраняется в Redis; (2) `cur_input` text interceptor — upsertBotMessage с ошибкой, `redisConnection.del` НЕ вызывается. Блокирует: Монобанк+USDT, Наличные+ETH, Lightning+USDC. Разрешает: Bybit+USDT, Payeer+USDT (гибрид), MetaMask+BTC. Commit `d9ad480`. tsc 0 ошибок. git push > Railway deployed. |
+| 2026-05-13 08:24 | **Phase 2.5 Шаг 3 — Anomaly Badge в пикерах.** `account-inline-keyboard.service.ts` (MODIFY): импорт `classifyCurrency`. `anomalyBadge(emoji, currency)` — возвращает `'?? '` если emoji=`??` и валюта не фиат. `buildAccountPickerV2Keyboard` улучшен: `??` для крипто, `??` для фиата, `??` только для банк+крипто аномалий по имени счёта. `buildAccountPickerForDraft`: `??` через `anomalyBadge()` по `accountTypeEmoji()`. Commit `f543c5e`. tsc 0 ошибок. git push > Railway deployed. Phase 2.5 COMPLETE. |
+| 2026-05-13 15:20 | **Phase 2.7 — Account Picker Fix & Cancellation UX.** Исправлена регрессия коммита `6efe173` (always show account picker), из-за которой транзакции без созданных счетов зависали. Кнопка «Записать без счёта» на no-match карточке заменена на `?? Отмена` (`ia:cancel`). При отмене: статус черновика в БД меняется на `rejected`, сообщение in-place меняется на "? Отменено" без кнопок, удаляются стейты из Redis. |
+| 2026-05-13 15:25 | **Infrastructure — AI Token Budget Fix.** Обнаружено, что очередь транзакций полностью встала из-за исчерпания дневного лимита токенов Claude (`AI daily token budget exceeded: 506188 >= 500000`). Через Railway CLI переменная `AI_BUDGET_MAX_DAILY_TOKENS` для `background-workers` увеличена с 500 000 до 2 000 000. Воркеры пересобраны, обработка транзакций восстановлена. |
+| 2026-05-13 21:30 | **Phase 2.8 — Этап 1: Callback Fix (ia:newac).** `account-inline-keyboard.service.ts`: исправлен критический баг — кнопка «? Создать счёт» в пикере черновика вызывала `ia:rename` вместо корректного `ia:newac`. Добавлен тип `showpicker` в `InlineAccountCmd` union и соответствующий парсер для обратной навигации. |
+| 2026-05-13 21:35 | **Phase 2.8 — Этап 2: Стандартизация текста онбординга.** `webhook.route.ts`: заголовок экрана выбора типа счёта (вызываемого через `ia:newac`) изменён с жёстко прописанного текста на константу `ACCOUNTS_EMPTY_TEXT` — соответствует стилю экрана `/start` для новых пользователей. |
+| 2026-05-13 21:45 | **Phase 2.8 — Этап 3: Back Navigation (ia:showpicker).** `account-onboard-keyboard.service.ts`: кнопка «?? Назад» на экране выбора типа счёта теперь генерирует callback `ia:showpicker` вместо `ia:pk:back`. `webhook.route.ts`: реализован новый handler `ia:showpicker` — восстанавливает `midas:prev_acct` (кэшированный accountId из Redis), рендерит Account Picker V2 с сохранением `linkedDraftId`. Пользователь может вернуться к пикеру без потери контекста черновика. |
+| 2026-05-13 22:00 | **Phase 2.8 — Этап 4: Удаление success-баннеров.** `webhook.route.ts`: удалены строки «? Счёт ... создан!» во всех трёх путях завершения онбординга из черновика: `bal_skip`, `bal_input`, `cur_input`. Теперь после создания счёта сразу показывается preview-карточка черновика через `confirmPreviewFull()` — чистый seamless UX без промежуточных экранов. |
+| 2026-05-13 22:30 | **Phase 2.8 — TS Build Fix.** Обнаружены ошибки сборки на Railway: `TS6133: 'linkedAccountNameBal' / 'acNameBi2' is declared but its value is never read` — переменные стали неиспользуемыми после удаления success-баннеров в Этапе 4. Удалены оба объявления. `tsc --noEmit`: 0 ошибок. Commit `56991be` pushed to main. Railway re-deploy: Midas ? Online. |
+| 2026-05-14 10:43 | **Phase 2.9 — Nav Buttons Never Delete Tx Records.** Проблема: после создания транзакции её message_id («? Записано» + «?? Изменить запись») хранился в Redis как `midas:am:` pointer. При нажатии Баланс/Отчёт/Транзакции/Настройки — `upsertBotMessage()` редактировал или удалял это сообщение. Решение: добавлен `sendNavMessage()` в `active-message.service.ts` — всегда отправляет НОВОЕ сообщение, не трогает `midas:am:`. 4 NAV_BTN_* обработчика в `webhook.route.ts` переключены на `sendNavMessage`. Commit `1477f55` pushed to main. |
+| 2026-05-14 10:57 | **Phase 2.9+ — Smart Nav Message (мidas:nav: key).** Проблема: каждое нажатие nav-кнопки отправляло новое сообщение (засорение чата). Решение: два независимых Redis-ключа. `midas:am:` — черновики/пикеры/подтверждения (не трогаем в nav). `midas:nav:` — nav-панель (Баланс/Отчёт/etc.). `sendNavMessage()` полностью переписан: edit-first через `midas:nav:`, при успехе — редактирует то же сообщение (чат не засоряется), при неудаче — отправляет новое. При вводе транзакции: `getNavMessageId` > `deleteMessage` > `clearNavMessageId` перед стандартным cleanup `midas:am:`. Commits `4baac9c`. |
+| 2026-05-14 11:04 | **Phase 2.9+ — Silent Close Button.** Кнопка «? Закрыть» в Настройках (`st:cancel`) ранее редактировала сообщение на «?? Настройки закрыты.» (лишнее). Теперь: `deleteMessage(chatId, messageId)` + `clearNavMessageId()` — панель просто исчезает, никакого нового текста. Кнопка «? Закрыть» в Балансе (`bl:close`) уже удаляла сообщение, но не очищала `midas:nav:` — исправлено. Commit `004966f` pushed to main. Railway auto-deploy triggered. |
+| 2026-05-14 12:28 | **Phase 2.10 — Fix 1: isSuccessCard — DEL midas:am: при подтверждении транзакции.** Проблема: после подтверждения транзакции success card сохранялась в `midas:am:` pointer. При вводе следующей транзакции step-7 в webhook.route.ts удалял сообщение из `midas:am:` — success card удалялась. Решение: `shared/index.ts` — добавлен `isSuccessCard?: boolean` в `NotificationJobPayload`. `confirmation.worker.ts` — при approve: `isSuccessCard: true` в payload. `notifications.worker.ts` — если `isSuccessCard`: `DEL midas:am:` вместо `SET`. Commit `df15a01`. |
+| 2026-05-14 12:28 | **Phase 2.10 — Fix 2: from-context в delete flow parser.** Проблема: при нажатии «Изменить запись» > «Удалить» > «Отмена» > «Закрыть» — кнопка Закрыть удаляла карточку вместо восстановления success card. Корень: `parseTxCallback` не читал `parts[4]` для `tx:d:ask` и `tx:d:yes` — контекст `from='s'` терялся при парсинге. Fix: `transaction-keyboard.service.ts` — `const from = parts[4]`; return с `from` для обоих action. Теперь `tx:view` корректно видит `from==='s'` и ставит `closeCallback = tx:done:{txId}`. Commit `8894b92`. |
+| 2026-05-14 12:37 | **Phase 2.10 — Fix 3: Double-lock sentinel key.** Проблема: даже после Fix 1 success card иногда удалялась (race condition между background-workers и telegram-bot, или отставание деплоя). Решение — двойная блокировка: (1) `notifications.worker.ts` при `isSuccessCard`: SET `midas:success_card:{sentMessageId}` = '1' (TTL 30 дней), затем DEL `midas:am:`. (2) `webhook.route.ts` step-7: перед `deleteMessage(amId)` проверяет `EXISTS midas:success_card:{amId}` — если sentinel есть, сообщение НЕ удаляется (только очищается pointer). Два замка работают независимо. tsc 0 ошибок оба приложения. Commit `b869c03`. |
+| 2026-05-14 17:30 | **Phase 2.10+ Gate Fix — Frozen UI при параллельном вводе транзакций.** Проблема: TX1 открывает пикер счёта > TX2 (webhook step-7) удаляет пикер (gate_sent ещё не установлен) > ai-parse gate присылает новую карточку с пикером и устанавливает gate_sent > TX3 (webhook step-7) удаляет gate-карточку (gate_sent не проверялся!) > ai-parse молчит (gate_sent SET > silently ignore) > TX4, TX5... цикл: сообщение приходит, удаляется, ответа нет — **ЗАВИСОН**. **Fix 1 (webhook.route.ts строки 5446–5458):** `const gateSentActive = await redisConnection.exists('midas:gate_sent:...')`. Если активен — `deleteMessage` и `clearActiveMessageId` НЕ вызываются. Gate-карточка остаётся видимой при TX3, TX4... **Fix 2 (webhook.route.ts строка 1539, ia:pk: handler):** `redisConnection.del('midas:gate_sent:...')` после `setDraftAccountId` — нормальный flow восстанавливается сразу после выбора счёта. **Fix 3 (ai-parse.worker.ts):** Gate реконструирует полный пикер счетов (inline keyboard с кнопками счетов + ?? Отмена) когда `pendingDraft.accountId === null` — вместо пустой confirm-клавиатуры. **Жизненный цикл gate_sent:** SET ai-parse.worker (при gate) > DEL ia:cancel (строка 1432, до фикса) / ia:pk: (ДОБАВЛЕНО) / approve/reject confirmation.worker (строка 268, до фикса) / TTL auto 1h. Scope: 2 файла (webhook.route.ts, ai-parse.worker.ts) + утилита fix-stuck-draft.mjs. tsc 0 ошибок. git commit `8d25ec1`, push origin main ?. Railway: Midas ? Online, background-workers ? Online. |
+| 2026-05-14 20:00 | **Phase 2.5+ — Currency-Aware Picker: Bot Layer (telegram-bot).** Проблема: в пикере счётов при USD-транзакции показывался USDT-счёт, хотя это стейблкоин и он не конвертируется в фиат. **Реализация (4 файла):** (1) `account-currency-validator.service.ts` — добавлена функция `isKnownCurrency(code)`: проверяет код по трём вайтлистам (FIAT_SET + STABLECOINS + CRYPTO_SET). Предотвращает создание фантомных валют типа «UDS» или «ЕВР». (2) `clarification.service.ts` — в `validateCurrencyCode()` добавлена ранняя проверка `!isKnownCurrency(upper)` > возврат `null` до записи в БД. (3) `account.service.ts` — `getWorkspaceAccountsWithBalances()` получает опциональный 4-й параметр `parsedCurrency?`. После SQL-запроса: если tx — фиат > exact-match сначала + остальные фиатные; если стейблкоин/крипто > только exact match. (4) `account-inline-keyboard.service.ts` — `getPickerScreenText(intent, parsedCurrency?)` добавляет контекстную подсказку; `getPickerEmptyText(parsedCurrency?)` — «Нет USDT-счетов» вместо общего сообщения. `webhook.route.ts` — пробрасывает `draft.parsed_currency` в 3 entry points (sendAndStorePreview, ia:delink, ia:showpicker). Первый деплой упал — TS6133 (ACCOUNT_PICKER_EMPTY_TEXT в импорте но не используется). Исправлено коммитом `04f7e81`. |
+| 2026-05-14 20:10 | **Phase 2.5+ — Currency-Aware Picker: Worker Layer (background-workers). Root Cause Fix.** Обнаружено: начальный пикер строится ПОЛНОСТЬЮ в `ai-parse.worker.ts` (background-workers), а не в `telegram-bot`. Изменения в `account.service.ts` (telegram-bot) на initial picker не влияют никак. **Реализация (`ai-parse.worker.ts`):** Добавлены локальные классификаторы: `PICKER_STABLECOINS` (10 записей), `PICKER_KNOWN_CRYPTOS` (27 записей), `classifyPickerCcy(code)`, `filterPickerAccounts(accounts, txCurrency)` — аналог логики `account.service.ts`. Применено в 2 местах: (A) **Initial picker** (строка ~620) — фильтрует по `aiData?.currency` (когда AI вернул currency, например «USDT»); (B) **Gate picker** (строка ~340) — фильтрует по `pendingDraft.parsedCurrency` (восстановление пикера при gate-блокировке). Итог фильтрации: `{USD tx}` > [USD-счета] + [другие фиатные]; `{USDT tx}` > [только USDT-счета]. tsc 0 ошибок (оба приложения). git commit `0085d8f`, push origin main ?. Railway auto-deploy triggered. |
+| 2026-05-15 02:00 | **Balance Phase A — Grouped UI ЗАДЕПЛОЕН.** `balance-keyboard.service.ts` (MODIFY): `GroupType` union, `GROUP_EMOJI` map, `GROUP_ORDER` priority, `classifyAccountGroup(name, currency)` эвристика (Банки/Криптобиржи/Крипто-кошельки/Наличные/Прочее), `buildBalanceListKeyboard` с группировкой и emoji-префиксами, `export formatBalanceShort`. `balance.service.ts` (MODIFY): секционированный текст getBalanceData() с эмодзи групп, удалён CURRENCY_TOTALS_SQL. tsc 0 ошибок. Commit `4a1748c` push to main. Railway auto-deploy ?. |
+| 2026-05-15 02:27 | **Balance Phase B-1 — DB Migration ПРИМЕНЕНА.** `packages/database/migrations/1779800000000_account-parent-and-subtype.js` (NEW): `parent_account_id VARCHAR(26) FK ON DELETE CASCADE`, `sub_type TEXT NOT NULL DEFAULT 'general'` CHECK constraint, `idx_account_sources_parent` (partial). Решена ESM-проблема `1779400000000` (exports > export const). Миграция применена `node-pg-migrate up --check-order false`. Аудит: FK 31/31 ?, формула initial_balance+income?expense ?, INSERT транзакций не затронут ?. Commit `75156b9`. |
+| 2026-05-15 02:30 | **Обновлен workflow_state.md для Phase B-2 handoff.** Section 1 (status), Section 2 (фазы), Section 8 (файлы), Section 9 (промпт), Section 10 (история). Следующий шаг: Phase B-2 (PER_ACCOUNT_SQL + лесенка +/L + агрегация дочерних). |
+| 2026-05-15 23:40 | **Balance Phase B-2 — Hierarchical Ladder View ЗАДЕПЛОЕН.** `balance.service.ts`: `PER_ACCOUNT_SQL` добавлен `a.parent_account_id`; `AccountBalanceRow` + `parent_account_id: string | null`; `getBalanceData()` строит childrenMap/childCountMap, рендерит +/L лесенку для parent>children; листовые счета без изменений (backward compat). `balance-keyboard.service.ts`: `BalanceAccountRow` + `parentAccountId?`+`childCount?`; `BalanceCallbackCmd` + `add_currency`; `parseBalanceCallback` `bl:ac:{id}` — SEC-01 compliant; `pluralizeCurrency()` (валюта/валюты/валют, mod10/mod100); `buildBalanceListKeyboard()` переписан — отделяет parents/children, parent с детьми: aggregation button + indented `L CURRENCY · balance` child rows + `? Добавить валюту` (bl:ac:{parentId}); листовые счета — Phase A/LD++ rendering. tsc 0 errors. Commit `d04bcba` pushed to main. Railway auto-deploy triggered. |
+| 2026-05-14 22:00 | **Hotfix: кнопка "?? Отмена" в пикере счетов + "юздт" алиас USDT + промпт-примеры.** (1) `account-inline-keyboard.service.ts` (MODIFY) строка 381–383: кнопка `buildAccountPickerV2Keyboard` «?? Отмена» изменена с `ia:pk:back:{draftId}` > `ia:cancel:{draftId}`. До фикса: нажатие «Отмена» возвращало к карточке превью с кнопками [?? Изменить|?? Отмена]+[?? Выбрать счёт]. После фикса: `ia:cancel` handler редактирует сообщение > «? Отменено» без кнопок, ставит черновику статус `rejected`, чистит Redis. (2) `packages/ai-core/src/prompts.ts` — добавлен `"юздт"` в список алиасов USDT (строка 37): было `"юсдт", "тезер", "tether", "usdt"` > стало `"юсдт", "юздт", "тезер", "tether", "usdt"`. (3) `packages/ai-core/src/prompts.ts` — добавлены 2 примера в секцию `-- Partial (amount missing) --`: `"купил квартиру юздт"` > `{intent:expense,currency:USDT,item_hint:квартира,confidence:0.75}` и `"купил недвижку usdt"` > `{intent:expense,currency:USDT,item_hint:недвижимость,confidence:0.75}`. Цель: Claude теперь возвращает `item_hint` даже когда нет `amount`. tsc 0 ошибок. git commit `ccaec87`, push origin main ?. Railway auto-deploy triggered. |
+| 2026-05-14 20:00 | **Phase 2.5+ — Currency-Aware Picker: Bot Layer (telegram-bot).** Проблема: в пикере счётов при USD-транзакции показывался USDT-счёт, хотя это стейблкоин и он не конвертируется в фиат. **Реализация (4 файла):** (1) `account-currency-validator.service.ts` — добавлена функция `isKnownCurrency(code)`: проверяет код по трём вайтлистам (FIAT_SET + STABLECOINS + CRYPTO_SET). Предотвращает создание фантомных валют типа «UDS» или «ЕВР». (2) `clarification.service.ts` — в `validateCurrencyCode()` добавлена ранняя проверка `!isKnownCurrency(upper)` > возврат `null` до записи в БД. (3) `account.service.ts` — `getWorkspaceAccountsWithBalances()` получает опциональный 4-й параметр `parsedCurrency?`. После SQL-запроса: если tx — фиат > exact-match сначала + остальные фиатные; если стейблкоин/крипто > только exact match. (4) `account-inline-keyboard.service.ts` — `getPickerScreenText(intent, parsedCurrency?)` добавляет контекстную подсказку; `getPickerEmptyText(parsedCurrency?)` — «Нет USDT-счетов» вместо общего сообщения. `webhook.route.ts` — пробрасывает `draft.parsed_currency` в 3 entry points (sendAndStorePreview, ia:delink, ia:showpicker). Первый деплой упал — TS6133 (ACCOUNT_PICKER_EMPTY_TEXT в импорте но не используется). Исправлено коммитом `04f7e81`. |
+| 2026-05-14 20:10 | **Phase 2.5+ — Currency-Aware Picker: Worker Layer (background-workers). Root Cause Fix.** Обнаружено: начальный пикер строится ПОЛНОСТЬЮ в `ai-parse.worker.ts` (background-workers), а не в `telegram-bot`. Изменения в `account.service.ts` (telegram-bot) на initial picker не влияют никак. **Реализация (`ai-parse.worker.ts`):** Добавлены локальные классификаторы: `PICKER_STABLECOINS` (10 записей), `PICKER_KNOWN_CRYPTOS` (27 записей), `classifyPickerCcy(code)`, `filterPickerAccounts(accounts, txCurrency)` — аналог логики `account.service.ts`. Применено в 2 местах: (A) **Initial picker** (строка ~620) — фильтрует по `aiData?.currency` (когда AI вернул currency, например «USDT»); (B) **Gate picker** (строка ~340) — фильтрует по `pendingDraft.parsedCurrency` (восстановление пикера при gate-блокировке). Итог фильтрации: `{USD tx}` > [USD-счета] + [другие фиатные]; `{USDT tx}` > [только USDT-счета]. tsc 0 ошибок (оба приложения). git commit `0085d8f`, push origin main ?. Railway auto-deploy triggered. |
 
 
-| 2026-05-15 10:20 | **Transaction Hub UX вЂ” 6-Filter Grid 2Г—3 + CCY Symbol Unification (DEPLOYED).** `transaction-hub.service.ts`: `TX_PAGE_SIZE` 6в†’5; `IntentFilter` СЂР°СЃС€РёСЂРµРЅ РґРѕ 6 С‚РёРїРѕРІ (`'e'|'i'|'dg'|'dr'|'t'|'a'`); `MonthMiniStats` вЂ” РїРѕР»Рµ `debt_count` Р·Р°РјРµРЅРµРЅРѕ С‚СЂРµРјСЏ: `debt_given_count`, `debt_received_count`, `transfer_count`; SQL-Р·Р°РїСЂРѕСЃС‹ `getTransactionList` Рё `countFilteredTransactions` РѕР±РЅРѕРІР»РµРЅС‹ СЃ РїРѕР»РЅРѕР№ РїРѕРґРґРµСЂР¶РєРѕР№ dg/dr/t (СѓРґР°Р»С‘РЅ СѓСЃС‚Р°СЂРµРІС€РёР№ С„РёР»СЊС‚СЂ `'d'`). `transaction-keyboard.service.ts`: `CCY_SYMBOL` Unicode-РєР°СЂС‚Р° + `fmtCurrency()` (в‚Ѕ/$в‚¬в‚ґ РґР»СЏ С„РёР°С‚Р°, ISO РґР»СЏ РєСЂРёРїС‚С‹); `intentEmoji` РѕР±РЅРѕРІР»С‘РЅ (рџ“¤рџ“Ґ РІРјРµСЃС‚Рѕ рџ”ґрџџў); `FILTER_LABELS` 4в†’6; `FILTER_ROW_1=['e','i','t']` + `FILTER_ROW_2=['dr','dg','a']` вЂ” СЃРµС‚РєР° 2Г—3; РїР°РіРёРЅР°С†РёСЏ В«в¬…пёЏ РџРѕР·Р¶Рµ В· рџ“„ X/Y В· Р Р°РЅСЊС€Рµ вћЎпёЏВ»; `formatTxListHeader` РґР»СЏ РІСЃРµС… 6 С„РёР»СЊС‚СЂРѕРІ; `VALID_FILTERS` РѕР±РЅРѕРІР»С‘РЅ; fallback `'d'в†’'a'`. tsc 0 РѕС€РёР±РѕРє. 23/23 РїСЂРѕРІРµСЂРѕРє PASS. Commit `a9c0f52`, push origin main вњ…. Railway auto-deploy triggered. |
-| 2026-05-14 23:50 | **Balance Phase B-5/B-6/B-8/B-9 пїЅ Add Currency Workflow пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ.** B-8: addChildAccount() пїЅ account.service.ts (withTenantTransaction, parent_account_id, no workspace defaults update). B-6: child_count subquery пїЅ ACCOUNT_DETAIL_SQL; AccountDetailData пїЅпїЅпїЅпїЅпїЅпїЅпїЅ child_count. B-5: buildAccountActionsKeyboard(hasChildren?) пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ bl:ac: (32 пїЅпїЅпїЅпїЅпїЅ). webhook.route.ts: add_currency handler + currency_set пїЅпїЅпїЅпїЅпїЅ + 6 пїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅ detail.child_count>0. B-9: parent_account_id пїЅ GROUP BY PER_ACCOUNT_SQL; ORDER BY пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ. tsc 0 пїЅпїЅпїЅпїЅпїЅпїЅ. Commits 5ce9148+04e79b8. Railway auto-deploy. |
+| 2026-05-15 10:35 | **Transaction Hub UX `[Variant D]` Icon Chips (DEPLOYED).** Финальное состояние фильтров Transaction Hub. Проблема: текст кнопок слишком длинный — кнопки не влезали. Решение: `FILTER_LABELS` сведён к иконочным чипам. Макет: `[??][??][??][??][?? Все]` — 5 компактных кнопок в 1 строку. `IntentFilter`: 5 типов `a/e/i/d/t` (долги dg+dr merged в `d`). SQL: `OR (='d' AND intent IN ('debt_given','debt_received'))`. Toggle: нажатие на активный (?Все) снимает фильтр. Backward compat: dg/dr > d. tsc 0 ошибок. Commits `f4d7ecd`+`d770ca4`, push ?. Railway auto-deploy. |
+| 2026-05-15 10:20 | **Transaction Hub UX — 6-Filter Grid 2?3 + CCY Symbol Unification (DEPLOYED).** `transaction-hub.service.ts`: `TX_PAGE_SIZE` 6>5; `IntentFilter` расширен до 6 типов (`'e'|'i'|'dg'|'dr'|'t'|'a'`); `MonthMiniStats` — поле `debt_count` заменено тремя: `debt_given_count`, `debt_received_count`, `transfer_count`; SQL-запросы `getTransactionList` и `countFilteredTransactions` обновлены с полной поддержкой dg/dr/t (удалён устаревший фильтр `'d'`). `transaction-keyboard.service.ts`: `CCY_SYMBOL` Unicode-карта + `fmtCurrency()` (?/$€? для фиата, ISO для крипты); `intentEmoji` обновлён (???? вместо ????); `FILTER_LABELS` 4>6; `FILTER_ROW_1=['e','i','t']` + `FILTER_ROW_2=['dr','dg','a']` — сетка 2?3; пагинация «?? Позже · ?? X/Y · Раньше ??»; `formatTxListHeader` для всех 6 фильтров; `VALID_FILTERS` обновлён; fallback `'d'>'a'`. tsc 0 ошибок. 23/23 проверок PASS. Commit `a9c0f52`, push origin main ?. Railway auto-deploy triggered. |
+| 2026-05-14 23:50 | **Balance Phase B-5/B-6/B-8/B-9 ? Add Currency Workflow ?????????.** B-8: addChildAccount() ? account.service.ts (withTenantTransaction, parent_account_id, no workspace defaults update). B-6: child_count subquery ? ACCOUNT_DETAIL_SQL; AccountDetailData ??????? child_count. B-5: buildAccountActionsKeyboard(hasChildren?) ?????????? ?????? bl:ac: (32 ?????). webhook.route.ts: add_currency handler + currency_set ????? + 6 ??????? ? detail.child_count>0. B-9: parent_account_id ? GROUP BY PER_ACCOUNT_SQL; ORDER BY ?????????????. tsc 0 ??????. Commits 5ce9148+04e79b8. Railway auto-deploy. |
 
 
 ---
 
-## 11. AGENT OPERATING PROTOCOL вЂ” РћР‘РЇР—РђРўР•Р›Р¬РќР«Р™ РџР РћР¦Р•РЎРЎ Р РђР‘РћРўР«
+## 11. AGENT OPERATING PROTOCOL — ОБЯЗАТЕЛЬНЫЙ ПРОЦЕСС РАБОТЫ
 
 1. Startup Protocol
 
 Every new agent session must start by reading:
 - project_config.md
 - workflow_state.md
-- docs/product-roadmap.md (СѓС‚РІРµСЂР¶РґС‘РЅРЅС‹Р№ РїР»Р°РЅ СЂР°Р·РІРёС‚РёСЏ РїСЂРѕРґСѓРєС‚Р° вЂ” Phase 1.23вЂ“2.5)
+- docs/product-roadmap.md (утверждённый план развития продукта — Phase 1.23–2.5)
 - only the phase-relevant files listed in workflow_state.md
 
 The agent must not load all project files by default.
@@ -570,7 +572,7 @@ Each task must have:
 - completion report
 
 The agent must avoid broad commands like:
-вЂњImplement the whole phase.вЂќ
+“Implement the whole phase.”
 
 Instead, use controlled chunks such as:
 - migration structure
@@ -730,14 +732,14 @@ C. Required MCP Servers
 The agent must recommend only the MCP servers required for the current step.
 
 Examples:
-- Filesystem / Local FS MCP вЂ” required when reading or editing project files.
-- Postgres MCP вЂ” required only for database/schema/RLS/migration work.
-- GitHub MCP вЂ” required only if working with a remote GitHub repository, branches, pull requests, or issues.
-- Context7 MCP вЂ” useful only when current external library documentation is needed.
-- Browser / DevTools MCP вЂ” useful only during frontend/UI testing phases.
-- Notion MCP вЂ” forbidden until Phase 3.
-- Google Sheets integration вЂ” forbidden until Phase 3.
-- Crypto / Blockchain tools вЂ” forbidden until Phase 2.
+- Filesystem / Local FS MCP — required when reading or editing project files.
+- Postgres MCP — required only for database/schema/RLS/migration work.
+- GitHub MCP — required only if working with a remote GitHub repository, branches, pull requests, or issues.
+- Context7 MCP — useful only when current external library documentation is needed.
+- Browser / DevTools MCP — useful only during frontend/UI testing phases.
+- Notion MCP — forbidden until Phase 3.
+- Google Sheets integration — forbidden until Phase 3.
+- Crypto / Blockchain tools — forbidden until Phase 2.
 
 D. Access Level Recommendation
 For every MCP/tool, the agent must specify the minimum safe access needed:
@@ -789,8 +791,8 @@ Required Phase Advisory format:
 Required files:
 - `workflow_state.md`
 - `project_config.md`
-- `docs/product-roadmap.md` в†ђ **РёСЃС‚РѕС‡РЅРёРє РїСЂР°РІРґС‹** РґР»СЏ СЃР»РµРґСѓСЋС‰РёС… С„Р°Р· (1.23вЂ“2.5)
-- `docs/balance-semantics.md` (РґР»СЏ С„Р°Р·, СЃРІСЏР·Р°РЅРЅС‹С… СЃ Р±Р°Р»Р°РЅСЃРѕРј)
+- `docs/product-roadmap.md` < **источник правды** для следующих фаз (1.23–2.5)
+- `docs/balance-semantics.md` (для фаз, связанных с балансом)
 Optional files:
 - phase-relevant source code (determined per phase from roadmap)
 Do not load:
@@ -816,334 +818,334 @@ Waiting for APPROVED before implementation.
 
 ## 14. WORKFLOW_STATE SELF-AUDIT PROTOCOL
 
-**РўСЂРёРіРіРµСЂС‹** вЂ” Р·Р°РїСѓСЃРєР°С‚СЊ Р°СѓРґРёС‚ С‚РѕР»СЊРєРѕ РїСЂРё:
-- Р·Р°РІРµСЂС€РµРЅРёРё С„Р°Р·С‹ РёР»Рё РєСЂСѓРїРЅРѕР№ РїРѕРґС„Р°Р·С‹
-- РїСЂРѕС…РѕР¶РґРµРЅРёРё review gate (Traceability / Security / Scope Guard)
-- РёР·РјРµРЅРµРЅРёРё MCP РєРѕРЅС„РёРіСѓСЂР°С†РёРё
+**Триггеры** — запускать аудит только при:
+- завершении фазы или крупной подфазы
+- прохождении review gate (Traceability / Security / Scope Guard)
+- изменении MCP конфигурации
 - git checkpoint
-- context reset / handoff РІ РЅРѕРІС‹Р№ С‡Р°С‚
-- РїРµСЂРµРґ РЅР°С‡Р°Р»РѕРј high-risk С„Р°Р·С‹ (DB, security, payments, auth, deploy)
+- context reset / handoff в новый чат
+- перед началом high-risk фазы (DB, security, payments, auth, deploy)
 
-**РќРµ Р·Р°РїСѓСЃРєР°С‚СЊ** РїРѕСЃР»Рµ РєР°Р¶РґРѕРіРѕ РјРµР»РєРѕРіРѕ С‚Р°СЃРєР°.
+**Не запускать** после каждого мелкого таска.
 
-**Р¤РѕСЂРјР°С‚ РІС‹РІРѕРґР°** вЂ” РєРѕРјРїР°РєС‚РЅР°СЏ С‚Р°Р±Р»РёС†Р°, max 10 СЃС‚СЂРѕРє:
+**Формат вывода** — компактная таблица, max 10 строк:
 
-| РџСЂРѕРІРµСЂРєР° | РЎС‚Р°С‚СѓСЃ |
+| Проверка | Статус |
 |---|---|
-| Р”Р°С‚Р° РѕР±РЅРѕРІР»РµРЅРёСЏ Р°РєС‚СѓР°Р»СЊРЅР° | вњ… / вќЊ |
-| Section 1 (СЃРѕСЃС‚РѕСЏРЅРёРµ) РєРѕСЂСЂРµРєС‚РЅРѕ | вњ… / вќЊ |
-| Section 10 (РёСЃС‚РѕСЂРёСЏ) Р°РєС‚СѓР°Р»СЊРЅР° | вњ… / вќЊ |
-| Section 8 (С„Р°Р№Р»С‹) РєР»Р°СЃСЃРёС„РёС†РёСЂРѕРІР°РЅС‹ | вњ… / вќЊ |
-| Section 7 (MCP) РїРѕР»РЅР°СЏ | вњ… / вќЊ |
-| Section 6 (scope) СЃРѕРѕС‚РІРµС‚СЃС‚РІСѓРµС‚ С„Р°Р·Рµ | вњ… / вќЊ |
-| Section 9 (handoff prompt) Р°РєС‚СѓР°Р»РµРЅ | вњ… / вќЊ |
-| project_config.md РЅРµ РёР·РјРµРЅС‘РЅ | вњ… / вќЊ |
-| Git working tree clean | вњ… / вќЊ |
-| РќРµС‚ scope creep | вњ… / вќЊ |
+| Дата обновления актуальна | ? / ? |
+| Section 1 (состояние) корректно | ? / ? |
+| Section 10 (история) актуальна | ? / ? |
+| Section 8 (файлы) классифицированы | ? / ? |
+| Section 7 (MCP) полная | ? / ? |
+| Section 6 (scope) соответствует фазе | ? / ? |
+| Section 9 (handoff prompt) актуален | ? / ? |
+| project_config.md не изменён | ? / ? |
+| Git working tree clean | ? / ? |
+| Нет scope creep | ? / ? |
 
-РџСЂРё РѕР±РЅР°СЂСѓР¶РµРЅРёРё `вќЊ` вЂ” РёСЃРїСЂР°РІРёС‚СЊ РЅРµРјРµРґР»РµРЅРЅРѕ РёР»Рё СѓРІРµРґРѕРјРёС‚СЊ РІР»Р°РґРµР»СЊС†Р°.
-
----
-
-## 15. РџРћР›РќР«Р™ Р¤Р›РћРЈ РџР РћР”РЈРљРўРђ (С‚РµРєСѓС‰РµРµ СЃРѕСЃС‚РѕСЏРЅРёРµ)
-
-> Р­С‚РѕС‚ СЂР°Р·РґРµР» РѕРїРёСЃС‹РІР°РµС‚ РїРѕР»РЅС‹Р№ РїСѓС‚СЊ РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ вЂ” РѕС‚ РїРµСЂРІРѕРіРѕ Р·Р°РїСѓСЃРєР° Р±РѕС‚Р° РґРѕ РјРѕРјРµРЅС‚Р° СЃРѕР·РґР°РЅРёСЏ РїРµСЂРІРѕР№ С‚СЂР°РЅР·Р°РєС†РёРё. РћР±РЅРѕРІР»С‘РЅ: 2026-05-11 19:52 (UTC+3).
+При обнаружении `?` — исправить немедленно или уведомить владельца.
 
 ---
 
-### рџљЂ Р­С‚Р°Рї 0 вЂ” РџРµСЂРІС‹Р№ Р·Р°РїСѓСЃРє `/start`
+## 15. ПОЛНЫЙ ФЛОУ ПРОДУКТА (текущее состояние)
 
-1. РџРѕР»СЊР·РѕРІР°С‚РµР»СЊ РїРёС€РµС‚ `/start` РІ С‡Р°С‚ Р±РѕС‚Р°.
-2. `webhook.route.ts` в†’ `resolveWorkspace()` в†’ РІС‹Р·С‹РІР°РµС‚ `system_find_or_create_user()` (SECURITY DEFINER, atomic, pg_advisory_xact_lock).
-3. РЎРѕР·РґР°С‘С‚СЃСЏ: **workspace** (default_currency=USDT, timezone=UTC), **workspace_membership**, **default account_source** (В«РџРѕ СѓРјРѕР»С‡Р°РЅРёСЋВ», USDT), **default category** (Р”СЂСѓРіРѕРµ).
-4. Р‘РѕС‚ РѕС‚РїСЂР°РІР»СЏРµС‚ РїСЂРёРІРµС‚СЃС‚РІРµРЅРЅРѕРµ СЃРѕРѕР±С‰РµРЅРёРµ СЃ ReplyKeyboard (`is_persistent: false`, `resize_keyboard: true`):
+> Этот раздел описывает полный путь пользователя — от первого запуска бота до момента создания первой транзакции. Обновлён: 2026-05-11 19:52 (UTC+3).
+
+---
+
+### ?? Этап 0 — Первый запуск `/start`
+
+1. Пользователь пишет `/start` в чат бота.
+2. `webhook.route.ts` > `resolveWorkspace()` > вызывает `system_find_or_create_user()` (SECURITY DEFINER, atomic, pg_advisory_xact_lock).
+3. Создаётся: **workspace** (default_currency=USDT, timezone=UTC), **workspace_membership**, **default account_source** («По умолчанию», USDT), **default category** (Другое).
+4. Бот отправляет приветственное сообщение с ReplyKeyboard (`is_persistent: false`, `resize_keyboard: true`):
    ```
-   РЎС‚СЂРѕРєР° 1: [рџ’° Р‘Р°Р»Р°РЅСЃ]  [рџ“Љ РћС‚С‡С‘С‚]
-   РЎС‚СЂРѕРєР° 2: [рџ“‹ РўСЂР°РЅР·Р°РєС†РёРё]  [вљ™пёЏ РќР°СЃС‚СЂРѕР№РєРё]
+   Строка 1: [?? Баланс]  [?? Отчёт]
+   Строка 2: [?? Транзакции]  [?? Настройки]
    ```
-5. Р•СЃР»Рё Сѓ РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ **0 СЃС‡РµС‚РѕРІ** в†’ Р±РѕС‚ С‚Р°РєР¶Рµ РїРѕРєР°Р·С‹РІР°РµС‚ guided onboarding keyboard (`buildStartOnboardKeyboard`).
-6. Greeting-СЃРѕРѕР±С‰РµРЅРёРµ **РЅРёРєРѕРіРґР° РЅРµ СѓРґР°Р»СЏРµС‚СЃСЏ** вЂ” РѕРЅРѕ РЅРѕСЃРёС‚РµР»СЊ ReplyKeyboard.
+5. Если у пользователя **0 счетов** > бот также показывает guided onboarding keyboard (`buildStartOnboardKeyboard`).
+6. Greeting-сообщение **никогда не удаляется** — оно носитель ReplyKeyboard.
 
 ---
 
-### рџЏ¦ Р­С‚Р°Рї 1 вЂ” РЎРѕР·РґР°РЅРёРµ РџР•Р Р’РћР“Рћ СЃС‡С‘С‚Р° (РѕРЅР±РѕСЂРґРёРЅРі)
+### ?? Этап 1 — Создание ПЕРВОГО счёта (онбординг)
 
-#### 1.1 Р’С‹Р±РѕСЂ С‚РёРїР° СЃС‡С‘С‚Р°
+#### 1.1 Выбор типа счёта
 
-РџРѕР»СЊР·РѕРІР°С‚РµР»СЊ РІРёРґРёС‚ inline-РєР»Р°РІРёР°С‚СѓСЂСѓ:
+Пользователь видит inline-клавиатуру:
 ```
-[рџЏ¦ Р‘Р°РЅРєРѕРІСЃРєР°СЏ РєР°СЂС‚Р°]  [рџ’µ РќР°Р»РёС‡РЅС‹Рµ]
-[рџ”„ РљСЂРёРїС‚Рѕ-Р±РёСЂР¶Р°]      [рџ”ђ РљСЂРёРїС‚Рѕ-РєРѕС€РµР»С‘Рє]
-[вњЏпёЏ РЎРІРѕС‘ РЅР°Р·РІР°РЅРёРµ]
-[в–¶пёЏ РќР°С‡Р°С‚СЊ Р±РµР· СЃС‡С‘С‚Р°]
+[?? Банковская карта]  [?? Наличные]
+[?? Крипто-биржа]      [?? Крипто-кошелёк]
+[?? Своё название]
+[?? Начать без счёта]
 ```
 
-**`[в–¶пёЏ РќР°С‡Р°С‚СЊ Р±РµР· СЃС‡С‘С‚Р°]` (ac:skip):**
-- Р•СЃР»Рё Сѓ РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ **0 СЃС‡РµС‚РѕРІ** в†’ С‚РёС…Рѕ СЃРѕР·РґР°С‘С‚СЃСЏ СЃС‡С‘С‚ В«РљРѕС€РµР»С‘РєВ» (USD) вЂ” non-fatal try/catch.
-- Redis-РєР»СЋС‡ `midas:ac:` СѓРґР°Р»СЏРµС‚СЃСЏ.
-- РџРѕР»СЊР·РѕРІР°С‚РµР»СЊ РїРѕР»СѓС‡Р°РµС‚ ReplyKeyboard Рё РјРѕР¶РµС‚ СЃСЂР°Р·Сѓ РІРІРѕРґРёС‚СЊ С‚СЂР°РЅР·Р°РєС†РёРё.
+**`[?? Начать без счёта]` (ac:skip):**
+- Если у пользователя **0 счетов** > тихо создаётся счёт «Кошелёк» (USD) — non-fatal try/catch.
+- Redis-ключ `midas:ac:` удаляется.
+- Пользователь получает ReplyKeyboard и может сразу вводить транзакции.
 
-#### 1.2 РЎС†РµРЅР°СЂРёР№ В«Р‘Р°РЅРєРѕРІСЃРєР°СЏ РєР°СЂС‚Р°В» (ac:type:card)
+#### 1.2 Сценарий «Банковская карта» (ac:type:card)
 
-1. FSM РїРµСЂРµС…РѕРґРёС‚ РІ С€Р°Рі `name_input`.
-2. Р‘РѕС‚ РїРѕРєР°Р·С‹РІР°РµС‚ РїСЂРѕРјРїС‚ РІРІРѕРґР° РЅР°Р·РІР°РЅРёСЏ СЃ blockquote-РїСЂРёРјРµСЂР°РјРё:
+1. FSM переходит в шаг `name_input`.
+2. Бот показывает промпт ввода названия с blockquote-примерами:
    ```
-   Р’РІРµРґРёС‚Рµ РЅР°Р·РІР°РЅРёРµ Р±Р°РЅРєР°:
-   <blockquote>РќР°РїСЂРёРјРµСЂ: РўРёРЅСЊРєРѕС„С„ В· РЎР±РµСЂР±Р°РЅРє В· РђР»СЊС„Р° В· Monobank</blockquote>
+   Введите название банка:
+   <blockquote>Например: Тинькофф · Сбербанк · Альфа · Monobank</blockquote>
    ```
-3. РџРѕР»СЊР·РѕРІР°С‚РµР»СЊ РІРІРѕРґРёС‚ С‚РµРєСЃС‚ в†’ `name_input` text interceptor.
+3. Пользователь вводит текст > `name_input` text interceptor.
 
-**РЎР»СѓС‡Р°Р№ A вЂ” fuzzy match РЅР°Р№РґРµРЅ** (РЅР°РїСЂРёРјРµСЂ В«С‚РёРЅСЊРєРѕС„С„В» в†’ В«РўРёРЅСЊРєРѕС„С„В»):
-- Р‘РѕС‚ РїРѕРєР°Р·С‹РІР°РµС‚ СЌРєСЂР°РЅ РїРѕРґС‚РІРµСЂР¶РґРµРЅРёСЏ СЃ blockquote В«РўРёРЅСЊРєРѕС„С„В».
-- РљРЅРѕРїРєРё: `[вњ… Р”Р°, РўРёРЅСЊРєРѕС„С„]` / `[вњЏпёЏ РќРµС‚, РёР·РјРµРЅРёС‚СЊ]`.
-- Р•СЃР»Рё РїРѕРґС‚РІРµСЂР¶РґРµРЅРѕ в†’ FSM РїРµСЂРµС…РѕРґРёС‚ РІ `cur_pick`.
+**Случай A — fuzzy match найден** (например «тинькофф» > «Тинькофф»):
+- Бот показывает экран подтверждения с blockquote «Тинькофф».
+- Кнопки: `[? Да, Тинькофф]` / `[?? Нет, изменить]`.
+- Если подтверждено > FSM переходит в `cur_pick`.
 
-**РЎР»СѓС‡Р°Р№ B вЂ” fuzzy null** (РЅР°РїСЂРёРјРµСЂ В«РђР±РІВ»):
-- Р‘РѕС‚ РїРѕРєР°Р·С‹РІР°РµС‚ no-match СЌРєСЂР°РЅ:
+**Случай B — fuzzy null** (например «Абв»):
+- Бот показывает no-match экран:
   ```
-  рџ”Ќ РџРѕС…РѕР¶РµРіРѕ Р±Р°РЅРєР° РЅРµ РЅР°С€Р»Рё.
-  <blockquote>В«РђР±РІВ»</blockquote>
-  РҐРѕС‚РёС‚Рµ СЃРѕР·РґР°С‚СЊ СЃС‡С‘С‚ СЃ С‚Р°РєРёРј РЅР°Р·РІР°РЅРёРµРј?
+  ?? Похожего банка не нашли.
+  <blockquote>«Абв»</blockquote>
+  Хотите создать счёт с таким названием?
   ```
-- РљРЅРѕРїРєРё:
-  - `[вњ… РЎРѕР·РґР°С‚СЊ В«РђР±РІВ»]` (ac:cus:save) в†’ СЃРѕС…СЂР°РЅСЏРµС‚ РєР°Рє `pendingName`, `isCustomName=true`, РїРµСЂРµС…РѕРґРёС‚ РІ `cur_pick`.
-  - `[вњЏпёЏ РР·РјРµРЅРёС‚СЊ РЅР°Р·РІР°РЅРёРµ]` (ac:cus:keep) в†’ РІРѕР·РІСЂР°С‚ РІ `name_input`.
-  - `[в—ЂпёЏ Рљ С‚РёРїСѓ СЃС‡С‘С‚Р°]` (ac:type:back) в†’ РІРѕР·РІСЂР°С‚ РЅР° СЃС‚Р°СЂС‚РѕРІС‹Р№ СЌРєСЂР°РЅ.
+- Кнопки:
+  - `[? Создать «Абв»]` (ac:cus:save) > сохраняет как `pendingName`, `isCustomName=true`, переходит в `cur_pick`.
+  - `[?? Изменить название]` (ac:cus:keep) > возврат в `name_input`.
+  - `[?? К типу счёта]` (ac:type:back) > возврат на стартовый экран.
 
-#### 1.3 РЎС†РµРЅР°СЂРёР№ В«РќР°Р»РёС‡РЅС‹РµВ» (ac:type:cash)
+#### 1.3 Сценарий «Наличные» (ac:type:cash)
 
-- РќР°Р·РІР°РЅРёРµ С„РѕСЂРјРёСЂСѓРµС‚СЃСЏ Р°РІС‚РѕРјР°С‚РёС‡РµСЃРєРё: В«РќР°Р»РёС‡РЅС‹Рµ {CURRENCY}В» (РёРјСЏ СЃС‡С‘С‚Р° СЃРѕР·РґР°С‘С‚СЃСЏ РїРѕСЃР»Рµ РІС‹Р±РѕСЂР° РІР°Р»СЋС‚С‹).
-- РџРѕР»СЊР·РѕРІР°С‚РµР»СЊ СЃСЂР°Р·Сѓ РІРёРґРёС‚ currency picker (С€Р°Рі `cur_pick`).
-- **РќРµС‚ СЌРєСЂР°РЅР° РІРІРѕРґР° РЅР°Р·РІР°РЅРёСЏ.**
+- Название формируется автоматически: «Наличные {CURRENCY}» (имя счёта создаётся после выбора валюты).
+- Пользователь сразу видит currency picker (шаг `cur_pick`).
+- **Нет экрана ввода названия.**
 
-#### 1.4 РЎС†РµРЅР°СЂРёР№ В«РљСЂРёРїС‚Рѕ-Р±РёСЂР¶Р°В» / В«РљСЂРёРїС‚Рѕ-РєРѕС€РµР»С‘РєВ»
+#### 1.4 Сценарий «Крипто-биржа» / «Крипто-кошелёк»
 
-- **РљСЂРёРїС‚Рѕ-Р±РёСЂР¶Р° (ac:type:exchange):** РџРѕРєР°Р·С‹РІР°РµС‚ paginated picker Р±РёСЂР¶ (5 РїСЂРµСЃРµС‚РѕРІ: Binance/Bybit/OKX/Kraken/Huobi + вњЏпёЏ РЎРІРѕСЏ).
-- **РљСЂРёРїС‚Рѕ-РєРѕС€РµР»С‘Рє (ac:type:wallet):** РџРѕРєР°Р·С‹РІР°РµС‚ sub-picker: crypto / e-wallet / TON / Lightning.
-  - Lightning в†’ С„РёРєСЃРёСЂРѕРІР°РЅРЅР°СЏ РІР°Р»СЋС‚Р° BTC, РјРёРЅСѓРµС‚ currency picker.
-  - РћСЃС‚Р°Р»СЊРЅС‹Рµ в†’ РёРґСѓС‚ РІ crypto currency picker.
-- Paginated pickers Р±Р°РЅРєРѕРІ/Р±РёСЂР¶ вЂ” РЅР°РІРёРіР°С†РёСЏ `[в—ЂпёЏ][N / Total][в–¶пёЏ]`, РІСЃРµРіРґР° РѕР±Рµ СЃС‚СЂРµР»РєРё (noop РЅР° РєСЂР°СЏС…).
+- **Крипто-биржа (ac:type:exchange):** Показывает paginated picker бирж (5 пресетов: Binance/Bybit/OKX/Kraken/Huobi + ?? Своя).
+- **Крипто-кошелёк (ac:type:wallet):** Показывает sub-picker: crypto / e-wallet / TON / Lightning.
+  - Lightning > фиксированная валюта BTC, минует currency picker.
+  - Остальные > идут в crypto currency picker.
+- Paginated pickers банков/бирж — навигация `[??][N / Total][??]`, всегда обе стрелки (noop на краях).
 
 ---
 
-### рџ’± Р­С‚Р°Рї 2 вЂ” Р’С‹Р±РѕСЂ РІР°Р»СЋС‚С‹ (С€Р°Рі `cur_pick`)
+### ?? Этап 2 — Выбор валюты (шаг `cur_pick`)
 
-РџРѕР»СЊР·РѕРІР°С‚РµР»СЊ РІРёРґРёС‚:
+Пользователь видит:
 ```
-Р’ РєР°РєРѕР№ РІР°Р»СЋС‚Рµ РѕС‚РєСЂС‹С‚СЊ СЃС‡С‘С‚ В«РўРёРЅСЊРєРѕС„С„В»?
+В какой валюте открыть счёт «Тинькофф»?
 
-[рџ‡·рџ‡є RUB]  [рџ‡єрџ‡ё USD]  [рџ‡Єрџ‡є EUR]
-[рџ‡¬рџ‡§ GBP]  [рџ‡№рџ‡· TRY]  [в‚ї BTC]
-[в—ЂпёЏ] [1 / 2] [в–¶пёЏ]
-[рџ”Ќ РќР°Р№С‚Рё РІР°Р»СЋС‚Сѓ]
+[???? RUB]  [???? USD]  [???? EUR]
+[???? GBP]  [???? TRY]  [? BTC]
+[??] [1 / 2] [??]
+[?? Найти валюту]
 ```
 
-Р”Р»СЏ РєР°СЃС‚РѕРјРЅС‹С… СЃС‡С‘С‚РѕРІ (`isCustomName=true`) С‚РµРєСЃС‚: В«Р”Р»СЏ РІР°С€РµРіРѕ СЃС‡С‘С‚Р° (СЃРІРѕР№ СЃС‡С‘С‚)В».
+Для кастомных счётов (`isCustomName=true`) текст: «Для вашего счёта (свой счёт)».
 
-**РљРЅРѕРїРєР° `[рџ”Ќ РќР°Р№С‚Рё РІР°Р»СЋС‚Сѓ]` (ac:cur:search):**
-1. FSM РїРµСЂРµС…РѕРґРёС‚ РІ С€Р°Рі `cur_search`.
-2. Р‘РѕС‚ РїРѕРєР°Р·С‹РІР°РµС‚ РїСЂРѕРјРїС‚:
+**Кнопка `[?? Найти валюту]` (ac:cur:search):**
+1. FSM переходит в шаг `cur_search`.
+2. Бот показывает промпт:
    ```
-   рџ”Ќ РџРѕРёСЃРє РІР°Р»СЋС‚С‹ РґР»СЏ СЃС‡С‘С‚Р° В«РўРёРЅСЊРєРѕС„С„В»
-   Р’РІРµРґРёС‚Рµ РєРѕРґ РёР»Рё РЅР°Р·РІР°РЅРёРµ: RUB, РґРѕР»Р»Р°СЂ, bitcoin...
+   ?? Поиск валюты для счёта «Тинькофф»
+   Введите код или название: RUB, доллар, bitcoin...
    ```
-3. РџРѕР»СЊР·РѕРІР°С‚РµР»СЊ РІРІРѕРґРёС‚ С‚РµРєСЃС‚ в†’ `cur_search` text interceptor.
-4. `searchCurrencies(query, pool)` вЂ” fuzzy + С‚СЂР°РЅСЃР»РёС‚РµСЂР°С†РёСЏ (rub/СЂСѓР± в†’ RUB, dollar/РґРѕР»Р»Р°СЂ в†’ USD, btc в†’ BTC).
-5. **РќР°Р№РґРµРЅРѕ:** РїРѕРєР°Р·С‹РІР°РµС‚ РєРЅРѕРїРєРё СЂРµР·СѓР»СЊС‚Р°С‚РѕРІ + `[в—ЂпёЏ Р’РµСЂРЅСѓС‚СЊСЃСЏ Рє СЃРїРёСЃРєСѓ]` (ac:cur:list).
-6. **РќРµ РЅР°Р№РґРµРЅРѕ:** В«РўР°РєРѕР№ РІР°Р»СЋС‚С‹ РЅРµС‚. РџРѕРїСЂРѕР±СѓР№С‚Рµ: USD, RUB, BTC...В».
+3. Пользователь вводит текст > `cur_search` text interceptor.
+4. `searchCurrencies(query, pool)` — fuzzy + транслитерация (rub/руб > RUB, dollar/доллар > USD, btc > BTC).
+5. **Найдено:** показывает кнопки результатов + `[?? Вернуться к списку]` (ac:cur:list).
+6. **Не найдено:** «Такой валюты нет. Попробуйте: USD, RUB, BTC...».
 
-**Р’С‹Р±РѕСЂ РІР°Р»СЋС‚С‹ (ac:cur:{CODE}):**
-- РЎС‡С‘С‚ СЃРѕР·РґР°С‘С‚СЃСЏ РІ Р‘Р”: `addAccountWithCurrency(workspaceId, userId, name, currency)` в†’ INSERT РІ `account_sources`, С‚РёРї `manual`.
-- FSM РїРµСЂРµС…РѕРґРёС‚ РІ С€Р°Рі `bal_input`.
-
----
-
-### рџ’° Р­С‚Р°Рї 3 вЂ” Р’РІРѕРґ РЅР°С‡Р°Р»СЊРЅРѕРіРѕ Р±Р°Р»Р°РЅСЃР° (С€Р°Рі `bal_input`)
-
-```
-рџ’і РЎС‡С‘С‚ В«РўРёРЅСЊРєРѕС„С„В» (RUB) СЃРѕР·РґР°РЅ!
-Р’РІРµРґРёС‚Рµ РЅР°С‡Р°Р»СЊРЅС‹Р№ Р±Р°Р»Р°РЅСЃ РёР»Рё РїСЂРѕРїСѓСЃС‚РёС‚Рµ:
-
-[вЏ© РџСЂРѕРїСѓСЃС‚РёС‚СЊ]
-```
-
-- **Р’РІРѕРґ С‡РёСЃР»Р°** в†’ text interceptor `bal_input` в†’ `setAccountBalanceById()` в†’ `initial_balance` РІ Р‘Р”.
-- **`[вЏ© РџСЂРѕРїСѓСЃС‚РёС‚СЊ]`** (ac:bal:s) в†’ Р±Р°Р»Р°РЅСЃ РѕСЃС‚Р°С‘С‚СЃСЏ 0.
-
-РџРѕСЃР»Рµ РІРІРѕРґР°/РїСЂРѕРїСѓСЃРєР° вЂ” **success screen** (Р±РµР· РєРЅРѕРїРѕРє, С‚РѕР»СЊРєРѕ С‚РµРєСЃС‚):
-```
-вњ… РЎС‡С‘С‚ СЃРѕР·РґР°РЅ!
-рџЏ¦ РўРёРЅСЊРєРѕС„С„ В· RUB
-РќР°С‡Р°Р»СЊРЅС‹Р№ Р±Р°Р»Р°РЅСЃ: 15 000 в‚Ѕ
-```
-Р—Р°С‚РµРј СЃСЂР°Р·Сѓ вЂ” РїРёРєРµСЂ С‚РёРїР° РґР»СЏ РґРѕР±Р°РІР»РµРЅРёСЏ СЃР»РµРґСѓСЋС‰РµРіРѕ СЃС‡С‘С‚Р° (`buildFinishOnboardKeyboard`):
-```
-[рџЏ¦ Р‘Р°РЅРєРѕРІСЃРєР°СЏ РєР°СЂС‚Р°]  [рџ’µ РќР°Р»РёС‡РЅС‹Рµ]
-[рџ”„ РљСЂРёРїС‚Рѕ-Р±РёСЂР¶Р°]      [рџ”ђ РљСЂРёРїС‚Рѕ-РєРѕС€РµР»С‘Рє]
-[вњЏпёЏ РЎРІРѕС‘ РЅР°Р·РІР°РЅРёРµ]
-[вњ… Р—Р°РІРµСЂС€РёС‚СЊ]
-```
+**Выбор валюты (ac:cur:{CODE}):**
+- Счёт создаётся в БД: `addAccountWithCurrency(workspaceId, userId, name, currency)` > INSERT в `account_sources`, тип `manual`.
+- FSM переходит в шаг `bal_input`.
 
 ---
 
-### вћ• Р­С‚Р°Рї 4 вЂ” РЎРѕР·РґР°РЅРёРµ Р’РўРћР РћР“Рћ СЃС‡С‘С‚Р° (РЅРµРѕР±СЏР·Р°С‚РµР»СЊРЅРѕ)
+### ?? Этап 3 — Ввод начального баланса (шаг `bal_input`)
 
-РџРѕР»СЊР·РѕРІР°С‚РµР»СЊ РЅР°Р¶РёРјР°РµС‚ Р»СЋР±РѕР№ С‚РёРї РІ `buildFinishOnboardKeyboard` в†’ РїРѕРІС‚РѕСЂСЏРµС‚ Р­С‚Р°РїС‹ 1вЂ“3.
+```
+?? Счёт «Тинькофф» (RUB) создан!
+Введите начальный баланс или пропустите:
 
-**РџСЂРёРјРµСЂ РґРІСѓС… СЃС‡РµС‚РѕРІ:**
-1. В«РўРёРЅСЊРєРѕС„С„В» в†’ RUB в†’ Р±Р°Р»Р°РЅСЃ 15 000 (Р±Р°РЅРєРѕРІСЃРєР°СЏ РєР°СЂС‚Р°)
-2. В«РќР°Р»РёС‡РЅС‹Рµ RUBВ» в†’ RUB в†’ Р±Р°Р»Р°РЅСЃ 5 000 (РЅР°Р»РёС‡РЅС‹Рµ, РёРјСЏ Р°РІС‚Рѕ)
+[? Пропустить]
+```
 
-Р¤Р»РѕСѓ РќР°Р»РёС‡РЅС‹С… (РІС‚РѕСЂРѕР№ СЃС‡С‘С‚):
-- РќР°Р¶Р°С‚СЊ `[рџ’µ РќР°Р»РёС‡РЅС‹Рµ]` в†’ СЃСЂР°Р·Сѓ currency picker (РЅРµС‚ name_input) в†’ РІС‹Р±СЂР°С‚СЊ `[рџ‡·рџ‡є RUB]` в†’ РІРІРµСЃС‚Рё Р±Р°Р»Р°РЅСЃ `5000` в†’ success screen.
+- **Ввод числа** > text interceptor `bal_input` > `setAccountBalanceById()` > `initial_balance` в БД.
+- **`[? Пропустить]`** (ac:bal:s) > баланс остаётся 0.
 
-РџРѕСЃР»Рµ вЂ” СЃРЅРѕРІР° `buildFinishOnboardKeyboard`. РџРѕР»СЊР·РѕРІР°С‚РµР»СЊ РЅР°Р¶РёРјР°РµС‚ `[вњ… Р—Р°РІРµСЂС€РёС‚СЊ]` (ac:fin):
-- Redis-РєР»СЋС‡ `midas:ac:` РѕС‡РёС‰Р°РµС‚СЃСЏ.
-- РЎРѕРѕР±С‰РµРЅРёРµ СѓРґР°Р»СЏРµС‚СЃСЏ (`deleteMessage`).
-- РћС‚РїСЂР°РІР»СЏРµС‚СЃСЏ `sendMessageWithReplyKeyboard` вЂ” ReplyKeyboard РїРѕСЏРІР»СЏРµС‚СЃСЏ СЃРЅРѕРІР°.
-- Р•СЃР»Рё РїСЂРёС€С‘Р» РёР· Р±Р°Р»Р°РЅСЃ-РґР°С€Р±РѕСЂРґР° (`bl:source` РІ Redis) в†’ РІРѕР·РІСЂР°С‚ РІ Р±Р°Р»Р°РЅСЃ. РРЅР°С‡Рµ вЂ” С„РёРЅР°Р»СЊРЅС‹Р№ СЌРєСЂР°РЅ В«Р’СЃС‘ РіРѕС‚РѕРІРѕ!В».
+После ввода/пропуска — **success screen** (без кнопок, только текст):
+```
+? Счёт создан!
+?? Тинькофф · RUB
+Начальный баланс: 15 000 ?
+```
+Затем сразу — пикер типа для добавления следующего счёта (`buildFinishOnboardKeyboard`):
+```
+[?? Банковская карта]  [?? Наличные]
+[?? Крипто-биржа]      [?? Крипто-кошелёк]
+[?? Своё название]
+[? Завершить]
+```
 
 ---
 
-### рџ“ќ Р­С‚Р°Рї 5 вЂ” РџРµСЂРІР°СЏ С‚СЂР°РЅР·Р°РєС†РёСЏ (РІРІРѕРґ СЂР°СЃС…РѕРґР°)
+### ? Этап 4 — Создание ВТОРОГО счёта (необязательно)
 
-#### 5.1 Р’РІРѕРґ СЃРІРѕР±РѕРґРЅС‹Рј С‚РµРєСЃС‚РѕРј
+Пользователь нажимает любой тип в `buildFinishOnboardKeyboard` > повторяет Этапы 1–3.
 
-РџРѕР»СЊР·РѕРІР°С‚РµР»СЊ РїСЂРѕСЃС‚Рѕ **РїРёС€РµС‚ РІ С‡Р°С‚** (РЅРµ РєРѕРјР°РЅРґР°, РЅРµ РєРЅРѕРїРєР°):
+**Пример двух счетов:**
+1. «Тинькофф» > RUB > баланс 15 000 (банковская карта)
+2. «Наличные RUB» > RUB > баланс 5 000 (наличные, имя авто)
+
+Флоу Наличных (второй счёт):
+- Нажать `[?? Наличные]` > сразу currency picker (нет name_input) > выбрать `[???? RUB]` > ввести баланс `5000` > success screen.
+
+После — снова `buildFinishOnboardKeyboard`. Пользователь нажимает `[? Завершить]` (ac:fin):
+- Redis-ключ `midas:ac:` очищается.
+- Сообщение удаляется (`deleteMessage`).
+- Отправляется `sendMessageWithReplyKeyboard` — ReplyKeyboard появляется снова.
+- Если пришёл из баланс-дашборда (`bl:source` в Redis) > возврат в баланс. Иначе — финальный экран «Всё готово!».
+
+---
+
+### ?? Этап 5 — Первая транзакция (ввод расхода)
+
+#### 5.1 Ввод свободным текстом
+
+Пользователь просто **пишет в чат** (не команда, не кнопка):
 ```
-РєРѕС„Рµ 150 СЂСѓР±Р»РµР№
+кофе 150 рублей
 ```
 
-**РњР°СЂС€СЂСѓС‚:**
-1. `webhook.route.ts` вЂ” СЃРѕРѕР±С‰РµРЅРёРµ РїСЂРѕС…РѕРґРёС‚ РІСЃРµ text interceptors (РЅРµС‚ Р°РєС‚РёРІРЅС‹С… Redis-РєР»СЋС‡РµР№).
-2. РџРѕРїР°РґР°РµС‚ РІ СЂР°Р·РґРµР» AI parse в†’ `addJobToWebhookIngestionQueue()`.
-3. **`webhook-ingestion` worker** (BullMQ) в†’ `ai-parse.worker.ts`.
+**Маршрут:**
+1. `webhook.route.ts` — сообщение проходит все text interceptors (нет активных Redis-ключей).
+2. Попадает в раздел AI parse > `addJobToWebhookIngestionQueue()`.
+3. **`webhook-ingestion` worker** (BullMQ) > `ai-parse.worker.ts`.
 
 #### 5.2 AI parse pipeline
 
-1. `parseTransaction(text)` в†’ Claude Haiku 4.5, `temperature: 0`, `max_tokens: 256`.
-2. System prompt: MULTILINGUAL RECOGNITION (RU/EN/UA) + FUZZY MATCHING + 30-РєР°С‚РµРіРѕСЂРёР№РЅР°СЏ С‚Р°РєСЃРѕРЅРѕРјРёСЏ + 500+ СЏРєРѕСЂРЅС‹С… СЃР»РѕРІ + DISAMBIGUATION RULES.
-3. **Р РµР·СѓР»СЊС‚Р°С‚:**
+1. `parseTransaction(text)` > Claude Haiku 4.5, `temperature: 0`, `max_tokens: 256`.
+2. System prompt: MULTILINGUAL RECOGNITION (RU/EN/UA) + FUZZY MATCHING + 30-категорийная таксономия + 500+ якорных слов + DISAMBIGUATION RULES.
+3. **Результат:**
    ```json
-   { "intent": "expense", "amount": "150", "currency": "RUB", "category_hint": "РљР°С„Рµ Рё СЂРµСЃС‚РѕСЂР°РЅС‹", "confidence": 0.95 }
+   { "intent": "expense", "amount": "150", "currency": "RUB", "category_hint": "Кафе и рестораны", "confidence": 0.95 }
    ```
-4. Post-processing (safety net): 7 РіСЂСѓРїРї regex, negation guard, confidence boost.
-5. `ALLOWED_CATEGORIES` РІР°Р»РёРґР°С†РёСЏ: РµСЃР»Рё `category_hint` в€‰ set в†’ Р·Р°РјРµРЅСЏРµС‚СЃСЏ РЅР° В«Р”СЂСѓРіРѕРµВ».
-6. `CategoryResolverService`: exact DB match в†’ 200+ alias map в†’ fallback.
-7. **Dead card cleanup:** РµСЃР»Рё РІ Redis РµСЃС‚СЊ `midas:dead_card:{chatId}` (СЃС‚Р°СЂР°СЏ вќЊ РєР°СЂС‚РѕС‡РєР°) в†’ `deleteMessage` РїРµСЂРµРґ РѕС‚РїСЂР°РІРєРѕР№ preview.
+4. Post-processing (safety net): 7 групп regex, negation guard, confidence boost.
+5. `ALLOWED_CATEGORIES` валидация: если `category_hint` ? set > заменяется на «Другое».
+6. `CategoryResolverService`: exact DB match > 200+ alias map > fallback.
+7. **Dead card cleanup:** если в Redis есть `midas:dead_card:{chatId}` (старая ? карточка) > `deleteMessage` перед отправкой preview.
 
-#### 5.3 РЎРѕР·РґР°РЅРёРµ С‡РµСЂРЅРѕРІРёРєР° Рё preview
+#### 5.3 Создание черновика и preview
 
-1. `createDraft()` в†’ INSERT РІ `transaction_drafts` (СЃС‚Р°С‚СѓСЃ `pending_user`).
-2. `notifications.worker` в†’ РѕС‚РїСЂР°РІР»СЏРµС‚ preview-РєР°СЂС‚РѕС‡РєСѓ РІ С‡Р°С‚:
+1. `createDraft()` > INSERT в `transaction_drafts` (статус `pending_user`).
+2. `notifications.worker` > отправляет preview-карточку в чат:
    ```
-   в• РљР°С„Рµ Рё СЂРµСЃС‚РѕСЂР°РЅС‹
-   Р Р°СЃС…РѕРґ В· 150 в‚Ѕ
-   [вњ… Р—Р°РїРёСЃР°С‚СЊ]  
-   [вњЏпёЏ РР·РјРµРЅРёС‚СЊ] [вњ–пёЏ РћС‚РјРµРЅР°]
+   ? Кафе и рестораны
+   Расход · 150 ?
+   [? Записать]  
+   [?? Изменить] [?? Отмена]
    ```
-3. `midas:preview:{draftId}` (TTL 600s) в†’ СЃРѕС…СЂР°РЅСЏРµС‚ message_id РєР°СЂС‚РѕС‡РєРё.
+3. `midas:preview:{draftId}` (TTL 600s) > сохраняет message_id карточки.
 
-#### 5.4 РџРѕРґС‚РІРµСЂР¶РґРµРЅРёРµ
+#### 5.4 Подтверждение
 
-**РџРѕР»СЊР·РѕРІР°С‚РµР»СЊ РЅР°Р¶РёРјР°РµС‚ `[вњ… Р—Р°РїРёСЃР°С‚СЊ]`:**
-1. `callback_query` в†’ `confirmation.worker`.
-2. SELECT FOR UPDATE SKIP LOCKED в†’ Р°С‚РѕРјР°СЂРЅР°СЏ Р·Р°С‰РёС‚Р° РѕС‚ РґРІРѕР№РЅРѕРіРѕ РїРѕРґС‚РІРµСЂР¶РґРµРЅРёСЏ.
-3. INSERT РІ `transactions` (intent=expense, category=РљР°С„Рµ Рё СЂРµСЃС‚РѕСЂР°РЅС‹, base_amount=150, currency=RUB, account_id=РўРёРЅСЊРєРѕС„С„, base_currency=RUB).
-4. `confirmation.worker` С‡РёС‚Р°РµС‚ `midas:preview:{draftId}` в†’ `editMessageText` в†’ preview РїСЂРµРІСЂР°С‰Р°РµС‚СЃСЏ РІ confirmed card:
+**Пользователь нажимает `[? Записать]`:**
+1. `callback_query` > `confirmation.worker`.
+2. SELECT FOR UPDATE SKIP LOCKED > атомарная защита от двойного подтверждения.
+3. INSERT в `transactions` (intent=expense, category=Кафе и рестораны, base_amount=150, currency=RUB, account_id=Тинькофф, base_currency=RUB).
+4. `confirmation.worker` читает `midas:preview:{draftId}` > `editMessageText` > preview превращается в confirmed card:
    ```
-   вњ… Р—Р°РїРёСЃР°РЅРѕ!
-   в• РљР°С„Рµ Рё СЂРµСЃС‚РѕСЂР°РЅС‹
-   Р Р°СЃС…РѕРґ В· 150 в‚Ѕ В· РўРёРЅСЊРєРѕС„С„
-   [вњЏпёЏ РР·РјРµРЅРёС‚СЊ Р·Р°РїРёСЃСЊ]
+   ? Записано!
+   ? Кафе и рестораны
+   Расход · 150 ? · Тинькофф
+   [?? Изменить запись]
    ```
-5. `midas:preview:{draftId}` СѓРґР°Р»СЏРµС‚СЃСЏ РёР· Redis.
+5. `midas:preview:{draftId}` удаляется из Redis.
 
-**РџРѕР»СЊР·РѕРІР°С‚РµР»СЊ РЅР°Р¶РёРјР°РµС‚ `[вњ–пёЏ РћС‚РјРµРЅР°]`:**
-- `draft_status` в†’ `rejected`.
-- preview-РєР°СЂС‚РѕС‡РєР° СЂРµРґР°РєС‚РёСЂСѓРµС‚СЃСЏ в†’ В«вќЊ РћС‚РјРµРЅРµРЅРѕВ».
-- РЎРѕС…СЂР°РЅСЏРµС‚СЃСЏ РІ `midas:dead_card:{chatId}` (TTL 24h) вЂ” Р°РІС‚РѕСѓРґР°Р»РёС‚СЃСЏ РїСЂРё СЃР»РµРґСѓСЋС‰РµРј preview.
+**Пользователь нажимает `[?? Отмена]`:**
+- `draft_status` > `rejected`.
+- preview-карточка редактируется > «? Отменено».
+- Сохраняется в `midas:dead_card:{chatId}` (TTL 24h) — автоудалится при следующем preview.
 
-#### 5.5 Р•СЃР»Рё Claude РЅРµ СЂР°СЃРїРѕР·РЅР°Р» РІР°Р»СЋС‚Сѓ (awaiting_cur)
+#### 5.5 Если Claude не распознал валюту (awaiting_cur)
 
-- `midas:awaiting_cur:{chatId}` (TTL 600s) СЃРѕР·РґР°С‘С‚СЃСЏ РµСЃР»Рё РµСЃС‚СЊ СЃСѓРјРјР° РЅРѕ РЅРµС‚ РІР°Р»СЋС‚С‹ Рё РЅРµС‚ `midas:cur_set:{workspaceId}`.
-- РЎР»РµРґСѓСЋС‰РёР№ С‚РµРєСЃС‚ РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ РїРµСЂРµС…РІР°С‚С‹РІР°РµС‚СЃСЏ РєР°Рє РІР°Р»СЋС‚Р°: В«РµРІСЂРѕВ» в†’ EUR, В«150 СЂСѓР±В» в†’ RUB.
+- `midas:awaiting_cur:{chatId}` (TTL 600s) создаётся если есть сумма но нет валюты и нет `midas:cur_set:{workspaceId}`.
+- Следующий текст пользователя перехватывается как валюта: «евро» > EUR, «150 руб» > RUB.
 
-#### 5.6 Р•СЃР»Рё Claude РІРµСЂРЅСѓР» partial (РЅРµС‚ СЃСѓРјРјС‹)
+#### 5.6 Если Claude вернул partial (нет суммы)
 
-- `needs_clarification` СЃС‚Р°С‚СѓСЃ С‡РµСЂРЅРѕРІРёРєР°.
-- РџРѕР»СЊР·РѕРІР°С‚РµР»СЋ Р·Р°РґР°С‘С‚СЃСЏ РІРѕРїСЂРѕСЃ: В«РљР°РєР°СЏ СЃСѓРјРјР°?В».
-- `midas:clar:{userId}:{chatId}` (TTL 300s) в†’ СЃР»РµРґСѓСЋС‰РµРµ С‡РёСЃР»Рѕ вЂ” СЃСѓРјРјР°.
+- `needs_clarification` статус черновика.
+- Пользователю задаётся вопрос: «Какая сумма?».
+- `midas:clar:{userId}:{chatId}` (TTL 300s) > следующее число — сумма.
 
 ---
 
-### рџ“Љ РС‚РѕРіРѕРІР°СЏ СЃС…РµРјР°: РєР»СЋС‡РµРІС‹Рµ СЃСѓС‰РЅРѕСЃС‚Рё
+### ?? Итоговая схема: ключевые сущности
 
 ```
 workspaces
-  в””в”Ђв”Ђ workspace_memberships (telegramUserId в†’ workspaceId)
-  в””в”Ђв”Ђ account_sources (РўРёРЅСЊРєРѕС„С„/RUB, РќР°Р»РёС‡РЅС‹Рµ/RUB)
-  в””в”Ђв”Ђ categories (РљР°С„Рµ Рё СЂРµСЃС‚РѕСЂР°РЅС‹, РџСЂРѕРґСѓРєС‚С‹, ...)
-  в””в”Ђв”Ђ transaction_drafts (pending в†’ approved/rejected/expired)
-  в””в”Ђв”Ђ transactions (confirmed СЂР°СЃС…РѕРґС‹/РґРѕС…РѕРґС‹)
+  L-- workspace_memberships (telegramUserId > workspaceId)
+  L-- account_sources (Тинькофф/RUB, Наличные/RUB)
+  L-- categories (Кафе и рестораны, Продукты, ...)
+  L-- transaction_drafts (pending > approved/rejected/expired)
+  L-- transactions (confirmed расходы/доходы)
 ```
 
-### рџ“¦ Redis-РєР»СЋС‡Рё РІ Р°РєС‚РёРІРЅРѕРј РѕРЅР±РѕСЂРґРёРЅРіРµ
+### ?? Redis-ключи в активном онбординге
 
-| РљР»СЋС‡ | TTL | РќР°Р·РЅР°С‡РµРЅРёРµ |
+| Ключ | TTL | Назначение |
 |---|---|---|
-| `midas:ac:{userId}:{chatId}` | 300s | State РјР°С€РёРЅР° РѕРЅР±РѕСЂРґРёРЅРіР° (step, name, currency, pendingName, isCustomName, cur_search) |
-| `bl:source:{userId}:{chatId}` | 300s | Р¤Р»Р°Рі: РѕРЅР±РѕСЂРґРёРЅРі РёРЅРёС†РёРёСЂРѕРІР°РЅ РёР· Р±Р°Р»Р°РЅСЃ-РґР°С€Р±РѕСЂРґР° |
-| `midas:preview:{draftId}` | 600s | message_id preview-РєР°СЂС‚РѕС‡РєРё |
-| `midas:dead_card:{chatId}` | 24h | message_id РєР°СЂС‚РѕС‡РєРё вќЊ РґР»СЏ Р°РІС‚РѕСѓРґР°Р»РµРЅРёСЏ |
-| `midas:awaiting_cur:{chatId}` | 600s | РћР¶РёРґР°РЅРёРµ РІРІРѕРґР° РІР°Р»СЋС‚С‹ |
-| `midas:clar:{userId}:{chatId}` | 300s | РћР¶РёРґР°РЅРёРµ РІРІРѕРґР° СЃСѓРјРјС‹ РїСЂРё clarification |
-| `midas:cur_set:{workspaceId}` | - | Р¤Р»Р°Рі СѓСЃС‚Р°РЅРѕРІР»РµРЅРЅРѕР№ РІР°Р»СЋС‚С‹ (РЅРµ Р·Р°РїСЂР°С€РёРІР°С‚СЊ РїРѕРІС‚РѕСЂРЅРѕ) |
+| `midas:ac:{userId}:{chatId}` | 300s | State машина онбординга (step, name, currency, pendingName, isCustomName, cur_search) |
+| `bl:source:{userId}:{chatId}` | 300s | Флаг: онбординг инициирован из баланс-дашборда |
+| `midas:preview:{draftId}` | 600s | message_id preview-карточки |
+| `midas:dead_card:{chatId}` | 24h | message_id карточки ? для автоудаления |
+| `midas:awaiting_cur:{chatId}` | 600s | Ожидание ввода валюты |
+| `midas:clar:{userId}:{chatId}` | 300s | Ожидание ввода суммы при clarification |
+| `midas:cur_set:{workspaceId}` | - | Флаг установленной валюты (не запрашивать повторно) |
 
 ---
 
-## 16. ACTIVE ROADMAP вЂ” РљРЈР”Рђ Р”Р’РР“РђР•РњРЎРЇ Р”РђР›Р¬РЁР•
+## 16. ACTIVE ROADMAP — КУДА ДВИГАЕМСЯ ДАЛЬШЕ
 
-> Р­С‚РѕС‚ СЂР°Р·РґРµР» вЂ” Р¶РёРІРѕР№ РґРѕРєСѓРјРµРЅС‚. РћР±РЅРѕРІР»СЏРµС‚СЃСЏ РїСЂРё Р·Р°РІРµСЂС€РµРЅРёРё РєР°Р¶РґРѕР№ С„Р°Р·С‹.
-> РџРѕСЃР»РµРґРЅРµРµ РѕР±РЅРѕРІР»РµРЅРёРµ: 2026-05-13 11:24 (UTC+3)
+> Этот раздел — живой документ. Обновляется при завершении каждой фазы.
+> Последнее обновление: 2026-05-13 11:24 (UTC+3)
 
-### вњ… Р—Р°РІРµСЂС€РµРЅРѕ РІ Phase 2.5 (Smart Transaction Logic)
+### ? Завершено в Phase 2.5 (Smart Transaction Logic)
 
-| РЁР°Рі | Р§С‚Рѕ СЃРґРµР»Р°РЅРѕ | РЎС‚Р°С‚СѓСЃ |
+| Шаг | Что сделано | Статус |
 |---|---|---|
-| РЁР°Рі 1 | `item-category-detector.service.ts` вЂ” Р°РІС‚Рѕ-РѕРїСЂРµРґРµР»РµРЅРёРµ РєР°С‚РµРіРѕСЂРёРё РїРѕ РЅР°Р·РІР°РЅРёСЋ С‚РѕРІР°СЂР°/Р±СЂРµРЅРґР° (200+ Р·Р°РїРёСЃРµР№, 9 РєР°С‚РµРіРѕСЂРёР№, Maybachв†’РўСЂР°РЅСЃРїРѕСЂС‚) | вњ… |
-| РЁР°Рі 2 | `account-currency-validator.service.ts` вЂ” Р±Р»РѕРєРёСЂРѕРІРєР° РЅРµСЃРѕРІРјРµСЃС‚РёРјС‹С… РїР°СЂ СЃС‡С‘С‚+РІР°Р»СЋС‚Р° (Р‘Р°РЅРє+USDT = вќЊ, Р‘РёСЂР¶Р°+USDT = вњ…) | вњ… |
-| РЁР°Рі 3 | `anomalyBadge()` РІ РїРёРєРµСЂР°С… вЂ” РІРёР·СѓР°Р»СЊРЅС‹Р№ `вљ пёЏ` РґР»СЏ РїРѕРґРѕР·СЂРёС‚РµР»СЊРЅС‹С… СЃСѓС‰РµСЃС‚РІСѓСЋС‰РёС… СЃС‡РµС‚РѕРІ | вњ… |
-| РЁР°Рі 4 | `ai-parse.worker.ts` вЂ” С„РёРєСЃ В«Active Draft GateВ»: РІС‹РІРѕРґ Account/XFX-Р·Р°РІРёСЃРёРјС‹С… UI РєРѕРјРїРѕРЅРµРЅС‚РѕРІ РїСЂРё Р°РєС‚РёРІРЅРѕРј С‡РµСЂРЅРѕРІРёРєРµ | вњ… |
+| Шаг 1 | `item-category-detector.service.ts` — авто-определение категории по названию товара/бренда (200+ записей, 9 категорий, Maybach>Транспорт) | ? |
+| Шаг 2 | `account-currency-validator.service.ts` — блокировка несовместимых пар счёт+валюта (Банк+USDT = ?, Биржа+USDT = ?) | ? |
+| Шаг 3 | `anomalyBadge()` в пикерах — визуальный `??` для подозрительных существующих счетов | ? |
+| Шаг 4 | `ai-parse.worker.ts` — фикс «Active Draft Gate»: вывод Account/XFX-зависимых UI компонентов при активном черновике | ? |
 
-### вњ… Р—Р°РІРµСЂС€РµРЅРѕ РІ Phase 2.5+ (Currency-Aware Account Picker)
+### ? Завершено в Phase 2.5+ (Currency-Aware Account Picker)
 
-> **РџСЂРѕР±Р»РµРјР°:** USDT-СЃС‡С‘С‚ РѕС‚РѕР±СЂР°Р¶Р°Р»СЃСЏ РІ РїРёРєРµСЂРµ РїСЂРё USD-С‚СЂР°РЅР·Р°РєС†РёРё. РџСЂРёС‡РёРЅР° вЂ” РЅР°С‡Р°Р»СЊРЅС‹Р№ РїРёРєРµСЂ СЃС‚СЂРѕРёС‚СЃСЏ РІ `background-workers`, Р° РЅРµ РІ `telegram-bot`, РїРѕСЌС‚РѕРјСѓ РёР·РјРµРЅРµРЅРёСЏ РІ `account.service.ts` (telegram-bot) РЅР° РЅРµРіРѕ РЅРµ РІР»РёСЏР»Рё.
+> **Проблема:** USDT-счёт отображался в пикере при USD-транзакции. Причина — начальный пикер строится в `background-workers`, а не в `telegram-bot`, поэтому изменения в `account.service.ts` (telegram-bot) на него не влияли.
 
-| РЁР°Рі | Р¤Р°Р№Р» | Р§С‚Рѕ СЃРґРµР»Р°РЅРѕ | РЎС‚Р°С‚СѓСЃ |
+| Шаг | Файл | Что сделано | Статус |
 |---|---|---|---|
-| 1 | `account-currency-validator.service.ts` | `isKnownCurrency()` вЂ” РІР°Р№С‚Р»РёСЃС‚-Р·Р°С‰РёС‚Р° РѕС‚ С„Р°РЅС‚РѕРјРЅС‹С… РІР°Р»СЋС‚ (UDS, Р•Р’Р ) | вњ… |
-| 2 | `clarification.service.ts` | `validateCurrencyCode()` в†’ СЂР°РЅРЅСЏСЏ РїСЂРѕРІРµСЂРєР° `isKnownCurrency()` РїРµСЂРµРґ Р·Р°РїРёСЃСЊСЋ РІ Р‘Р” | вњ… |
-| 3 | `account.service.ts` | `getWorkspaceAccountsWithBalances(parsedCurrency?)` вЂ” С„РёР»СЊС‚СЂ: С„РёР°С‚в†’С„РёР°С‚РЅС‹Р№ РїСѓР», СЃС‚РµР№Р±Р»РєРѕРёРЅ/РєСЂРёРїС‚Рѕв†’exact only | вњ… |
-| 4 | `account-inline-keyboard.service.ts` | РљРѕРЅС‚РµРєСЃС‚РЅС‹Рµ РїРѕРґСЃРєР°Р·РєРё Рё `getPickerEmptyText(parsedCurrency?)` | вњ… |
-| 5 | `webhook.route.ts` | РџСЂРѕР±СЂР°СЃС‹РІР°РµС‚ `parsed_currency` РІ 3 entry points (preview, delink, showpicker) | вњ… |
-| 6 в­ђ | `ai-parse.worker.ts` | **Root-cause fix:** `filterPickerAccounts()` + `classifyPickerCcy()` РїСЂРёРјРµРЅРµРЅС‹ Рє initial picker (`aiData.currency`) Рё gate picker (`pendingDraft.parsedCurrency`) | вњ… |
+| 1 | `account-currency-validator.service.ts` | `isKnownCurrency()` — вайтлист-защита от фантомных валют (UDS, ЕВР) | ? |
+| 2 | `clarification.service.ts` | `validateCurrencyCode()` > ранняя проверка `isKnownCurrency()` перед записью в БД | ? |
+| 3 | `account.service.ts` | `getWorkspaceAccountsWithBalances(parsedCurrency?)` — фильтр: фиат>фиатный пул, стейблкоин/крипто>exact only | ? |
+| 4 | `account-inline-keyboard.service.ts` | Контекстные подсказки и `getPickerEmptyText(parsedCurrency?)` | ? |
+| 5 | `webhook.route.ts` | Пробрасывает `parsed_currency` в 3 entry points (preview, delink, showpicker) | ? |
+| 6 ? | `ai-parse.worker.ts` | **Root-cause fix:** `filterPickerAccounts()` + `classifyPickerCcy()` применены к initial picker (`aiData.currency`) и gate picker (`pendingDraft.parsedCurrency`) | ? |
 
-**РђСЂС…РёС‚РµРєС‚СѓСЂРЅС‹Р№ СѓСЂРѕРє:** Р’ Midas РґРІР° РЅРµР·Р°РІРёСЃРёРјС‹С… РїР°Р№РїР»Р°Р№РЅР° РїРёРєРµСЂР°. Р›СЋР±С‹Рµ РёР·РјРµРЅРµРЅРёСЏ Р»РѕРіРёРєРё РїРёРєРµСЂР° С‚СЂРµР±СѓСЋС‚ РѕР±РЅРѕРІР»РµРЅРёСЏ РћР‘РћРРҐ РїСЂРёР»РѕР¶РµРЅРёР№:
-- `apps/telegram-bot` вЂ” РїРёРєРµСЂС‹ РЅР°РІРёРіР°С†РёРё (ia:delink, ia:showpicker)
-- `apps/background-workers` вЂ” РЅР°С‡Р°Р»СЊРЅС‹Р№ РїРёРєРµСЂ РїРѕСЃР»Рµ AI parse
+**Архитектурный урок:** В Midas два независимых пайплайна пикера. Любые изменения логики пикера требуют обновления ОБОИХ приложений:
+- `apps/telegram-bot` — пикеры навигации (ia:delink, ia:showpicker)
+- `apps/background-workers` — начальный пикер после AI parse
 
 ---
 
-### рџ”ґ Phase 3.0 вЂ” DB Schema: РџРѕР»РЅР°СЏ Р°СЂС…РёС‚РµРєС‚СѓСЂРЅР°СЏ РІР°Р»РёРґР°С†РёСЏ (РћР‘РЇР—РђРўР•Р›Р¬РќРћ)
+### ?? Phase 3.0 — DB Schema: Полная архитектурная валидация (ОБЯЗАТЕЛЬНО)
 
-> **РџСЂРёРѕСЂРёС‚РµС‚: Р’Р«РЎРћРљРР™.** РўРµРєСѓС‰Р°СЏ РІР°Р»РёРґР°С†РёСЏ (РЁР°Рі 2) вЂ” СЌРІСЂРёСЃС‚РёС‡РµСЃРєР°СЏ, РѕСЃРЅРѕРІР°РЅР° РЅР° `AccountOnboardState` РёР· Redis.
-> Р•СЃР»Рё Redis-РєР»СЋС‡ РёСЃС‚С‘Рє РёР»Рё РїРѕР»СЊР·РѕРІР°С‚РµР»СЊ СЃРѕР·РґР°С‘С‚ СЃС‡С‘С‚ РЅРµСЃС‚Р°РЅРґР°СЂС‚РЅС‹Рј РїСѓС‚С‘Рј вЂ” С‚РёРї СЃС‡С‘С‚Р° РЅРµРёР·РІРµСЃС‚РµРЅ.
-> Phase 3.0 РїРµСЂРµРІРѕРґРёС‚ СЃРёСЃС‚РµРјСѓ РЅР° **100% РЅР°РґС‘Р¶РЅСѓСЋ, СЃС…РµРјР°-enforced РІР°Р»РёРґР°С†РёСЋ**.
+> **Приоритет: ВЫСОКИЙ.** Текущая валидация (Шаг 2) — эвристическая, основана на `AccountOnboardState` из Redis.
+> Если Redis-ключ истёк или пользователь создаёт счёт нестандартным путём — тип счёта неизвестен.
+> Phase 3.0 переводит систему на **100% надёжную, схема-enforced валидацию**.
 
-#### Р§С‚Рѕ РЅСѓР¶РЅРѕ СЃРґРµР»Р°С‚СЊ
+#### Что нужно сделать
 
-**РњРёРіСЂР°С†РёСЏ Р‘Р”:**
+**Миграция БД:**
 ```sql
 ALTER TABLE account_sources
   ADD COLUMN account_type    TEXT CHECK (account_type IN ('card','cash','exchange','wallet','custom')),
@@ -1151,83 +1153,83 @@ ALTER TABLE account_sources
   ADD COLUMN provider_key    TEXT;  -- 'mono', 'binance', 'payeer', etc. (lowercase)
 ```
 
-**Р—Р°РїРѕР»РЅРµРЅРёРµ РїСЂРё СЃРѕР·РґР°РЅРёРё СЃС‡С‘С‚Р°:**
-- Р’ `account.service.ts` в†’ `addAccountReturningId()` Рё `addAccountWithCurrency()`:
-  РїСЂРёРЅРёРјР°С‚СЊ `accountType`, `walletSubtype`, `providerKey` РёР· `AccountOnboardState` Рё Р·Р°РїРёСЃС‹РІР°С‚СЊ РІ Р‘Р”.
-- Р’ `webhook.route.ts` в†’ `cmd=currency` handler: РїРµСЂРµРґР°РІР°С‚СЊ `state.accountType`, `state.walletSubtype`, `state.name.toLowerCase()` РєР°Рє `providerKey`.
+**Заполнение при создании счёта:**
+- В `account.service.ts` > `addAccountReturningId()` и `addAccountWithCurrency()`:
+  принимать `accountType`, `walletSubtype`, `providerKey` из `AccountOnboardState` и записывать в БД.
+- В `webhook.route.ts` > `cmd=currency` handler: передавать `state.accountType`, `state.walletSubtype`, `state.name.toLowerCase()` как `providerKey`.
 
-**РСЃРїРѕР»СЊР·РѕРІР°РЅРёРµ РїСЂРё С‚СЂР°РЅР·Р°РєС†РёСЏС…:**
-- `buildAccountPickerForDraft` Рё `buildAccountPickerV2Keyboard`:
-  РІРјРµСЃС‚Рѕ СЌРІСЂРёСЃС‚РёРєРё РїРѕ РёРјРµРЅРё в†’ С‡РёС‚Р°С‚СЊ `account_type` РёР· Р‘Р”, РїРµСЂРµРґР°РІР°С‚СЊ РІ `validateAccountCurrency()`.
-  Р­С‚Рѕ РґРµР»Р°РµС‚ `вљ пёЏ` badge РЅР° 100% С‚РѕС‡РЅС‹Рј.
+**Использование при транзакциях:**
+- `buildAccountPickerForDraft` и `buildAccountPickerV2Keyboard`:
+  вместо эвристики по имени > читать `account_type` из БД, передавать в `validateAccountCurrency()`.
+  Это делает `??` badge на 100% точным.
 
-**Р РµС‚СЂРѕР°РєС‚РёРІРЅРѕРµ Р·Р°РїРѕР»РЅРµРЅРёРµ (РѕРїС†РёРѕРЅР°Р»СЊРЅРѕ):**
-- РџРѕРїС‹С‚Р°С‚СЊСЃСЏ РІС‹РІРµСЃС‚Рё `account_type` РёР· СЃСѓС‰РµСЃС‚РІСѓСЋС‰РёС… РЅР°Р·РІР°РЅРёР№ СЃС‡РµС‚РѕРІ С‡РµСЂРµР· РјР°С‚С‡ СЃ `BANK_PRESETS`/`EWALLET_PRESETS`/`EXCHANGE_PRESETS`.
-- Р’СЃРµ С‡С‚Рѕ РЅРµ РїРѕРґРѕС€Р»Рѕ в†’ `account_type = 'custom'`.
+**Ретроактивное заполнение (опционально):**
+- Попытаться вывести `account_type` из существующих названий счетов через матч с `BANK_PRESETS`/`EWALLET_PRESETS`/`EXCHANGE_PRESETS`.
+- Все что не подошло > `account_type = 'custom'`.
 
-#### Р¤Р°Р№Р»С‹ РґР»СЏ РёР·РјРµРЅРµРЅРёСЏ
+#### Файлы для изменения
 
-| Р¤Р°Р№Р» | РР·РјРµРЅРµРЅРёРµ |
+| Файл | Изменение |
 |---|---|
-| `packages/database/migrations/XXXXXXX_account-sources-type-columns.js` | NEW вЂ” ALTER TABLE |
-| `apps/telegram-bot/src/services/account.service.ts` | MODIFY вЂ” СЂР°СЃС€РёСЂРёС‚СЊ СЃРёРіРЅР°С‚СѓСЂС‹ addAccount* |
-| `apps/telegram-bot/src/routes/webhook.route.ts` | MODIFY вЂ” РїРµСЂРµРґР°РІР°С‚СЊ С‚РёРї РІ addAccount* |
-| `apps/telegram-bot/src/services/account-inline-keyboard.service.ts` | MODIFY вЂ” С‡РёС‚Р°С‚СЊ С‚РёРї РёР· Р‘Р” РІРјРµСЃС‚Рѕ СЌРІСЂРёСЃС‚РёРєРё |
-| `apps/telegram-bot/src/services/account-currency-validator.service.ts` | MODIFY вЂ” СѓР±СЂР°С‚СЊ РїСЂРѕРІР°Р№РґРµСЂ-С…РёРЅС‚ РёР· СЃРёРіРЅР°С‚СѓСЂС‹ (С‚РµРїРµСЂСЊ РёР· Р‘Р”) |
+| `packages/database/migrations/XXXXXXX_account-sources-type-columns.js` | NEW — ALTER TABLE |
+| `apps/telegram-bot/src/services/account.service.ts` | MODIFY — расширить сигнатуры addAccount* |
+| `apps/telegram-bot/src/routes/webhook.route.ts` | MODIFY — передавать тип в addAccount* |
+| `apps/telegram-bot/src/services/account-inline-keyboard.service.ts` | MODIFY — читать тип из БД вместо эвристики |
+| `apps/telegram-bot/src/services/account-currency-validator.service.ts` | MODIFY — убрать провайдер-хинт из сигнатуры (теперь из БД) |
 
-#### РћС†РµРЅРєР° СЂР°Р±РѕС‚С‹
-- ~3вЂ“4 С‡Р°СЃР° (РјРёРіСЂР°С†РёСЏ + СЃРёРіРЅР°С‚СѓСЂС‹ + РёРЅС‚РµРіСЂР°С†РёСЏ + smoke test)
-- Р‘РµР· breaking changes РІ UX вЂ” РёР·РјРµРЅРµРЅРёСЏ С‚РѕР»СЊРєРѕ РІ СЃР»РѕРµ РґР°РЅРЅС‹С…
-
----
-
-### рџџЎ Phase 3.1 вЂ” Р Р°СЃС€РёСЂРµРЅРёРµ СЃР»РѕРІР°СЂСЏ РґРµС‚РµРєС‚РѕСЂР° РєР°С‚РµРіРѕСЂРёР№
-
-> **РџСЂРёРѕСЂРёС‚РµС‚: РЎР Р•Р”РќРР™.** РўРµРєСѓС‰РёР№ СЃР»РѕРІР°СЂСЊ: 200+ Р·Р°РїРёСЃРµР№, 9 РєР°С‚РµРіРѕСЂРёР№.
-> Р¦РµР»СЊ: СЂР°СЃС€РёСЂРёС‚СЊ РґРѕ 500+ Р·Р°РїРёСЃРµР№, РґРѕР±Р°РІРёС‚СЊ Р»РѕРєР°Р»СЊРЅС‹Рµ Р±СЂРµРЅРґС‹ (UA/KZ/UZ/BY).
-
-- Р”РѕР±Р°РІРёС‚СЊ РєР°С‚РµРіРѕСЂРёРё: `РџСѓС‚РµС€РµСЃС‚РІРёСЏ`, `РџРѕРґР°СЂРєРё`, `РџРёС‚РѕРјС†С‹`, `РРЅРІРµСЃС‚РёС†РёРё`
-- Р”РѕР±Р°РІРёС‚СЊ 150+ Р»РѕРєР°Р»СЊРЅС‹С… Р±СЂРµРЅРґРѕРІ: РђРўР‘, РЎС–Р»СЊРїРѕ, Kaspi, OLX, Wildberries, Ozon, РЎР”Р­Рљ
-- Р”РѕР±Р°РІРёС‚СЊ С‚СЂР°РЅСЃР»РёС‚РµСЂР°С†РёСЋ: В«starbaksВ» в†’ Starbucks, В«makВ» в†’ McDonald's
+#### Оценка работы
+- ~3–4 часа (миграция + сигнатуры + интеграция + smoke test)
+- Без breaking changes в UX — изменения только в слое данных
 
 ---
 
-### рџџЎ Phase 3.2 вЂ” РћС‚С‡С‘С‚ 3.0: РљР°С‚РµРіРѕСЂРёР№РЅР°СЏ Р°РЅР°Р»РёС‚РёРєР°
+### ?? Phase 3.1 — Расширение словаря детектора категорий
 
-> **РџСЂРёРѕСЂРёС‚РµС‚: РЎР Р•Р”РќРР™.** РўРµРєСѓС‰РёР№ `/report` РїРѕРєР°Р·С‹РІР°РµС‚ С‚РѕР»СЊРєРѕ СЃСѓРјРјС‹ РїРѕ intent.
-> Р”РѕР±Р°РІРёС‚СЊ СЂР°Р·Р±РёРІРєСѓ РїРѕ РєР°С‚РµРіРѕСЂРёСЏРј + С‚РѕРї-5 С‚СЂР°С‚ Р·Р° РїРµСЂРёРѕРґ.
+> **Приоритет: СРЕДНИЙ.** Текущий словарь: 200+ записей, 9 категорий.
+> Цель: расширить до 500+ записей, добавить локальные бренды (UA/KZ/UZ/BY).
+
+- Добавить категории: `Путешествия`, `Подарки`, `Питомцы`, `Инвестиции`
+- Добавить 150+ локальных брендов: АТБ, Сільпо, Kaspi, OLX, Wildberries, Ozon, СДЭК
+- Добавить транслитерацию: «starbaks» > Starbucks, «mak» > McDonald's
+
+---
+
+### ?? Phase 3.2 — Отчёт 3.0: Категорийная аналитика
+
+> **Приоритет: СРЕДНИЙ.** Текущий `/report` показывает только суммы по intent.
+> Добавить разбивку по категориям + топ-5 трат за период.
 
 ```
-рџ“Љ РћС‚С‡С‘С‚ Р·Р° РјР°Р№ 2026
+?? Отчёт за май 2026
 
-рџ’ё Р Р°СЃС…РѕРґС‹: 45 000 UAH
-  рџљ— РўСЂР°РЅСЃРїРѕСЂС‚: 12 000 (27%)
-  рџЌ” Р•РґР°: 8 500 (19%)
-  рџ’» Р­Р»РµРєС‚СЂРѕРЅРёРєР°: 15 000 (33%)
-  рџ“Ѓ Р”СЂСѓРіРѕРµ: 9 500 (21%)
+?? Расходы: 45 000 UAH
+  ?? Транспорт: 12 000 (27%)
+  ?? Еда: 8 500 (19%)
+  ?? Электроника: 15 000 (33%)
+  ?? Другое: 9 500 (21%)
 
-рџ’° Р”РѕС…РѕРґС‹: 120 000 UAH
+?? Доходы: 120 000 UAH
 ```
 
 ---
 
-### рџ”µ Phase 4.0 вЂ” Telegram Mini App (Frontend)
+### ?? Phase 4.0 — Telegram Mini App (Frontend)
 
-> **РџСЂРёРѕСЂРёС‚РµС‚: РќРР—РљРР™ / Р‘РЈР”РЈР©Р•Р•.** React 19 + Vite 8.
-> Р’РёР·СѓР°Р»СЊРЅС‹Р№ РґР°С€Р±РѕСЂРґ Р±Р°Р»Р°РЅСЃР°, РґРёР°РіСЂР°РјРјС‹ СЂР°СЃС…РѕРґРѕРІ РїРѕ РєР°С‚РµРіРѕСЂРёСЏРј, РёСЃС‚РѕСЂРёСЏ С‚СЂР°РЅР·Р°РєС†РёР№.
-> **РќРµ РЅР°С‡РёРЅР°С‚СЊ РґРѕ Р·Р°РІРµСЂС€РµРЅРёСЏ Phase 3.0 + 3.1.**
+> **Приоритет: НИЗКИЙ / БУДУЩЕЕ.** React 19 + Vite 8.
+> Визуальный дашборд баланса, диаграммы расходов по категориям, история транзакций.
+> **Не начинать до завершения Phase 3.0 + 3.1.**
 
 ---
 
-### РЎРІРѕРґРЅР°СЏ С‚Р°Р±Р»РёС†Р° РїСЂРёРѕСЂРёС‚РµС‚РѕРІ
+### Сводная таблица приоритетов
 
-| Р¤Р°Р·Р° | РќР°Р·РІР°РЅРёРµ | РџСЂРёРѕСЂРёС‚РµС‚ | РЎС‚Р°С‚СѓСЃ | РўСЂРµР±СѓРµС‚ |
-|---|---|---|---|| 2026-05-15 09:20 | **Balance UI Polish B-9+ вЂ” compact text layout + Add Currency fix.** alance.service.ts: (1) Compact text вЂ” СѓР±СЂР°РЅС‹ РїСѓСЃС‚С‹Рµ СЃС‚СЂРѕРєРё РјРµР¶РґСѓ СЃС‡С‘С‚Р°РјРё РІРЅСѓС‚СЂРё СЃРµРєС†РёРё Рё РјРµР¶РґСѓ Р·Р°РіРѕР»РѕРІРєРѕРј Рё РїРµСЂРІС‹Рј СЃС‡С‘С‚РѕРј; GROUP_LABEL в†’ Title Case (РЅРµ ALL CAPS); СЂРѕР»СЊ-Р±РµР№РґР¶Рё СЃРѕРєСЂР°С‰РµРЅС‹ РґРѕ РёРєРѕРЅРѕРє. (2) ACCOUNT_DETAIL_SQL + GROUP BY РѕР±РЅРѕРІР»РµРЅС‹ вЂ” РґРѕР±Р°РІР»РµРЅ .parent_account_id; AccountDetailRow/AccountDetailData + parent_account_id: string | null. alance-keyboard.service.ts: uildAccountActionsKeyboard вЂ” РїР°СЂР°РјРµС‚СЂ РїРµСЂРµРёРјРµРЅРѕРІР°РЅ hasChildren в†’ canAddCurrency, РєРЅРѕРїРєР° В«Р”РѕР±Р°РІРёС‚СЊ РІР°Р»СЋС‚СѓВ» РїРѕРєР°Р·С‹РІР°РµС‚СЃСЏ РґР»СЏ Р’РЎР•РҐ top-level СЃС‡С‘С‚РѕРІ (parent_account_id === null), РЅРµ С‚РѕР»СЊРєРѕ РёРјРµСЋС‰РёС… РґРµС‚РµР№. webhook.route.ts: 7 РІС‹Р·РѕРІРѕРІ uildAccountActionsKeyboard вЂ” СѓСЃР»РѕРІРёРµ detail.child_count > 0 Р·Р°РјРµРЅРµРЅРѕ РЅР° detail.parent_account_id === null. tsc 0 РѕС€РёР±РѕРє. Commits cb37de6. Railway auto-deploy. |
-| 2026-05-15 09:30 | **Balance UI Polish вЂ” N26/Revolut professional redesign.** alance.service.ts: (1) РќРѕРІС‹Р№ С„РѕСЂРјР°С‚ вЂ” 1 СЃС‡С‘С‚ = 1 СЃС‚СЂРѕРєР° В«РђР»СЊС„Р°-Р‘Р°РЅРє (в­ђ РѕСЃРЅРѕРІРЅРѕР№) В· 22 010 213 в‚ЅВ» РІРјРµСЃС‚Рѕ 2-СЃС‚СЂРѕС‡РЅРѕРіРѕ В«в”” balance currencyВ». (2) РўР°Р±Р»РёС†Р° CCY_SYMBOL вЂ” СЃРёРјРІРѕР»С‹ РІР°Р»СЋС‚ в‚Ѕ $ в‚¬ в‚ґ ВЈ в‚ё в‚¬ (17 РІР°Р»СЋС‚) РІРјРµСЃС‚Рѕ РєРѕРґРѕРІ. (3) oleSuffix вЂ” СЂРѕР»СЊ СЃСѓС„С„РёРєСЃРѕРј <i>(в­ђ РѕСЃРЅРѕРІРЅРѕР№)</i> РїРѕСЃР»Рµ РёРјРµРЅРё (Variant A). (4) Р—Р°РіРѕР»РѕРІРѕРє рџ’ј Р‘Р°Р»Р°РЅСЃ в†’ рџ’° Р‘Р°Р»Р°РЅСЃ (СЃРѕРІРїР°РґР°РµС‚ СЃ reply-keyboard). alance-keyboard.service.ts: (1) GROUP_EMOJI РѕР±РЅРѕРІР»РµРЅС‹ вЂ” рџ“€ Р±РёСЂР¶Рё, рџ”ђ РєРѕС€РµР»СЊРєРё, рџ“‚ РїСЂРѕС‡РµРµ. (2) GROUP_LABEL в†’ Title Case. (3) РљРЅРѕРїРєРё вЂ” CCY_SYM С‚Р°Р±Р»РёС†Р° СЃРёРјРІРѕР»РѕРІ; СЂРѕР»СЊ-СЃСѓС„С„РёРєСЃ ' в­ђ' (icon-only, Р±РµР· СЃРєРѕР±РѕРє Рё С‚РµРєСЃС‚Р°). tsc 0 РѕС€РёР±РѕРє. Commits c4ba46c, 0b6530, 21e0a6f. Railway auto-deploy. |
+| Фаза | Название | Приоритет | Статус | Требует |
+|---|---|---|---|| 2026-05-15 09:20 | **Balance UI Polish B-9+ — compact text layout + Add Currency fix.** alance.service.ts: (1) Compact text — убраны пустые строки между счётами внутри секции и между заголовком и первым счётом; GROUP_LABEL > Title Case (не ALL CAPS); роль-бейджи сокращены до иконок. (2) ACCOUNT_DETAIL_SQL + GROUP BY обновлены — добавлен .parent_account_id; AccountDetailRow/AccountDetailData + parent_account_id: string | null. alance-keyboard.service.ts: uildAccountActionsKeyboard — параметр переименован hasChildren > canAddCurrency, кнопка «Добавить валюту» показывается для ВСЕХ top-level счётов (parent_account_id === null), не только имеющих детей. webhook.route.ts: 7 вызовов uildAccountActionsKeyboard — условие detail.child_count > 0 заменено на detail.parent_account_id === null. tsc 0 ошибок. Commits cb37de6. Railway auto-deploy. |
+| 2026-05-15 09:30 | **Balance UI Polish — N26/Revolut professional redesign.** alance.service.ts: (1) Новый формат — 1 счёт = 1 строка «Альфа-Банк (? основной) · 22 010 213 ?» вместо 2-строчного «L balance currency». (2) Таблица CCY_SYMBOL — символы валют ? $ € ? ? ? € (17 валют) вместо кодов. (3) oleSuffix — роль суффиксом <i>(? основной)</i> после имени (Variant A). (4) Заголовок ?? Баланс > ?? Баланс (совпадает с reply-keyboard). alance-keyboard.service.ts: (1) GROUP_EMOJI обновлены — ?? биржи, ?? кошельки, ?? прочее. (2) GROUP_LABEL > Title Case. (3) Кнопки — CCY_SYM таблица символов; роль-суффикс ' ?' (icon-only, без скобок и текста). tsc 0 ошибок. Commits c4ba46c, 0b6530, 21e0a6f. Railway auto-deploy. |
 
 ---|
-| **3.0** | DB Schema: account_type/wallet_subtype | рџ”ґ Р’Р«РЎРћРљРР™ | вЏі РЎР»РµРґСѓСЋС‰Р°СЏ | Phase 2.5 вњ… |
-| **3.1** | Р Р°СЃС€РёСЂРµРЅРёРµ СЃР»РѕРІР°СЂСЏ РґРµС‚РµРєС‚РѕСЂР° | рџџЎ РЎР Р•Р”РќРР™ | рџ“‹ Р—Р°РїР»Р°РЅРёСЂРѕРІР°РЅР° | Phase 3.0 |
-| **3.2** | РћС‚С‡С‘С‚ 3.0: РєР°С‚РµРіРѕСЂРёР№РЅР°СЏ Р°РЅР°Р»РёС‚РёРєР° | рџџЎ РЎР Р•Р”РќРР™ | рџ“‹ Р—Р°РїР»Р°РЅРёСЂРѕРІР°РЅР° | Phase 3.0 |
-| **4.0** | Telegram Mini App | рџ”µ РќРР—РљРР™ | рџ“‹ Р‘СѓРґСѓС‰РµРµ | Phase 3.x |
+| **3.0** | DB Schema: account_type/wallet_subtype | ?? ВЫСОКИЙ | ? Следующая | Phase 2.5 ? |
+| **3.1** | Расширение словаря детектора | ?? СРЕДНИЙ | ?? Запланирована | Phase 3.0 |
+| **3.2** | Отчёт 3.0: категорийная аналитика | ?? СРЕДНИЙ | ?? Запланирована | Phase 3.0 |
+| **4.0** | Telegram Mini App | ?? НИЗКИЙ | ?? Будущее | Phase 3.x |
 
