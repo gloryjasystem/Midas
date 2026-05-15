@@ -271,10 +271,10 @@ export function buildBalanceListKeyboard(accounts: BalanceAccountRow[]): InlineK
     if (children.length > 0) {
       // Parent with children — aggregation button + child rows
       const n = children.length;
-      // Variant A: role suffix in parentheses after name
-      const rs = (acc.isExpenseDefault && acc.isIncomeDefault) ? ' (⭐ основной)'
-               : acc.isExpenseDefault                          ? ' (💸 расходы)'
-               : acc.isIncomeDefault                           ? ' (💰 доходы)'
+      // Icon only in buttons — no parentheses or text labels
+      const rs = (acc.isExpenseDefault && acc.isIncomeDefault) ? ' ⭐'
+               : acc.isExpenseDefault                          ? ' 💸'
+               : acc.isIncomeDefault                           ? ' 💰'
                : '';
       accountRows.push([{
         text: `${emoji} ${acc.name}${rs}  ·  ${n}\u00a0${pluralizeCurrency(n)}`,
@@ -296,10 +296,10 @@ export function buildBalanceListKeyboard(accounts: BalanceAccountRow[]): InlineK
         callback_data: `bl:ac:${acc.account_id}`,
       }]);
     } else {
-      // Leaf account — Variant A: role suffix in parentheses after name
-      const rs = (acc.isExpenseDefault && acc.isIncomeDefault) ? ' (⭐ основной)'
-               : acc.isExpenseDefault                          ? ' (💸 расходы)'
-               : acc.isIncomeDefault                           ? ' (💰 доходы)'
+      // Leaf account — icon only role suffix in buttons
+      const rs = (acc.isExpenseDefault && acc.isIncomeDefault) ? ' ⭐'
+               : acc.isExpenseDefault                          ? ' 💸'
+               : acc.isIncomeDefault                           ? ' 💰'
                : '';
       const balFmt = `${formatBalanceShort(acc.balance)}\u00a0${sym(acc.currency)}`;
       accountRows.push([{

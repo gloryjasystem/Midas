@@ -351,7 +351,7 @@ export async function getBalanceData(
     sections.push(`${GROUP_EMOJI[groupType]} <b>${GROUP_LABEL[groupType]}</b>\n${lines.join('\n')}`);
   }
 
-  const text = '💼 <b>Баланс</b>\n\n' + sections.join('\n\n');
+  const text = '💰 <b>Баланс</b>\n\n' + sections.join('\n\n');
   return { text, accounts: accountRows };
 }
 
