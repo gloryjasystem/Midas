@@ -264,6 +264,12 @@ export type DraftFields = {
   item_name: string | null;
   parsed_category_hint: string | null;
   category_id: string | null;
+  /**
+   * Resolved name of the SELECTED category (from categories JOIN).
+   * Populated when category_id is set; null otherwise.
+   * Use this for display instead of parsed_category_hint when set.
+   */
+  category_name: string | null;
   // ── Phase 2.4: Account-Aware Draft Card fields ──────────────────────────
   /** FK to account_sources. Null = no account explicitly linked yet. */
   account_id: string | null;
@@ -301,15 +307,17 @@ export async function getDraftFields(
 ): Promise<DraftFields | null> {
   return withTenantTransaction(workspaceId, userId, async (client) => {
     const result = await client.query<DraftFields>(
-      `SELECT id, status, parsed_intent, parsed_amount::TEXT AS parsed_amount, parsed_currency,
-              item_name, parsed_category_hint, category_id,
-              account_id,
-              account_debit_amount::TEXT AS account_debit_amount,
-              account_debit_currency
-       FROM transaction_drafts
-       WHERE id = $1 AND workspace_id = $2
-         AND status IN ('pending_user','needs_clarification')
-         AND expires_at > NOW()`,
+      `SELECT d.id, d.status, d.parsed_intent, d.parsed_amount::TEXT AS parsed_amount, d.parsed_currency,
+              d.item_name, d.parsed_category_hint, d.category_id,
+              c.name AS category_name,
+              d.account_id,
+              d.account_debit_amount::TEXT AS account_debit_amount,
+              d.account_debit_currency
+       FROM transaction_drafts d
+       LEFT JOIN categories c ON c.id = d.category_id AND c.workspace_id = d.workspace_id
+       WHERE d.id = $1 AND d.workspace_id = $2
+         AND d.status IN ('pending_user','needs_clarification')
+         AND d.expires_at > NOW()`,
       [draftId, workspaceId],
     );
     return result.rows[0] ?? null;

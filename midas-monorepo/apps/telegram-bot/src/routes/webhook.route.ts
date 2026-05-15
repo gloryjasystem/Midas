@@ -698,7 +698,10 @@ async function confirmPreviewFull(
     intent:       draft.parsed_intent,
     amount:       draft.parsed_amount,
     currency:     draft.parsed_currency,
-    categoryHint: draft.parsed_category_hint ? escapeHtml(draft.parsed_category_hint) : null,
+    // Display the explicitly selected category first; fall back to AI hint
+    categoryHint: (draft.category_name ?? draft.parsed_category_hint)
+      ? escapeHtml((draft.category_name ?? draft.parsed_category_hint) ?? '')
+      : null,
     accountHint:  null,
     itemName:     draft.item_name ? escapeHtml(draft.item_name) : null,
     accountBlock,
@@ -3167,7 +3170,7 @@ Midas создан, чтобы сделать учет денег максима
 
             void upsertBotMessage(
               telegramUserId, chatId,
-              `📁 <b>${groupEmoji} ${groupName}:</b>`,
+              `<b>${groupEmoji} ${groupName}:</b>`,
               { inline_keyboard: s2Rows },
             );
           }
