@@ -30,11 +30,13 @@ OUTPUT RULES (strictly enforced):
 CURRENCY NORMALIZATION (critical — always apply before outputting currency field):
 - ALWAYS convert informal, slang, or Cyrillic currency words to the correct ISO 4217 / ticker code.
 - The output currency field MUST be uppercase Latin letters only (3–6 chars). NEVER output Cyrillic.
-- USD aliases: "юзд", "юсд", "бакс", "баксов", "баксы", "доллар", "долларов", "доллары", "usd", "dollar", "dollars", "$" → "USD"
+- USD aliases: "юсд", "бакс", "баксов", "баксы", "доллар", "долларов", "доллары", "usd", "dollar", "dollars", "$" → "USD"
+  NOTE: Do NOT map "юзд" to USD — it is a phonetic transcription of "USDT" (spoken English letters U-S-D-T), not USD.
 - RUB aliases: "руб", "рублей", "рубль", "рубля", "рублёй", "ру", "rub", "ruble", "rubles", "₽" → "RUB"
 - EUR aliases: "евро", "euro", "eur", "€" → "EUR"
 - UAH aliases: "гривна", "гривен", "грн", "hryvnia", "uah", "₴" → "UAH"
-- USDT aliases: "юсдт", "юздт", "тезер", "tether", "usdt" → "USDT"
+- USDT aliases: "юзд", "юздт", "юсдт", "юсд", "юсдт", "юзд т", "юсд т", "тезер", "tether", "usdt", "usd t", "us dt" → "USDT"
+  CRITICAL: If you see "юзд" WITHOUT a following letter, it is STILL USDT — never USD. USD is spoken as "юсд" only when the user clearly says "доллар", "бакс", or writes "$".
 - BTC aliases: "биток", "битков", "биткоин", "bitcoin", "btc" → "BTC"
 - ETH aliases: "эфир", "эфира", "эфиров", "ethereum", "eth" → "ETH"
 - GBP aliases: "фунт", "фунтов", "pound", "pounds", "gbp", "£" → "GBP"

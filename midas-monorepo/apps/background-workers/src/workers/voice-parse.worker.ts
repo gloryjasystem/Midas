@@ -148,6 +148,53 @@ function detectVoiceCommand(text: string): VoiceCommand {
 }
 
 // ─────────────────────────────────────────────────────────────
+// Phase 2.3: STT transcript normalizer — crypto ticker fix
+//
+// Problem: xAI Grok STT transcribes spoken "USDT" as:
+//   "юзд", "юздт", "юсдт", "usdt", "USD T", "US DT", "usd t" etc.
+// Claude then maps "юзд" → USD (incorrect) per the prompt alias table.
+//
+// Solution: deterministic regex replacement BEFORE Claude sees the text.
+// This is O(1), zero latency, zero LLM calls — the only right approach.
+// ─────────────────────────────────────────────────────────────
+
+const STT_CRYPTO_NORMALIZATIONS: Array<{ pattern: RegExp; replacement: string }> = [
+  // USDT — most common mismatch. Must run BEFORE USD rules.
+  // Covers: "юздт", "юсдт", "юзд т", "usdt", "usd t", "USD T", "us dt"
+  { pattern: /\bюзд\s*т\b|\bюсд\s*т\b|\bюздт\b|\bюсдт\b/gi, replacement: 'USDT' },
+  { pattern: /\busd\s*t\b|\bus\s*dt\b/gi,                       replacement: 'USDT' },
+  { pattern: /\bтезер\b|\btether\b/gi,                           replacement: 'USDT' },
+
+  // USDC — similar phonetics
+  { pattern: /\bюздс\b|\bюсдс\b|\busd\s*c\b/gi,                 replacement: 'USDC' },
+
+  // BTC — "биток" already in prompt but add STT variants
+  { pattern: /\bbt\s*c\b|\bb\s*t\s*c\b/gi,                      replacement: 'BTC' },
+
+  // ETH — "эфир" already in prompt; add STT split variants
+  { pattern: /\be\s*t\s*h\b/gi,                                  replacement: 'ETH' },
+
+  // TON — Telegram's own coin, common in CIS
+  { pattern: /\bтон\s*коин\b|\bton\s*coin\b/gi,                  replacement: 'TON' },
+];
+
+/**
+ * Normalize crypto ticker phonetic transcriptions in a raw STT transcript.
+ *
+ * Runs deterministic regex replacements BEFORE Claude sees the text.
+ * Preserves all other words and numbers unchanged.
+ *
+ * SEC-12: input/output text NEVER logged — caller's responsibility.
+ */
+function normalizeSttTranscript(transcript: string): string {
+  let result = transcript;
+  for (const { pattern, replacement } of STT_CRYPTO_NORMALIZATIONS) {
+    result = result.replace(pattern, replacement);
+  }
+  return result;
+}
+
+// ─────────────────────────────────────────────────────────────
 // UX message templates
 // ─────────────────────────────────────────────────────────────
 
@@ -294,7 +341,9 @@ async function _processVoiceParse(job: Job<VoiceParseJobPayload>): Promise<void>
   void redisConnection.del(failKey);
 
   // SEC-12: transcript exists in sttResult.text — NEVER log it
-  const transcript = sttResult.text;
+  // Phase 2.3: normalize crypto tickers BEFORE ai-parse sees the text.
+  // e.g. "купил куртку за 300 юзд" → "купил куртку за 300 USDT"
+  const transcript = normalizeSttTranscript(sttResult.text);
 
   // ── Phase 2.2: Voice command detection ───────────────────
   const voiceCmd = detectVoiceCommand(transcript);
