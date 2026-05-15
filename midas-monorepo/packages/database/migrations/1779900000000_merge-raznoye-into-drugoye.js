@@ -76,7 +76,7 @@ export const up = (pgm) => {
         ELSE
           -- ── Case 2: workspace has ONLY "Разное" — rename in-place ───────
           UPDATE categories
-          SET name = 'Другое', updated_at = NOW()
+          SET name = 'Другое'
           WHERE id = raznoye_id
             AND workspace_id = ws.workspace_id;
         END IF;
