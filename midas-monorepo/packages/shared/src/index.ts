@@ -78,6 +78,17 @@ export interface AiParseJobPayload {
   raw_text: string;
   /** ISO timestamp of original message */
   receivedAt: string;
+  /**
+   * Phase 2.7: Optional clarification context from a prior partial parse.
+   * Preserved so Claude can merge the user's clarification answer (e.g. "100 грн")
+   * with the original item_hint/category_hint instead of parsing in a vacuum.
+   * SEC-12: labels only — never IDs, amounts, or system fields.
+   */
+  clarificationContext?: {
+    itemHint?: string;
+    categoryHint?: string;
+    intent?: string;
+  };
 }
 
 /**

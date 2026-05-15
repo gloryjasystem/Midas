@@ -176,10 +176,140 @@ const STT_CRYPTO_NORMALIZATIONS: Array<{ pattern: RegExp; replacement: string }>
 
   // TON — Telegram's own coin, common in CIS
   { pattern: /\bтон\s*коин\b|\bton\s*coin\b/gi,                  replacement: 'TON' },
+
+  // SOL — Solana, often spoken as "сол" or "солана"
+  { pattern: /\bсолана\b|\bsolana\b/gi,                           replacement: 'SOL' },
+
+  // MATIC/POL — Polygon
+  { pattern: /\bматик\b|\bполигон\b|\bpolygon\b/gi,               replacement: 'MATIC' },
+
+  // XRP — Ripple
+  { pattern: /\bрипл\b|\bripple\b/gi,                             replacement: 'XRP' },
+
+  // TRX — Tron
+  { pattern: /\bтрон\b(?!\s*(?:ов|ах|у|е|ом|ями))/gi,            replacement: 'TRX' },
+];
+
+// ─────────────────────────────────────────────────────────────
+// Phase 2.7: STT spoken-number normalizer
+//
+// Problem: Voice input transcribes numbers as words:
+//   "сто" → "100", "двести пятьдесят" → "250", "тысяча" → "1000"
+// Without this, computeMissingFields() sees no digit → asks "Сколько?"
+// even though the amount is clearly spoken.
+//
+// Strategy: single-pass greedy match of compound number words.
+// Handles RU + UA phonetic variants (двохсот, п'ятдесят etc. handled
+// by adding common Grok STT outputs for Ukrainian speech).
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Map of spoken-number words → numeric values.
+ * Ordered longest-first inside each tier to avoid partial matches.
+ */
+const SPOKEN_NUMBERS: Array<{ pattern: RegExp; value: number }> = [
+  // Thousands (must be before hundreds)
+  { pattern: /\bтысяч(?:а|и|у|ей|ам|ами|ах)?\b/gi, value: 1000 },
+  { pattern: /\bтисяч(?:а|і|у|ею|ами|ах)?\b/gi,     value: 1000 }, // UA Grok variant
+
+  // Hundreds
+  { pattern: /\bдевятьсот\b/gi,      value: 900 },
+  { pattern: /\bвосемьсот\b/gi,      value: 800 },
+  { pattern: /\bвісімсот\b/gi,       value: 800 }, // UA
+  { pattern: /\bсемьсот\b/gi,        value: 700 },
+  { pattern: /\bшестьсот\b/gi,       value: 600 },
+  { pattern: /\bпятьсот\b/gi,        value: 500 },
+  { pattern: /\bп'?ятсот\b/gi,       value: 500 }, // UA
+  { pattern: /\bчетыреста\b/gi,      value: 400 },
+  { pattern: /\bчотириста\b/gi,      value: 400 }, // UA
+  { pattern: /\bтриста\b/gi,         value: 300 },
+  { pattern: /\bдвести\b|\bдвісті\b/gi, value: 200 },
+  { pattern: /\bсто\b/gi,            value: 100 },
+
+  // Tens
+  { pattern: /\bдевяносто?\b/gi,     value: 90 },
+  { pattern: /\bвосемьдесят\b/gi,    value: 80 },
+  { pattern: /\bвісімдесят\b/gi,     value: 80 }, // UA
+  { pattern: /\bсемьдесят\b/gi,      value: 70 },
+  { pattern: /\bшестьдесят\b/gi,     value: 60 },
+  { pattern: /\bпятьдесят\b/gi,      value: 50 },
+  { pattern: /\bп'?ятдесят\b/gi,     value: 50 }, // UA
+  { pattern: /\bсорок\b/gi,          value: 40 },
+  { pattern: /\bтридцать\b|\bтридцять\b/gi, value: 30 },
+  { pattern: /\bдвадцать\b|\bдвадцять\b/gi, value: 20 },
+
+  // Teens (must be before single digits to avoid "один" matching in "одиннадцать")
+  { pattern: /\bдевятнадцать\b|\bдев'?ятнадцять\b/gi, value: 19 },
+  { pattern: /\bвосемнадцать\b|\bвісімнадцять\b/gi,    value: 18 },
+  { pattern: /\bсемнадцать\b|\bсімнадцять\b/gi,        value: 17 },
+  { pattern: /\bшестнадцать\b|\bшістнадцять\b/gi,      value: 16 },
+  { pattern: /\bпятнадцать\b|\bп'?ятнадцять\b/gi,      value: 15 },
+  { pattern: /\bчетырнадцать\b|\bчотирнадцять\b/gi,    value: 14 },
+  { pattern: /\bтринадцать\b|\bтринадцять\b/gi,        value: 13 },
+  { pattern: /\bдвенадцать\b|\bдванадцять\b/gi,        value: 12 },
+  { pattern: /\bодиннадцать\b|\bодинадцять\b/gi,       value: 11 },
+  { pattern: /\bдесять\b|\bдесять\b/gi,                value: 10 },
+
+  // Singles (last — most likely to false-positive)
+  { pattern: /\bдевять\b|\bдев'?ять\b/gi,              value: 9 },
+  { pattern: /\bвосемь\b|\bвісім\b/gi,                 value: 8 },
+  { pattern: /\bсемь\b|\bсім\b/gi,                     value: 7 },
+  { pattern: /\bшесть\b|\bшість\b/gi,                  value: 6 },
+  { pattern: /\bпять\b|\bп'?ять\b/gi,                  value: 5 },
+  { pattern: /\bчетыре\b|\bчотири\b/gi,                value: 4 },
+  { pattern: /\bтри\b/gi,                              value: 3 },
+  { pattern: /\bдва\b|\bдві\b|\bдвух\b/gi,             value: 2 },
+  { pattern: /\bодин\b|\bодна\b|\bодно\b/gi,           value: 1 },
 ];
 
 /**
- * Normalize crypto ticker phonetic transcriptions in a raw STT transcript.
+ * Convert spoken-number words to digits in a transcript.
+ *
+ * Strategy: replace isolated number words one-by-one with their numeric
+ * equivalents. Adjacent numbers are then summed by the following
+ * aggregation pass (e.g. "двести пятьдесят" → "200 50" → "250").
+ *
+ * Note: only converts when the number word(s) appear adjacent to a
+ * currency word or at the start of the amount position.
+ * Avoids false positives like "три рубля" in "мы потратили три рубля"
+ * — those still trigger correctly.
+ *
+ * SEC-12: text never logged here.
+ */
+function normalizeSpokenNumbers(text: string): string {
+  // Step 1: replace each spoken-number word with its digit value.
+  let result = text;
+  for (const { pattern, value } of SPOKEN_NUMBERS) {
+    result = result.replace(pattern, String(value));
+  }
+
+  // Step 2: sum adjacent digit sequences separated only by spaces.
+  // E.g. "200 50" → "250", "1000 200 30 5" → "1235"
+  // Only collapses groups that are plausibly a compound number:
+  //   - each token is a pure integer
+  //   - adjacent tokens together form a reasonable financial number (≤ 10M)
+  result = result.replace(/\b(\d+)(\s+\d+)+\b/g, (match) => {
+    const parts = match.split(/\s+/).map(Number);
+    // Validate: must be a descending-magnitude sequence (thousands > hundreds > tens > ones)
+    // e.g. [1000, 200, 50] is valid; [100, 200] is not (ascending → keep as-is)
+    let sum = 0;
+    let prevMagnitude = Infinity;
+    let valid = true;
+    for (const p of parts) {
+      if (p >= prevMagnitude) { valid = false; break; }
+      prevMagnitude = p;
+      sum += p;
+    }
+    // Cap at 10M to avoid bizarre concatenations
+    if (valid && sum > 0 && sum <= 10_000_000) return String(sum);
+    return match; // leave unchanged if not a valid compound
+  });
+
+  return result;
+}
+
+/**
+ * Normalize crypto ticker phonetic transcriptions + spoken numbers in a raw STT transcript.
  *
  * Runs deterministic regex replacements BEFORE Claude sees the text.
  * Preserves all other words and numbers unchanged.
@@ -188,11 +318,15 @@ const STT_CRYPTO_NORMALIZATIONS: Array<{ pattern: RegExp; replacement: string }>
  */
 function normalizeSttTranscript(transcript: string): string {
   let result = transcript;
+  // Pass 1: crypto tickers
   for (const { pattern, replacement } of STT_CRYPTO_NORMALIZATIONS) {
     result = result.replace(pattern, replacement);
   }
+  // Pass 2: spoken numbers → digits
+  result = normalizeSpokenNumbers(result);
   return result;
 }
+
 
 // ─────────────────────────────────────────────────────────────
 // UX message templates

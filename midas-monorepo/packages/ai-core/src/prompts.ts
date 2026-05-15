@@ -65,7 +65,10 @@ FUZZY MATCHING:
 - Typos: "кофэ" → кофе, "нетфликс" → Netflix, "спотифай" → Spotify, "ютуб" → YouTube.
 - Slang/abbreviations: "комуналка" → коммуналка, "коммуналка" → Жильё, "подписон" → Подписки.
 - Transliteration: "kafe" → кафе, "taksi" → такси, "benzin" → бензин.
-- Only match if the similarity is very strong. If unsure, use "Другое".
+- Only match if the similarity is very strong (same root, ≤ 2 character difference). If unsure, use "Другое".
+- FUZZY STOP WORDS — NEVER treat these Russian/Ukrainian words as person names, item names, or account names, even if they vaguely resemble a name:
+  только, просто, немного, чуть, всего, уже, ещё, вот, там, тут, здесь, даже, лишь, тоже, однако, ведь, мол, дескать, якобы, трохи, лише, тільки, просто, вже, ще, навіть
+- CRITICAL FUZZY RULE: "только" is a Russian particle ("just/only"). NEVER interpret it as a person name (e.g. "Толику"). If you see "купил только 100 грн" — there is NO person and NO gift. Intent=expense, no person_hint, no Подарки.
 
 KEY BILINGUAL PAIRS (non-obvious translations):
 RU → EN: шиномонтаж=tire service, коммуналка=utilities, коворкинг=coworking, каршеринг=car sharing, самокат=scooter rental, маршрутка=minibus, электричка=commuter train, подписка=subscription, репетитор=tutor, кружок=kids class, детский сад=daycare/kindergarten, подгузники=diapers, наполнитель=cat litter, бытовая химия=household chemicals, канцелярия=office supplies, эквайринг=acquiring/payment processing, подрядчик=contractor, единый налог=flat tax
@@ -177,18 +180,20 @@ INTENT VALUES (choose one):
 - "debt_received" \u2014 user borrowed money from someone
 - "transfer" \u2014 money moved between accounts
 
-RUSSIAN LANGUAGE RULES (critical \u2014 most users write in Russian):
+RUSSIAN + UKRAINIAN LANGUAGE RULES (critical — most users write in Russian or Ukrainian):
 
-EXPENSE signals \u2014 if ANY of these appear, intent is "expense":
+EXPENSE signals — if ANY of these appear, intent is "expense":
   Spending verbs: потратил/а/и, потрачено, заплатил/а, оплатил/а, купил/а/и, покупка,
     списалось, списали, сняли, обошлось, вышло (сумма), ушло (на), отдал/а (за),
     заказал/а, арендовал/а, пополнил (проезд/метро), поел/а, сходил/а (в магазин/кафе),
     заправился, взял/а (кофе/такси), выпил/а, съел/а, накупил/а, набрал (на N руб)
+  Ukrainian variants: купив, заплатив, витратив, оплатив, замовив, орендував, поїв, взяв
   Preposition patterns: "за [что-то] [сумма]", "на [что-то] [сумма]"
 
-INCOME signals \u2014 if ANY of these appear, intent is "income":
+INCOME signals — if ANY of these appear, intent is "income":
   Receiving verbs: получил/а, пришло/пришли, заработал/а, начислили, перечислили,
     выплатили, поступило, зачислили, вернули (возврат), дали (зарплату/аванс), выдали
+  Ukrainian variants: отримав, заробив, нарахували, переказали, повернули, надійшло
   Selling: продал/а, продажа, выручка
   Informal: прилетело, упало (на счёт), капнуло (кешбэк)
   Income nouns alone: зарплата, получка, аванс, премия, стипендия, кешбэк, дивиденды,
@@ -321,12 +326,45 @@ User: "привет как дела"
 Output: {"confidence":0.05}
 
 User: "🤔"
-Output: {"confidence":0.1}`;
+Output: {"confidence":0.1}
+
+-- STOP WORD examples (fuzzy must NOT trigger) --
+User: "купил только 100 грн"
+Output: {"intent":"expense","amount":"100","currency":"UAH","category_hint":"Другое","confidence":0.85}
+
+User: "купил Толику 100 грн"
+Output: {"intent":"expense","amount":"100","currency":"UAH","item_hint":"подарок Толику","person_hint":"Толик","category_hint":"Подарки","confidence":0.85}
+
+User: "потратил просто 500 рублей"
+Output: {"intent":"expense","amount":"500","currency":"RUB","category_hint":"Другое","confidence":0.85}
+
+-- Ukrainian voice examples --
+User: "купив каву 80 гривень"
+Output: {"intent":"expense","amount":"80","currency":"UAH","item_hint":"кава","category_hint":"Кафе и рестораны","confidence":0.9}
+
+User: "заплатив за таксі 150 UAH"
+Output: {"intent":"expense","amount":"150","currency":"UAH","item_hint":"таксі","category_hint":"Транспорт","confidence":0.9}`;
 
 // ─────────────────────────────────────────────────────────────
 // Build user message from raw_text
 // SEC-12: raw_text is used here as transient input only — never logged
 // ─────────────────────────────────────────────────────────────
+
+/**
+ * Optional context from a prior partial parse to pass forward into a
+ * clarification answer. Preserves item_hint and category_hint so that
+ * answering "100 грн" to "How much?" doesn't lose the original item context.
+ *
+ * SEC-12: these values are user-facing labels only — never contain IDs.
+ */
+export interface ClarificationContext {
+  /** item_hint from the partial parse (e.g. "куртка", "толика") */
+  itemHint?: string;
+  /** category_hint from the partial parse (e.g. "Одежда") */
+  categoryHint?: string;
+  /** intent from the partial parse */
+  intent?: string;
+}
 
 /**
  * Build the user message for Claude.
@@ -336,24 +374,47 @@ Output: {"confidence":0.1}`;
  *   Injected as KNOWN ACCOUNTS context so Claude recognises custom
  *   account names (e.g. "Влада Калина") without prepositions.
  *   Only account names are passed — never IDs, balances, or system fields.
+ * @param clarCtx - Optional clarification context from a prior partial parse.
+ *   Injected so Claude can correctly merge the user's clarification answer
+ *   (e.g. "100 грн") with the already-parsed fields (e.g. item_hint="куртка").
  */
-export function buildUserMessage(rawText: string, accountNames?: string[]): string {
+export function buildUserMessage(
+  rawText: string,
+  accountNames?: string[],
+  clarCtx?: ClarificationContext,
+): string {
   // Truncate to prevent prompt injection via extremely long messages
   const truncated = rawText.slice(0, 1000);
 
-  if (!accountNames || accountNames.length === 0) {
-    return truncated;
+  const parts: string[] = [];
+
+  // Inject clarification context FIRST so Claude treats this as a correction
+  if (clarCtx && (clarCtx.itemHint || clarCtx.categoryHint)) {
+    parts.push('CLARIFICATION CONTEXT (from prior partial parse — user is answering "how much?"):');
+    if (clarCtx.intent)       parts.push(`  intent: ${clarCtx.intent}`);
+    if (clarCtx.itemHint)     parts.push(`  item_hint: ${clarCtx.itemHint.slice(0, 60)}`);
+    if (clarCtx.categoryHint) parts.push(`  category_hint: ${clarCtx.categoryHint.slice(0, 60)}`);
+    parts.push(
+      'INSTRUCTION: Merge the user\'s clarification answer with the context above. ' +
+      'Extract only the amount (and currency if present) from the answer. ' +
+      'Keep item_hint and category_hint from context unless the answer overrides them explicitly.',
+    );
+    parts.push('');
   }
 
-  // Build KNOWN ACCOUNTS block: safe list of names only (no financial data)
-  const accountList = accountNames
-    .slice(0, 30)                          // cap at 30 to bound token usage
-    .map((n) => `- ${n.slice(0, 60)}`)    // cap each name at 60 chars
-    .join('\n');
+  // Known accounts block
+  if (accountNames && accountNames.length > 0) {
+    const accountList = accountNames
+      .slice(0, 30)                          // cap at 30 to bound token usage
+      .map((n) => `- ${n.slice(0, 60)}`)    // cap each name at 60 chars
+      .join('\n');
+    parts.push(
+      `KNOWN ACCOUNTS (user's wallet/bank/account names — treat any match as account_hint):\n${accountList}`,
+    );
+    parts.push('');
+  }
 
-  return (
-    `KNOWN ACCOUNTS (user's wallet/bank/account names — treat any match as account_hint):\n` +
-    `${accountList}\n\n` +
-    `Transaction text: ${truncated}`
-  );
+  parts.push(clarCtx ? `User's clarification answer: ${truncated}` : truncated);
+
+  return parts.join('\n');
 }

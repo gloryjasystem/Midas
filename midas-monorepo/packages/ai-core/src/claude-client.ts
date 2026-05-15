@@ -35,7 +35,8 @@ import {
   MIN_CONFIDENCE_THRESHOLD,
   PARTIAL_CONFIDENCE_THRESHOLD,
 } from './schemas.js';
-import { SYSTEM_PROMPT, buildUserMessage } from './prompts.js';
+import { SYSTEM_PROMPT, buildUserMessage, type ClarificationContext } from './prompts.js';
+
 
 // ─────────────────────────────────────────────────────────────
 // Types
@@ -145,7 +146,10 @@ const EXPENSE_PATTERNS: RegExp[] = [
   /\b(поел\w*|сходил\w*|заправил\w*|заказал\w*|арендовал\w*)\b/i,
   /\b(слил\w*|угробил\w*|накупил\w*)\b/i,
   /\bвзял\w*\s+(кофе|такси|обед|пиво|чай|воду|сок|билет)/i,
+  // Ukrainian variants (Phase 2.7)
+  /\bкупив\b|\bзаплатив\b|\bвитратив\b|\bоплатив\b|\bзамовив\b|\bорендував\b|\bпо[їи]в\b|\bвзяв\b/i,
 ];
+
 
 const EXPENSE_CATEGORY_PATTERNS: RegExp[] = [
   /\b(кофе|обед|ужин|завтрак|еда|продукты|ресторан|кафе|доставк\w*)\b/i,
@@ -163,7 +167,10 @@ const INCOME_PATTERNS: RegExp[] = [
   /\b(вернул\w*|возврат\w*)\b/i,
   /\b(продал\w*|продаж\w*|выручк\w*)\b/i,
   /\b(прилетел\w*|упал[оа]|капнул\w*|налетел\w*)\b/i,
+  // Ukrainian variants (Phase 2.7)
+  /\bотримав\b|\bзаробив\b|\bнадійшло\b|\bпереказали\b|\bповернули\b/i,
 ];
+
 
 const INCOME_CATEGORY_PATTERNS: RegExp[] = [
   /\b(зарплат\w*|получк\w*|аванс\w*|преми[яю]\w*|стипенди\w*)\b/i,
@@ -245,7 +252,11 @@ function postProcessIntentRecovery(
  *   names (e.g. "Влада Калина") without requiring explicit prepositions.
  * @returns ParseResult discriminated union.
  */
-export async function parseTransaction(rawText: string, accountNames?: string[]): Promise<ParseResult> {
+export async function parseTransaction(
+  rawText: string,
+  accountNames?: string[],
+  clarCtx?: ClarificationContext,
+): Promise<ParseResult> {
   const client = getClient();
 
   let response: Awaited<ReturnType<typeof client.messages.create>>;
@@ -258,7 +269,7 @@ export async function parseTransaction(rawText: string, accountNames?: string[])
       messages: [
         {
           role: 'user',
-          content: buildUserMessage(rawText, accountNames),
+          content: buildUserMessage(rawText, accountNames, clarCtx),
         },
       ],
     });
