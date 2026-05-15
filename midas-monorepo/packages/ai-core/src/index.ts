@@ -24,3 +24,6 @@ export {
   type AiOutput,
   type MissingField,
 } from './schemas.js';
+/** Phase 2.1: xAI Grok STT — transcribes voice messages */
+export { transcribeVoice, type TranscribeResult } from './groq-stt.js';
+

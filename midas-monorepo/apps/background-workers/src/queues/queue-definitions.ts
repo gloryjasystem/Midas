@@ -27,6 +27,7 @@ import type {
   AiParseJobPayload,
   NotificationJobPayload,
   CallbackConfirmJobPayload,
+  VoiceParseJobPayload,
 } from '@midas/shared';
 
 // ─────────────────────────────────────────────────────────────
@@ -165,6 +166,33 @@ export const draftExpirationQueue = new Queue(QUEUE_NAMES.DRAFT_EXPIRATION, {
 });
 
 // ─────────────────────────────────────────────────────────────
+// voice-parse Queue — Phase 2.1
+// Processes voice messages: download OGG → xAI Grok STT → enqueue ai-parse.
+// Concurrency: 3 | xAI STT: $0.10/hr (well within $5 budget)
+// SEC-12: No user text in payload (only file_id metadata).
+// ─────────────────────────────────────────────────────────────
+
+const voiceParseDefaultJobOptions: DefaultJobOptions = {
+  attempts: 2,
+  backoff: {
+    type: 'fixed',
+    delay: 3_000, // 3s — allow xAI STT to recover from transient errors
+  },
+  removeOnComplete: { count: 500 },
+  // No raw_text in payload — no redaction needed, but still auto-remove after 24h
+  removeOnFail: { age: 86_400 },
+};
+
+export const voiceParseQueue = new Queue<VoiceParseJobPayload>(
+  QUEUE_NAMES.VOICE_PARSE,
+  {
+    connection: redisConnection,
+    prefix: BULL_PREFIX,
+    defaultJobOptions: voiceParseDefaultJobOptions,
+  },
+);
+
+// ─────────────────────────────────────────────────────────────
 // Graceful shutdown — close all queue connections
 // ─────────────────────────────────────────────────────────────
 
@@ -175,6 +203,8 @@ export async function closeQueues(): Promise<void> {
     callbackConfirmQueue.close(),
     notificationsQueue.close(),
     draftExpirationQueue.close(),
+    voiceParseQueue.close(),
   ]);
 }
+
 

@@ -52,8 +52,10 @@ import {
   type TelegramUpdate,
   type WebhookIngestionJobPayload,
   type CallbackConfirmJobPayload,
+  type VoiceParseJobPayload,
 } from '@midas/shared';
 import { webhookIngestionQueue } from '../queues/webhook-queue.js';
+import { voiceParseQueue } from '../queues/voice-queue.js';
 import { resolveWorkspace } from '../services/workspace-resolver.js';
 import { checkOnboardingRateLimit } from '../services/rate-limiter.js';
 // Phase 1.33: sendMessage no longer imported directly — all sends go via upsertBotMessage.
@@ -100,6 +102,7 @@ import {
   // Phase 1.33: sendMessageWithKeyboard no longer imported — routed via upsertBotMessage.
   editMessageText,
   answerCallbackQuery,
+  sendMessage,                   // Phase 2.1: needed for voice status message
   sendMessageWithReplyKeyboard,  // Phase 1.36-UX: persistent bottom nav keyboard
   deleteMessage,                 // Phase 1.37-UX: clean chat — delete stale bot messages
 } from '../services/telegram-api.js';
@@ -301,12 +304,21 @@ const telegramChatSchema = z.object({
   type: z.enum(['private', 'group', 'supergroup', 'channel']),
 });
 
+const telegramVoiceSchema = z.object({
+  file_id: z.string(),
+  duration: z.number(),
+  mime_type: z.string().optional(),
+  file_size: z.number().optional(),
+});
+
 const telegramMessageSchema = z.object({
   message_id: z.number(),
   from: telegramUserSchema.optional(),
   chat: telegramChatSchema,
   date: z.number(),
   text: z.string().optional(), // absent = non-text message (SEC-05)
+  /** Phase 2.1: present for voice messages */
+  voice: telegramVoiceSchema.optional(),
 });
 
 const telegramCallbackQuerySchema = z.object({
@@ -3598,9 +3610,86 @@ Midas создан, чтобы сделать учет денег максима
       return;
     }
 
-    // ── Step 4: SEC-05 — Non-text filter ─────────────────────
+    // ── Step 4: Phase 2.1 — Voice message handler ───────────
+    // Voice messages bypass the SEC-05 text filter and go to the
+    // voice-parse queue (Groq Whisper STT → ai-parse → same draft flow).
+    if (message.voice && !message.text) {
+      const voiceFrom = message.from;
+      if (!voiceFrom || voiceFrom.is_bot) {
+        // Ignore voice from bots or anonymous senders
+        await reply.status(200).send({ ok: true });
+        return;
+      }
+
+      const vUserId = String(voiceFrom.id);
+      const vChatId = String(message.chat.id);
+      const vMessageId = String(message.message_id);
+      const vReceivedAt = new Date(message.date * 1000).toISOString();
+      const { duration, file_id: vFileId } = message.voice;
+
+      // ── Silence guard: reject sub-1-second audio (no content) ──
+      if (duration < 1) {
+        void sendMessage(
+          vChatId,
+          '🔇 <b>Голосовое пустое</b> — ничего не записал?\n\nПопробуй ещё раз.',
+        );
+        request.log.info({ msg: '[midas:bot:webhook] Phase 2.1: voice too short — discarded', vUserId });
+        await reply.status(200).send({ ok: true });
+        return;
+      }
+
+      // ── Resolve workspace (SEC-03: from trusted backend source) ──
+      let vWorkspaceId: string;
+      try {
+        const vResolved = await resolveWorkspace(vUserId, vChatId);
+        vWorkspaceId = vResolved.workspaceId;
+      } catch {
+        request.log.warn({ msg: '[midas:bot:webhook] Phase 2.1: workspace resolution failed for voice', vUserId });
+        await reply.status(200).send({ ok: true });
+        return;
+      }
+
+      // ── Send immediate status message (⋅⋅⋅ typing indicator) ──
+      // SEC-12: No user text here — this is a system status message.
+      const statusMsgId = await sendMessage(vChatId, '⏳ <b>Распознаю голосовое...</b>');
+      if (!statusMsgId) {
+        // Non-fatal: if status send fails, still process the voice
+        request.log.warn({ msg: '[midas:bot:webhook] Phase 2.1: failed to send voice status message', vUserId });
+      }
+
+      // ── Enqueue for async processing ──
+      const vIdempotencyKey = IdempotencyKeyBuilder.voiceParse(BOT_ID, vChatId, vMessageId);
+      const vPayload: VoiceParseJobPayload = {
+        botId: BOT_ID,
+        chatId: vChatId,
+        messageId: vMessageId,
+        telegramUserId: vUserId,
+        workspaceId: vWorkspaceId, // SEC-03: trusted backend source
+        fileId: vFileId,
+        duration,
+        statusMessageId: statusMsgId ?? '0', // '0' = no status msg (worker handles gracefully)
+        receivedAt: vReceivedAt,
+      };
+
+      await voiceParseQueue.add(QUEUE_NAMES.VOICE_PARSE, vPayload, {
+        jobId: vIdempotencyKey,
+      });
+
+      request.log.info({
+        msg: '[midas:bot:webhook] Phase 2.1: voice message enqueued',
+        vUserId,
+        vWorkspaceId,
+        duration,
+        jobId: vIdempotencyKey,
+      });
+
+      await reply.status(200).send({ ok: true });
+      return;
+    }
+
+    // ── Step 4b: SEC-05 — Non-text filter (original, unchanged) ──
     if (!message.text || message.text.trim().length === 0) {
-      // Voice, photo, video, sticker, document, etc. — silently drop
+      // Photo, video, sticker, document, etc. — silently drop
       request.log.info({
         msg: '[midas:bot:webhook] SEC-05: non-text message — discarded',
         chatId: String(message.chat.id),

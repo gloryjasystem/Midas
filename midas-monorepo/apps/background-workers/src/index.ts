@@ -32,6 +32,7 @@ import {
   EXPIRATION_CRON_PATTERN,
   EXPIRATION_CRON_JOB_ID,
 } from './workers/draft-expiration.worker.js';
+import { createVoiceParseWorker } from './workers/voice-parse.worker.js';
 import { QUEUE_NAMES } from '@midas/shared';
 import type { QueueEvents } from 'bullmq';
 
@@ -65,10 +66,12 @@ const aiParseWorker = createAiParseWorker();
 const notificationsWorker = createNotificationsWorker();
 const confirmationWorker = createConfirmationWorker();
 const expirationWorker = createDraftExpirationWorker();
+const voiceParseWorker = createVoiceParseWorker();
 
 console.log('[midas] Workers started:');
 console.log(`  ✓ ${QUEUE_NAMES.WEBHOOK_INGESTION} (concurrency: 10)`);
 console.log(`  ✓ ${QUEUE_NAMES.AI_PARSE} (concurrency: 5, rate-limit: 50/60s)`);
+console.log(`  ✓ ${QUEUE_NAMES.VOICE_PARSE} (concurrency: 3, rate-limit: 30/60s)`);
 console.log(`  ✓ ${QUEUE_NAMES.NOTIFICATIONS} (concurrency: 10, rate-limit: 30/1s)`);
 console.log(`  ✓ ${QUEUE_NAMES.CALLBACK_CONFIRM} (concurrency: 5)`);
 console.log(`  ✓ ${QUEUE_NAMES.DRAFT_EXPIRATION} (concurrency: 1, CRON: ${EXPIRATION_CRON_PATTERN})`);
@@ -80,6 +83,7 @@ console.log(`  ✓ ${QUEUE_NAMES.DRAFT_EXPIRATION} (concurrency: 1, CRON: ${EXPI
 const dlqHandlers: QueueEvents[] = [
   attachDlqHandler(QUEUE_NAMES.WEBHOOK_INGESTION),
   attachDlqHandler(QUEUE_NAMES.AI_PARSE),
+  attachDlqHandler(QUEUE_NAMES.VOICE_PARSE),
   attachDlqHandler(QUEUE_NAMES.CALLBACK_CONFIRM),
   attachDlqHandler(QUEUE_NAMES.NOTIFICATIONS),
   attachDlqHandler(QUEUE_NAMES.DRAFT_EXPIRATION),
@@ -102,6 +106,7 @@ async function gracefulShutdown(signal: string): Promise<void> {
     notificationsWorker.close(),
     confirmationWorker.close(),
     expirationWorker.close(),
+    voiceParseWorker.close(),
   ]);
 
   console.log('[midas] All workers stopped');

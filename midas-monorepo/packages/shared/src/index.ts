@@ -20,6 +20,8 @@
 export const QUEUE_NAMES = {
   WEBHOOK_INGESTION: 'webhook-ingestion',
   AI_PARSE: 'ai-parse',
+  /** Phase 2.1: Voice message processing (download + xAI Grok STT + ai-parse re-enqueue) */
+  VOICE_PARSE: 'voice-parse',
   CALLBACK_CONFIRM: 'callback-confirm',
   NOTIFICATIONS: 'notifications',
   DRAFT_EXPIRATION: 'draft-expiration',
@@ -75,6 +77,35 @@ export interface AiParseJobPayload {
   /** Raw text to parse — MUST NOT be logged (SEC-12) */
   raw_text: string;
   /** ISO timestamp of original message */
+  receivedAt: string;
+}
+
+/**
+ * Payload for the `voice-parse` queue — Phase 2.1.
+ * The worker downloads OGG audio, transcribes via xAI Grok STT,
+ * then re-enqueues as AiParseJobPayload (raw_text = transcript).
+ *
+ * SEC-06 idempotency key: voice|bot|{botId}|chat|{chatId}|msg|{messageId}
+ * SEC-12: No user text here — only Telegram file metadata.
+ */
+export interface VoiceParseJobPayload {
+  /** Telegram bot ID */
+  botId: string;
+  /** Telegram chat ID */
+  chatId: string;
+  /** Telegram message ID */
+  messageId: string;
+  /** Telegram user ID */
+  telegramUserId: string;
+  /** Internal workspace ID (ULID) — from trusted backend (SEC-03) */
+  workspaceId: string;
+  /** Telegram file_id — used to call getFile API */
+  fileId: string;
+  /** Duration in seconds (pre-validated ≥ 1 at webhook layer) */
+  duration: number;
+  /** ID of the "⏳ Распознаю..." status message sent immediately by the bot */
+  statusMessageId: string;
+  /** ISO timestamp */
   receivedAt: string;
 }
 
@@ -220,6 +251,11 @@ export const IdempotencyKeyBuilder = {
     return `parse|bot|${botId}|msg|${messageId}`;
   },
 
+  /** Phase 2.1: Key for voice-parse queue jobs. */
+  voiceParse(botId: string, chatId: string, messageId: string): string {
+    return `voice|bot|${botId}|chat|${chatId}|msg|${messageId}`;
+  },
+
   /**
    * Key for callback confirmation jobs.
    * action = 'approved' | 'rejected'
@@ -288,12 +324,24 @@ export interface TelegramChat {
  * Minimal Telegram Message — only fields required for Phase 1 text processing.
  * SEC-05: `text` being absent signals a non-text message that must be rejected.
  */
+/** Phase 2.1: Minimal Telegram Voice object */
+export interface TelegramVoice {
+  /** Telegram file_id — pass to getFile API for download URL */
+  file_id: string;
+  /** Duration in seconds */
+  duration: number;
+  mime_type?: string;
+  file_size?: number;
+}
+
 export interface TelegramMessage {
   message_id: number;
   from?: TelegramUser;
   chat: TelegramChat;
-  date: number; // Unix timestamp
-  text?: string; // Only present for text messages
+  date: number;
+  text?: string;
+  /** Phase 2.1: present for voice messages */
+  voice?: TelegramVoice;
 }
 
 /**
