@@ -333,13 +333,12 @@ export async function getBalanceData(
       const children = childrenMap.get(row.account_id) ?? [];
 
       if (children.length > 0) {
-        // Multi-currency: first currency inline with name, rest indented below
-        const mainAmt = fmtAmount(row.balance.toFixed(2), row.currency);
-        lines.push(`${status} ${name}${star} \u2014 <b>${mainAmt}</b>`);
-        for (const child of children) {
-          const childAmt = fmtAmount(child.balance.toFixed(2), child.currency);
-          lines.push(`  \u21b3 <b>${childAmt}</b>`);
-        }
+        // Multi-currency: all on one line, slash-separated — one account = one line
+        const allAmts = [
+          fmtAmount(row.balance.toFixed(2), row.currency),
+          ...children.map((c) => fmtAmount(c.balance.toFixed(2), c.currency)),
+        ];
+        lines.push(`${status} ${name}${star} \u2014 <b>${allAmts.join(' / ')}</b>`);
       } else {
         // Single currency: name and balance on one line
         const amt = fmtAmount(row.balance.toFixed(2), row.currency);
