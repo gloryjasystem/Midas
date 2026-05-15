@@ -176,6 +176,27 @@ function voiceFailKey(telegramUserId: string, chatId: string): string {
 // ─────────────────────────────────────────────────────────────
 
 async function processVoiceParse(job: Job<VoiceParseJobPayload>): Promise<void> {
+  // Top-level guard: if anything throws unexpectedly, edit the status
+  // message so the user never sees a frozen "⏳ Распознаю..." forever.
+  // SEC-12: errors logged without transcript content.
+  try {
+    return await _processVoiceParse(job);
+  } catch (err) {
+    const statusMsgId = job.data.statusMessageId;
+    const chatId      = job.data.chatId;
+    console.error('[midas:voice-parse-worker] Unhandled error — editing status msg', {
+      jobId: job.id,
+      workspaceId: job.data.workspaceId,
+      errorClass: err instanceof Error ? err.constructor.name : 'Unknown',
+    });
+    if (statusMsgId && chatId) {
+      await editStatusMessage(chatId, statusMsgId, VOICE_ERROR_API_TEXT);
+    }
+    throw err; // re-throw so BullMQ marks the job as failed & retries
+  }
+}
+
+async function _processVoiceParse(job: Job<VoiceParseJobPayload>): Promise<void> {
   const { botId, chatId, messageId, telegramUserId, workspaceId, fileId, duration, statusMessageId } = job.data;
 
   console.log('[midas:voice-parse-worker] Processing job', {
@@ -318,7 +339,11 @@ async function processVoiceParse(job: Job<VoiceParseJobPayload>): Promise<void> 
     receivedAt: job.data.receivedAt,
   };
 
-  const aiJobId = IdempotencyKeyBuilder.aiParse(botId, `voice:${messageId}`);
+  // NOTE: BullMQ prohibits colons in custom job IDs.
+  // IdempotencyKeyBuilder.aiParse uses ':' separators → crashes here.
+  // Voice jobs are already deduplicated at the webhook level (voiceParse key),
+  // so we use a plain ULID for the downstream ai-parse job.
+  const aiJobId = ulid();
   await aiParseQueue.add(QUEUE_NAMES.AI_PARSE, aiParsePayload, { jobId: aiJobId });
 
   console.log('[midas:voice-parse-worker] Transcript enqueued to ai-parse', {
