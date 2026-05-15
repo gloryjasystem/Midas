@@ -314,12 +314,8 @@ export async function getBalanceData(
       const isExp = Boolean(row.is_expense_default);
       const isInc = Boolean(row.is_income_default);
 
-      // ── Variant A: role shown AFTER name in parentheses
-      // "Альфа-Банк (⭐ основной) · 22 010 213 ₽"
-      const roleSuffix = (isExp && isInc) ? ' <i>(⭐ основной)</i>'
-                       : isExp            ? ' <i>(💸 расходы)</i>'
-                       : isInc            ? ' <i>(💰 доходы)</i>'
-                       : '';
+      // Two-state role: ⭐ основной (expense+income default) or nothing
+      const roleSuffix = (isExp && isInc) ? ' <i>(⭐ основной)</i>' : '';
 
       const childrenOfRow = childrenMap.get(row.account_id) ?? [];
 

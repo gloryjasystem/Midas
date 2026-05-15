@@ -271,11 +271,8 @@ export function buildBalanceListKeyboard(accounts: BalanceAccountRow[]): InlineK
     if (children.length > 0) {
       // Parent with children — aggregation button + child rows
       const n = children.length;
-      // Icon only in buttons — no parentheses or text labels
-      const rs = (acc.isExpenseDefault && acc.isIncomeDefault) ? ' ⭐'
-               : acc.isExpenseDefault                          ? ' 💸'
-               : acc.isIncomeDefault                           ? ' 💰'
-               : '';
+      // ⭐ only for primary (expense+income default), nothing otherwise
+      const rs = (acc.isExpenseDefault && acc.isIncomeDefault) ? ' ⭐' : '';
       accountRows.push([{
         text: `${emoji} ${acc.name}${rs}  ·  ${n}\u00a0${pluralizeCurrency(n)}`,
         callback_data: `bl:v:${acc.account_id}`,
@@ -296,11 +293,8 @@ export function buildBalanceListKeyboard(accounts: BalanceAccountRow[]): InlineK
         callback_data: `bl:ac:${acc.account_id}`,
       }]);
     } else {
-      // Leaf account — icon only role suffix in buttons
-      const rs = (acc.isExpenseDefault && acc.isIncomeDefault) ? ' ⭐'
-               : acc.isExpenseDefault                          ? ' 💸'
-               : acc.isIncomeDefault                           ? ' 💰'
-               : '';
+      // Leaf account — ⭐ only for primary, nothing otherwise
+      const rs = (acc.isExpenseDefault && acc.isIncomeDefault) ? ' ⭐' : '';
       const balFmt = `${formatBalanceShort(acc.balance)}\u00a0${sym(acc.currency)}`;
       accountRows.push([{
         text: `${emoji} ${acc.name}${rs}  ·  ${balFmt}`,
@@ -339,25 +333,12 @@ export function buildAccountActionsKeyboard(
   roles: AccountRoleState = { isExpenseDefault: false, isIncomeDefault: false },
   canAddCurrency = false,
 ): InlineKeyboardMarkup {
-  const isExp = roles.isExpenseDefault;
-  const isInc = roles.isIncomeDefault;
+  const isMain = roles.isExpenseDefault && roles.isIncomeDefault;
 
-  let roleLabel = '';
-  let nextRoleCode = '';
-
-  if (isExp && isInc) {
-    roleLabel = '🏷 Роль: 💸💰 Основной';
-    nextRoleCode = 'n';
-  } else if (isExp) {
-    roleLabel = '🏷 Роль: 💸 Расходы';
-    nextRoleCode = 'i';
-  } else if (isInc) {
-    roleLabel = '🏷 Роль: 💰 Доходы';
-    nextRoleCode = 'm';
-  } else {
-    roleLabel = '🏷 Роль: Обычный счёт';
-    nextRoleCode = 'e';
-  }
+  // Two-state toggle: normal ↔ primary (⭐)
+  // «Основной» means the account is both expense AND income default simultaneously.
+  const roleLabel   = isMain ? '⭐ Роль: Основной счёт' : '🏷 Роль: Обычный счёт';
+  const nextRoleCode = isMain ? 'n' : 'm';  // n=none, m=main
 
   // Phase B-5: all top-level accounts can add a sub-currency account
   const addCurrencyRow = canAddCurrency
@@ -469,14 +450,9 @@ export function formatAccountDetailText(
   const txCount = escapeHtml(acc.tx_count);
   const created = formatDate(acc.created_at);
 
-  // Phase LD++: role status line
-  const isExp = roles?.isExpenseDefault ?? false;
-  const isInc = roles?.isIncomeDefault  ?? false;
-  const roleLine = (isExp || isInc)
-    ? `\n🏷 Роль: ${ isExp && isInc ? '💸💰 Основной'
-                 : isExp             ? '💸 Расходы'
-                 :                     '💰 Доходы'}`
-    : '';
+  // Simplified role line: only two states — normal or primary (⭐)
+  const isMain = (roles?.isExpenseDefault ?? false) && (roles?.isIncomeDefault ?? false);
+  const roleLine = isMain ? '\n⭐ Роль: Основной счёт' : '\n🏷 Роль: Обычный счёт';
 
   return (
     `🏦 <b>${name}</b>\n\n` +
