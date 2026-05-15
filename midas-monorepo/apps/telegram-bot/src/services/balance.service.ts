@@ -287,32 +287,20 @@ export async function getBalanceData(
 
   // ── Russian section titles ───────────────────────────────────
   const SECTION_TITLE: Record<GroupType, string> = {
-    bank:            'БАНКИ',
-    crypto_exchange: 'БИРЖИ',
-    crypto_wallet:   'КРИПТО',
-    cash:            'НАЛИЧНЫЕ',
-    other:           'ПРОЧЕЕ',
-  };
-
-  // ── Visual-width helper ──────────────────────────────────────
-  // Emoji (astral plane >U+FFFF, misc symbols U+2600–U+27BF, ⭐ U+2B00–U+2BFF) = 2 cols.
-  // Box-drawing chars (U+2500–U+25FF) fall below U+2600, so they stay at 1 col — correct.
-  const vw = (s: string): number => {
-    let w = 0;
-    for (const ch of s) {
-      const cp = ch.codePointAt(0) ?? 0;
-      w += (cp > 0xFFFF || (cp >= 0x2600 && cp <= 0x27BF) || (cp >= 0x2B00 && cp <= 0x2BFF)) ? 2 : 1;
-    }
-    return w;
+    bank:            'Банки',
+    crypto_exchange: 'Биржи',
+    crypto_wallet:   'Крипто',
+    cash:            'Наличные',
+    other:           'Прочее',
   };
 
   // ── Balance formatter ────────────────────────────────────────
-  // Positive: "1 970 000 ₽"     (no sign)
-  // Negative: "−  3 000 $"      (U+2212 + 2 spaces gap before number)
+  // Positive: "1 970 000 ₽"   (no sign)
+  // Negative: "−  3 000 $"    (U+2212 + 1 space before number)
   const fmtAmount = (balance: string, currency: string): string => {
     const raw = formatBalanceShort(balance);
     const sym = CCY_SYM[currency] ?? currency;
-    if (raw.startsWith('-')) return `\u2212  ${raw.slice(1)}\u00a0${sym}`;
+    if (raw.startsWith('-')) return `\u2212 ${raw.slice(1)}\u00a0${sym}`;
     return `${raw}\u00a0${sym}`;
   };
 
@@ -325,99 +313,41 @@ export async function getBalanceData(
     grouped.get(g)!.push(row);
   }
 
-  // ── Build line descriptors for every section ─────────────────
-  // Three line types:
-  //   combined   – name (left) + amount (right) on one line
-  //   nameOnly   – multi-currency parent: name only, amount on next lines
-  //   amountOnly – multi-currency child: right-aligned amount, indented
-  interface LineDesc {
-    leftStr: string; leftVW: number;
-    rightStr: string; rightVW: number;
-    nameOnly: boolean; amountOnly: boolean;
-  }
-
-  const sectionData: { groupType: GroupType; lines: LineDesc[] }[] = [];
+  // ── Assemble text ─────────────────────────────────────────
+  const sections: string[] = [];
 
   for (const groupType of GROUP_ORDER) {
     const rows = grouped.get(groupType);
     if (!rows || rows.length === 0) continue;
-    const lines: LineDesc[] = [];
+
+    const emoji = GROUP_EMOJI[groupType];
+    const title = SECTION_TITLE[groupType];
+
+    const lines: string[] = [];
 
     for (const row of rows) {
       const isNeg  = parseFloat(row.balance.toFixed(2)) < 0;
       const status = isNeg ? '🔴' : '🟢';
       const star   = (Boolean(row.is_expense_default) && Boolean(row.is_income_default)) ? ' ⭐' : '';
-      // vw() on raw name; escapeHtml() for output (HTML chars are visually single-width)
-      const rawName  = row.name;
-      const safeName = escapeHtml(rawName);
-      const leftRaw  = ` ${status} ${rawName}${star}`;  // for visual-width calc
-      const leftOut  = ` ${status} ${safeName}${star}`; // for output
-      const leftVW   = vw(leftRaw);
+      const name   = escapeHtml(row.name);
       const children = childrenMap.get(row.account_id) ?? [];
 
       if (children.length > 0) {
-        // Name-only line
-        lines.push({ leftStr: leftOut, leftVW, rightStr: '', rightVW: 0, nameOnly: true, amountOnly: false });
-        // Amount-only lines — one per currency
-        const allBal = [
-          { balance: row.balance.toFixed(2), currency: row.currency },
-          ...children.map((c) => ({ balance: c.balance.toFixed(2), currency: c.currency })),
-        ];
-        for (const b of allBal) {
-          const rightStr = fmtAmount(b.balance, b.currency);
-          lines.push({ leftStr: '', leftVW: 0, rightStr, rightVW: vw(rightStr), nameOnly: false, amountOnly: true });
+        // Multi-currency: first currency inline with name, rest indented below
+        const mainAmt = fmtAmount(row.balance.toFixed(2), row.currency);
+        lines.push(`${status} ${name}${star} \u2014 <b>${mainAmt}</b>`);
+        for (const child of children) {
+          const childAmt = fmtAmount(child.balance.toFixed(2), child.currency);
+          lines.push(`  \u21b3 <b>${childAmt}</b>`);
         }
       } else {
-        const rightStr = fmtAmount(row.balance.toFixed(2), row.currency);
-        lines.push({ leftStr: leftOut, leftVW, rightStr, rightVW: vw(rightStr), nameOnly: false, amountOnly: false });
+        // Single currency: name and balance on one line
+        const amt = fmtAmount(row.balance.toFixed(2), row.currency);
+        lines.push(`${status} ${name}${star} \u2014 <b>${amt}</b>`);
       }
     }
-    sectionData.push({ groupType, lines });
-  }
 
-  // ── Compute global INNER_W (same box width for ALL sections) ─
-  // innerW = visual columns between the two │ characters (excl. the 1-space padding each side).
-  const MIN_GAP = 3;
-  let innerW = 16;
-  for (const { lines } of sectionData) {
-    for (const l of lines) {
-      const req = l.amountOnly ? l.rightVW
-                : l.nameOnly   ? l.leftVW
-                : l.leftVW + MIN_GAP + l.rightVW;
-      if (req > innerW) innerW = req;
-    }
-  }
-  innerW += 2; // right-side breathing room
-
-  // ── Box primitives ───────────────────────────────────────────
-  // Box line: │ [innerW visual cols] │  → total visual = innerW + 4
-  const dashes = '─'.repeat(innerW + 2);
-  const BOX_TOP = `┌${dashes}┐`;
-  const BOX_BOT = `└${dashes}┘`;
-
-  const buildBoxLine = (l: LineDesc): string => {
-    let content: string;
-    if (l.amountOnly) {
-      // Right-aligned: spaces on the left
-      content = ' '.repeat(Math.max(0, innerW - l.rightVW)) + l.rightStr;
-    } else if (l.nameOnly) {
-      // Left-aligned: spaces on the right
-      content = l.leftStr + ' '.repeat(Math.max(0, innerW - l.leftVW));
-    } else {
-      // Name left, amount right — gap fills the middle
-      const gap = Math.max(MIN_GAP, innerW - l.leftVW - l.rightVW);
-      content = l.leftStr + ' '.repeat(gap) + l.rightStr;
-    }
-    return `│ ${content} │`;
-  };
-
-  // ── Assemble final text ──────────────────────────────────────
-  const sections: string[] = [];
-  for (const { groupType, lines } of sectionData) {
-    const emoji = GROUP_EMOJI[groupType];
-    const title = SECTION_TITLE[groupType];
-    const boxContent = [BOX_TOP, ...lines.map(buildBoxLine), BOX_BOT].join('\n');
-    sections.push(`${emoji} <b>${title}</b>\n<pre>${boxContent}</pre>`);
+    sections.push(`${emoji} <b>${title}</b>\n${lines.join('\n')}`);
   }
 
   const text = '💼 <b>Баланс</b>\n\n' + sections.join('\n\n');
