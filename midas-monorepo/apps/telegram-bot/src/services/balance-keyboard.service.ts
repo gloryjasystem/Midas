@@ -45,10 +45,10 @@ export type GroupType = 'bank' | 'crypto_exchange' | 'crypto_wallet' | 'cash' | 
 
 export const GROUP_EMOJI: Record<GroupType, string> = {
   bank:            '🏦',
-  crypto_exchange: '🪙',
-  crypto_wallet:   '👛',
+  crypto_exchange: '📈',
+  crypto_wallet:   '🔐',
   cash:            '💵',
-  other:           '📁',
+  other:           '📂',
 };
 
 export const GROUP_ORDER: GroupType[] = [
@@ -251,6 +251,15 @@ export function buildBalanceListKeyboard(accounts: BalanceAccountRow[]): InlineK
     return a.name.localeCompare(b.name, 'ru');
   });
 
+  // Currency symbol map (shared with text renderer)
+  const CCY_SYM: Record<string, string> = {
+    RUB: '₽', USD: '$', EUR: '€', UAH: '₴', GBP: '£',
+    KZT: '₸', BYN: 'Br', GEL: '₾', PLN: 'zł', TRY: '₺',
+    CNY: '¥', JPY: '¥', HKD: 'HK$', SGD: 'S$', AUD: 'A$',
+    CAD: 'C$', CHF: 'Fr',
+  };
+  const sym = (code: string) => CCY_SYM[code] ?? code;
+
   // ── Build keyboard rows ───────────────────────────────────────────
   const accountRows: { text: string; callback_data: string }[][] = [];
 
@@ -260,17 +269,23 @@ export function buildBalanceListKeyboard(accounts: BalanceAccountRow[]): InlineK
     const children = childrenOf.get(acc.account_id) ?? [];
 
     if (children.length > 0) {
-      // Phase B-2: Parent with children — show aggregation button
+      // Parent with children — aggregation button + child rows
       const n = children.length;
+      // Role prefix for parent
+      const rp = (acc.isExpenseDefault && acc.isIncomeDefault) ? '⭐ '
+               : acc.isExpenseDefault                          ? '💸 '
+               : acc.isIncomeDefault                           ? '💰 '
+               : '';
       accountRows.push([{
-        text: `${emoji} ${acc.name}  ·  ${n}\u00a0${pluralizeCurrency(n)}`,
+        text: `${emoji} ${rp}${acc.name}  ·  ${n}\u00a0${pluralizeCurrency(n)}`,
         callback_data: `bl:v:${acc.account_id}`,
       }]);
 
-      // Child rows: indented with └ connector, showing currency · balance
+      // Child rows: indented, currency symbol + balance
       for (const child of children) {
+        const balFmt = `${formatBalanceShort(child.balance)}\u00a0${sym(child.currency)}`;
         accountRows.push([{
-          text: `  └ ${child.currency}  ·  ${formatBalanceShort(child.balance)}`,
+          text: `  └ ${balFmt}`,
           callback_data: `bl:v:${child.account_id}`,
         }]);
       }
@@ -281,13 +296,15 @@ export function buildBalanceListKeyboard(accounts: BalanceAccountRow[]): InlineK
         callback_data: `bl:ac:${acc.account_id}`,
       }]);
     } else {
-      // Leaf account (no children): same as Phase A / LD++
-      const roleTag = (acc.isExpenseDefault && acc.isIncomeDefault) ? ' 💸💰'
-                    : acc.isExpenseDefault                          ? ' 💸'
-                    : acc.isIncomeDefault                           ? ' 💰'
-                    : '';
+      // Leaf account — single clean button line
+      // ⭐ prefix for main account (clearly readable vs trailing emoji)
+      const rp = (acc.isExpenseDefault && acc.isIncomeDefault) ? '⭐ '
+               : acc.isExpenseDefault                          ? '💸 '
+               : acc.isIncomeDefault                           ? '💰 '
+               : '';
+      const balFmt = `${formatBalanceShort(acc.balance)}\u00a0${sym(acc.currency)}`;
       accountRows.push([{
-        text: `${emoji} ${acc.name}${roleTag}  ·  ${formatBalanceShort(acc.balance)} ${acc.currency}`,
+        text: `${emoji} ${rp}${acc.name}  ·  ${balFmt}`,
         callback_data: `bl:v:${acc.account_id}`,
       }]);
     }

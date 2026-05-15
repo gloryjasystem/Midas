@@ -277,13 +277,22 @@ export async function getBalanceData(
     childCount:       childCountMap.get(row.account_id) ?? 0,
   }));
 
-  // ── Grouped text by account type (Phase A / B-2) ────────────
+  // ── Currency symbol map (professional display) ──────────────
+  const CCY_SYMBOL: Record<string, string> = {
+    RUB: '₽', USD: '$', EUR: '€', UAH: '₴', GBP: '£',
+    KZT: '₸', BYN: 'Br', GEL: '₾', PLN: 'zł', TRY: '₺',
+    CNY: '¥', JPY: '¥', HKD: 'HK$', SGD: 'S$', AUD: 'A$',
+    CAD: 'C$', CHF: 'Fr',
+  };
+  const fmtCcy = (code: string) => CCY_SYMBOL[code] ?? code;
+
+  // ── Group label — Title Case, professional (not ALL CAPS) ────
   const GROUP_LABEL: Record<GroupType, string> = {
-    bank:            'БАНКИ И КАРТЫ',
-    crypto_exchange: 'КРИПТОБИРЖИ',
-    crypto_wallet:   'КРИПТО-КОШЕЛЬКИ',
-    cash:            'НАЛИЧНЫЕ',
-    other:           'ПРОЧЕЕ',
+    bank:            'Банки и карты',
+    crypto_exchange: 'Биржи',
+    crypto_wallet:   'Кошельки',
+    cash:            'Наличные',
+    other:           'Прочее',
   };
 
   // Phase B-2: only top-level accounts define group structure;
@@ -304,36 +313,46 @@ export async function getBalanceData(
     const lines = rows.map((row) => {
       const isExp = Boolean(row.is_expense_default);
       const isInc = Boolean(row.is_income_default);
-      // Compact role badge — icon only to save space
-      const roleBadge = (isExp && isInc) ? ' 💸💰'
-                      : isExp            ? ' 💸'
-                      : isInc            ? ' 💰'
-                      : '';
+
+      // ── Role prefix: ⭐ = основной (exp+inc), 💸 = расходы, 💰 = доходы
+      // Placed BEFORE the name — clearly readable at a glance (Revolut pattern)
+      const rolePrefix = (isExp && isInc) ? '⭐ '
+                       : isExp            ? '💸 '
+                       : isInc            ? '💰 '
+                       : '';
 
       const childrenOfRow = childrenMap.get(row.account_id) ?? [];
 
       if (childrenOfRow.length > 0) {
-        // Phase B-2: parent with children — render ├/└ ladder
+        // Parent with children — compact ladder, no separate balance line for parent
         const childLines = childrenOfRow.map((child, idx) => {
           const isLast = idx === childrenOfRow.length - 1;
           const connector = isLast ? '└' : '├';
           const balStr = formatBalanceShort(child.balance.toFixed(2));
-          return `${connector} ${escapeHtml(child.currency)} · ${balStr}`;
+          const sym = fmtCcy(child.currency);
+          // e.g. "└ 32 601 USDT" or "└ 32 601 $" (symbol for known currencies)
+          const balDisplay = CCY_SYMBOL[child.currency]
+            ? `${balStr} ${sym}`
+            : `${balStr} ${escapeHtml(child.currency)}`;
+          return `${connector} ${balDisplay}`;
         });
-        return `<b>${escapeHtml(row.name)}</b>${roleBadge}\n${childLines.join('\n')}`;
+        return `${rolePrefix}<b>${escapeHtml(row.name)}</b>\n${childLines.join('\n')}`;
       }
 
-      // Leaf account (no children)
+      // ── Leaf account: single line  "⭐ Альфа-Банк · 22 010 213 ₽"
       const balStr = formatBalanceShort(row.balance.toFixed(2));
-      return `<b>${escapeHtml(row.name)}</b>${roleBadge}\n└ ${balStr} ${escapeHtml(row.currency)}`;
+      const sym = fmtCcy(row.currency);
+      const balDisplay = CCY_SYMBOL[row.currency]
+        ? `${balStr}\u00a0${sym}`
+        : `${balStr}\u00a0${escapeHtml(row.currency)}`;
+      return `${rolePrefix}<b>${escapeHtml(row.name)}</b> · ${balDisplay}`;
     });
 
-    // Compact: no blank line between section label and first account,
-    // no blank lines between accounts within the section.
+    // Section header: emoji + Title Case label, then accounts immediately below
     sections.push(`${GROUP_EMOJI[groupType]} <b>${GROUP_LABEL[groupType]}</b>\n${lines.join('\n')}`);
   }
 
-  const text = '💰 <b>Баланс счетов</b>\n\n' + sections.join('\n\n');
+  const text = '💼 <b>Баланс</b>\n\n' + sections.join('\n\n');
   return { text, accounts: accountRows };
 }
 
