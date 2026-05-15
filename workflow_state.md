@@ -10,7 +10,7 @@
 | �������� | �������� |
 |---|---|
 | **PHASE** | `Transaction Hub UX � Variant D Icon Chips ? DEPLOYED` |
-| **STEP** | `Commit d770ca4 pushed to main. Railway auto-deploy triggered.` |
+| **STEP** | `Commit fbdfa0a pushed to main. Railway deployed (railway up from parent dir — railpack-v0.23.0 workaround).` |
 | **AGENT STATUS** | `tsc 0 errors. IntentFilter 5 ����� (e/i/d/t/a). 'd' = merged ����� (debt_given + debt_received). ������� D: 1 ������ ? 5 ��������� ������ [??][??][??][??][?? ���]. Toggle: ������� �� �������� ������ ������� ���.` |
 | **DEPLOYMENT** | `Railway (spirited-happiness project)` � `Midas` ? Online � `background-workers` ? Online � `Postgres` ? � `Redis` ?. Health: https://midas-production-f4f1.up.railway.app/health > {"status":"ok"} |
 | **LAST COMPLETED** | `Transaction Hub Variant D: ��������� ���� ���������� [??][??][??][??][?? ���] � 1 ������ ������ 2?3 �����. IntentFilter d = SQL IN ('debt_given','debt_received'). Toggle UX. Backward compat dg/dr>d. Commit d770ca4.` |
@@ -458,7 +458,12 @@ Phase B-1 (commit 75156b9, ��������� �� live Railway Postg
 
 | 2026-05-15 10:35 | **Transaction Hub UX `[Variant D]` Icon Chips (DEPLOYED).** ��������� ��������� �������� Transaction Hub. ��������: ����� ������ ������� ������� � ������ �� �������. �������: `FILTER_LABELS` ����� � ��������� �����. �����: `[??][??][??][??][?? ���]` � 5 ���������� ������ � 1 ������. `IntentFilter`: 5 ����� `a/e/i/d/t` (����� dg+dr merged � `d`). SQL: `OR (='d' AND intent IN ('debt_given','debt_received'))`. Toggle: ������� �� �������� (?���) ������� ������. Backward compat: dg/dr > d. tsc 0 ������. Commits `f4d7ecd`+`d770ca4`, push ?. Railway auto-deploy. |
 | 2026-05-15 10:20 | **Transaction Hub UX � 6-Filter Grid 2?3 + CCY Symbol Unification (DEPLOYED).** `transaction-hub.service.ts`: `TX_PAGE_SIZE` 6>5; `IntentFilter` �������� �� 6 ����� (`'e'|'i'|'dg'|'dr'|'t'|'a'`); `MonthMiniStats` � ���� `debt_count` �������� �����: `debt_given_count`, `debt_received_count`, `transfer_count`; SQL-������� `getTransactionList` � `countFilteredTransactions` ��������� � ������ ���������� dg/dr/t (����� ���������� ������ `'d'`). `transaction-keyboard.service.ts`: `CCY_SYMBOL` Unicode-����� + `fmtCurrency()` (?/$�? ��� �����, ISO ��� ������); `intentEmoji` ������� (???? ������ ????); `FILTER_LABELS` 4>6; `FILTER_ROW_1=['e','i','t']` + `FILTER_ROW_2=['dr','dg','a']` � ����� 2?3; ��������� �?? ����� � ?? X/Y � ������ ??�; `formatTxListHeader` ��� ���� 6 ��������; `VALID_FILTERS` �������; fallback `'d'>'a'`. tsc 0 ������. 23/23 �������� PASS. Commit `a9c0f52`, push origin main ?. Railway auto-deploy triggered. |
-| 2026-05-14 23:50 | **Balance Phase B-5/B-6/B-8/B-9 ? Add Currency Workflow ?????????.** B-8: addChildAccount() ? account.service.ts (withTenantTransaction, parent_account_id, no workspace defaults update). B-6: child_count subquery ? ACCOUNT_DETAIL_SQL; AccountDetailData ??????? child_count. B-5: buildAccountActionsKeyboard(hasChildren?) ?????????? ?????? bl:ac: (32 ?????). webhook.route.ts: add_currency handler + currency_set ????? + 6 ??????? ? detail.child_count>0. B-9: parent_account_id ? GROUP BY PER_ACCOUNT_SQL; ORDER BY ?????????????. tsc 0 ??????. Commits 5ce9148+04e79b8. Railway auto-deploy. |
+
+| 2026-05-15 14:22 | **Balance Visual Redesign — Nav Fix (commit 8a1a8e2).** Backward compatibility for old Reply Keyboard button. webhook.route.ts: 
+avText === NAV_BTN_BALANCE \|\| navText === '💰 Баланс' — users who still had the old 💰 button in their chat got routed correctly to balance handler instead of falling through to AI parse. |
+| 2026-05-15 14:26 | **Balance Visual Redesign — Remove <pre> (commit 13a9056).** alance.service.ts: Dropped box-drawing / <pre> renderer entirely (caused ugly "копировать" code block header in Telegram). New clean HTML text renderer: section titles Title Case (Банки/Биржи/Крипто/Наличные). CCY_SYM map (17 symbols). mtAmount(): positive → 1 970 000 ₽, negative → −3 000 $ (U+2212). Multi-currency: first currency inline with name, additional currencies indented with ↳ on next lines. Status: 🟢/🔴 retained at this stage. tsc 0 errors. |
+| 2026-05-15 14:31 | **Balance Visual Redesign — Multi-currency inline slash (commit e418b6a).** alance.service.ts: Multi-currency accounts now render on ONE line: ▸ Тинькофф — 2 122 $ / 0 zł. Dropped ↳ indented lines — they felt visually fragmented (not monolithic). One account = one line, matching Revolut/N26 pattern. tsc 0 errors. Railway deploy failed (railpack-v0.23.0 builder issue). |
+| 2026-05-15 14:37 | **Balance Visual Redesign — Chevron ▸ + minus fix (commit fbdfa0a). DEPLOYED.** alance.service.ts: (1) Replaced 🟢/🔴 colored circles with neutral ▸ (U+25B8) chevron for all accounts — Apple Notes minimal style. Sign − is the negative indicator, no extra colored dot needed. (2) Removed space between minus and number: −3 000 $ (was − 3 000 $). Railway CLI deploy fix: ailway up --service Midas from parent dir C:\Users\secvency\Desktop\Midas (railpack-v0.23.0 bug — builder cannot unpack snapshot when CWD is midas-monorepo/). Deploy exit 0 ✅. || 2026-05-14 23:50 | **Balance Phase B-5/B-6/B-8/B-9 ? Add Currency Workflow ?????????.** B-8: addChildAccount() ? account.service.ts (withTenantTransaction, parent_account_id, no workspace defaults update). B-6: child_count subquery ? ACCOUNT_DETAIL_SQL; AccountDetailData ??????? child_count. B-5: buildAccountActionsKeyboard(hasChildren?) ?????????? ?????? bl:ac: (32 ?????). webhook.route.ts: add_currency handler + currency_set ????? + 6 ??????? ? detail.child_count>0. B-9: parent_account_id ? GROUP BY PER_ACCOUNT_SQL; ORDER BY ?????????????. tsc 0 ??????. Commits 5ce9148+04e79b8. Railway auto-deploy. |
 
 
 ---
@@ -1288,4 +1293,7 @@ oleSuffix � ���� ��������� <i>(? �������
 | **3.1** | ���������� ������� ��������� | ?? ������� | ?? ������������� | Phase 3.0 |
 | **3.2** | ����� 3.0: ������������ ��������� | ?? ������� | ?? ������������� | Phase 3.0 |
 | **4.0** | Telegram Mini App | ?? ������ | ?? ������� | Phase 3.x |
+
+
+
 
