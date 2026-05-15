@@ -2992,7 +2992,7 @@ Midas создан, чтобы сделать учет денег максима
                   { text: 'CNY', callback_data: `draft:setcur:CNY:${curDraftId}` },
                 ],
                 [
-                  { text: '◀️ Назад', callback_data: `draft:edit:${curDraftId}` },
+                  { text: '◀️ Назад', callback_data: `draft:back:${curDraftId}` },
                 ],
               ],
             };
