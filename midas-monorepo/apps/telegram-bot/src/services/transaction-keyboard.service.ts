@@ -59,13 +59,27 @@ function formatAmountStr(numStr: string): string {
   return `${intWithSep}.${frac}`;
 }
 
-/** Intent → emoji mapping */
+// ── Currency symbol map (mirrors balance.service.ts — keep in sync) ──────────
+// Fiat currencies get their unicode symbol; crypto stays as ISO code (no symbol).
+const CCY_SYMBOL: Record<string, string> = {
+  RUB: '₽', USD: '$',  EUR: '€', UAH: '₴', GBP: '£',
+  KZT: '₸', BYN: 'Br', GEL: '₾', PLN: 'zł', TRY: '₺',
+  CNY: '¥', JPY: '¥',  HKD: 'HK$', SGD: 'S$', AUD: 'A$',
+  CAD: 'C$', CHF: 'Fr',
+};
+
+/** Symbol for fiat (₽ $ €), ISO code for crypto (USDT BTC ETH). */
+function fmtCurrency(code: string): string {
+  return CCY_SYMBOL[code] ?? code;
+}
+
+/** Intent → emoji mapping (matches filter button icons) */
 function intentEmoji(intent: string): string {
   switch (intent) {
     case 'income':        return '💰';
     case 'expense':       return '💸';
-    case 'debt_given':    return '🔴';
-    case 'debt_received': return '🟢';
+    case 'debt_given':    return '📤';
+    case 'debt_received': return '📥';
     default:              return '🔄';
   }
 }
@@ -83,10 +97,12 @@ function shortDate(isoDate: string): string {
 // ─────────────────────────────────────────────────────────────
 
 const FILTER_LABELS: Record<IntentFilter, { text: string; active: string }> = {
-  e: { text: '💸 Расходы',  active: '💸 Расходы ✓' },
-  i: { text: '💰 Доходы',   active: '💰 Доходы ✓' },
-  a: { text: '📋 Все',       active: '📋 Все ✓' },
-  d: { text: '🤝 Долги',    active: '🤝 Долги ✓' },
+  e:  { text: '💸 Расходы',   active: '💸 Расходы ✓'   },
+  i:  { text: '💰 Доходы',    active: '💰 Доходы ✓'    },
+  t:  { text: '🔄 Переводы',  active: '🔄 Переводы ✓'  },
+  dr: { text: '📥 Взял долг', active: '📥 Взял долг ✓' },
+  dg: { text: '📤 Дал долг',  active: '📤 Дал долг ✓'  },
+  a:  { text: '📋 Все',       active: '📋 Все ✓'        },
 };
 
 // ─────────────────────────────────────────────────────────────
@@ -110,14 +126,17 @@ export function buildTxListKeyboard(
 ): InlineKeyboardMarkup {
   const rows: InlineKeyboardButton[][] = [];
 
-  // Filter row — 3 buttons: Expense / Income / All
-  const filterRow: InlineKeyboardButton[] = (
-    ['e', 'i', 'a'] as IntentFilter[]
-  ).map((f) => ({
-    text: f === activeFilter ? FILTER_LABELS[f].active : FILTER_LABELS[f].text,
-    callback_data: `tx:l:0:${f}`,
-  }));
-  rows.push(filterRow);
+  // Filter grid — 2 rows × 3 buttons (Вариант 1: Двухстрочная сетка)
+  // Строка 1: основные финансовые потоки
+  // Строка 2: долговые операции + «Все»
+  const FILTER_ROW_1: IntentFilter[] = ['e', 'i', 't'];
+  const FILTER_ROW_2: IntentFilter[] = ['dr', 'dg', 'a'];
+  for (const filterRow of [FILTER_ROW_1, FILTER_ROW_2]) {
+    rows.push(filterRow.map((f) => ({
+      text: f === activeFilter ? FILTER_LABELS[f].active : FILTER_LABELS[f].text,
+      callback_data: `tx:l:0:${f}`,
+    })));
+  }
 
   // Search button
   rows.push([{ text: '\uD83D\uDD0D Поиск', callback_data: 'tx:s' }]);
@@ -126,7 +145,7 @@ export function buildTxListKeyboard(
   for (const tx of items) {
     const emoji = intentEmoji(tx.transaction_intent);
     const amt   = formatAmountStr(tx.base_amount);
-    const cur   = escapeHtml(tx.base_currency);
+    const cur   = fmtCurrency(tx.base_currency);
     const date  = shortDate(tx.transaction_time);
 
     // Show item_name if exists, else fall back to category
@@ -145,11 +164,11 @@ export function buildTxListKeyboard(
   if (totalPages > 1) {
     const navRow: InlineKeyboardButton[] = [];
     if (page > 0) {
-      navRow.push({ text: '\u25C0\uFE0F', callback_data: `tx:l:${String(page - 1)}:${activeFilter}` });
+      navRow.push({ text: '⬅️ Позже', callback_data: `tx:l:${String(page - 1)}:${activeFilter}` });
     }
-    navRow.push({ text: `${String(page + 1)}/${String(totalPages)}`, callback_data: 'tx:x' });
+    navRow.push({ text: `📄 ${String(page + 1)} / ${String(totalPages)}`, callback_data: 'tx:x' });
     if (page < totalPages - 1) {
-      navRow.push({ text: '\u25B6\uFE0F', callback_data: `tx:l:${String(page + 1)}:${activeFilter}` });
+      navRow.push({ text: 'Раньше ➡️', callback_data: `tx:l:${String(page + 1)}:${activeFilter}` });
     }
     rows.push(navRow);
   }
@@ -272,9 +291,15 @@ export function formatTxListHeader(
   if (filter === 'a') {
     // All transactions — summary line
     const parts: string[] = [];
-    if (stats.expense_count > 0) parts.push(`${String(stats.expense_count)} расход${pluralRu(stats.expense_count)}`);
-    if (stats.income_count > 0)  parts.push(`${String(stats.income_count)} доход${pluralRu(stats.income_count)}`);
-    if (stats.debt_count > 0)    parts.push(`${String(stats.debt_count)} долг${pluralRu(stats.debt_count)}`);
+    if (stats.expense_count > 0)
+      parts.push(`${String(stats.expense_count)} расход${pluralRu(stats.expense_count)}`);
+    if (stats.income_count > 0)
+      parts.push(`${String(stats.income_count)} доход${pluralRu(stats.income_count)}`);
+    const totalDebt = stats.debt_given_count + stats.debt_received_count;
+    if (totalDebt > 0)
+      parts.push(`${String(totalDebt)} долг${pluralRu(totalDebt)}`);
+    if (stats.transfer_count > 0)
+      parts.push(`${String(stats.transfer_count)} перевод${pluralRu(stats.transfer_count)}`);
     const summary = parts.length > 0 ? parts.join(' · ') : 'нет транзакций';
     return `<b>📋 Транзакции</b>\n\nЗа ${monthName}: ${summary}`;
   }
@@ -289,8 +314,14 @@ export function formatTxListHeader(
     return `<b>💰 Доходы за ${monthName}</b> (${String(stats.income_count)} шт. · ${amt} ${cur})`;
   }
 
-  // filter === 'd'
-  return `<b>🤝 Долги за ${monthName}</b> (${String(stats.debt_count)} шт.)`;
+  if (filter === 'dg') {
+    return `<b>📤 Дал в долг за ${monthName}</b> (${String(stats.debt_given_count)} шт.)`;
+  }
+  if (filter === 'dr') {
+    return `<b>📥 Взял в долг за ${monthName}</b> (${String(stats.debt_received_count)} шт.)`;
+  }
+  // filter === 't'
+  return `<b>🔄 Переводы за ${monthName}</b> (${String(stats.transfer_count)} шт.)`;
 }
 
 /**
@@ -340,7 +371,7 @@ export type TxCallbackCmd =
   | { cmd: 'close' }
   | { cmd: 'done'; txId: string };
 
-const VALID_FILTERS: readonly string[] = ['a', 'e', 'i', 'd'];
+const VALID_FILTERS: readonly string[] = ['a', 'e', 'i', 'dg', 'dr', 't'];
 
 /**
  * Parse a tx: callback_data string into a typed command.
@@ -381,7 +412,10 @@ export function parseTxCallback(data: string): TxCallbackCmd | null {
   if (sub === 'l') {
     const page = parseInt(parts[2] ?? '0', 10);
     if (isNaN(page) || page < 0) return null;
-    const filter = (parts[3] ?? 'a') as IntentFilter;
+    let filter = (parts[3] ?? 'a') as IntentFilter;
+    // Backward compat: stale cached Telegram buttons may send old 'd' (combined debts).
+    // Silently redirect to 'a' (All) to avoid null-return on stale keyboards.
+    if ((filter as string) === 'd') filter = 'a';
     if (!VALID_FILTERS.includes(filter)) return null;
     return { cmd: 'list', page, filter };
   }

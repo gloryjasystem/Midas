@@ -21,7 +21,7 @@ import { withTenantTransaction } from '@midas/database';
 // Constants
 // ─────────────────────────────────────────────────────────────
 
-export const TX_PAGE_SIZE = 6;
+export const TX_PAGE_SIZE = 5;  // grid filter takes +1 row; 5 tx fit cleanly on mobile
 
 // ─────────────────────────────────────────────────────────────
 // Types
@@ -38,19 +38,26 @@ export interface TxListItem {
 }
 
 export interface MonthMiniStats {
-  expense_count: number;
-  income_count: number;
-  debt_count: number;
+  expense_count:       number;
+  income_count:        number;
+  debt_given_count:    number;   // дал долг (деньги ушли)
+  debt_received_count: number;   // взял долг (деньги пришли)
+  transfer_count:      number;   // переводы между счетами
   expense_total: string;      // NUMERIC string (SEC-02)
-  income_total: string;       // NUMERIC string (SEC-02)
-  currency: string;           // workspace default_currency
+  income_total:  string;      // NUMERIC string (SEC-02)
+  currency:      string;      // workspace default_currency
 }
 
 /**
  * Intent filter for transaction list.
- *   'a' = all, 'e' = expense, 'i' = income, 'd' = debt
+ *   'a'  = all
+ *   'e'  = expense (расходы)
+ *   'i'  = income (доходы)
+ *   'dg' = debt_given (дал в долг — деньги ушли)
+ *   'dr' = debt_received (взял в долг — деньги пришли)
+ *   't'  = transfer (переводы между счетами)
  */
-export type IntentFilter = 'a' | 'e' | 'i' | 'd';
+export type IntentFilter = 'a' | 'e' | 'i' | 'dg' | 'dr' | 't';
 
 // ─────────────────────────────────────────────────────────────
 // Queries
@@ -83,9 +90,11 @@ export async function getTransactionList(
          AND t.deleted_at IS NULL
          AND (
            $2 = 'a'
-           OR ($2 = 'e' AND t.transaction_intent = 'expense')
-           OR ($2 = 'i' AND t.transaction_intent = 'income')
-           OR ($2 = 'd' AND t.transaction_intent IN ('debt_given', 'debt_received'))
+           OR ($2 = 'e'  AND t.transaction_intent = 'expense')
+           OR ($2 = 'i'  AND t.transaction_intent = 'income')
+           OR ($2 = 'dg' AND t.transaction_intent = 'debt_given')
+           OR ($2 = 'dr' AND t.transaction_intent = 'debt_received')
+           OR ($2 = 't'  AND t.transaction_intent = 'transfer')
          )
        ORDER BY t.transaction_time DESC
        LIMIT $3 OFFSET $4`,
@@ -112,9 +121,11 @@ export async function countFilteredTransactions(
          AND deleted_at IS NULL
          AND (
            $2 = 'a'
-           OR ($2 = 'e' AND transaction_intent = 'expense')
-           OR ($2 = 'i' AND transaction_intent = 'income')
-           OR ($2 = 'd' AND transaction_intent IN ('debt_given', 'debt_received'))
+           OR ($2 = 'e'  AND transaction_intent = 'expense')
+           OR ($2 = 'i'  AND transaction_intent = 'income')
+           OR ($2 = 'dg' AND transaction_intent = 'debt_given')
+           OR ($2 = 'dr' AND transaction_intent = 'debt_received')
+           OR ($2 = 't'  AND transaction_intent = 'transfer')
          )`,
       [workspaceId, filter],
     );
@@ -140,16 +151,20 @@ export async function getMonthMiniStats(
     const currency = wRes.rows[0]?.default_currency ?? 'USDT';
 
     const r = await client.query<{
-      expense_count: string;
-      income_count: string;
-      debt_count: string;
-      expense_total: string;
-      income_total: string;
+      expense_count:       string;
+      income_count:        string;
+      debt_given_count:    string;
+      debt_received_count: string;
+      transfer_count:      string;
+      expense_total:       string;
+      income_total:        string;
     }>(
       `SELECT
          COUNT(*) FILTER (WHERE transaction_intent = 'expense')::text AS expense_count,
          COUNT(*) FILTER (WHERE transaction_intent = 'income')::text AS income_count,
-         COUNT(*) FILTER (WHERE transaction_intent IN ('debt_given', 'debt_received'))::text AS debt_count,
+         COUNT(*) FILTER (WHERE transaction_intent = 'debt_given')::text    AS debt_given_count,
+         COUNT(*) FILTER (WHERE transaction_intent = 'debt_received')::text AS debt_received_count,
+         COUNT(*) FILTER (WHERE transaction_intent = 'transfer')::text      AS transfer_count,
          COALESCE(SUM(base_amount) FILTER (WHERE transaction_intent = 'expense'), 0)::text AS expense_total,
          COALESCE(SUM(base_amount) FILTER (WHERE transaction_intent = 'income'), 0)::text AS income_total
        FROM transactions
@@ -163,7 +178,9 @@ export async function getMonthMiniStats(
     return {
       expense_count: parseInt(row?.expense_count ?? '0', 10),
       income_count: parseInt(row?.income_count ?? '0', 10),
-      debt_count: parseInt(row?.debt_count ?? '0', 10),
+      debt_given_count:    parseInt(row?.debt_given_count    ?? '0', 10),
+      debt_received_count: parseInt(row?.debt_received_count ?? '0', 10),
+      transfer_count:      parseInt(row?.transfer_count      ?? '0', 10),
       expense_total: row?.expense_total ?? '0',
       income_total: row?.income_total ?? '0',
       currency,
