@@ -342,10 +342,6 @@ export function createVoiceParseWorker(): Worker<VoiceParseJobPayload> {
       prefix: 'bull',
       concurrency: 3,
       // xAI Grok STT rate limit is generous — 3 concurrent workers is well within budget.
-      limiter: {
-        max: 30,
-        duration: 60_000,
-      },
     },
   );
 
