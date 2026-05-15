@@ -460,55 +460,94 @@ async function processAiParse(job: Job<AiParseJobPayload>): Promise<void> {
     // in settings, ask via text prompt instead of silently defaulting to USDT.
     const aiCurrency = partialData?.currency ?? null;
     if (!aiCurrency) {
-      const curSetFlag = await redisConnection.exists(`midas:cur_set:${workspaceId}`);
-      if (curSetFlag === 0) {
-        // User never set currency → ask via text
-        const awaitKey = `midas:awaiting_cur:${chatId}`;
-        await redisConnection.set(
-          awaitKey,
-          `${draftId}:${workspaceId}:${userId}`,
-          'EX', 600, // 10 min TTL
+      // Phase V2 (Phase 9): check for primary account (⭐) first.
+      // If user has set a primary account, auto-apply its currency AND account ID —
+      // skip the «В какой валюте?» prompt entirely.
+      let primaryAccountId: string | null = null;
+      let primaryCurrency: string | null = null;
+      try {
+        const primaryRow = await pool.query<{ id: string; currency: string }>(
+          `SELECT id, currency FROM account_sources
+           WHERE workspace_id = $1
+             AND is_expense_default = true
+             AND deleted_at IS NULL
+           LIMIT 1`,
+          [workspaceId],
         );
-
-        const clarMsg = buildCurrencyClarScreen();
-
-        // Reuse existing clar msg caching for edit-in-place
-        const clarMsgCacheKey = `midas:clar:msg:${telegramUserId}:${chatId}`;
-        let prevClarMsgId: string | undefined;
-        try {
-          prevClarMsgId = (await redisConnection.get(clarMsgCacheKey)) ?? undefined;
-        } catch {
-          prevClarMsgId = undefined;
+        if (primaryRow.rows[0]) {
+          primaryAccountId = primaryRow.rows[0].id;
+          primaryCurrency  = primaryRow.rows[0].currency;
         }
-
-        await notificationsQueue.add(
-          QUEUE_NAMES.NOTIFICATIONS,
-          {
-            alertId,
-            workspaceId,
-            chatId,
-            draftId,
-            telegramUserId,
-            message: clarMsg,
-            inlineKeyboardJson: JSON.stringify({ inline_keyboard: [] }),
-            activeMessageId: prevClarMsgId,
-            cacheStoreKey: clarMsgCacheKey,
-          },
-          {
-            jobId: IdempotencyKeyBuilder.notification(workspaceId, alertId),
-          },
-        );
-
-        console.log('[midas:ai-parse-worker] Phase 1.38: currency clarification sent', {
-          jobId: job.id,
-          draftId,
-          workspaceId,
-        });
-        return; // Exit early — don't show confirm card yet
+      } catch {
+        // Non-fatal: fall through to cur_set check
       }
-      // curSetFlag === 1 → fall through to normal confirm card
-      // (draft-confirmation.service.ts will apply default_currency)
-    }
+
+      if (primaryAccountId && primaryCurrency) {
+        // Auto-apply currency from primary account to draft
+        try {
+          await pool.query(
+            `UPDATE transaction_drafts
+                SET parsed_currency = $3,
+                    account_id = $4,
+                    updated_at = NOW()
+              WHERE id = $2 AND workspace_id = $1`,
+            [workspaceId, draftId, primaryCurrency, primaryAccountId],
+          );
+        } catch {
+          // Non-fatal: draft-confirmation.service will apply fallback
+        }
+        // Fall through — show normal confirm card with primary account below
+        console.log('[midas:ai-parse-worker] Phase 9: auto-applied primary account currency', {
+          jobId: job.id, draftId, workspaceId,
+        });
+      } else {
+        // No primary account — check Redis cur_set flag (currency set in Settings)
+        const curSetFlag = await redisConnection.exists(`midas:cur_set:${workspaceId}`);
+        if (curSetFlag === 0) {
+          // User never set currency → ask via text
+          const awaitKey = `midas:awaiting_cur:${chatId}`;
+          await redisConnection.set(
+            awaitKey,
+            `${draftId}:${workspaceId}:${userId}`,
+            'EX', 600,
+          );
+
+          const clarMsg = buildCurrencyClarScreen();
+          const clarMsgCacheKey = `midas:clar:msg:${telegramUserId}:${chatId}`;
+          let prevClarMsgId: string | undefined;
+          try {
+            prevClarMsgId = (await redisConnection.get(clarMsgCacheKey)) ?? undefined;
+          } catch {
+            prevClarMsgId = undefined;
+          }
+
+          await notificationsQueue.add(
+            QUEUE_NAMES.NOTIFICATIONS,
+            {
+              alertId,
+              workspaceId,
+              chatId,
+              draftId,
+              telegramUserId,
+              message: clarMsg,
+              inlineKeyboardJson: JSON.stringify({ inline_keyboard: [] }),
+              activeMessageId: prevClarMsgId,
+              cacheStoreKey: clarMsgCacheKey,
+            },
+            {
+              jobId: IdempotencyKeyBuilder.notification(workspaceId, alertId),
+            },
+          );
+
+          console.log('[midas:ai-parse-worker] Phase 1.38: currency clarification sent', {
+            jobId: job.id, draftId, workspaceId,
+          });
+          return; // Exit early — don't show confirm card yet
+        }
+        // curSetFlag === 1 → fall through to normal confirm card
+      }
+
+    } // end if (!aiCurrency)
 
     // ── Phase 1.31 (Option A): Resolve account_hint BEFORE first keyboard ──
     const accountHint = parseResult.status === 'ok' ? (parseResult.data.account_hint ?? null) : null;
