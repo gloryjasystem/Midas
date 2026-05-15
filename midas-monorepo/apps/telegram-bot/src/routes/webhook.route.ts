@@ -2869,40 +2869,63 @@ Midas создан, чтобы сделать учет денег максима
             }
           } else if (isCat) {
             // ── Phase 2.X: 2-level AI-first category picker ──────────────────────
-            // Screen 1: AI hint (if present) + group tabs (Жизнь / Бизнес)
-            // Screen 2: rendered by draft:catg: handler below
+            // Screen 1: AI hint row (if present) + smart layout:
+            //   • ≤ 6 total OR one group empty → flat list (no group navigation)
+            //   • > 6 total AND both groups non-empty → group tabs
+            // Screen 2: rendered by draft:catg: handler below.
             // NOTE: getWorkspaceCategories is already statically imported at line 134.
-            const allCats = await getWorkspaceCategories(dsResolved.workspaceId, dsResolved.userId);
 
-            // Fetch draft to get parsed_category_hint for AI suggestion row.
-            // One extra DB round-trip, but avoids storing hint state in Redis.
+            // Shared emoji map (display only, never stored)
+            const CAT_EMOJI_S1: Record<string, string> = {
+              'Продукты': '🛒', 'Кафе и рестораны': '☕', 'Транспорт': '🚗',
+              'Жильё': '🏠', 'Здоровье': '💊', 'Одежда': '👗',
+              'Красота': '💄', 'Развлечения': '🎮', 'Подписки': '📱',
+              'Связь': '📡', 'Образование': '📚', 'Спорт': '🏋️',
+              'Путешествия': '✈️', 'Подарки': '🎁', 'Дети': '👶',
+              'Питомцы': '🐾', 'Дом': '🏡', 'Другое': '📦', 'Разное': '🗂️',
+              'Зарплаты и выплаты': '💰', 'Фриланс': '🤝', 'Реклама': '📣',
+              'Софт и сервисы': '💻', 'Оборудование': '🖥️', 'Офис': '🏢',
+              'Налоги': '🧾', 'Комиссии': '💸', 'Крипто-комиссии': '⛽',
+              'Подрядчики': '👷', 'Продажи': '📈', 'Инвестиции': '💹',
+            };
+
+            const allCats = await getWorkspaceCategories(dsResolved.workspaceId, dsResolved.userId);
             const draftForHint = await getDraftFields(dsResolved.workspaceId, dsResolved.userId, draftSubId);
             const hintName = draftForHint?.parsed_category_hint ?? null;
-            // Match hint name → category id (case-sensitive — all names are canonical)
-            const hintCat = hintName ? allCats.find(c => c.name === hintName) ?? null : null;
+            const hintCat  = hintName ? allCats.find(c => c.name === hintName) ?? null : null;
 
-            // Build Screen 1 keyboard
+            const lifeCats = allCats.filter(c => c.group === 'Жизнь');
+            const bizCats  = allCats.filter(c => c.group === 'Бизнес');
+            const useFlatList = allCats.length <= 6 || lifeCats.length === 0 || bizCats.length === 0;
+
             const s1Rows: { text: string; callback_data: string }[][] = [];
 
-            // Row 0: AI suggestion (full-width) — only if hint resolves to a real category
-            // Byte: clar:cat:{26}:{26} = 62 ✓
+            // AI suggestion row — full width, only when hint matches a real category
             if (hintCat) {
               s1Rows.push([{ text: `✨ ${hintCat.name}`, callback_data: `clar:cat:${hintCat.id}:${draftSubId}` }]);
             }
 
-            // Row 1: Group tabs — 2 buttons
-            // Byte: draft:catg:life:{26} = 42 ✓  draft:catg:biz:{26} = 41 ✓
-            s1Rows.push([
-              { text: '🛒 Жизнь',  callback_data: `draft:catg:life:${draftSubId}` },
-              { text: '💼 Бизнес', callback_data: `draft:catg:biz:${draftSubId}` },
-            ]);
+            if (useFlatList) {
+              // Flat list: render all categories 2-per-row directly
+              for (let i = 0; i < allCats.length; i += 2) {
+                const a = allCats[i]!;
+                const b = allCats[i + 1];
+                const btnA = { text: `${CAT_EMOJI_S1[a.name] ?? '📂'} ${a.name}`, callback_data: `clar:cat:${a.id}:${draftSubId}` };
+                s1Rows.push(b
+                  ? [btnA, { text: `${CAT_EMOJI_S1[b.name] ?? '📂'} ${b.name}`, callback_data: `clar:cat:${b.id}:${draftSubId}` }]
+                  : [btnA],
+                );
+              }
+            } else {
+              // 2-level: group tabs (both groups have categories)
+              s1Rows.push([
+                { text: '🛒 Жизнь',  callback_data: `draft:catg:life:${draftSubId}` },
+                { text: '💼 Бизнес', callback_data: `draft:catg:biz:${draftSubId}` },
+              ]);
+            }
 
-            // Row 2: utility row
-            // Byte: clar:nocat:{26} = 35 ✓  draft:back:{26} = 37 ✓
-            s1Rows.push([
-              { text: '📋 Без категории', callback_data: `clar:nocat:${draftSubId}` },
-              { text: '◀️ Назад',         callback_data: `draft:back:${draftSubId}` },
-            ]);
+            // Last row: back button only — no "Без категории" (every tx must have a category)
+            s1Rows.push([{ text: '◀️ Назад', callback_data: `draft:back:${draftSubId}` }]);
 
             void upsertBotMessage(
               telegramUserId, chatId,
@@ -3056,36 +3079,18 @@ Midas создан, чтобы сделать учет денег максима
           return;
         }
 
-        // Emoji map for all 28 default categories (display only, never stored)
+        // Emoji map — all default + legacy categories (display only, never stored)
         const CAT_EMOJI: Record<string, string> = {
-          'Продукты':           '🛒',
-          'Кафе и рестораны':   '☕',
-          'Транспорт':          '🚗',
-          'Жильё':              '🏠',
-          'Здоровье':           '💊',
-          'Одежда':             '👗',
-          'Красота':            '💄',
-          'Развлечения':        '🎮',
-          'Подписки':           '📱',
-          'Связь':              '📡',
-          'Образование':        '📚',
-          'Спорт':              '🏋️',
-          'Путешествия':        '✈️',
-          'Подарки':            '🎁',
-          'Дети':               '👶',
-          'Другое':             '📦',
-          'Зарплаты и выплаты': '💰',
-          'Фриланс':            '🤝',
-          'Реклама':            '📣',
-          'Софт и сервисы':     '💻',
-          'Оборудование':       '🖥️',
-          'Офис':               '🏢',
-          'Налоги':             '🧾',
-          'Комиссии':           '💸',
-          'Крипто-комиссии':    '⛽',
-          'Подрядчики':         '👷',
-          'Продажи':            '📈',
-          'Инвестиции':         '💹',
+          'Продукты': '🛒', 'Кафе и рестораны': '☕', 'Транспорт': '🚗',
+          'Жильё': '🏠', 'Здоровье': '💊', 'Одежда': '👗',
+          'Красота': '💄', 'Развлечения': '🎮', 'Подписки': '📱',
+          'Связь': '📡', 'Образование': '📚', 'Спорт': '🏋️',
+          'Путешествия': '✈️', 'Подарки': '🎁', 'Дети': '👶',
+          'Питомцы': '🐾', 'Дом': '🏡', 'Другое': '📦', 'Разное': '🗂️',
+          'Зарплаты и выплаты': '💰', 'Фриланс': '🤝', 'Реклама': '📣',
+          'Софт и сервисы': '💻', 'Оборудование': '🖥️', 'Офис': '🏢',
+          'Налоги': '🧾', 'Комиссии': '💸', 'Крипто-комиссии': '⛽',
+          'Подрядчики': '👷', 'Продажи': '📈', 'Инвестиции': '💹',
         };
 
         try {
@@ -3093,24 +3098,37 @@ Midas создан, чтобы сделать учет денег максима
           const allCatg = await getWorkspaceCategories(catgResolved.workspaceId, catgResolved.userId);
 
           if (catgSub === 'back') {
-            // ── Restore Screen 1 (group picker) ────────────────────────────────
+            // ── Restore Screen 1 ────────────────────────────────────────────────
             // Re-fetch hint so AI suggestion is still shown on back-navigation.
             const draftForBack = await getDraftFields(catgResolved.workspaceId, catgResolved.userId, catgDraftId);
             const backHintName = draftForBack?.parsed_category_hint ?? null;
             const backHintCat  = backHintName ? allCatg.find(c => c.name === backHintName) ?? null : null;
 
+            const backLifeCats = allCatg.filter(c => c.group === 'Жизнь');
+            const backBizCats  = allCatg.filter(c => c.group === 'Бизнес');
+            const backFlat = allCatg.length <= 6 || backLifeCats.length === 0 || backBizCats.length === 0;
+
             const backRows: { text: string; callback_data: string }[][] = [];
             if (backHintCat) {
               backRows.push([{ text: `✨ ${backHintCat.name}`, callback_data: `clar:cat:${backHintCat.id}:${catgDraftId}` }]);
             }
-            backRows.push([
-              { text: '🛒 Жизнь',  callback_data: `draft:catg:life:${catgDraftId}` },
-              { text: '💼 Бизнес', callback_data: `draft:catg:biz:${catgDraftId}` },
-            ]);
-            backRows.push([
-              { text: '📋 Без категории', callback_data: `clar:nocat:${catgDraftId}` },
-              { text: '◀️ Назад',         callback_data: `draft:back:${catgDraftId}` },
-            ]);
+            if (backFlat) {
+              for (let i = 0; i < allCatg.length; i += 2) {
+                const a = allCatg[i]!;
+                const b = allCatg[i + 1];
+                const btnA = { text: `${CAT_EMOJI[a.name] ?? '📂'} ${a.name}`, callback_data: `clar:cat:${a.id}:${catgDraftId}` };
+                backRows.push(b
+                  ? [btnA, { text: `${CAT_EMOJI[b.name] ?? '📂'} ${b.name}`, callback_data: `clar:cat:${b.id}:${catgDraftId}` }]
+                  : [btnA],
+                );
+              }
+            } else {
+              backRows.push([
+                { text: '🛒 Жизнь',  callback_data: `draft:catg:life:${catgDraftId}` },
+                { text: '💼 Бизнес', callback_data: `draft:catg:biz:${catgDraftId}` },
+              ]);
+            }
+            backRows.push([{ text: '◀️ Назад', callback_data: `draft:back:${catgDraftId}` }]);
             void upsertBotMessage(
               telegramUserId, chatId,
               '📁 <b>Категория:</b>',
@@ -3118,38 +3136,33 @@ Midas создан, чтобы сделать учет денег максима
             );
 
           } else {
-            // ── Screen 2: categories in selected group ──────────────────────────
-            // group value in DB is 'Жизнь' or 'Бизнес' (category_group enum)
+            // ── Screen 2: all categories in selected group ──────────────────────
+            // group value in DB: 'Жизнь' or 'Бизнес' (category_group enum)
             const groupName  = catgSub === 'life' ? 'Жизнь' : 'Бизнес';
             const groupEmoji = catgSub === 'life' ? '🛒' : '💼';
             const groupCats  = allCatg.filter(c => c.group === groupName);
 
             const s2Rows: { text: string; callback_data: string }[][] = [];
-            // 2 buttons per row, with emoji prefix
-            // Byte: clar:cat:{26}:{26} = 62 ✓
-            for (let i = 0; i < groupCats.length; i += 2) {
-              const a = groupCats[i]!;
-              const b = groupCats[i + 1];
-              const btnA = {
-                text: `${CAT_EMOJI[a.name] ?? '📂'} ${a.name}`,
-                callback_data: `clar:cat:${a.id}:${catgDraftId}`,
-              };
-              if (b) {
-                s2Rows.push([btnA, {
-                  text: `${CAT_EMOJI[b.name] ?? '📂'} ${b.name}`,
-                  callback_data: `clar:cat:${b.id}:${catgDraftId}`,
-                }]);
-              } else {
-                s2Rows.push([btnA]);
+
+            if (groupCats.length === 0) {
+              // Edge case: group exists in UI but workspace has no categories in it
+              s2Rows.push([{ text: '⚠️ В этой группе нет категорий', callback_data: `draft:catg:back:${catgDraftId}` }]);
+            } else {
+              // 2 buttons per row with emoji prefix; Byte: clar:cat:{26}:{26} = 62 ✓
+              for (let i = 0; i < groupCats.length; i += 2) {
+                const a = groupCats[i]!;
+                const b = groupCats[i + 1];
+                const btnA = { text: `${CAT_EMOJI[a.name] ?? '📂'} ${a.name}`, callback_data: `clar:cat:${a.id}:${catgDraftId}` };
+                s2Rows.push(b
+                  ? [btnA, { text: `${CAT_EMOJI[b.name] ?? '📂'} ${b.name}`, callback_data: `clar:cat:${b.id}:${catgDraftId}` }]
+                  : [btnA],
+                );
               }
             }
 
-            // Bottom navigation row
-            // Byte: draft:catg:back:{26} = 42 ✓  clar:nocat:{26} = 35 ✓
-            s2Rows.push([
-              { text: '◀️ К группам',     callback_data: `draft:catg:back:${catgDraftId}` },
-              { text: '📋 Без категории', callback_data: `clar:nocat:${catgDraftId}` },
-            ]);
+            // Bottom nav — no "Без категории": every transaction must have a category
+            // Byte: draft:catg:back:{26} = 42 ✓
+            s2Rows.push([{ text: '◀️ К группам', callback_data: `draft:catg:back:${catgDraftId}` }]);
 
             void upsertBotMessage(
               telegramUserId, chatId,
