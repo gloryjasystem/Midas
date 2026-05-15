@@ -3757,7 +3757,7 @@ Midas создан, чтобы сделать учет денег максима
     // Intercept here — before AI parse — and route to the correct handler.
     const navText = message.text.trim();
 
-    if (navText === NAV_BTN_BALANCE) {
+    if (navText === NAV_BTN_BALANCE || navText === '💰 Баланс') {
       // Phase 2.9: sendNavMessage — always sends NEW message, never edits/deletes tx records
       try {
         const resolved = await resolveWorkspace(telegramUserId, chatId);
