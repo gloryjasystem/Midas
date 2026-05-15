@@ -3344,12 +3344,8 @@ Midas создан, чтобы сделать учет денег максима
                   buildAccountActionsKeyboard(blCmd.accountId, roles, detail.parent_account_id === null),
                 );
               }
-              // Toast message based on new role
-              let toastMsg = 'Обычный счёт установлен';
-              if (blCmd.role === 'expense') toastMsg = '💸 Назначен только для расходов';
-              if (blCmd.role === 'income') toastMsg = '💰 Назначен только для доходов';
-              if (blCmd.role === 'main') toastMsg = '💸💰 Счёт назначен основным';
-              if (blCmd.role === 'none') toastMsg = 'Счёт стал обычным';
+              // Toast: two-state only — normal or primary
+              const toastMsg = (blCmd.role === 'main') ? '⭐ Счёт назначен основным' : '🏷 Счёт стал обычным';
               
               await answerCallbackQuery(cq.id, toastMsg);
             }
