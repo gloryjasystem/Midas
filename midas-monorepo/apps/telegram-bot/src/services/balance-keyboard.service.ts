@@ -216,18 +216,7 @@ const TYPE_LABELS: Record<string, string> = {
 // ─────────────────────────────────────────────────────────────
 
 /**
- * Russian plural form for currency count.
- * 1 → «валюта», 2–4 → «валюты», 5+ → «валют»
- * Special cases: 11–14 always → «валют»
- */
-function pluralizeCurrency(n: number): string {
-  const mod10  = n % 10;
-  const mod100 = n % 100;
-  if (mod100 >= 11 && mod100 <= 14) return 'валют';
-  if (mod10 === 1)                  return 'валюта';
-  if (mod10 >= 2 && mod10 <= 4)    return 'валюты';
-  return 'валют';
-}
+
 
 /**
  * Build the main balance list keyboard.
@@ -277,36 +266,17 @@ export function buildBalanceListKeyboard(accounts: BalanceAccountRow[]): InlineK
     const children = childrenOf.get(acc.account_id) ?? [];
 
     if (children.length > 0) {
-      // Parent with children — show parent own balance + each child (N+1 total)
-      const total = children.length + 1; // parent itself is one currency
-      const rs = (acc.isExpenseDefault && acc.isIncomeDefault) ? ' ⭐' : '';
-      accountRows.push([{
-        text: `${emoji} ${acc.name}${rs}  ·  ${total}\u00a0${pluralizeCurrency(total)}`,
-        callback_data: `bl:v:${acc.account_id}`,
-      }]);
-
-      // Build ladder: parent own balance first, then children
+      // Multi-currency parent: ONE button with dot-separated balances
+      // e.g. [🏦 Тинькофф · 2 122 $ · 50 000 ₽]
       const allEntries = [
-        { balance: acc.balance, currency: acc.currency, accountId: acc.account_id, isParent: true },
-        ...children.map((c) => ({ balance: c.balance, currency: c.currency, accountId: c.account_id, isParent: false })),
+        { balance: acc.balance, currency: acc.currency },
+        ...children.map((c) => ({ balance: c.balance, currency: c.currency })),
       ];
-      for (let i = 0; i < allEntries.length; i++) {
-        const entry = allEntries[i]!;
-        const isLast = i === allEntries.length - 1;
-        const connector = isLast ? '└' : '├';
-        const flag = getCurrencyFlag(entry.currency);
-        const balFmt = `${formatBalanceShort(entry.balance)}\u00a0${sym(entry.currency)}`;
-        const label = flag ? `${flag}\u00a0${entry.currency}` : entry.currency;
-        accountRows.push([{
-          text: `  ${connector} ${balFmt}  (${label})`,
-          callback_data: `bl:v:${entry.accountId}`,
-        }]);
-      }
-
-      // ➕ Добавить валюту — bl:ac:{parentId} ≤ 32 bytes ✔️
+      const dotParts = allEntries.map((e) => `${formatBalanceShort(e.balance)}\u00a0${sym(e.currency)}`);
+      const rs = (acc.isExpenseDefault && acc.isIncomeDefault) ? ' \u2b50' : '';
       accountRows.push([{
-        text: '➕ Добавить валюту',
-        callback_data: `bl:ac:${acc.account_id}`,
+        text: `${emoji} ${acc.name}${rs} \u00b7 ${dotParts.join(' \u00b7 ')}`,
+        callback_data: `bl:v:${acc.account_id}`,
       }]);
     } else {
       // Leaf account — ⭐ only for primary, nothing otherwise
@@ -352,20 +322,19 @@ export function buildAccountActionsKeyboard(
   const isMain = roles.isExpenseDefault && roles.isIncomeDefault;
 
   // Two-state toggle: normal ↔ primary (⭐)
-  // «Основной» means the account is both expense AND income default simultaneously.
-  const roleLabel   = isMain ? '⭐ Роль: Основной счёт' : '🏷 Роль: Обычный счёт';
+  const roleLabel    = isMain ? '⭐ Основной → снять роль' : '🏷 Обычный → сделать Основным';
   const nextRoleCode = isMain ? 'n' : 'm';  // n=none, m=main
 
-  // Phase B-5: all top-level accounts can add a sub-currency account
+  // «Добавить валюту» available for all top-level accounts
   const addCurrencyRow = canAddCurrency
     ? [[{ text: '➕ Добавить валюту', callback_data: `bl:ac:${accountId}` }]]
     : [];
 
   return {
     inline_keyboard: [
-      [{ text: roleLabel, callback_data: `bl:sr:${nextRoleCode}:${accountId}` }],
-      ...addCurrencyRow,
+      [{ text: roleLabel,                  callback_data: `bl:sr:${nextRoleCode}:${accountId}` }],
       [{ text: '✏️ Переименовать',      callback_data: `bl:rn:${accountId}` }],
+      ...addCurrencyRow,
       [{ text: '💱 Изменить валюту',    callback_data: `bl:cv:${accountId}` }],
       [{ text: '🔄 Установить баланс', callback_data: `bl:sb:${accountId}` }],
       [{ text: '🗑 Удалить',           callback_data: `bl:d:${accountId}`  }],
@@ -491,23 +460,25 @@ export function formatAccountDetailText(
 ): string {
   const name = escapeHtml(acc.name);
   const typeLabel = TYPE_LABELS[acc.type] ?? acc.type;
-  const currency = escapeHtml(acc.currency);
-  const balance = escapeHtml(formatBalanceShort(acc.balance));
-  const txCount = escapeHtml(acc.tx_count);
   const created = formatDate(acc.created_at);
 
-  // Simplified role line: only two states — normal or primary (⭐)
+  // Currency symbol (not code): ₽, $, € etc.
+  const CCY_SYM: Record<string, string> = {
+    RUB: '₽', USD: '$', EUR: '€', UAH: '₴', GBP: '£',
+    KZT: '₸', BYN: 'Br', GEL: '₾', PLN: 'zł', TRY: '₺',
+    CNY: '¥', JPY: '¥', HKD: 'HK$', SGD: 'S$', AUD: 'A$', CAD: 'C$', CHF: 'Fr',
+  };
+  const sym = CCY_SYM[acc.currency] ?? acc.currency;
+  const balance = formatBalanceShort(acc.balance);
+
+  // Two-state: primary (⭐) or normal
   const isMain = (roles?.isExpenseDefault ?? false) && (roles?.isIncomeDefault ?? false);
-  const roleLine = isMain ? '\n⭐ Роль: Основной счёт' : '\n🏷 Роль: Обычный счёт';
+  const mainMark = isMain ? ' ⭐ Основной' : '';
 
   return (
-    `🏦 <b>${name}</b>\n\n` +
-    `📊 Тип: ${escapeHtml(typeLabel)}\n` +
-    `💱 Валюта: ${currency}\n` +
-    `💰 Баланс: <b>${balance} ${currency}</b>\n` +
-    `📝 Транзакций: ${txCount}\n` +
-    `📅 Создан: ${created}` +
-    roleLine
+    `🏦 <b>${name}</b>${mainMark}\n\n` +
+    `💰 ${balance}\u00a0${sym}\n` +
+    `📊 ${escapeHtml(typeLabel)} · ${created}`
   );
 }
 
@@ -553,4 +524,126 @@ function formatDate(isoStr: string): string {
   } catch {
     return isoStr;
   }
+}
+
+// ─────────────────────────────────────────────────────────────
+// Phase V2: Multi-currency account card (parent container)
+// ─────────────────────────────────────────────────────────────
+
+/** Currency entry for multi-currency display. */
+export interface MultiCurrencyEntry {
+  subAccountId: string;
+  code: string;
+  balance: string;
+  flag: string;
+}
+
+const MULTI_CCY_SYM: Record<string, string> = {
+  RUB: '₽', USD: '$', EUR: '€', UAH: '₴', GBP: '£',
+  KZT: '₸', BYN: 'Br', GEL: '₾', PLN: 'zł', TRY: '₺',
+  CNY: '¥', JPY: '¥', HKD: 'HK$', SGD: 'S$', AUD: 'A$', CAD: 'C$', CHF: 'Fr',
+};
+const multiSym = (code: string): string => MULTI_CCY_SYM[code] ?? code;
+
+/**
+ * Format text for multi-currency account card.
+ * Example:
+ *   🏦 Тинькофф
+ *
+ *   🇺🇸 USD   2 122 $
+ *   🇵🇱 PLN   50 000 ₽
+ *
+ *   📊 Ручной ввод · 14.05.2026
+ */
+export function formatMultiCurrencyDetailText(
+  parentName: string,
+  currencies: MultiCurrencyEntry[],
+  typeLabel: string,
+  created: string,
+): string {
+  const lines = currencies.map((c) =>
+    `${c.flag} ${c.code}   ${formatBalanceShort(c.balance)}\u00a0${multiSym(c.code)}`,
+  );
+  return (
+    `🏦 <b>${escapeHtml(parentName)}</b>\n\n` +
+    `${lines.join('\n')}\n\n` +
+    `📊 ${escapeHtml(typeLabel)} · ${created}`
+  );
+}
+
+/**
+ * Build keyboard for multi-currency account card.
+ * Shows per-currency tap buttons, Add currency, Rename, Delete, Back.
+ * NO role toggle at this level — roles live on leaf/sub accounts.
+ */
+export function buildMultiCurrencyActionsKeyboard(
+  parentAccountId: string,
+  currencies: MultiCurrencyEntry[],
+): InlineKeyboardMarkup {
+  return {
+    inline_keyboard: [
+      ...currencies.map((c) => [{
+        text: `${c.flag} ${c.code} · ${formatBalanceShort(c.balance)}\u00a0${multiSym(c.code)}`,
+        callback_data: `bl:v:${c.subAccountId}`,
+      }]),
+      [{ text: '➕ Добавить валюту', callback_data: `bl:ac:${parentAccountId}` }],
+      [{ text: '✏️ Переименовать',   callback_data: `bl:rn:${parentAccountId}` }],
+      [{ text: '🗑 Удалить',         callback_data: `bl:d:${parentAccountId}`  }],
+      [{ text: '◀️ Назад',           callback_data: 'bl:back'                  }],
+    ],
+  };
+}
+
+// ─────────────────────────────────────────────────────────────
+// Phase V2: Sub-account card (child currency of multi-currency)
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Format text for sub-account card.
+ * Example:
+ *   🏦 Тинькофф · 🇺🇸 USD ⭐ Основной
+ *
+ *   💰 2 122 $
+ *   📅 Добавлен: 14.05.2026
+ */
+export function formatSubAccountDetailText(
+  parentName: string,
+  currency: string,
+  balance: string,
+  created: string,
+  isMain: boolean,
+): string {
+  const flag = getCurrencyFlag(currency) ?? '';
+  const flagStr = flag ? `${flag} ` : '';
+  const mainMark = isMain ? ' ⭐ Основной' : '';
+  const sym = MULTI_CCY_SYM[currency] ?? currency;
+  return (
+    `🏦 <b>${escapeHtml(parentName)} · ${flagStr}${escapeHtml(currency)}</b>${mainMark}\n\n` +
+    `💰 ${formatBalanceShort(balance)}\u00a0${sym}\n` +
+    `📅 Добавлен: ${created}`
+  );
+}
+
+/**
+ * Build keyboard for sub-account card.
+ * Role toggle + set balance + change currency + delete + back-to-parent.
+ */
+export function buildSubAccountActionsKeyboard(
+  subAccountId: string,
+  parentAccountId: string,
+  parentName: string,
+  roles: AccountRoleState,
+): InlineKeyboardMarkup {
+  const isMain = roles.isExpenseDefault && roles.isIncomeDefault;
+  const roleLabel    = isMain ? '⭐ Основной → снять роль' : '🏷 Обычный → сделать Основным';
+  const nextRoleCode = isMain ? 'n' : 'm';
+  return {
+    inline_keyboard: [
+      [{ text: roleLabel, callback_data: `bl:sr:${nextRoleCode}:${subAccountId}` }],
+      [{ text: '🔄 Установить баланс',  callback_data: `bl:sb:${subAccountId}` }],
+      [{ text: '💱 Изменить валюту',    callback_data: `bl:cv:${subAccountId}` }],
+      [{ text: '🗑 Удалить эту валюту', callback_data: `bl:d:${subAccountId}`  }],
+      [{ text: `◀️ Назад к ${escapeHtml(parentName)}`, callback_data: `bl:v:${parentAccountId}` }],
+    ],
+  };
 }

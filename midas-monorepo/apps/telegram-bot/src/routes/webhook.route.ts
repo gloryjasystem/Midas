@@ -58,7 +58,7 @@ import { resolveWorkspace } from '../services/workspace-resolver.js';
 import { checkOnboardingRateLimit } from '../services/rate-limiter.js';
 // Phase 1.33: sendMessage no longer imported directly — all sends go via upsertBotMessage.
 import { getMonthlyReport } from '../services/report.service.js';
-import { getBalanceData, getAccountDetail, setAccountBalanceById, getAccountTxCount, getChildAccountCurrencies } from '../services/balance.service.js';
+import { getBalanceData, getAccountDetail, setAccountBalanceById, getAccountTxCount, getChildAccountCurrencies, getChildAccountDetails } from '../services/balance.service.js';
 import {
   setAccountBalance,
   parseSetBalanceArgs,
@@ -205,6 +205,11 @@ import {
   buildBalanceFiatCurrencyKeyboard,  // Phase 2.1
   buildAddCurrencyKeyboard,          // Phase B-2+: filtered add-currency picker
   formatAccountDetailText,           // Phase 2.1
+  formatMultiCurrencyDetailText,     // Phase V2: multi-currency parent card text
+  buildMultiCurrencyActionsKeyboard, // Phase V2: multi-currency parent card keyboard
+  formatSubAccountDetailText,        // Phase V2: sub-account card text
+  buildSubAccountActionsKeyboard,    // Phase V2: sub-account card keyboard
+  type MultiCurrencyEntry,           // Phase V2
   type BalanceAccountRow,            // Phase 2.1
 } from '../services/balance-keyboard.service.js';
 import {
@@ -3201,8 +3206,69 @@ Midas создан, чтобы сделать учет денег максима
             const detail = await getAccountDetail(blResolved.workspaceId, blResolved.userId, blCmd.accountId);
             if (!detail) {
               await upsertBotMessage(telegramUserId, chatId, '⚠️ Счёт не найден.');
+            } else if (detail.parent_account_id !== null) {
+              // ── Sub-account (child currency) ──────────────────────────────────
+              const roles   = await getAccountRoles(blResolved.workspaceId, blResolved.userId, blCmd.accountId);
+              const isMain  = roles.isExpenseDefault && roles.isIncomeDefault;
+              const parentD = await getAccountDetail(blResolved.workspaceId, blResolved.userId, detail.parent_account_id);
+              await upsertBotMessage(
+                telegramUserId, chatId,
+                formatSubAccountDetailText(
+                  parentD?.name ?? '',
+                  detail.currency,
+                  detail.balance,
+                  detail.created_at,
+                  isMain,
+                ),
+                buildSubAccountActionsKeyboard(
+                  blCmd.accountId,
+                  detail.parent_account_id,
+                  parentD?.name ?? '',
+                  roles,
+                ),
+              );
+
+            } else if (detail.child_count > 0) {
+              // ── Multi-currency container ──────────────────────────────────────
+              const children = await getChildAccountDetails(blResolved.workspaceId, blResolved.userId, blCmd.accountId);
+              const TYPE_LABELS_MAP: Record<string, string> = {
+                manual: 'Ручной ввод',
+                crypto_read_only: 'Только чтение',
+                bank_sync: 'Банковская синхр.',
+              };
+              const typeLabel = TYPE_LABELS_MAP[detail.type] ?? detail.type;
+              const created   = (() => {
+                try {
+                  const d  = new Date(detail.created_at);
+                  const dd = String(d.getDate()).padStart(2, '0');
+                  const mm = String(d.getMonth() + 1).padStart(2, '0');
+                  return `${dd}.${mm}.${d.getFullYear()}`;
+                } catch { return detail.created_at; }
+              })();
+              // Build currency list: parent own balance first, then children
+              const getCurrencyFlag2 = (code: string): string => {
+                const FLAGS: Record<string, string> = {
+                  USD: '🇺🇸', EUR: '🇪🇺', RUB: '🇷🇺', UAH: '🇺🇦', GBP: '🇬🇧',
+                  PLN: '🇵🇱', KZT: '🇰🇿', BYN: '🇧🇾', GEL: '🇬🇪', TRY: '🇹🇷',
+                  CNY: '🇨🇳', JPY: '🇯🇵', CHF: '🇨🇭', AUD: '🇦🇺', CAD: '🇨🇦',
+                  HKD: '🇭🇰', SGD: '🇸🇬', AED: '🇦🇪',
+                  BTC: '₿', ETH: '⟠', USDT: '💵', USDC: '💵', BNB: '🔶',
+                  SOL: '◎', TON: '💎', XRP: '🔷', TRX: '🔴',
+                };
+                return FLAGS[code] ?? '💱';
+              };
+              const allCurrencies: MultiCurrencyEntry[] = [
+                { subAccountId: blCmd.accountId, code: detail.currency, balance: detail.balance, flag: getCurrencyFlag2(detail.currency) },
+                ...children.map((c) => ({ subAccountId: c.subAccountId, code: c.currency, balance: c.balance, flag: getCurrencyFlag2(c.currency) })),
+              ];
+              await upsertBotMessage(
+                telegramUserId, chatId,
+                formatMultiCurrencyDetailText(detail.name, allCurrencies, typeLabel, created),
+                buildMultiCurrencyActionsKeyboard(blCmd.accountId, allCurrencies),
+              );
+
             } else {
-              // Phase LD++: fetch role flags for circle-toggle buttons
+              // ── Leaf (single-currency) account ────────────────────────────────
               const roles = await getAccountRoles(blResolved.workspaceId, blResolved.userId, blCmd.accountId);
               await upsertBotMessage(
                 telegramUserId, chatId,

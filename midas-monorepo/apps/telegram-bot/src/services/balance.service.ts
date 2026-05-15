@@ -286,20 +286,12 @@ export async function getBalanceData(
   };
   const fmtCcy = (code: string) => CCY_SYMBOL[code] ?? code;
 
-  // ── Group label — Title Case, professional (not ALL CAPS) ────
-  const GROUP_LABEL: Record<GroupType, string> = {
-    bank:            'Банки и карты',
-    crypto_exchange: 'Биржи',
-    crypto_wallet:   'Кошельки',
-    cash:            'Наличные',
-    other:           'Прочее',
-  };
 
-  // Phase B-2: only top-level accounts define group structure;
-  // children are rendered as a ladder under their parent.
+  // Phase V2: only top-level accounts define group structure;
+  // children are rendered inline as dot-separated balances.
   const grouped = new Map<GroupType, AccountBalanceRow[]>();
   for (const row of accounts) {
-    if (row.parent_account_id !== null) continue; // rendered under parent
+    if (row.parent_account_id !== null) continue; // inlined under parent
     const g = classifyAccountGroup(row.name, row.currency, row.type);
     if (!grouped.has(g)) grouped.set(g, []);
     grouped.get(g)!.push(row);
@@ -310,45 +302,41 @@ export async function getBalanceData(
     const rows = grouped.get(groupType);
     if (!rows || rows.length === 0) continue;
 
+    const emoji = GROUP_EMOJI[groupType];
+
     const lines = rows.map((row) => {
       const isExp = Boolean(row.is_expense_default);
       const isInc = Boolean(row.is_income_default);
 
-      // Two-state role: ⭐ основной (expense+income default) or nothing
-      const roleSuffix = (isExp && isInc) ? ' <i>(⭐ основной)</i>' : '';
+      // ⭐ only for primary (expense+income default)
+      const starSuffix = (isExp && isInc) ? ' ⭐' : '';
 
       const childrenOfRow = childrenMap.get(row.account_id) ?? [];
 
       if (childrenOfRow.length > 0) {
-        // Multi-currency parent: ladder with parent's own balance as first entry
-        const allCurrencyRows = [
-          { balance: row.balance.toFixed(2), currency: row.currency }, // parent itself
+        // Multi-currency: parent own balance · child1 · child2 ...
+        const allEntries = [
+          { balance: row.balance.toFixed(2), currency: row.currency },
           ...childrenOfRow.map((c) => ({ balance: c.balance.toFixed(2), currency: c.currency })),
         ];
-        const ladderLines = allCurrencyRows.map((r, idx) => {
-          const isLast = idx === allCurrencyRows.length - 1;
-          const connector = isLast ? '└' : '├';
+        const dotParts = allEntries.map((r) => {
           const balStr = formatBalanceShort(r.balance);
-          const symStr = fmtCcy(r.currency);
-          const balDisplay = CCY_SYMBOL[r.currency]
-            ? `${balStr}\u00a0${symStr}`
-            : `${balStr}\u00a0${escapeHtml(r.currency)}`;
-          return `${connector} ${balDisplay}`;
+          const sym = CCY_SYMBOL[r.currency] ? `${balStr}\u00a0${fmtCcy(r.currency)}` : `${balStr}\u00a0${escapeHtml(r.currency)}`;
+          return sym;
         });
-        return `<b>${escapeHtml(row.name)}</b>${roleSuffix}\n${ladderLines.join('\n')}`;
+        return `${emoji} <b>${escapeHtml(row.name)}</b>${starSuffix} · ${dotParts.join(' · ')}`;
       }
 
-      // ── Leaf account: "Альфа-Банк (⭐ основной) · 22 010 213 ₽"
+      // ── Leaf account: emoji + name + star + balance
       const balStr = formatBalanceShort(row.balance.toFixed(2));
-      const sym = fmtCcy(row.currency);
       const balDisplay = CCY_SYMBOL[row.currency]
-        ? `${balStr}\u00a0${sym}`
+        ? `${balStr}\u00a0${fmtCcy(row.currency)}`
         : `${balStr}\u00a0${escapeHtml(row.currency)}`;
-      return `<b>${escapeHtml(row.name)}</b>${roleSuffix} · ${balDisplay}`;
+      return `${emoji} <b>${escapeHtml(row.name)}</b>${starSuffix} · ${balDisplay}`;
     });
 
-    // Section header: emoji + Title Case label, then accounts immediately below
-    sections.push(`${GROUP_EMOJI[groupType]} <b>${GROUP_LABEL[groupType]}</b>\n${lines.join('\n')}`);
+    // No section header — just the account lines, groups separated by blank line
+    sections.push(lines.join('\n'));
   }
 
   const text = '💰 <b>Баланс</b>\n\n' + sections.join('\n\n');
@@ -568,6 +556,65 @@ export async function getChildAccountCurrencies(
         [workspaceId, parentAccountId],
       );
       return new Set(res.rows.map((r) => r.currency));
+    },
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// getChildAccountDetails — Phase V2
+// ─────────────────────────────────────────────────────────────
+
+/** Child account with computed balance. */
+export interface ChildAccountDetail {
+  subAccountId: string;
+  currency: string;
+  balance: string;
+}
+
+/**
+ * Fetch all child accounts of a parent with their computed balances.
+ * Used for rendering the multi-currency account card.
+ *
+ * SEC-03: withTenantTransaction (RLS enforced).
+ */
+export async function getChildAccountDetails(
+  workspaceId: string,
+  userId: string,
+  parentAccountId: string,
+): Promise<ChildAccountDetail[]> {
+  return withTenantTransaction<ChildAccountDetail[]>(
+    workspaceId,
+    userId,
+    async (client) => {
+      const res = await client.query<{
+        id: string;
+        currency: string;
+        balance: { toFixed: (dp: number) => string };
+      }>(
+        `SELECT a.id,
+                a.currency,
+                a.initial_balance
+                  + COALESCE(SUM(CASE WHEN t.transaction_intent = 'income'        THEN  t.base_amount END), 0)
+                  + COALESCE(SUM(CASE WHEN t.transaction_intent = 'debt_received' THEN  t.base_amount END), 0)
+                  - COALESCE(SUM(CASE WHEN t.transaction_intent = 'expense'       THEN  t.base_amount END), 0)
+                  - COALESCE(SUM(CASE WHEN t.transaction_intent = 'debt_given'    THEN  t.base_amount END), 0)
+                  AS balance
+         FROM account_sources a
+         LEFT JOIN transactions t
+           ON t.account_id = a.id
+          AND t.workspace_id = $1
+          AND t.deleted_at IS NULL
+         WHERE a.parent_account_id = $2
+           AND a.workspace_id = $1
+           AND a.deleted_at IS NULL
+         GROUP BY a.id, a.currency, a.initial_balance`,
+        [workspaceId, parentAccountId],
+      );
+      return res.rows.map((r) => ({
+        subAccountId: r.id,
+        currency: r.currency,
+        balance: r.balance.toFixed(2),
+      }));
     },
   );
 }
