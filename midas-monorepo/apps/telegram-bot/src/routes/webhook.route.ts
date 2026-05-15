@@ -58,7 +58,7 @@ import { resolveWorkspace } from '../services/workspace-resolver.js';
 import { checkOnboardingRateLimit } from '../services/rate-limiter.js';
 // Phase 1.33: sendMessage no longer imported directly — all sends go via upsertBotMessage.
 import { getMonthlyReport } from '../services/report.service.js';
-import { getBalanceData, getAccountDetail, setAccountBalanceById, getAccountTxCount, getChildAccountCurrencies, getChildAccountDetails } from '../services/balance.service.js';
+import { getBalanceData, getAccountDetail, setAccountBalanceById, getAccountTxCount, getChildAccountCurrencies, getChildAccountDetails, getDefaultAccount } from '../services/balance.service.js';
 import {
   setAccountBalance,
   parseSetBalanceArgs,
@@ -4802,33 +4802,46 @@ Midas создан, чтобы сделать учет денег максима
           );
 
           if (amtPatchResult.status === 'ready') {
-            // Phase 1.38: Check if currency is already set before showing confirm card.
-            // If user hasn't set a default currency in Settings, ask for it now.
-            const curSetFlag = await redisConnection.exists(
-              `midas:cur_set:${clarIntResolved.workspaceId}`,
-            );
-            if (!curSetFlag) {
-              // Store currency await context so the next message is intercepted
-              const awaitCurKey = `midas:awaiting_cur:${chatId}`;
-              await redisConnection.setex(
-                awaitCurKey,
-                300, // 5-minute TTL
-                `${clarDraftId}:${clarIntResolved.workspaceId}:${clarIntResolved.userId}`,
+            // Phase V2 (Phase 9): if workspace has a primary account (⭐),
+            // auto-patch currency AND account — skip the «В какой валюте?» prompt.
+            const primaryAcct = await getDefaultAccount(clarIntResolved.workspaceId, clarIntResolved.userId);
+            if (primaryAcct) {
+              // Auto-apply currency from primary account
+              await patchDraftCurrency(
+                clarIntResolved.workspaceId, clarIntResolved.userId, clarDraftId, primaryAcct.currency,
               );
-              const clarMsg = await upsertBotMessage(
-                telegramUserId,
-                chatId,
-                CUR_PROMPT_MSG,
+              // Auto-apply account from primary account
+              await patchDraftAccount(
+                clarIntResolved.workspaceId, clarIntResolved.userId, clarDraftId, primaryAcct.id,
               );
-              if (clarMsg) {
-                await redisConnection.setex(
-                  `midas:clar:msg:${telegramUserId}:${chatId}`,
-                  300,
-                  clarMsg,
-                );
-              }
-            } else {
               await sendAndStorePreview(telegramUserId, chatId, clarIntResolved.workspaceId, clarIntResolved.userId, clarDraftId);
+            } else {
+              // Fallback: check Redis cur_set flag (user set currency in Settings)
+              const curSetFlag = await redisConnection.exists(
+                `midas:cur_set:${clarIntResolved.workspaceId}`,
+              );
+              if (!curSetFlag) {
+                const awaitCurKey = `midas:awaiting_cur:${chatId}`;
+                await redisConnection.setex(
+                  awaitCurKey,
+                  300,
+                  `${clarDraftId}:${clarIntResolved.workspaceId}:${clarIntResolved.userId}`,
+                );
+                const clarMsg = await upsertBotMessage(
+                  telegramUserId,
+                  chatId,
+                  CUR_PROMPT_MSG,
+                );
+                if (clarMsg) {
+                  await redisConnection.setex(
+                    `midas:clar:msg:${telegramUserId}:${chatId}`,
+                    300,
+                    clarMsg,
+                  );
+                }
+              } else {
+                await sendAndStorePreview(telegramUserId, chatId, clarIntResolved.workspaceId, clarIntResolved.userId, clarDraftId);
+              }
             }
           } else if (amtPatchResult.status === 'still_needs' && amtPatchResult.field === 'intent') {
             void upsertBotMessage(

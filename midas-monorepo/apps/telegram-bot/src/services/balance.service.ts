@@ -618,3 +618,43 @@ export async function getChildAccountDetails(
     },
   );
 }
+
+// ─────────────────────────────────────────────────────────────
+// getDefaultAccount — Phase V2 (Phase 9)
+// ─────────────────────────────────────────────────────────────
+
+/** Primary (⭐) account for auto-select in AI transaction parsing. */
+export interface DefaultAccountInfo {
+  id: string;
+  name: string;
+  currency: string;
+}
+
+/**
+ * Returns the workspace's primary account (is_expense_default = true)
+ * if one exists. Used so «купил кофе 100» → auto-selects this account
+ * without asking «В какой валюте?».
+ *
+ * SEC-03: withTenantTransaction (RLS enforced).
+ */
+export async function getDefaultAccount(
+  workspaceId: string,
+  userId: string,
+): Promise<DefaultAccountInfo | null> {
+  return withTenantTransaction<DefaultAccountInfo | null>(
+    workspaceId,
+    userId,
+    async (client) => {
+      const res = await client.query<DefaultAccountInfo>(
+        `SELECT id, name, currency
+         FROM account_sources
+         WHERE workspace_id = $1
+           AND is_expense_default = true
+           AND deleted_at IS NULL
+         LIMIT 1`,
+        [workspaceId],
+      );
+      return res.rows[0] ?? null;
+    },
+  );
+}
