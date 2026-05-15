@@ -1,4 +1,4 @@
-# WORKFLOW_STATE.MD — Диспетчер задач ИИ-агента Midas
+﻿# WORKFLOW_STATE.MD — Диспетчер задач ИИ-агента Midas
 
 > **Тип:** MUTABLE — кратковременная память агента. Обновляется на каждом шаге работы.
 > **Обновлён:** 2026-05-15 02:27 (UTC+3)
@@ -9,11 +9,11 @@
 
 | Параметр | Значение |
 |---|---|
-| **PHASE** | `Balance Redesign Phase A ✅ + Phase B-1 ✅ + Phase B-2 ✅ — Hierarchical Balance UI` |
-| **STEP** | `Phase B-2 DONE. Commit d04bcba pushed to main. Railway auto-deploy triggered.` |
+| **PHASE** | `Balance UI Polish B-9+ ✅ — Professional Redesign (N26/Revolut style) + Add Currency fix` |
+| **STEP** | `Balance UI Polish DONE. Commits cb37de6→21e0a6f pushed to main. Railway auto-deploy triggered.` |
 | **AGENT STATUS** | `Phase B-2 complete: PER_ACCOUNT_SQL + parent_account_id; tree build in getBalanceData() with ├/└ ladder; buildBalanceListKeyboard — parent aggregation (N валют) + indented child rows (└ CURRENCY · balance) + ➕ Добавить валюту (bl:ac:); pluralizeCurrency() RU plural. tsc 0 errors.` |
 | **DEPLOYMENT** | `Railway (spirited-happiness project)` — `Midas` ✅ Online · `background-workers` ✅ Online · `Postgres` ✅ · `Redis` ✅. Health: https://midas-production-f4f1.up.railway.app/health → {"status":"ok"} |
-| **LAST COMPLETED** | `Phase Balance-B-2: hierarchical ladder view + parent aggregation keyboard. Commit d04bcba.` |
+| **LAST COMPLETED** | `Balance UI Polish B-9+: compact 1-line-per-account format, currency symbols ₽/$€₴, role suffix Variant A (⭐ основной) after name, header icon 💰, Add Currency button for all top-level accounts. Commits cb37de6→21e0a6f.` |
 | **BLOCKER** | None. |
 | **NEXT ACTION** | Smoke-test /balance в живом боте (убедиться что parent→children отображаются корректно). Затем — следующая фаза по роадмапу. |
 
@@ -455,7 +455,7 @@ Phase B-1 (commit 75156b9, применено на live Railway Postgres):
 | 2026-05-14 20:10 | **Phase 2.5+ — Currency-Aware Picker: Worker Layer (background-workers). Root Cause Fix.** Обнаружено: начальный пикер строится ПОЛНОСТЬЮ в `ai-parse.worker.ts` (background-workers), а не в `telegram-bot`. Изменения в `account.service.ts` (telegram-bot) на initial picker не влияют никак. **Реализация (`ai-parse.worker.ts`):** Добавлены локальные классификаторы: `PICKER_STABLECOINS` (10 записей), `PICKER_KNOWN_CRYPTOS` (27 записей), `classifyPickerCcy(code)`, `filterPickerAccounts(accounts, txCurrency)` — аналог логики `account.service.ts`. Применено в 2 местах: (A) **Initial picker** (строка ~620) — фильтрует по `aiData?.currency` (когда AI вернул currency, например «USDT»); (B) **Gate picker** (строка ~340) — фильтрует по `pendingDraft.parsedCurrency` (восстановление пикера при gate-блокировке). Итог фильтрации: `{USD tx}` → [USD-счета] + [другие фиатные]; `{USDT tx}` → [только USDT-счета]. tsc 0 ошибок (оба приложения). git commit `0085d8f`, push origin main ✅. Railway auto-deploy triggered. |
 
 
-| 2026-05-14 23:50 | **Balance Phase B-5/B-6/B-8/B-9 � Add Currency Workflow ���������.** B-8: addChildAccount() � account.service.ts (withTenantTransaction, parent_account_id, no workspace defaults update). B-6: child_count subquery � ACCOUNT_DETAIL_SQL; AccountDetailData ������� child_count. B-5: buildAccountActionsKeyboard(hasChildren?) ���������� ������ bl:ac: (32 �����). webhook.route.ts: add_currency handler + currency_set ����� + 6 ������� � detail.child_count>0. B-9: parent_account_id � GROUP BY PER_ACCOUNT_SQL; ORDER BY �������������. tsc 0 ������. Commits 5ce9148+04e79b8. Railway auto-deploy. |
+| 2026-05-14 23:50 | **Balance Phase B-5/B-6/B-8/B-9 � Add Currency Workflow ���������.** B-8: addChildAccount() � account.service.ts (withTenantTransaction, parent_account_id, no workspace defaults update). B-6: child_count subquery � ACCOUNT_DETAIL_SQL; AccountDetailData ������� child_count. B-5: buildAccountActionsKeyboard(hasChildren?) ���������� ������ bl:ac: (32 �����). webhook.route.ts: add_currency handler + currency_set ����� + 6 ������� � detail.child_count>0. B-9: parent_account_id � GROUP BY PER_ACCOUNT_SQL; ORDER BY �������������. tsc 0 ������. Commits 5ce9148+04e79b8. Railway auto-deploy. |
 
 
 ---
@@ -1221,7 +1221,10 @@ ALTER TABLE account_sources
 ### Сводная таблица приоритетов
 
 | Фаза | Название | Приоритет | Статус | Требует |
-|---|---|---|---|---|
+|---|---|---|---|| 2026-05-15 09:20 | **Balance UI Polish B-9+ — compact text layout + Add Currency fix.** alance.service.ts: (1) Compact text — убраны пустые строки между счётами внутри секции и между заголовком и первым счётом; GROUP_LABEL → Title Case (не ALL CAPS); роль-бейджи сокращены до иконок. (2) ACCOUNT_DETAIL_SQL + GROUP BY обновлены — добавлен .parent_account_id; AccountDetailRow/AccountDetailData + parent_account_id: string | null. alance-keyboard.service.ts: uildAccountActionsKeyboard — параметр переименован hasChildren → canAddCurrency, кнопка «Добавить валюту» показывается для ВСЕХ top-level счётов (parent_account_id === null), не только имеющих детей. webhook.route.ts: 7 вызовов uildAccountActionsKeyboard — условие detail.child_count > 0 заменено на detail.parent_account_id === null. tsc 0 ошибок. Commits cb37de6. Railway auto-deploy. |
+| 2026-05-15 09:30 | **Balance UI Polish — N26/Revolut professional redesign.** alance.service.ts: (1) Новый формат — 1 счёт = 1 строка «Альфа-Банк (⭐ основной) · 22 010 213 ₽» вместо 2-строчного «└ balance currency». (2) Таблица CCY_SYMBOL — символы валют ₽ $ € ₴ £ ₸ € (17 валют) вместо кодов. (3) oleSuffix — роль суффиксом <i>(⭐ основной)</i> после имени (Variant A). (4) Заголовок 💼 Баланс → 💰 Баланс (совпадает с reply-keyboard). alance-keyboard.service.ts: (1) GROUP_EMOJI обновлены — 📈 биржи, 🔐 кошельки, 📂 прочее. (2) GROUP_LABEL → Title Case. (3) Кнопки — CCY_SYM таблица символов; роль-суффикс ' ⭐' (icon-only, без скобок и текста). tsc 0 ошибок. Commits c4ba46c, 0b6530, 21e0a6f. Railway auto-deploy. |
+
+---|
 | **3.0** | DB Schema: account_type/wallet_subtype | 🔴 ВЫСОКИЙ | ⏳ Следующая | Phase 2.5 ✅ |
 | **3.1** | Расширение словаря детектора | 🟡 СРЕДНИЙ | 📋 Запланирована | Phase 3.0 |
 | **3.2** | Отчёт 3.0: категорийная аналитика | 🟡 СРЕДНИЙ | 📋 Запланирована | Phase 3.0 |
