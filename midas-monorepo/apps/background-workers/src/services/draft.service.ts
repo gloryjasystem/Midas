@@ -757,6 +757,7 @@ export interface WorkspaceAccountEntry {
   name: string;
   currency: string;
   balance: string; // NUMERIC string
+  is_expense_default: boolean; // Phase 9: primary account flag
 }
 
 /**
@@ -779,6 +780,7 @@ export async function getWorkspaceAccountsForPicker(
        a.id,
        a.name,
        a.currency,
+       a.is_expense_default,
        (
          a.initial_balance
          + COALESCE(SUM(CASE
@@ -798,7 +800,7 @@ export async function getWorkspaceAccountsForPicker(
      WHERE a.workspace_id = $1
        AND a.deleted_at IS NULL
        AND a.is_onboarding_placeholder = FALSE
-     GROUP BY a.id, a.name, a.currency, a.initial_balance
+     GROUP BY a.id, a.name, a.currency, a.initial_balance, a.is_expense_default
      ORDER BY a.name`,
     [workspaceId],
   );
