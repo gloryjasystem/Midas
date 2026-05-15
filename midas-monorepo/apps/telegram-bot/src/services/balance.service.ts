@@ -300,7 +300,7 @@ export async function getBalanceData(
   const fmtAmount = (balance: string, currency: string): string => {
     const raw = formatBalanceShort(balance);
     const sym = CCY_SYM[currency] ?? currency;
-    if (raw.startsWith('-')) return `\u2212 ${raw.slice(1)}\u00a0${sym}`;
+    if (raw.startsWith('-')) return `\u2212${raw.slice(1)}\u00a0${sym}`;
     return `${raw}\u00a0${sym}`;
   };
 
@@ -326,10 +326,9 @@ export async function getBalanceData(
     const lines: string[] = [];
 
     for (const row of rows) {
-      const isNeg  = parseFloat(row.balance.toFixed(2)) < 0;
-      const status = isNeg ? '🔴' : '🟢';
-      const star   = (Boolean(row.is_expense_default) && Boolean(row.is_income_default)) ? ' ⭐' : '';
-      const name   = escapeHtml(row.name);
+      const star     = (Boolean(row.is_expense_default) && Boolean(row.is_income_default)) ? ' ⭐' : '';
+      const marker   = '\u25b8'; // ▸ neutral chevron (U+25B8)
+      const name     = escapeHtml(row.name);
       const children = childrenMap.get(row.account_id) ?? [];
 
       if (children.length > 0) {
@@ -338,11 +337,11 @@ export async function getBalanceData(
           fmtAmount(row.balance.toFixed(2), row.currency),
           ...children.map((c) => fmtAmount(c.balance.toFixed(2), c.currency)),
         ];
-        lines.push(`${status} ${name}${star} \u2014 <b>${allAmts.join(' / ')}</b>`);
+        lines.push(`${marker} ${name}${star} \u2014 <b>${allAmts.join(' / ')}</b>`);
       } else {
         // Single currency: name and balance on one line
         const amt = fmtAmount(row.balance.toFixed(2), row.currency);
-        lines.push(`${status} ${name}${star} \u2014 <b>${amt}</b>`);
+        lines.push(`${marker} ${name}${star} \u2014 <b>${amt}</b>`);
       }
     }
 
