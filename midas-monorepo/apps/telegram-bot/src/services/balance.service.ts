@@ -314,38 +314,37 @@ export async function getBalanceData(
       const isExp = Boolean(row.is_expense_default);
       const isInc = Boolean(row.is_income_default);
 
-      // ── Role prefix: ⭐ = основной (exp+inc), 💸 = расходы, 💰 = доходы
-      // Placed BEFORE the name — clearly readable at a glance (Revolut pattern)
-      const rolePrefix = (isExp && isInc) ? '⭐ '
-                       : isExp            ? '💸 '
-                       : isInc            ? '💰 '
+      // ── Variant A: role shown AFTER name in parentheses
+      // "Альфа-Банк (⭐ основной) · 22 010 213 ₽"
+      const roleSuffix = (isExp && isInc) ? ' <i>(⭐ основной)</i>'
+                       : isExp            ? ' <i>(💸 расходы)</i>'
+                       : isInc            ? ' <i>(💰 доходы)</i>'
                        : '';
 
       const childrenOfRow = childrenMap.get(row.account_id) ?? [];
 
       if (childrenOfRow.length > 0) {
-        // Parent with children — compact ladder, no separate balance line for parent
+        // Parent with children — compact ladder
         const childLines = childrenOfRow.map((child, idx) => {
           const isLast = idx === childrenOfRow.length - 1;
           const connector = isLast ? '└' : '├';
           const balStr = formatBalanceShort(child.balance.toFixed(2));
           const sym = fmtCcy(child.currency);
-          // e.g. "└ 32 601 USDT" or "└ 32 601 $" (symbol for known currencies)
           const balDisplay = CCY_SYMBOL[child.currency]
             ? `${balStr} ${sym}`
             : `${balStr} ${escapeHtml(child.currency)}`;
           return `${connector} ${balDisplay}`;
         });
-        return `${rolePrefix}<b>${escapeHtml(row.name)}</b>\n${childLines.join('\n')}`;
+        return `<b>${escapeHtml(row.name)}</b>${roleSuffix}\n${childLines.join('\n')}`;
       }
 
-      // ── Leaf account: single line  "⭐ Альфа-Банк · 22 010 213 ₽"
+      // ── Leaf account: "Альфа-Банк (⭐ основной) · 22 010 213 ₽"
       const balStr = formatBalanceShort(row.balance.toFixed(2));
       const sym = fmtCcy(row.currency);
       const balDisplay = CCY_SYMBOL[row.currency]
         ? `${balStr}\u00a0${sym}`
         : `${balStr}\u00a0${escapeHtml(row.currency)}`;
-      return `${rolePrefix}<b>${escapeHtml(row.name)}</b> · ${balDisplay}`;
+      return `<b>${escapeHtml(row.name)}</b>${roleSuffix} · ${balDisplay}`;
     });
 
     // Section header: emoji + Title Case label, then accounts immediately below

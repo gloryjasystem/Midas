@@ -271,13 +271,13 @@ export function buildBalanceListKeyboard(accounts: BalanceAccountRow[]): InlineK
     if (children.length > 0) {
       // Parent with children — aggregation button + child rows
       const n = children.length;
-      // Role prefix for parent
-      const rp = (acc.isExpenseDefault && acc.isIncomeDefault) ? '⭐ '
-               : acc.isExpenseDefault                          ? '💸 '
-               : acc.isIncomeDefault                           ? '💰 '
+      // Variant A: role suffix in parentheses after name
+      const rs = (acc.isExpenseDefault && acc.isIncomeDefault) ? ' (⭐ основной)'
+               : acc.isExpenseDefault                          ? ' (💸 расходы)'
+               : acc.isIncomeDefault                           ? ' (💰 доходы)'
                : '';
       accountRows.push([{
-        text: `${emoji} ${rp}${acc.name}  ·  ${n}\u00a0${pluralizeCurrency(n)}`,
+        text: `${emoji} ${acc.name}${rs}  ·  ${n}\u00a0${pluralizeCurrency(n)}`,
         callback_data: `bl:v:${acc.account_id}`,
       }]);
 
@@ -296,15 +296,14 @@ export function buildBalanceListKeyboard(accounts: BalanceAccountRow[]): InlineK
         callback_data: `bl:ac:${acc.account_id}`,
       }]);
     } else {
-      // Leaf account — single clean button line
-      // ⭐ prefix for main account (clearly readable vs trailing emoji)
-      const rp = (acc.isExpenseDefault && acc.isIncomeDefault) ? '⭐ '
-               : acc.isExpenseDefault                          ? '💸 '
-               : acc.isIncomeDefault                           ? '💰 '
+      // Leaf account — Variant A: role suffix in parentheses after name
+      const rs = (acc.isExpenseDefault && acc.isIncomeDefault) ? ' (⭐ основной)'
+               : acc.isExpenseDefault                          ? ' (💸 расходы)'
+               : acc.isIncomeDefault                           ? ' (💰 доходы)'
                : '';
       const balFmt = `${formatBalanceShort(acc.balance)}\u00a0${sym(acc.currency)}`;
       accountRows.push([{
-        text: `${emoji} ${rp}${acc.name}  ·  ${balFmt}`,
+        text: `${emoji} ${acc.name}${rs}  ·  ${balFmt}`,
         callback_data: `bl:v:${acc.account_id}`,
       }]);
     }
