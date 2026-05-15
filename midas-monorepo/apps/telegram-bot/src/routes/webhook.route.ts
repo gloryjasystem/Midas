@@ -3612,7 +3612,7 @@ Midas создан, чтобы сделать учет денег максима
 
     // ── Step 4: Phase 2.1 — Voice message handler ───────────
     // Voice messages bypass the SEC-05 text filter and go to the
-    // voice-parse queue (Groq Whisper STT → ai-parse → same draft flow).
+    // voice-parse queue (xAI Grok STT → ai-parse → same draft flow).
     if (message.voice && !message.text) {
       const voiceFrom = message.from;
       if (!voiceFrom || voiceFrom.is_bot) {
@@ -3649,6 +3649,21 @@ Midas создан, чтобы сделать учет денег максима
         return;
       }
 
+      // ── Clean previous STT error message from chat ──────────
+      // If the previous voice attempt failed (STT empty/error), its
+      // error message ID is stored in Redis. Delete it now so the chat
+      // stays clean before the new "⏳" appears.
+      const voiceErrMsgKey = `midas:voice:err:msg:${vUserId}:${vChatId}`;
+      try {
+        const prevErrMsgId = await redisConnection.get(voiceErrMsgKey);
+        if (prevErrMsgId) {
+          void deleteMessage(vChatId, prevErrMsgId);
+          void redisConnection.del(voiceErrMsgKey);
+        }
+      } catch {
+        // Non-fatal: if Redis is down, just skip cleanup
+      }
+
       // ── Send immediate status message (⋅⋅⋅ typing indicator) ──
       // SEC-12: No user text here — this is a system status message.
       const statusMsgId = await sendMessage(vChatId, '⏳ <b>Распознаю голосовое...</b>');
@@ -3656,6 +3671,11 @@ Midas создан, чтобы сделать учет денег максима
         // Non-fatal: if status send fails, still process the voice
         request.log.warn({ msg: '[midas:bot:webhook] Phase 2.1: failed to send voice status message', vUserId });
       }
+
+      // ── Delete the user's voice message to keep chat clean ────
+      // Telegram Bot API allows bots to delete any message in private
+      // chats (messages < 48h old). Fire-and-forget: non-fatal if fails.
+      void deleteMessage(vChatId, vMessageId);
 
       // ── Enqueue for async processing ──
       const vIdempotencyKey = IdempotencyKeyBuilder.voiceParse(BOT_ID, vChatId, vMessageId);

@@ -166,9 +166,22 @@ const VOICE_ERROR_DOWNLOAD_TEXT =
   '⚠️ <b>Не смог загрузить голосовое сообщение.</b>\n\n' +
   'Попробуй ещё раз или напиши текстом 👇';
 
-// Counter key: tracks consecutive voice failures per user
+// ─────────────────────────────────────────────────────────────
+// Redis key helpers
+// ─────────────────────────────────────────────────────────────
+
+/** Tracks consecutive voice failures per user (for UX degradation) */
 function voiceFailKey(telegramUserId: string, chatId: string): string {
   return `midas:voice:fail:${telegramUserId}:${chatId}`;
+}
+
+/**
+ * Stores the ID of the last STT error message.
+ * Read and deleted by the webhook when the user sends the next voice.
+ * TTL: 24h (error messages older than that can't be deleted by Telegram anyway).
+ */
+function voiceErrMsgKey(telegramUserId: string, chatId: string): string {
+  return `midas:voice:err:msg:${telegramUserId}:${chatId}`;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -247,6 +260,8 @@ async function _processVoiceParse(job: Job<VoiceParseJobPayload>): Promise<void>
       jobId: job.id, workspaceId,
     });
     await editStatusMessage(chatId, statusMessageId, VOICE_ERROR_EMPTY_TEXT);
+    // Store error message ID so next voice attempt deletes it
+    void redisConnection.set(voiceErrMsgKey(telegramUserId, chatId), statusMessageId, 'EX', 86400);
 
     // Increment failure counter — suggest text input after 3 failures
     const failCount = await redisConnection.incr(failKey);
@@ -268,6 +283,8 @@ async function _processVoiceParse(job: Job<VoiceParseJobPayload>): Promise<void>
       reason: sttResult.reason, // reason is system message, not user text — safe
     });
     await editStatusMessage(chatId, statusMessageId, VOICE_ERROR_API_TEXT);
+    // Store error message ID so next voice attempt deletes it
+    void redisConnection.set(voiceErrMsgKey(telegramUserId, chatId), statusMessageId, 'EX', 86400);
     // Don't increment failure counter for API errors — not user's fault
     return;
   }
