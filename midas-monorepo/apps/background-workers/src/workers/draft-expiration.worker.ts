@@ -29,6 +29,7 @@ import {
   buildReminderScreen,
   buildConfirmKeyboard,
 } from '../utils/screen-builder.js';
+import { getAccountBalanceForPreview } from '../services/draft.service.js';
 import { ulid } from 'ulid';
 
 // ─────────────────────────────────────────────────────────────
@@ -142,6 +143,37 @@ async function processExpiration(job: Job): Promise<void> {
       itemName: draft.itemName,
     });
 
+    // Phase 2.5: Build context-aware keyboard matching the preview card.
+    // If an account is already selected → show "Сменить счёт" + "Подтвердить".
+    // If no account selected → show "Выбрать счёт" (confirm blocked by buildConfirmKeyboard logic).
+    let accountForKb: { id: string; name: string; currency: string } | null = null;
+    let xfxForKb: { hasCrossAmount: boolean } | null = null;
+
+    if (draft.accountId) {
+      try {
+        const acctData = await getAccountBalanceForPreview(draft.workspaceId, draft.accountId);
+        if (acctData) {
+          accountForKb = {
+            id: acctData.accountId,
+            name: acctData.accountName,
+            currency: acctData.accountCurrency,
+          };
+          const isCross = !!draft.parsedCurrency
+            && acctData.accountCurrency !== draft.parsedCurrency;
+          const hasCrossAmount = !!draft.accountDebitAmount;
+          xfxForKb = isCross ? { hasCrossAmount } : null;
+        }
+      } catch { /* non-fatal: fall back to no-account keyboard */ }
+    }
+
+    // account === null  → explicit null passed → "➕ Выбрать счёт" row shown
+    // account === accountForKb → confirm button visible + "🔄 Сменить счёт" row shown
+    const reminderKeyboard = buildConfirmKeyboard(
+      draft.draftId,
+      draft.accountId ? accountForKb : null,
+      xfxForKb,
+    );
+
     await notificationsQueue.add(
       QUEUE_NAMES.NOTIFICATIONS,
       {
@@ -150,7 +182,7 @@ async function processExpiration(job: Job): Promise<void> {
         chatId: draft.previewChatId,
         draftId: draft.draftId,
         message: reminderText,
-        inlineKeyboardJson: JSON.stringify(buildConfirmKeyboard(draft.draftId)),
+        inlineKeyboardJson: JSON.stringify(reminderKeyboard),
         cacheStoreKey: `midas:reminder:${draft.draftId}`,
       },
       { jobId: IdempotencyKeyBuilder.notification(draft.workspaceId, alertId) },

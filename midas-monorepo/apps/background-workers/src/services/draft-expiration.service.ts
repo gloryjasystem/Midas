@@ -49,6 +49,10 @@ export interface ReminderDraft {
   parsedCurrency: string | null;
   itemName: string | null;
   parsedCategoryHint: string | null;
+  /** Phase 2.5: account linked to the draft (null = not selected yet) */
+  accountId: string | null;
+  /** Phase 2.5: cross-currency debit amount (null = same currency) */
+  accountDebitAmount: string | null;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -122,8 +126,15 @@ export async function findDraftsNeedingReminder(leadSeconds: number = 600): Prom
     parsed_currency: string | null;
     item_name: string | null;
     parsed_category_hint: string | null;
+    account_id: string | null;
+    account_debit_amount: string | null;
   }>(
-    `SELECT * FROM system_find_drafts_needing_reminder($1)`,
+    // Phase 2.5: also select account_id + account_debit_amount for keyboard building
+    `SELECT d.draft_id, d.workspace_id, d.preview_message_id, d.preview_chat_id,
+            d.parsed_intent, d.parsed_amount, d.parsed_currency,
+            d.item_name, d.parsed_category_hint,
+            d.account_id, d.account_debit_amount::TEXT AS account_debit_amount
+     FROM system_find_drafts_needing_reminder($1) d`,
     [leadSeconds],
   );
 
@@ -137,5 +148,7 @@ export async function findDraftsNeedingReminder(leadSeconds: number = 600): Prom
     parsedCurrency: r.parsed_currency,
     itemName: r.item_name,
     parsedCategoryHint: r.parsed_category_hint,
+    accountId: r.account_id,
+    accountDebitAmount: r.account_debit_amount,
   }));
 }
