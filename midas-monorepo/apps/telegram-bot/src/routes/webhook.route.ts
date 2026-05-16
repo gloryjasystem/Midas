@@ -2437,6 +2437,8 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
             }
           } else if (cmd.cmd === 'menu' || cmd.cmd === 'grouppicker' || cmd.cmd === 'back') {
             if (cmd.cmd === 'menu' || cmd.cmd === 'back') {
+              // Clear timezone search mode (if user pressed Back from tz screen) — SEC: prevent stale intercept
+              void redisConnection.del(`midas:tz_srch:${telegramUserId}:${chatId}`);
               // Re-show main menu (refresh)
               const settings = await getSettings(stResolved.workspaceId, stResolved.userId);
               const text = formatSettingsMenuText(
