@@ -153,7 +153,9 @@ export function buildAccountBalanceBlock(data: AccountBalanceBlock): string {
   const isCross = data.txCurrency !== data.accountCurrency;
 
   const lines: string[] = [];
-  lines.push(`🏦 <b>${data.accountName}</b> · ${data.accountCurrency}`);
+  // Only append currency suffix if not already present in account name (child accounts like "DASD · UAH").
+  const _acbSuffix = data.accountName.toUpperCase().endsWith(data.accountCurrency.toUpperCase()) ? '' : ` · ${data.accountCurrency}`;
+  lines.push(`🏦 <b>${data.accountName}</b>${_acbSuffix}`);
 
   if (isCross && !data.debitAmount) {
     lines.push(`🔄 Укажите, сколько ${data.accountCurrency} списано`);
@@ -356,7 +358,9 @@ export function buildConfirmedScreen(data: ConfirmedScreenData): string {
     const debitCur     = data.debitCurrency ?? acctCurrency;
 
     lines.push('');
-    lines.push(`🏦 <b>${escapeHtml(data.accountName)}</b> ${escapeHtml(acctCurrency)}`);
+    // Only append currency suffix if not already present in account name (child accounts like "DASD · UAH").
+    const _bsSuffix = data.accountName.toUpperCase().endsWith(acctCurrency.toUpperCase()) ? '' : ` · ${escapeHtml(acctCurrency)}`;
+    lines.push(`🏦 <b>${escapeHtml(data.accountName)}</b>${_bsSuffix}`);
 
     // Cross-currency rate line (only when debitCurrency differs from txCurrency)
     const isCross = !!data.debitAmount && !!data.debitCurrency && data.debitCurrency !== data.currency;

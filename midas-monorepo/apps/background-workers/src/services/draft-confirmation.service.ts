@@ -395,7 +395,7 @@ export async function approveDraft(
     const acctCurrencyFinal = acctCurrency;
 
     // Debit amount in account currency: explicit xfx override or tx amount (same currency).
-    const debitAmountRaw = draft.account_debit_amount ?? amountStr;
+    const debitAmountRaw = draft.account_debit_amount ? String(draft.account_debit_amount) : amountStr;
 
     // Compute balanceBefore by reversing the balance step.
     // SEC-02: BigInt arithmetic via numericReverse() helper below.
