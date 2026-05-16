@@ -4322,7 +4322,17 @@ Midas создан, чтобы сделать учет денег максима
           await clearActiveMessageId(telegramUserId, chatId);
 
           // If existing user, send a re-greeting (resolveWorkspace only sends for isNewUser)
+          // Phase LD: Also check if returning user has no accounts (e.g. after data reset).
+          // A returning user with zero accounts must see the onboarding flow, not "Welcome back".
+          let userHasNoAccounts = false;
           if (!resolved.isNewUser) {
+            try {
+              const existingAccts = await getWorkspaceAccounts(resolved.workspaceId, resolved.userId);
+              userHasNoAccounts = existingAccts.length === 0;
+            } catch { /* non-fatal: assume accounts exist → show welcome back */ }
+          }
+
+          if (!resolved.isNewUser && !userHasNoAccounts) {
             // Phase 1.37-UX: Existing user re-greeting with ReplyKeyboard.
             // Old active message was already deleted above — chat is clean.
             const greetMsgId = await sendMessageWithReplyKeyboard(
@@ -4337,6 +4347,7 @@ Midas создан, чтобы сделать учет денег максима
             }
           } else {
             // Phase 1.37-UX: New user onboarding — ONE message, NO ReplyKeyboard.
+            // Also fires for returning users who have no accounts (data reset, etc.)
             //
             // Design rationale:
             //   - Showing ReplyKeyboard (Balance/Report/Settings) to a new user with no
