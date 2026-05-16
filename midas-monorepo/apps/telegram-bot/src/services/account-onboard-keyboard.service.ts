@@ -1170,23 +1170,23 @@ export function buildSuccessScreenText(
   currency: string,
   balance?: string,
   icon = '💳',
+  isDefault = false,   // Phase B-9: only first account gets ⭐
 ): string {
-  // Header: icon + name + balance/currency (dedup if name already includes currency)
   const nameEndsWithCur = name.trimEnd().toUpperCase().endsWith(currency.toUpperCase());
   const balStr = balance
-    ? `${balance} ${currency}`
+    ? `${balance}\u00a0${currency}`
     : (nameEndsWithCur ? '' : currency);
-  const headerLine = balStr
-    ? `${icon} <b>${name}</b> · ${balStr}  ⭐`
-    : `${icon} <b>${name}</b>  ⭐`;
+  const roleLine = isDefault
+    ? '⭐ Основной  ·  Готов к работе'
+    : 'Готов к работе';
   const { expense, income } = getCurrencyExamples(currency);
   return (
-    `✅ <b>Всё готово!</b>\n\n` +
-    `${headerLine}\n\n` +
-    `Попробуйте прямо сейчас:\n` +
-    `<blockquote>${expense}\n${income}</blockquote>\n` +
-    `Midas поймёт сам.\n` +
-    `/help — все возможности бота`
+    `✅ <b>Счёт создан</b>\n\n` +
+    `${icon} <b>${name}</b>${balStr ? `  ·  ${balStr}` : ''}\n` +
+    `<i>${roleLine}</i>\n\n` +
+    `▸ ${expense}\n` +
+    `▸ ${income}\n\n` +
+    `Пишите текстом или голосом — Midas распознает всё.`
   );
 }
 

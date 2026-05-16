@@ -508,16 +508,16 @@ function buildAccountAddedD4Text(
   // Dedup: if name already ends with currency (e.g. "Наличные PLN"), skip suffix
   const newNameEndsCur = newName.trimEnd().toUpperCase().endsWith(newCurrency.toUpperCase());
   const balStr = newBalance !== undefined
-    ? `${newBalance} ${newCurrency}`
+    ? `${newBalance} ${newCurrency}`
     : (newNameEndsCur ? '' : newCurrency);
-  const headerSuffix = balStr ? ` · ${balStr}` : '';
   const { expense, income } = getCurrencyExamples(newCurrency);
   return (
-    `✅ Счёт добавлен\n\n` +
-    `${newIcon} <b>${newName}</b>${headerSuffix}\n\n` +
-    `Напишите операцию:\n` +
-    `<blockquote>${expense}\n${income}</blockquote>\n` +
-    `Midas разберёт сам.`
+    `✅ <b>Счёт добавлен</b>\n\n` +
+    `${newIcon} <b>${newName}</b>${balStr ? `  ·  ${balStr}` : ''}\n` +
+    `<i>Обычный  ·  Готов к работе</i>\n\n` +
+    `▸ ${expense}\n` +
+    `▸ ${income}\n\n` +
+    `Пишите текстом или голосом — Midas распознает всё.`
   );
 }
 
@@ -1258,13 +1258,13 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
                 const newSuccessId = await sendMessageWithReplyKeyboard(chatId, d4Text, buildMainMenuKeyboard());
                 if (newSuccessId) void redisConnection.set(lastSuccessMsgKey(telegramUserId, chatId), newSuccessId, 'EX', LAST_SUCCESS_MSG_TTL_SEC);
               } else {
-                // First account — full onboarding success screen
+                // First account — full onboarding success screen (isDefault=true — auto-promoted by COALESCE)
                 const defIcon = defBal ? getIconByName(defBal.name, PROVIDER_ICONS) : skippedIcon;
                 const defName = defBal?.name ?? skippedName;
                 const defCur = defBal?.currency ?? skippedCur;
                 const firstSuccessId = await sendMessageWithReplyKeyboard(
                   chatId,
-                  buildSuccessScreenText(escapeHtml(defName), defCur, undefined, defIcon),
+                  buildSuccessScreenText(escapeHtml(defName), defCur, undefined, defIcon, true),
                   buildMainMenuKeyboard(),
                 );
                 if (firstSuccessId) void redisConnection.set(lastSuccessMsgKey(telegramUserId, chatId), firstSuccessId, 'EX', LAST_SUCCESS_MSG_TTL_SEC);
@@ -5517,7 +5517,7 @@ Midas создан, чтобы сделать учет денег максима
                 const defCurCi = defCi?.currency ?? rawCode;
                 const firstSuccessIdCi = await sendMessageWithReplyKeyboard(
                   chatId,
-                  buildSuccessScreenText(escapeHtml(defNameCi), escapeHtml(defCurCi), undefined, defIconCi),
+                  buildSuccessScreenText(escapeHtml(defNameCi), escapeHtml(defCurCi), undefined, defIconCi, true),
                   buildMainMenuKeyboard(),
                 );
                 if (firstSuccessIdCi) void redisConnection.set(lastSuccessMsgKey(telegramUserId, chatId), firstSuccessIdCi, 'EX', LAST_SUCCESS_MSG_TTL_SEC);
@@ -5611,7 +5611,7 @@ Midas создан, чтобы сделать учет денег максима
               const defCurBi = defBi?.currency ?? acCur;
               const firstSuccessIdBi = await sendMessageWithReplyKeyboard(
                 chatId,
-                buildSuccessScreenText(escapeHtml(defNameBi), escapeHtml(defCurBi), amount, defIconBi),
+                buildSuccessScreenText(escapeHtml(defNameBi), escapeHtml(defCurBi), amount, defIconBi, true),
                 buildMainMenuKeyboard(),
               );
               if (firstSuccessIdBi) void redisConnection.set(lastSuccessMsgKey(telegramUserId, chatId), firstSuccessIdBi, 'EX', LAST_SUCCESS_MSG_TTL_SEC);
