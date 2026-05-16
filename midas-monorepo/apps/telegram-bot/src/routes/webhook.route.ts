@@ -494,41 +494,37 @@ function getIconByName(name: string, providerIconsMap: ReadonlyMap<string, strin
  * Format:
  *   ✅ Счёт добавлен
  *
- *   {icon} {name} · {currency}[ · {balance}]
+ *   {icon} {name}[ · {balance} {currency}]
  *
- *   Напишите операцию — «продукты 800» или «зарплата 45 000».
+ *   Напишите операцию — «кофе 350 {currency}» или «зарплата 45 000 {currency}».
  *   Midas распознает сумму, тип и категорию автоматически.
- *
- *   Все счета:
- *   {icon1} {name1} · {cur1}
- *   {icon2} {name2} · {cur2}
- *   …
  */
 function buildAccountAddedD4Text(
   newIcon: string,
   newName: string,
   newCurrency: string,
   newBalance: number | string | undefined,
-  portfolio: Array<{ name: string; currency: string; type: string }>,
-  providerIconsMap: ReadonlyMap<string, string>,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  _portfolio: Array<{ name: string; currency: string; type: string }>,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  _providerIconsMap: ReadonlyMap<string, string>,
 ): string {
-  // Dedup: if name already ends with currency (e.g. "Наличные PLN"), skip " · PLN"
+  // If balance is set: show «icon Name · 10000 USDT» (no redundant currency separator)
+  // If balance is absent: show «icon Name · USDT»
+  const balPart = newBalance !== undefined
+    ? ` · ${newBalance} ${newCurrency}`
+    : ` · ${newCurrency}`;
+  // Dedup: if name already ends with currency (e.g. "Наличные PLN"), skip currency suffix entirely
   const newNameEndsCur = newName.trimEnd().toUpperCase().endsWith(newCurrency.toUpperCase());
-  const headerCurPart = newNameEndsCur ? '' : ` · ${newCurrency}`;
-  const balPart = newBalance !== undefined ? ` · ${newBalance} ${newCurrency}` : '';
-  const portfolioLines = portfolio
-    .map((a) => {
-      const endsCur = a.name.trimEnd().toUpperCase().endsWith(a.currency.toUpperCase());
-      const curSuffix = endsCur ? '' : ` · ${a.currency}`;
-      return `${getIconByName(a.name, providerIconsMap)} ${a.name}${curSuffix}`;
-    })
-    .join('\n');
+  const headerSuffix = newNameEndsCur && newBalance === undefined ? '' : balPart;
+  // Currency-aware operation examples
+  const exampleExpense = `«кофе 350 ${newCurrency}»`;
+  const exampleIncome  = `«зарплата 45 000 ${newCurrency}»`;
   return (
     `✅ Счёт добавлен\n\n` +
-    `${newIcon} <b>${newName}</b>${headerCurPart}${balPart}\n\n` +
-    `Напишите операцию — «продукты 800» или «зарплата 45 000».\n` +
-    `Midas распознает сумму, тип и категорию автоматически.\n\n` +
-    `<b>Все счета:</b>\n${portfolioLines}`
+    `${newIcon} <b>${newName}</b>${headerSuffix}\n\n` +
+    `Напишите операцию — ${exampleExpense} или ${exampleIncome}.\n` +
+    `Midas распознает сумму, тип и категорию автоматически.`
   );
 }
 
@@ -1257,7 +1253,7 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
               try {
                 await softDeletePlaceholderAccount(acResolved.workspaceId, acResolved.userId);
               } catch { /* non-fatal */ }
-              const skippedIcon = getProviderIcon(undefined, skippedType, skippedSub);
+              const skippedIcon = getIconByName(skippedName, PROVIDER_ICONS);
               // Phase LD+: fetch default account + check if first
               const defBal = await getWorkspaceDefaultAccount(acResolved.workspaceId, acResolved.userId).catch(() => null);
               // Activate nav keyboard: delete inline onboarding msg
@@ -1276,7 +1272,7 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
                 if (newSuccessId) void redisConnection.set(lastSuccessMsgKey(telegramUserId, chatId), newSuccessId, 'EX', LAST_SUCCESS_MSG_TTL_SEC);
               } else {
                 // First account — full onboarding success screen
-                const defIcon = defBal ? getProviderIcon(undefined, defBal.type, undefined) : skippedIcon;
+                const defIcon = defBal ? getIconByName(defBal.name, PROVIDER_ICONS) : skippedIcon;
                 const defName = defBal?.name ?? skippedName;
                 const defCur = defBal?.currency ?? skippedCur;
                 const firstSuccessId = await sendMessageWithReplyKeyboard(
@@ -3406,6 +3402,7 @@ Midas создан, чтобы сделать учет денег максима
                   detail.balance,
                   detail.created_at,
                   isMain,
+                  parentD?.type,
                 ),
                 buildSubAccountActionsKeyboard(
                   blCmd.accountId,
@@ -3450,7 +3447,7 @@ Midas создан, чтобы сделать учет денег максима
               ];
               await upsertBotMessage(
                 telegramUserId, chatId,
-                formatMultiCurrencyDetailText(detail.name, allCurrencies, typeLabel, created),
+                formatMultiCurrencyDetailText(detail.name, allCurrencies, typeLabel, created, detail.type, detail.currency),
                 buildMultiCurrencyActionsKeyboard(blCmd.accountId, allCurrencies),
               );
 
@@ -5470,7 +5467,7 @@ Midas создан, чтобы сделать учет денег максима
               try {
                 await softDeletePlaceholderAccount(resolved.workspaceId, resolved.userId);
               } catch { /* non-fatal */ }
-              const icon = getProviderIcon(undefined, acState.accountType ?? 'custom', acState.walletSubtype);
+              const icon = getIconByName(accountName, PROVIDER_ICONS);
               // Phase LD+: fetch the REAL default account for the success screen
               const defCi = await getWorkspaceDefaultAccount(resolved.workspaceId, resolved.userId).catch(() => null);
               // Activate nav keyboard: delete inline onboarding msg, send success + ReplyKeyboard
@@ -5490,7 +5487,7 @@ Midas создан, чтобы сделать учет денег максима
                 if (newSuccessIdCi) void redisConnection.set(lastSuccessMsgKey(telegramUserId, chatId), newSuccessIdCi, 'EX', LAST_SUCCESS_MSG_TTL_SEC);
               } else {
                 // First account — full onboarding success screen
-                const defIconCi = defCi ? getProviderIcon(undefined, defCi.type, undefined) : icon;
+                const defIconCi = defCi ? getIconByName(defCi.name, PROVIDER_ICONS) : icon;
                 const defNameCi = defCi?.name ?? accountName;
                 const defCurCi = defCi?.currency ?? rawCode;
                 const firstSuccessIdCi = await sendMessageWithReplyKeyboard(
@@ -5568,7 +5565,7 @@ Midas создан, чтобы сделать учет денег максима
             const defBi = await getWorkspaceDefaultAccount(resolved.workspaceId, resolved.userId).catch(() => null);
             const acName = acState.name ?? 'Счёт';
             const acCur = acState.currency ?? '';
-            const icon = getProviderIcon(undefined, acState.accountType ?? 'custom', acState.walletSubtype);
+            const icon = getIconByName(acName, PROVIDER_ICONS);
             // Activate nav keyboard: delete inline onboarding msg, send success + ReplyKeyboard
             const oldMsgIdBal = await getActiveMessageId(telegramUserId, chatId);
             if (oldMsgIdBal) void deleteMessage(chatId, oldMsgIdBal);
@@ -5586,7 +5583,7 @@ Midas создан, чтобы сделать учет денег максима
               if (newSuccessIdBi) void redisConnection.set(lastSuccessMsgKey(telegramUserId, chatId), newSuccessIdBi, 'EX', LAST_SUCCESS_MSG_TTL_SEC);
             } else {
               // First account — full onboarding success screen with balance
-              const defIconBi = defBi ? getProviderIcon(undefined, defBi.type, undefined) : icon;
+              const defIconBi = defBi ? getIconByName(defBi.name, PROVIDER_ICONS) : icon;
               const defNameBi = defBi?.name ?? acName;
               const defCurBi = defBi?.currency ?? acCur;
               const firstSuccessIdBi = await sendMessageWithReplyKeyboard(

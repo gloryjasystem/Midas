@@ -475,8 +475,12 @@ export function formatAccountDetailText(
   const isMain = (roles?.isExpenseDefault ?? false) && (roles?.isIncomeDefault ?? false);
   const mainMark = isMain ? ' ⭐ Основной' : '';
 
+  // Use the same group-classification emoji as the balance list keyboard
+  const group = classifyAccountGroup(acc.name, acc.currency, acc.type);
+  const icon  = GROUP_EMOJI[group];
+
   return (
-    `🏦 <b>${name}</b>${mainMark}\n\n` +
+    `${icon} <b>${name}</b>${mainMark}\n\n` +
     `💰 ${balance}\u00a0${sym}\n` +
     `📊 ${escapeHtml(typeLabel)} · ${created}`
   );
@@ -560,12 +564,19 @@ export function formatMultiCurrencyDetailText(
   currencies: MultiCurrencyEntry[],
   typeLabel: string,
   created: string,
+  accountType?: string,
+  accountCurrency?: string,
 ): string {
   const lines = currencies.map((c) =>
     `${c.flag} ${c.code}   ${formatBalanceShort(c.balance)}\u00a0${multiSym(c.code)}`,
   );
+  // Use the correct group icon (same as list keyboard)
+  const group = accountType && accountCurrency
+    ? classifyAccountGroup(parentName, accountCurrency, accountType)
+    : 'bank' as const;
+  const icon = GROUP_EMOJI[group];
   return (
-    `🏦 <b>${escapeHtml(parentName)}</b>\n\n` +
+    `${icon} <b>${escapeHtml(parentName)}</b>\n\n` +
     `${lines.join('\n')}\n\n` +
     `📊 ${escapeHtml(typeLabel)} · ${created}`
   );
@@ -612,13 +623,19 @@ export function formatSubAccountDetailText(
   balance: string,
   created: string,
   isMain: boolean,
+  accountType?: string,
 ): string {
   const flag = getCurrencyFlag(currency) ?? '';
   const flagStr = flag ? `${flag} ` : '';
   const mainMark = isMain ? ' ⭐ Основной' : '';
   const sym = MULTI_CCY_SYM[currency] ?? currency;
+  // Derive correct icon from account type (e.g. 📈 for exchanges, 🏦 for banks)
+  const group = accountType
+    ? classifyAccountGroup(parentName, currency, accountType)
+    : 'bank' as const;
+  const icon = GROUP_EMOJI[group];
   return (
-    `🏦 <b>${escapeHtml(parentName)} · ${flagStr}${escapeHtml(currency)}</b>${mainMark}\n\n` +
+    `${icon} <b>${escapeHtml(parentName)} · ${flagStr}${escapeHtml(currency)}</b>${mainMark}\n\n` +
     `💰 ${formatBalanceShort(balance)}\u00a0${sym}\n` +
     `📅 Добавлен: ${created}`
   );
