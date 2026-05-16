@@ -1790,14 +1790,14 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
             const bizCatsBack  = allCatgTx.filter(c => c.group === 'Бизнес');
             const useFlatBack  = allCatgTx.length <= 6 || lifeCatsBack.length === 0 || bizCatsBack.length === 0;
             const backRows: { text: string; callback_data: string }[][] = [];
-            if (currentCatBack) {
-              backRows.push([{ text: `✅ ${CAT_EMOJI_TX[currentCatBack.name] ?? '📂'} ${currentCatBack.name}`, callback_data: `tx:c:cat:${catgTxId}:${currentCatBack.id}` }]);
-            }
+            // Current category shown in header text, not as a button
+            const backHeaderText = currentCatBack
+              ? `📁 <b>Категория:</b> <i>${escapeHtml(CAT_EMOJI_TX[currentCatBack.name] ?? '📂')} ${escapeHtml(currentCatBack.name)}</i>\n\nВыберите новую категорию:`
+              : '📁 <b>Выберите категорию:</b>';
             if (useFlatBack) {
-              const catsToShow = currentCatBack ? allCatgTx.filter(c => c.id !== currentCatBack.id) : allCatgTx;
-              for (let i = 0; i < catsToShow.length; i += 2) {
-                const a = catsToShow[i]!;
-                const b = catsToShow[i + 1];
+              for (let i = 0; i < allCatgTx.length; i += 2) {
+                const a = allCatgTx[i]!;
+                const b = allCatgTx[i + 1];
                 const btnA = { text: `${CAT_EMOJI_TX[a.name] ?? '📂'} ${a.name}`, callback_data: `tx:c:cat:${catgTxId}:${a.id}` };
                 backRows.push(b ? [btnA, { text: `${CAT_EMOJI_TX[b.name] ?? '📂'} ${b.name}`, callback_data: `tx:c:cat:${catgTxId}:${b.id}` }] : [btnA]);
               }
@@ -1808,7 +1808,7 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
               ]);
             }
             backRows.push([{ text: '◀️ Назад', callback_data: `tx:v:${catgTxId}${catgSf}` }]);
-            if (txCatgMsgId) void editMessageText(chatId, txCatgMsgId, '📁 <b>Категория:</b>', { inline_keyboard: backRows });
+            if (txCatgMsgId) void editMessageText(chatId, txCatgMsgId, backHeaderText, { inline_keyboard: backRows });
           } else {
             // ── Screen 2: all categories in selected group ───────────────────
             const groupName  = catgSub === 'life' ? 'Жизнь' : 'Бизнес';
@@ -1948,15 +1948,14 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
               const bizCatsFC  = allCatsFC.filter(c => c.group === 'Бизнес');
               const useFlatFC  = allCatsFC.length <= 6 || lifeCatsFC.length === 0 || bizCatsFC.length === 0;
               const fcRows: { text: string; callback_data: string }[][] = [];
-              // Current category row — highlighted at top
-              if (currentCatFC) {
-                fcRows.push([{ text: `✅ ${CAT_EMOJI_FC[currentCatFC.name] ?? '📂'} ${currentCatFC.name}`, callback_data: `tx:c:cat:${txCmd.txId}:${currentCatFC.id}` }]);
-              }
+              // Current category shown in header text, not as a button
+              const fcHeaderText = currentCatFC
+                ? `📁 <b>Категория:</b> <i>${escapeHtml(CAT_EMOJI_FC[currentCatFC.name] ?? '📂')} ${escapeHtml(currentCatFC.name)}</i>\n\nВыберите новую категорию:`
+                : '📁 <b>Выберите категорию:</b>';
               if (useFlatFC) {
-                const catsToShow = currentCatFC ? allCatsFC.filter(c => c.id !== currentCatFC.id) : allCatsFC;
-                for (let i = 0; i < catsToShow.length; i += 2) {
-                  const a = catsToShow[i]!;
-                  const b = catsToShow[i + 1];
+                for (let i = 0; i < allCatsFC.length; i += 2) {
+                  const a = allCatsFC[i]!;
+                  const b = allCatsFC[i + 1];
                   const btnA = { text: `${CAT_EMOJI_FC[a.name] ?? '📂'} ${a.name}`, callback_data: `tx:c:cat:${txCmd.txId}:${a.id}` };
                   fcRows.push(b ? [btnA, { text: `${CAT_EMOJI_FC[b.name] ?? '📂'} ${b.name}`, callback_data: `tx:c:cat:${txCmd.txId}:${b.id}` }] : [btnA]);
                 }
@@ -1967,7 +1966,7 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
                 ]);
               }
               fcRows.push([{ text: '◀️ Назад', callback_data: `tx:v:${txCmd.txId}${sf}` }]);
-              if (txMsgId) void editMessageText(chatId, txMsgId, '📁 <b>Категория:</b>', { inline_keyboard: fcRows });
+              if (txMsgId) void editMessageText(chatId, txMsgId, fcHeaderText, { inline_keyboard: fcRows });
             }
           } else if (txCmd.cmd === 'field_acc') {
             const sf = txCmd.from ? `:${txCmd.from}` : '';
