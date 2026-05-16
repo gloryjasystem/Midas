@@ -1312,3 +1312,111 @@ oleSuffix � ���� ��������� <i>(? �������
 
 
 
+
+---
+
+## SESSION LOG — 2026-05-16 (Multi-Currency Navigation Fix)
+
+### Что было сделано в этой сессии
+
+#### Контекст проблемы
+Пользователь обнаружил навигационный баг: при нажатии кнопки «◀️ Назад» из экрана
+одиночных настроек счёта (открытого через строку родительской валюты в мульти-карточке)
+происходил возврат на ПОЛНЫЙ СПИСОК БАЛАНСА (bl:back), а не на МУЛЬТИ-КАРТОЧКУ (bl:v:{accountId}).
+
+#### Корневая причина
+uildAccountActionsKeyboard имел хардкоженный callback_data: 'bl:back' в кнопке «◀️ Назад».
+
+---
+
+### Изменения
+
+#### 1. pps/telegram-bot/src/services/balance-keyboard.service.ts
+
+Добавлен опциональный параметр ackCallback в uildAccountActionsKeyboard:
+
+`	ypescript
+// ДО:
+export function buildAccountActionsKeyboard(
+  accountId: string,
+  roles: AccountRoleState = { isExpenseDefault: false, isIncomeDefault: false },
+  canAddCurrency = false,
+): InlineKeyboardMarkup {
+  ...
+  [{ text: '◀️ Назад', callback_data: 'bl:back' }],
+
+// ПОСЛЕ:
+export function buildAccountActionsKeyboard(
+  accountId: string,
+  roles: AccountRoleState = { isExpenseDefault: false, isIncomeDefault: false },
+  canAddCurrency = false,
+  backCallback = 'bl:back',   // Phase B-9: allow custom back target
+): InlineKeyboardMarkup {
+  ...
+  [{ text: '◀️ Назад', callback_data: backCallback }],
+`
+
+По умолчанию ackCallback = 'bl:back' — все существующие вызовы без изменений, обратная совместимость сохранена.
+
+---
+
+#### 2. pps/telegram-bot/src/routes/webhook.route.ts
+
+Обновлён handler iew_account_single — теперь передаёт l:v:{accountId} как ackCallback:
+
+`	ypescript
+// ДО:
+buildAccountActionsKeyboard(blCmd.accountId, rolesSingle, detailSingle.parent_account_id === null)
+
+// ПОСЛЕ:
+buildAccountActionsKeyboard(
+  blCmd.accountId,
+  rolesSingle,
+  detailSingle.parent_account_id === null,
+  l:v:,   // ← Назад → мульти-карточка, не список баланса
+),
+`
+
+---
+
+### Навигационный флоу ПОСЛЕ исправления
+
+`
+Скрин 1 (мульти-карточка, child_count > 0)
+  → нажать строку родительской валюты (bl:vs:{id})  → view_account_single
+      → нажать ◀️ Назад → bl:v:{id} → view_account → child_count > 0
+          → рендер Скрин 1 (мульти-карточка) ✅  (БЫЛО: полный список bl:back)
+
+  → нажать строку дочерней валюты (bl:v:{childId})  → Скрин настроек child
+      → нажать ◀️ Назад к {имя_родителя} → bl:v:{parentId} → Скрин 1 ✅
+`
+
+---
+
+### Коммиты этой сессии
+
+| SHA | Сообщение |
+|---|---|
+| 4faf03 | ix(balance): fix back navigation from single-settings to multi-card |
+
+- **Файлы затронуты:** 2 (webhook.route.ts, alance-keyboard.service.ts)
+- **tsc:** 0 ошибок
+- **Pushed:** main ✅
+- **Railway:** auto-deploy triggered
+
+---
+
+### Состояние на момент закрытия сессии
+
+| Параметр | Значение |
+|---|---|
+| **PHASE** | Balance Multi-Currency Navigation — FIXED & DEPLOYED |
+| **LAST COMMIT** | 4faf03 pushed to main |
+| **BLOCKER** | None — все известные навигационные баги закрыты |
+| **NEXT ACTION** | End-to-end тест: мульти-карточка → USD (bl:vs) → Назад → мульти-карточка |
+
+### Архитектура bl:vs vs bl:v (важно для следующего агента)
+
+- l:v:{id} — view_account: рендерит ЛИБО мульти-карточку (если child_count > 0), ЛИБО одиночную карточку
+- l:vs:{id} — view_account_single: ВСЕГДА рендерит одиночную карточку (для строки родительской валюты в мульти-карточке)
+- Кнопка «Назад» в iew_account_single теперь = l:v:{accountId} (не l:back)
