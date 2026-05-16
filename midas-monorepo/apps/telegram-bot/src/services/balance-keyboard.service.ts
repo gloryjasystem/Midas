@@ -434,7 +434,7 @@ export function buildAddCurrencyKeyboard(
 
   const FIAT_PRESETS = [
     'USD', 'EUR', 'UAH', 'GBP', 'PLN',
-    'CHF', 'KZT', 'AED', 'GEL', 'TRY', 'BYN', 'CNY',
+    'CHF', 'KZT', 'AED', 'GEL', 'TRY', 'BYN', 'CNY', 'SGD',
   ] as const;
 
   const CRYPTO_PRESETS = [
