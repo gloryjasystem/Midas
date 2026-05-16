@@ -1143,7 +1143,7 @@ export function getCurrencyExamples(currency: string): { expense: string; income
   const cur = currency.toUpperCase();
   // Stablecoins
   if (['USDT','USDC','BUSD','DAI','TUSD'].includes(cur))
-    return { expense: `Netflix 15 ${cur}`, income: `фриланс 500 ${cur}` };
+    return { expense: `подписка 15 ${cur}`, income: `фриланс 500 ${cur}` };
   // BTC
   if (cur === 'BTC')
     return { expense: `комиссия 0.0005 ${cur}`, income: `продажа 0.1 ${cur}` };
@@ -1153,14 +1153,18 @@ export function getCurrencyExamples(currency: string): { expense: string; income
   // Other crypto
   if (['SOL','TON','BNB','XRP','TRX','LTC','DOGE','AVAX','NOT','DOGS'].includes(cur))
     return { expense: `комиссия 0.01 ${cur}`, income: `продажа 5 ${cur}` };
-  // Fiat
-  if (cur === 'RUB') return { expense: `кофе 350 ${cur}`, income: `зарплата 95 000 ${cur}` };
-  if (cur === 'UAH') return { expense: `кава 95 ${cur}`,   income: `зарплата 25 000 ${cur}` };
-  if (cur === 'KZT') return { expense: `кофе 2 500 ${cur}`, income: `зарплата 450 000 ${cur}` };
-  if (cur === 'USD') return { expense: `coffee 4 ${cur}`,  income: `salary 3 500 ${cur}` };
-  if (cur === 'EUR') return { expense: `Kaffee 4 ${cur}`,  income: `Gehalt 3 000 ${cur}` };
-  if (cur === 'GBP') return { expense: `coffee 3 ${cur}`,  income: `salary 3 000 ${cur}` };
-  if (cur === 'TRY') return { expense: `kahve 150 ${cur}`, income: `maaş 50 000 ${cur}` };
+  // Fiat — всегда на русском
+  if (cur === 'RUB') return { expense: `кофе 350 ${cur}`,     income: `зарплата 95 000 ${cur}` };
+  if (cur === 'UAH') return { expense: `кофе 95 ${cur}`,      income: `зарплата 25 000 ${cur}` };
+  if (cur === 'KZT') return { expense: `кофе 2 500 ${cur}`,   income: `зарплата 450 000 ${cur}` };
+  if (cur === 'USD') return { expense: `кофе 4 ${cur}`,       income: `зарплата 3 500 ${cur}` };
+  if (cur === 'EUR') return { expense: `кофе 4 ${cur}`,       income: `зарплата 3 000 ${cur}` };
+  if (cur === 'GBP') return { expense: `кофе 3 ${cur}`,       income: `зарплата 3 000 ${cur}` };
+  if (cur === 'TRY') return { expense: `кофе 150 ${cur}`,     income: `зарплата 50 000 ${cur}` };
+  if (cur === 'CNY') return { expense: `кофе 30 ${cur}`,      income: `зарплата 8 000 ${cur}` };
+  if (cur === 'SGD') return { expense: `кофе 6 ${cur}`,       income: `зарплата 5 000 ${cur}` };
+  if (cur === 'AED') return { expense: `кофе 18 ${cur}`,      income: `зарплата 12 000 ${cur}` };
+  if (cur === 'GEL') return { expense: `кофе 12 ${cur}`,      income: `зарплата 3 000 ${cur}` };
   // Fallback
   return { expense: `расход 50 ${cur}`, income: `доход 500 ${cur}` };
 }
