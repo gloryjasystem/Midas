@@ -181,7 +181,7 @@ import {
   buildSuccessScreenText,            // Phase 2.3: post-creation success screen
   buildCurrencyPickerText,           // Phase 2.3: context-aware currency picker header
   buildBalancePromptText,            // Phase 2.3: context-aware balance prompt
-  getProviderIcon,                   // Phase 2.3: provider emoji for success screen
+  // getProviderIcon removed — replaced by getIconByName(name, PROVIDER_ICONS) everywhere
   PROVIDER_ICONS,                    // Phase LD+: D.4 portfolio name-based icon lookup
   capitalizeFirst,                   // Phase 2.3: auto-capitalize user input
   // master_roadmap: no-match screen + currency search
@@ -1202,15 +1202,11 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
             const rawStateBal = await redisConnection.get(acKey);
             let skippedName = 'Счёт';
             let skippedCur = '';
-            let skippedType = 'custom';
-            let skippedSub: string | undefined;
             if (rawStateBal) {
               try {
                 const s = JSON.parse(rawStateBal) as AccountOnboardState;
                 skippedName = s.name ?? 'Счёт';
                 skippedCur = s.currency ?? '';
-                skippedType = s.accountType ?? 'custom';
-                skippedSub = s.walletSubtype;
               } catch { /* ignore */ }
             }
 
