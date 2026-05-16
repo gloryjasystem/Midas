@@ -659,7 +659,7 @@ export function buildCurrencyClarScreen(): string {
   return (
     '💱 <b>В какой валюте записать?</b>' +
     '\n\n<blockquote>руб · USD · USDT · EUR · $ · BTC · доллар · евро</blockquote>' +
-    '\n\n<blockquote>💡 Чтобы не спрашивало каждый раз — установи валюту по умолчанию:\n' +
-    '⚙️ Настройки → Базовая валюта</blockquote>'
+    '\n\n<blockquote>💡 Чтобы не спрашивало — установи ⭐ основной счёт:\n' +
+    '🏦 Баланс → выберите счёт → Сделать основным</blockquote>'
   );
 }
