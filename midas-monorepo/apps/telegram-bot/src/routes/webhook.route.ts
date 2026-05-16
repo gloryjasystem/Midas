@@ -3451,13 +3451,19 @@ Midas создан, чтобы сделать учет денег максима
           } else if (blCmd.cmd === 'view_account_single') {
             // Phase B-9: Open single-account settings for parent from multi-currency card.
             // Triggered by bl:vs:{id} — renders single card regardless of child_count.
+            // Back button returns to multi-card (bl:v:{id}) instead of full balance list.
             const detailSingle = await getAccountDetail(blResolved.workspaceId, blResolved.userId, blCmd.accountId);
             if (detailSingle) {
               const rolesSingle = await getAccountRoles(blResolved.workspaceId, blResolved.userId, blCmd.accountId);
               await upsertBotMessage(
                 telegramUserId, chatId,
                 formatAccountDetailText(detailSingle, rolesSingle),
-                buildAccountActionsKeyboard(blCmd.accountId, rolesSingle, detailSingle.parent_account_id === null),
+                buildAccountActionsKeyboard(
+                  blCmd.accountId,
+                  rolesSingle,
+                  detailSingle.parent_account_id === null,
+                  `bl:v:${blCmd.accountId}`,   // ← Назад → мульти-карточка, не список баланса
+                ),
               );
             } else {
               await upsertBotMessage(telegramUserId, chatId, '⚠️ Счёт не найден.');

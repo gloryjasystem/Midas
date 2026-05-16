@@ -323,6 +323,7 @@ export function buildAccountActionsKeyboard(
   accountId: string,
   roles: AccountRoleState = { isExpenseDefault: false, isIncomeDefault: false },
   canAddCurrency = false,
+  backCallback = 'bl:back',   // Phase B-9: allow custom back target (e.g. bl:v:{id} for multi-card)
 ): InlineKeyboardMarkup {
   const isMain = roles.isExpenseDefault && roles.isIncomeDefault;
 
@@ -343,7 +344,7 @@ export function buildAccountActionsKeyboard(
       [{ text: '💱 Изменить валюту',    callback_data: `bl:cv:${accountId}` }],
       [{ text: '🔄 Установить баланс', callback_data: `bl:sb:${accountId}` }],
       [{ text: '🗑 Удалить',           callback_data: `bl:d:${accountId}`  }],
-      [{ text: '◀️ Назад',             callback_data: 'bl:back'            }],
+      [{ text: '◀️ Назад',             callback_data: backCallback            }],
     ],
   };
 }
