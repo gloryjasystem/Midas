@@ -78,8 +78,8 @@ function intentEmoji(intent: string): string {
   switch (intent) {
     case 'income':        return '💰';
     case 'expense':       return '💸';
-    case 'debt_given':    return '📤';
-    case 'debt_received': return '📥';
+    case 'debt_given':    return '🤝';
+    case 'debt_received': return '🤲';
     default:              return '🔄';
   }
 }
