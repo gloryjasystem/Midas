@@ -2321,7 +2321,7 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
                 : 0;
               const header = crossCount > 0
                 ? `\uD83C\uDFE6 <b>\u0412\u044B\u0431\u0435\u0440\u0438\u0442\u0435 \u0441\u0447\u0451\u0442:</b>\n\n<i>\uD83C\uDFE6 \u2014 \u0441\u043E\u0432\u043F\u0430\u0434\u0430\u0435\u0442 \u043F\u043E \u0432\u0430\u043B\u044E\u0442\u0435 (${escapeHtml(txCurrency)}) \u00B7 \u26A0\uFE0F \u2014 \u0434\u0440\u0443\u0433\u0430\u044F \u0432\u0430\u043B\u044E\u0442\u0430</i>`
-                : '\uD83C\uDFE6 <b>\uВыберите счёт:</b>';
+                : '\uD83C\uDFE6 <b>\u0412\u044B\u0431\u0435\u0440\u0438\u0442\u0435 \u0441\u0447\u0451\u0442:</b>';
               const keyboard = buildAccountPickerKeyboard(cmd.txId, accounts, txCurrency);
               if (messageId) void editMessageText(chatId, messageId, header, keyboard);
             }
