@@ -27,10 +27,44 @@ import { markReminderSent } from '../services/draft.service.js';
 import {
   buildExpiredDraftScreen,
   buildReminderScreen,
-  buildConfirmKeyboard,
 } from '../utils/screen-builder.js';
-import { getAccountBalanceForPreview } from '../services/draft.service.js';
+import { getWorkspaceAccountsForPicker, type WorkspaceAccountEntry } from '../services/draft.service.js';
 import { ulid } from 'ulid';
+
+// ─────────────────────────────────────────────────────────────
+// Currency-aware picker filtering (mirrors ai-parse.worker.ts)
+// ─────────────────────────────────────────────────────────────
+
+const PICKER_STABLECOINS = new Set([
+  'USDT', 'USDC', 'DAI', 'BUSD', 'TUSD', 'USDP', 'FDUSD', 'PYUSD', 'USDS', 'GUSD',
+]);
+const PICKER_KNOWN_CRYPTOS = new Set([
+  'BTC', 'ETH', 'BNB', 'SOL', 'ADA', 'XRP', 'DOGE', 'DOT', 'AVAX', 'MATIC',
+  'LINK', 'LTC', 'TRX', 'XMR', 'ETC', 'XLM', 'ATOM', 'FIL', 'NEAR', 'APT',
+  'ARB', 'OP', 'INJ', 'TON', 'NOT', 'DOGS', 'HMSTR', 'CATI',
+]);
+
+function classifyPickerCcy(code: string): 'fiat' | 'stablecoin' | 'crypto' {
+  const upper = code.toUpperCase();
+  if (PICKER_STABLECOINS.has(upper)) return 'stablecoin';
+  if (PICKER_KNOWN_CRYPTOS.has(upper)) return 'crypto';
+  return /^[A-Z]{2,5}$/.test(upper) ? 'fiat' : 'crypto';
+}
+
+function filterPickerAccounts(
+  accounts: WorkspaceAccountEntry[],
+  txCurrency: string,
+): WorkspaceAccountEntry[] {
+  const txCur = txCurrency.toUpperCase();
+  if (classifyPickerCcy(txCur) === 'fiat') {
+    const exact = accounts.filter(a => a.currency.toUpperCase() === txCur);
+    const other = accounts.filter(
+      a => a.currency.toUpperCase() !== txCur && classifyPickerCcy(a.currency) === 'fiat',
+    );
+    return [...exact, ...other];
+  }
+  return accounts.filter(a => a.currency.toUpperCase() === txCur);
+}
 
 // ─────────────────────────────────────────────────────────────
 // CRON schedule
@@ -135,7 +169,31 @@ async function processExpiration(job: Job): Promise<void> {
     if (!draft.previewChatId) continue; // can't send reminder without chatId
 
     const alertId = ulid();
-    const reminderText = buildReminderScreen({
+
+    // Phase 2.5 (revised): Reminder ALWAYS shows the account picker.
+    // UX goal: one tap on an account = select + confirm.
+    // This is simpler and more action-oriented than showing a "Confirm" button.
+    // Callbacks ia:pk:{accountId}:{draftId} already handle both
+    // "set account" and "rebuild confirm card" in the webhook route.
+    let pickerAccounts: WorkspaceAccountEntry[] = [];
+    try {
+      const allAccounts = await getWorkspaceAccountsForPicker(draft.workspaceId);
+      const txCur = draft.parsedCurrency;
+      pickerAccounts = txCur
+        ? filterPickerAccounts(allAccounts, txCur)
+        : allAccounts;
+    } catch { /* non-fatal: fall back to empty picker */ }
+
+    // Build picker inline keyboard
+    const intent = draft.parsedIntent;
+    const pickerHeader = (intent === 'income' || intent === 'debt_received')
+      ? '\n\n\uD83C\uDFE6 <b>\u041D\u0430 \u043A\u0430\u043A\u043E\u0439 \u0441\u0447\u0451\u0442 \u0437\u0430\u0447\u0438\u0441\u043B\u0438\u0442\u044C?</b>'
+      : '\n\n\uD83C\uDFE6 <b>\u0421 \u043A\u0430\u043A\u043E\u0433\u043e \u0441\u0447\u0451\u0442\u0430 \u0441\u043F\u0438\u0441\u0430\u0442\u044C?</b>';
+
+    let reminderKeyboard: object;
+    let reminderMessage: string;
+
+    const reminderBase = buildReminderScreen({
       parsedIntent: draft.parsedIntent,
       parsedAmount: draft.parsedAmount,
       parsedCurrency: draft.parsedCurrency,
@@ -143,36 +201,24 @@ async function processExpiration(job: Job): Promise<void> {
       itemName: draft.itemName,
     });
 
-    // Phase 2.5: Build context-aware keyboard matching the preview card.
-    // If an account is already selected → show "Сменить счёт" + "Подтвердить".
-    // If no account selected → show "Выбрать счёт" (confirm blocked by buildConfirmKeyboard logic).
-    let accountForKb: { id: string; name: string; currency: string } | null = null;
-    let xfxForKb: { hasCrossAmount: boolean } | null = null;
+    if (pickerAccounts.length > 0) {
+      const pickerRows = pickerAccounts.slice(0, 8).map((acc) => {
+        const balDisplay = acc.balance.replace(/\.?0+$/, '') || '0';
+        return [{
+          text: `\uD83C\uDFE6 ${acc.name} \u00B7 ${balDisplay} ${acc.currency}`,
+          callback_data: `ia:pk:${acc.id}:${draft.draftId}`,
+        }];
+      });
+      // Cancel button — always last
+      pickerRows.push([{ text: '\u2716\uFE0F \u041E\u0442\u043C\u0435\u043D\u0430', callback_data: `ia:cancel:${draft.draftId}` }]);
 
-    if (draft.accountId) {
-      try {
-        const acctData = await getAccountBalanceForPreview(draft.workspaceId, draft.accountId);
-        if (acctData) {
-          accountForKb = {
-            id: acctData.accountId,
-            name: acctData.accountName,
-            currency: acctData.accountCurrency,
-          };
-          const isCross = !!draft.parsedCurrency
-            && acctData.accountCurrency !== draft.parsedCurrency;
-          const hasCrossAmount = !!draft.accountDebitAmount;
-          xfxForKb = isCross ? { hasCrossAmount } : null;
-        }
-      } catch { /* non-fatal: fall back to no-account keyboard */ }
+      reminderKeyboard = { inline_keyboard: pickerRows };
+      reminderMessage = reminderBase + pickerHeader;
+    } else {
+      // No accounts in workspace: fallback to plain cancel button
+      reminderKeyboard = { inline_keyboard: [[{ text: '\u2716\uFE0F \u041E\u0442\u043C\u0435\u043D\u0430', callback_data: `ia:cancel:${draft.draftId}` }]] };
+      reminderMessage = reminderBase;
     }
-
-    // account === null  → explicit null passed → "➕ Выбрать счёт" row shown
-    // account === accountForKb → confirm button visible + "🔄 Сменить счёт" row shown
-    const reminderKeyboard = buildConfirmKeyboard(
-      draft.draftId,
-      draft.accountId ? accountForKb : null,
-      xfxForKb,
-    );
 
     await notificationsQueue.add(
       QUEUE_NAMES.NOTIFICATIONS,
@@ -181,7 +227,7 @@ async function processExpiration(job: Job): Promise<void> {
         workspaceId: draft.workspaceId,
         chatId: draft.previewChatId,
         draftId: draft.draftId,
-        message: reminderText,
+        message: reminderMessage,
         inlineKeyboardJson: JSON.stringify(reminderKeyboard),
         cacheStoreKey: `midas:reminder:${draft.draftId}`,
       },
