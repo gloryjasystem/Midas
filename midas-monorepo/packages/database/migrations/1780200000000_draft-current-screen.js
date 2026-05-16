@@ -58,7 +58,8 @@ export const up = (pgm) => {
       account_id            CHARACTER VARYING,
       account_debit_amount  TEXT,
       current_screen        TEXT,
-      account_name          TEXT
+      account_name          TEXT,
+      account_currency      TEXT
     )
     LANGUAGE plpgsql
     SECURITY DEFINER
@@ -79,7 +80,8 @@ export const up = (pgm) => {
         td.account_id,
         td.account_debit_amount::TEXT,
         td.current_screen,
-        acc.name                       AS account_name
+        acc.name                       AS account_name,
+        acc.currency                   AS account_currency
       FROM transaction_drafts td
       LEFT JOIN account_sources acc ON acc.id = td.account_id
       WHERE td.status = 'pending_user'

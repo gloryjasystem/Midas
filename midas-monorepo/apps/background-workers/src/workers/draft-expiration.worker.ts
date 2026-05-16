@@ -190,7 +190,7 @@ async function processExpiration(job: Job): Promise<void> {
       // Mirror: ✅ Подтвердить | 🔄 Сменить счёт: {name} | ✏️ Изменить | ✖️ Отмена
       case 'screen2': {
         const acct = draft.accountId
-          ? { id: draft.accountId, name: draft.accountName ?? '', currency: '' }
+          ? { id: draft.accountId, name: draft.accountName ?? '', currency: draft.accountCurrency ?? '' }
           : null;
         const kb = buildConfirmKeyboard(
           draft.draftId,
@@ -204,11 +204,11 @@ async function processExpiration(job: Job): Promise<void> {
       }
 
       // ── Screen 1b: Account selected but cross-currency debit amount not entered yet.
-      // Mirror: 🔄 Сменить счёт: {name} | ✏️ Указать сумму в {cur} | ✏️ Изменить | ✖️ Отмена
+      // Mirror: 🔄 Сменить счёт: {name} | ✏️ Указать сумму в {accountCurrency} | ✏️ Изменить | ✖️ Отмена
       // Note: Confirm button is NOT shown (blocked by hasCrossAmount=false), matching the live card.
       case 'screen1b': {
         const acctB = draft.accountId
-          ? { id: draft.accountId, name: draft.accountName ?? '', currency: draft.parsedCurrency ?? '' }
+          ? { id: draft.accountId, name: draft.accountName ?? '', currency: draft.accountCurrency ?? draft.parsedCurrency ?? '' }
           : null;
         const kbB = buildConfirmKeyboard(
           draft.draftId,

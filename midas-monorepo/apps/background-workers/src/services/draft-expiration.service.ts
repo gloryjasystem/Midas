@@ -57,6 +57,8 @@ export interface ReminderDraft {
   currentScreen: 'screen1' | 'screen1b' | 'screen2';
   /** Phase 2.6: display name of linked account (from account_sources JOIN) */
   accountName: string | null;
+  /** Phase 2.6: currency of linked account — needed for xfx button label ("Указать сумму в UAH") */
+  accountCurrency: string | null;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -134,12 +136,13 @@ export async function findDraftsNeedingReminder(leadSeconds: number = 600): Prom
     account_debit_amount: string | null;
     current_screen: string | null;
     account_name: string | null;
+    account_currency: string | null;
   }>(
-    // Phase 2.6: also select current_screen + account_name for reminder mirroring
+    // Phase 2.6: also select current_screen + account_name + account_currency for reminder mirroring
     `SELECT d.draft_id, d.workspace_id, d.preview_message_id, d.preview_chat_id,
             d.parsed_intent, d.parsed_amount, d.parsed_currency,
             d.item_name, d.parsed_category_hint,
-            d.account_id, d.account_debit_amount, d.current_screen, d.account_name
+            d.account_id, d.account_debit_amount, d.current_screen, d.account_name, d.account_currency
      FROM system_find_drafts_needing_reminder($1) d`,
     [leadSeconds],
   );
@@ -158,5 +161,6 @@ export async function findDraftsNeedingReminder(leadSeconds: number = 600): Prom
     accountDebitAmount: r.account_debit_amount,
     currentScreen: (r.current_screen ?? 'screen1') as ReminderDraft['currentScreen'],
     accountName: r.account_name,
+    accountCurrency: r.account_currency,
   }));
 }
