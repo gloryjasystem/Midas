@@ -1745,6 +1745,98 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
         return;
       }
 
+      // ── Phase ED-CAT: tx: 2-level category group browser ─────────────────────────────────
+      // tx:catg:life:{txId}[:{from}]  — show Жизнь list
+      // tx:catg:biz:{txId}[:{from}]   — show Бизнес list
+      // tx:catg:back:{txId}[:{from}]  — rebuild Screen 1 (group tabs / flat list)
+      // MUST be before tx: handler (parseTxCallback returns null for 'catg' sub)
+      if (callbackData.startsWith('tx:catg:')) {
+        const CAT_EMOJI_TX: Record<string, string> = {
+          'Продукты': '🛒', 'Кафе и рестораны': '☕', 'Транспорт': '🚗',
+          'Жильё': '🏠', 'Здоровье': '💊', 'Одежда': '👗',
+          'Красота': '💄', 'Развлечения': '🎮', 'Подписки': '📱',
+          'Связь': '📡', 'Образование': '📚', 'Спорт': '🏋️',
+          'Путешествия': '✈️', 'Подарки': '🎁', 'Дети': '👶',
+          'Питомцы': '🐾', 'Дом': '🏡', 'Другое': '📦', 'Разное': '🗂️',
+          'Зарплаты и выплаты': '💰', 'Фриланс': '🤝', 'Реклама': '📣',
+          'Софт и сервисы': '💻', 'Оборудование': '🖥️', 'Офис': '🏢',
+          'Налоги': '🧾', 'Комиссии': '💸', 'Крипто-комиссии': '⛽',
+          'Подрядчики': '👷', 'Продажи': '📈', 'Инвестиции': '💹',
+        };
+        // Parse: tx:catg:{sub}:{txId}[:{from}]
+        const catgParts  = callbackData.split(':');
+        const catgSub    = catgParts[2] ?? '';   // 'life' | 'biz' | 'back'
+        const catgTxId   = catgParts[3] ?? '';
+        const catgFrom   = catgParts[4];
+        const catgSf     = catgFrom ? `:${catgFrom}` : '';
+
+        if (!/^[0-9A-Z]{26}$/.test(catgTxId) || !['life', 'biz', 'back'].includes(catgSub)) {
+          await answerCallbackQuery(cq.id);
+          await reply.status(200).send({ ok: true });
+          return;
+        }
+        const txCatgMsgId = cq.message ? String(cq.message.message_id) : null;
+        try {
+          const txCatgResolved = await resolveWorkspace(telegramUserId, chatId);
+          const allCatgTx = await getWorkspaceCategories(txCatgResolved.workspaceId, txCatgResolved.userId);
+
+          if (catgSub === 'back') {
+            // ── Rebuild Screen 1 ────────────────────────────────────────────
+            const cardForBack = await getTransactionCard(catgTxId, txCatgResolved.workspaceId, txCatgResolved.userId);
+            const currentCatBack = cardForBack
+              ? allCatgTx.find(c => c.name === cardForBack.category_name) ?? null
+              : null;
+            const lifeCatsBack = allCatgTx.filter(c => c.group === 'Жизнь');
+            const bizCatsBack  = allCatgTx.filter(c => c.group === 'Бизнес');
+            const useFlatBack  = allCatgTx.length <= 6 || lifeCatsBack.length === 0 || bizCatsBack.length === 0;
+            const backRows: { text: string; callback_data: string }[][] = [];
+            if (currentCatBack) {
+              backRows.push([{ text: `✅ ${CAT_EMOJI_TX[currentCatBack.name] ?? '📂'} ${currentCatBack.name}`, callback_data: `tx:c:cat:${catgTxId}:${currentCatBack.id}` }]);
+            }
+            if (useFlatBack) {
+              const catsToShow = currentCatBack ? allCatgTx.filter(c => c.id !== currentCatBack.id) : allCatgTx;
+              for (let i = 0; i < catsToShow.length; i += 2) {
+                const a = catsToShow[i]!;
+                const b = catsToShow[i + 1];
+                const btnA = { text: `${CAT_EMOJI_TX[a.name] ?? '📂'} ${a.name}`, callback_data: `tx:c:cat:${catgTxId}:${a.id}` };
+                backRows.push(b ? [btnA, { text: `${CAT_EMOJI_TX[b.name] ?? '📂'} ${b.name}`, callback_data: `tx:c:cat:${catgTxId}:${b.id}` }] : [btnA]);
+              }
+            } else {
+              backRows.push([
+                { text: '🛒 Жизнь',  callback_data: `tx:catg:life:${catgTxId}${catgSf}` },
+                { text: '💼 Бизнес', callback_data: `tx:catg:biz:${catgTxId}${catgSf}` },
+              ]);
+            }
+            backRows.push([{ text: '◀️ Назад', callback_data: `tx:v:${catgTxId}${catgSf}` }]);
+            if (txCatgMsgId) void editMessageText(chatId, txCatgMsgId, '📁 <b>Категория:</b>', { inline_keyboard: backRows });
+          } else {
+            // ── Screen 2: all categories in selected group ───────────────────
+            const groupName  = catgSub === 'life' ? 'Жизнь' : 'Бизнес';
+            const groupEmoji = catgSub === 'life' ? '🛒' : '💼';
+            const groupCats  = allCatgTx.filter(c => c.group === groupName);
+            const s2Rows: { text: string; callback_data: string }[][] = [];
+            if (groupCats.length === 0) {
+              s2Rows.push([{ text: '⚠️ В этой группе нет категорий', callback_data: `tx:catg:back:${catgTxId}${catgSf}` }]);
+            } else {
+              for (let i = 0; i < groupCats.length; i += 2) {
+                const a = groupCats[i]!;
+                const b = groupCats[i + 1];
+                const btnA = { text: `${CAT_EMOJI_TX[a.name] ?? '📂'} ${a.name}`, callback_data: `tx:c:cat:${catgTxId}:${a.id}` };
+                s2Rows.push(b ? [btnA, { text: `${CAT_EMOJI_TX[b.name] ?? '📂'} ${b.name}`, callback_data: `tx:c:cat:${catgTxId}:${b.id}` }] : [btnA]);
+              }
+            }
+            s2Rows.push([{ text: '◀️ К группам', callback_data: `tx:catg:back:${catgTxId}${catgSf}` }]);
+            if (txCatgMsgId) void editMessageText(chatId, txCatgMsgId, `<b>${groupEmoji} ${groupName}:</b>`, { inline_keyboard: s2Rows });
+          }
+        } catch (err: unknown) {
+          const errorClass = err instanceof Error ? err.constructor.name : 'UnknownError';
+          request.log.error({ msg: '[midas:bot:webhook] tx:catg: failed', callbackId: cq.id, errorClass });
+        }
+        await answerCallbackQuery(cq.id);
+        await reply.status(200).send({ ok: true });
+        return;
+      }
+
       // ── Phase 2.0: transaction hub callbacks (prefix "tx:") ───
       // All handlers use editMessageText (ISSUE-7: never upsertBotMessage from callbacks).
       if (callbackData.startsWith('tx:')) {
@@ -1830,23 +1922,53 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
               try { await redisConnection.set(`midas:tx:edit:amt:${telegramUserId}:${chatId}`, `${txCmd.txId}:${txMsgId}:${txCmd.from || ''}`, 'EX', 120); } catch { /* non-fatal */ }
             }
           } else if (txCmd.cmd === 'field_cat') {
-            const cats = await getWorkspaceCategories(txResolved.workspaceId, txResolved.userId);
-            const catPageSize = 8; const catCols = 2;
-            const start = txCmd.page * catPageSize;
-            const pageItems = cats.slice(start, start + catPageSize);
-            const catTotalPages = Math.ceil(cats.length / catPageSize);
-            const rows: { text: string; callback_data: string }[][] = [];
+            // Phase ED-CAT: 2-level hierarchy (replaces old paginated flat list)
+            const CAT_EMOJI_FC: Record<string, string> = {
+              'Продукты': '🛒', 'Кафе и рестораны': '☕', 'Транспорт': '🚗',
+              'Жильё': '🏠', 'Здоровье': '💊', 'Одежда': '👗',
+              'Красота': '💄', 'Развлечения': '🎮', 'Подписки': '📱',
+              'Связь': '📡', 'Образование': '📚', 'Спорт': '🏋️',
+              'Путешествия': '✈️', 'Подарки': '🎁', 'Дети': '👶',
+              'Питомцы': '🐾', 'Дом': '🏡', 'Другое': '📦', 'Разное': '🗂️',
+              'Зарплаты и выплаты': '💰', 'Фриланс': '🤝', 'Реклама': '📣',
+              'Софт и сервисы': '💻', 'Оборудование': '🖥️', 'Офис': '🏢',
+              'Налоги': '🧾', 'Комиссии': '💸', 'Крипто-комиссии': '⛽',
+              'Подрядчики': '👷', 'Продажи': '📈', 'Инвестиции': '💹',
+            };
             const sf = txCmd.from ? `:${txCmd.from}` : '';
-            for (let i = 0; i < pageItems.length; i += catCols) {
-              rows.push(pageItems.slice(i, i + catCols).map((cat) => ({ text: escapeHtml(cat.name), callback_data: `tx:c:cat:${txCmd.txId}:${cat.id}${sf}` })));
+            const [allCatsFC, cardFC] = await Promise.all([
+              getWorkspaceCategories(txResolved.workspaceId, txResolved.userId),
+              getTransactionCard(txCmd.txId, txResolved.workspaceId, txResolved.userId),
+            ]);
+            if (allCatsFC.length === 0) {
+              if (txMsgId) void editMessageText(chatId, txMsgId, '⚠️ В рабочем пространстве нет категорий.', { inline_keyboard: [[{ text: '◀️ Назад', callback_data: `tx:v:${txCmd.txId}${sf}` }]] });
+            } else {
+              const currentCatFC = cardFC ? allCatsFC.find(c => c.name === cardFC.category_name) ?? null : null;
+              const lifeCatsFC = allCatsFC.filter(c => c.group === 'Жизнь');
+              const bizCatsFC  = allCatsFC.filter(c => c.group === 'Бизнес');
+              const useFlatFC  = allCatsFC.length <= 6 || lifeCatsFC.length === 0 || bizCatsFC.length === 0;
+              const fcRows: { text: string; callback_data: string }[][] = [];
+              // Current category row — highlighted at top
+              if (currentCatFC) {
+                fcRows.push([{ text: `✅ ${CAT_EMOJI_FC[currentCatFC.name] ?? '📂'} ${currentCatFC.name}`, callback_data: `tx:c:cat:${txCmd.txId}:${currentCatFC.id}` }]);
+              }
+              if (useFlatFC) {
+                const catsToShow = currentCatFC ? allCatsFC.filter(c => c.id !== currentCatFC.id) : allCatsFC;
+                for (let i = 0; i < catsToShow.length; i += 2) {
+                  const a = catsToShow[i]!;
+                  const b = catsToShow[i + 1];
+                  const btnA = { text: `${CAT_EMOJI_FC[a.name] ?? '📂'} ${a.name}`, callback_data: `tx:c:cat:${txCmd.txId}:${a.id}` };
+                  fcRows.push(b ? [btnA, { text: `${CAT_EMOJI_FC[b.name] ?? '📂'} ${b.name}`, callback_data: `tx:c:cat:${txCmd.txId}:${b.id}` }] : [btnA]);
+                }
+              } else {
+                fcRows.push([
+                  { text: '🛒 Жизнь',  callback_data: `tx:catg:life:${txCmd.txId}${sf}` },
+                  { text: '💼 Бизнес', callback_data: `tx:catg:biz:${txCmd.txId}${sf}` },
+                ]);
+              }
+              fcRows.push([{ text: '◀️ Назад', callback_data: `tx:v:${txCmd.txId}${sf}` }]);
+              if (txMsgId) void editMessageText(chatId, txMsgId, '📁 <b>Категория:</b>', { inline_keyboard: fcRows });
             }
-            const navRow: { text: string; callback_data: string }[] = [];
-            if (txCmd.page > 0) navRow.push({ text: '\u25C0\uFE0F', callback_data: `tx:f:cat:${txCmd.txId}:${txCmd.page - 1}${sf}` });
-            if (catTotalPages > 1) navRow.push({ text: `${txCmd.page + 1}/${catTotalPages}`, callback_data: 'tx:x' });
-            if (txCmd.page < catTotalPages - 1) navRow.push({ text: '\u25B6\uFE0F', callback_data: `tx:f:cat:${txCmd.txId}:${txCmd.page + 1}${sf}` });
-            if (navRow.length > 0) rows.push(navRow);
-            rows.push([{ text: '\u25C0\uFE0F \u041D\u0430\u0437\u0430\u0434', callback_data: `tx:v:${txCmd.txId}${sf}` }]);
-            if (txMsgId) void editMessageText(chatId, txMsgId, '\u{1F4C1} \u0412\u044B\u0431\u0435\u0440\u0438\u0442\u0435 \u043A\u0430\u0442\u0435\u0433\u043E\u0440\u0438\u044E:', { inline_keyboard: rows });
           } else if (txCmd.cmd === 'field_acc') {
             const sf = txCmd.from ? `:${txCmd.from}` : '';
             const [accs, txCardForPicker] = await Promise.all([
