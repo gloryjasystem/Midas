@@ -187,20 +187,67 @@ export function buildCategoryPickerKeyboard(
 // ─────────────────────────────────────────────────────────────
 
 /**
- * Build an account picker (all accounts, 1 per row — names can be long).
- * callback_data = ed:c:acc:<txId>:<accId> (≤ 62 bytes)
+ * Format account balance for display in account picker buttons.
+ * SEC-02: integer arithmetic only — no parseFloat / Number().
+ * Strips trailing decimal zeros, adds thin-space thousand separator.
+ */
+function fmtAccountBalance(balStr: string): string {
+  if (!balStr || balStr === '0') return '0';
+  const isNeg = balStr.startsWith('-');
+  const abs = isNeg ? balStr.slice(1) : balStr;
+  const dotIdx = abs.indexOf('.');
+  const intPart  = dotIdx === -1 ? abs : abs.slice(0, dotIdx);
+  const fracFull = dotIdx === -1 ? '' : abs.slice(dotIdx + 1);
+  const fracTrim = fracFull.replace(/0+$/, '');  // strip trailing zeros
+  const intSep   = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, '\u202F'); // thin space
+  const formatted = fracTrim ? `${intSep}.${fracTrim}` : intSep;
+  return isNeg ? `\u2212${formatted}` : formatted; // − (minus sign, not hyphen)
+}
+
+/**
+ * Build an account picker for either the `ed:` or `tx:` namespace.
+ *
+ * Visual design:
+ *   🏦 Name · bal CUR  ← accounts whose currency matches txCurrency (listed first)
+ *   ⚠️ Name · bal CUR  ← accounts with a different currency (listed after)
+ *
+ * If txCurrency is empty all accounts are shown with 🏦.
+ * Hint line is shown in the message header (passed by caller).
+ *
+ * @param txCurrency — currency of the current transaction (e.g. 'USD').
+ * @param opts.namespace — 'ed' (default) or 'tx' — controls callback_data prefix.
+ * @param opts.suffix   — extra suffix appended to tx: callback_data (e.g. ':s' for `from`).
  */
 export function buildAccountPickerKeyboard(
   txId: string,
   accounts: AccountItem[],
+  txCurrency: string,
+  opts?: { namespace?: 'ed' | 'tx'; suffix?: string },
 ): InlineKeyboardMarkup {
-  const rows: InlineKeyboardButton[][] = accounts.map((acc) => [
-    {
-      text: `${escapeHtml(acc.name)} (${escapeHtml(acc.currency)})`,
-      callback_data: `ed:c:acc:${txId}:${acc.id}`,
-    },
-  ]);
-  rows.push([{ text: '◀️ Назад', callback_data: `ed:v:${txId}` }]);
+  const ns  = opts?.namespace ?? 'ed';
+  const sfx = opts?.suffix   ?? '';
+  const txCur = txCurrency.toUpperCase();
+
+  const same  = txCur ? accounts.filter(a => a.currency.toUpperCase() === txCur)  : accounts;
+  const cross = txCur ? accounts.filter(a => a.currency.toUpperCase() !== txCur)  : [];
+
+  const makeRow = (acc: AccountItem, isCross: boolean): InlineKeyboardButton[] => {
+    const icon  = isCross ? '\u26A0\uFE0F' : '\uD83C\uDFE6';  // ⚠️ or 🏦
+    const bal   = fmtAccountBalance(acc.balance);
+    const label = `${icon} ${escapeHtml(acc.name)} \u00B7 ${bal} ${escapeHtml(acc.currency)}`;
+    const cbData = ns === 'tx'
+      ? `tx:c:acc:${txId}:${acc.id}${sfx}`
+      : `ed:c:acc:${txId}:${acc.id}`;
+    return [{ text: label, callback_data: cbData }];
+  };
+
+  const rows: InlineKeyboardButton[][] = [
+    ...same.map(a  => makeRow(a, false)),
+    ...cross.map(a => makeRow(a, true)),
+  ];
+
+  const backCb = ns === 'tx' ? `tx:v:${txId}${sfx}` : `ed:v:${txId}`;
+  rows.push([{ text: '\u25C0\uFE0F \u041D\u0430\u0437\u0430\u0434', callback_data: backCb }]);
   return { inline_keyboard: rows };
 }
 
@@ -211,8 +258,8 @@ export function buildAccountPickerKeyboard(
 const INTENT_BUTTON_LABELS: Record<string, string> = {
   income:        '💰 Доход',
   expense:       '💸 Расход',
-  debt_given:    '🔴 Долг выдан',
-  debt_received: '🟢 Долг получен',
+  debt_given:    '🤝 Долг (дал)',    // matches system-wide standard (🤝/🤲)
+  debt_received: '🤲 Долг (взял)',
   transfer:      '🔄 Перевод',
 };
 

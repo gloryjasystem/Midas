@@ -371,7 +371,7 @@ export async function updateTransactionIntent(
 // ─────────────────────────────────────────────────────────────
 
 export interface CategoryItem { id: string; name: string; group: string; }
-export interface AccountItem  { id: string; name: string; currency: string; }
+export interface AccountItem  { id: string; name: string; currency: string; balance: string; /* NUMERIC string (SEC-02) */ }
 
 /** Fetch all categories for this workspace (for category picker). */
 export async function getWorkspaceCategories(
@@ -430,16 +430,44 @@ export async function softDeleteTransaction(
   });
 }
 
-/** Fetch all accounts for this workspace (for account picker). */
+/** Fetch all accounts for this workspace (for account picker), including running balance.
+ * Balance formula mirrors balance.service.ts (D2: NUMERIC-only arithmetic in PostgreSQL).
+ * Only active (non-deleted) accounts are returned; deleted ones retain historical tx links.
+ */
 export async function getWorkspaceAccounts(
   workspaceId: string,
   userId: string,
 ): Promise<AccountItem[]> {
   const result = await withTenantTransaction(workspaceId, userId, async (client) => {
     const r = await client.query<AccountItem>(
-      // Only offer active (non-deleted) accounts in the picker.
-      // Deleted accounts remain linked to historical transactions but cannot be selected for new ones.
-      `SELECT id, name, currency FROM account_sources WHERE workspace_id = $1 AND deleted_at IS NULL ORDER BY name`,
+      `SELECT
+         a.id,
+         a.name,
+         a.currency,
+         ROUND(
+           a.initial_balance
+           + COALESCE(SUM(t.base_amount) FILTER (
+               WHERE t.transaction_intent IN ('income', 'debt_received')
+                 AND t.base_currency = a.currency
+             ), 0)
+           - COALESCE(SUM(t.base_amount) FILTER (
+               WHERE t.transaction_intent IN ('expense', 'debt_given', 'transfer')
+                 AND t.base_currency = a.currency
+             ), 0)
+           + COALESCE(SUM(t.account_debit_amount) FILTER (
+               WHERE t.transaction_intent IN ('income', 'debt_received')
+                 AND t.account_debit_currency = a.currency
+             ), 0)
+           - COALESCE(SUM(t.account_debit_amount) FILTER (
+               WHERE t.transaction_intent IN ('expense', 'debt_given', 'transfer')
+                 AND t.account_debit_currency = a.currency
+             ), 0),
+         2)::text AS balance
+       FROM account_sources a
+       LEFT JOIN transactions t ON t.account_id = a.id AND t.deleted_at IS NULL
+       WHERE a.workspace_id = $1 AND a.deleted_at IS NULL
+       GROUP BY a.id, a.name, a.currency
+       ORDER BY a.name`,
       [workspaceId],
     );
     return r.rows;

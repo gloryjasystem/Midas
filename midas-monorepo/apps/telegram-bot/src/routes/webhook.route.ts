@@ -1848,11 +1848,20 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
             rows.push([{ text: '\u25C0\uFE0F \u041D\u0430\u0437\u0430\u0434', callback_data: `tx:v:${txCmd.txId}${sf}` }]);
             if (txMsgId) void editMessageText(chatId, txMsgId, '\u{1F4C1} \u0412\u044B\u0431\u0435\u0440\u0438\u0442\u0435 \u043A\u0430\u0442\u0435\u0433\u043E\u0440\u0438\u044E:', { inline_keyboard: rows });
           } else if (txCmd.cmd === 'field_acc') {
-            const accs = await getWorkspaceAccounts(txResolved.workspaceId, txResolved.userId);
             const sf = txCmd.from ? `:${txCmd.from}` : '';
-            const rows: { text: string; callback_data: string }[][] = accs.map((acc) => [{ text: escapeHtml(acc.name), callback_data: `tx:c:acc:${txCmd.txId}:${acc.id}${sf}` }]);
-            rows.push([{ text: '\u25C0\uFE0F \u041D\u0430\u0437\u0430\u0434', callback_data: `tx:v:${txCmd.txId}${sf}` }]);
-            if (txMsgId) void editMessageText(chatId, txMsgId, '\u{1F3E6} \u0412\u044B\u0431\u0435\u0440\u0438\u0442\u0435 \u0441\u0447\u0451\u0442:', { inline_keyboard: rows });
+            const [accs, txCardForPicker] = await Promise.all([
+              getWorkspaceAccounts(txResolved.workspaceId, txResolved.userId),
+              getTransactionCard(txCmd.txId, txResolved.workspaceId, txResolved.userId),
+            ]);
+            const txCurrency = txCardForPicker?.base_currency ?? '';
+            const crossCount = txCurrency
+              ? accs.filter(a => a.currency.toUpperCase() !== txCurrency.toUpperCase()).length
+              : 0;
+            const pickerHeader = crossCount > 0
+              ? `\uD83C\uDFE6 <b>\u0412\u044B\u0431\u0435\u0440\u0438\u0442\u0435 \u0441\u0447\u0451\u0442:</b>\n\n<i>\uD83C\uDFE6 \u2014 \u0441\u043E\u0432\u043F\u0430\u0434\u0430\u0435\u0442 \u043F\u043E \u0432\u0430\u043B\u044E\u0442\u0435 (${escapeHtml(txCurrency)}) \u00B7 \u26A0\uFE0F \u2014 \u0434\u0440\u0443\u0433\u0430\u044F \u0432\u0430\u043B\u044E\u0442\u0430</i>`
+              : '\uD83C\uDFE6 <b>\u0412\u044B\u0431\u0435\u0440\u0438\u0442\u0435 \u0441\u0447\u0451\u0442:</b>';
+            const pickerKb = buildAccountPickerKeyboard(txCmd.txId, accs, txCurrency, { namespace: 'tx', suffix: sf });
+            if (txMsgId) void editMessageText(chatId, txMsgId, pickerHeader, pickerKb);
           } else if (txCmd.cmd === 'field_int') {
             const intentLabels: Record<string, string> = { income: '💰 Доход', expense: '💸 Расход', debt_given: '🤝 Долг (дал)', debt_received: '🤲 Долг (взял)', transfer: '🔄 Перевод' };
             const sf = txCmd.from ? `:${txCmd.from}` : '';
@@ -2299,12 +2308,22 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
             }
 
           } else if (cmd.cmd === 'field_acc') {
-            const accounts = await getWorkspaceAccounts(edResolved.workspaceId, edResolved.userId);
+            const [accounts, txCardForPicker] = await Promise.all([
+              getWorkspaceAccounts(edResolved.workspaceId, edResolved.userId),
+              getTransactionCard(cmd.txId, edResolved.workspaceId, edResolved.userId),
+            ]);
+            const txCurrency = txCardForPicker?.base_currency ?? '';
             if (accounts.length === 0) {
-              void upsertBotMessage(telegramUserId, chatId, '⚠️ В рабочем пространстве нет счетов.');
+              void upsertBotMessage(telegramUserId, chatId, '\u26A0\uFE0F \u0412 \u0440\u0430\u0431\u043E\u0447\u0435\u043C \u043F\u0440\u043E\u0441\u0442\u0440\u0430\u043D\u0441\u0442\u0432\u0435 \u043D\u0435\u0442 \u0441\u0447\u0435\u0442\u043E\u0432.');
             } else {
-              const keyboard = buildAccountPickerKeyboard(cmd.txId, accounts);
-              if (messageId) void editMessageText(chatId, messageId, '🏦 Выберите новый счёт:', keyboard);
+              const crossCount = txCurrency
+                ? accounts.filter(a => a.currency.toUpperCase() !== txCurrency.toUpperCase()).length
+                : 0;
+              const header = crossCount > 0
+                ? `\uD83C\uDFE6 <b>\u0412\u044B\u0431\u0435\u0440\u0438\u0442\u0435 \u0441\u0447\u0451\u0442:</b>\n\n<i>\uD83C\uDFE6 \u2014 \u0441\u043E\u0432\u043F\u0430\u0434\u0430\u0435\u0442 \u043F\u043E \u0432\u0430\u043B\u044E\u0442\u0435 (${escapeHtml(txCurrency)}) \u00B7 \u26A0\uFE0F \u2014 \u0434\u0440\u0443\u0433\u0430\u044F \u0432\u0430\u043B\u044E\u0442\u0430</i>`
+                : '\uD83C\uDFE6 <b>\uВыберите счёт:</b>';
+              const keyboard = buildAccountPickerKeyboard(cmd.txId, accounts, txCurrency);
+              if (messageId) void editMessageText(chatId, messageId, header, keyboard);
             }
 
           } else if (cmd.cmd === 'field_int') {
