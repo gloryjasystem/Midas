@@ -108,7 +108,8 @@ export interface TransactionCard extends TransactionListItem {
   account_id:      string | null;
   item_name:       string | null;
   exchange_rate:   string;
-  is_cross_currency: boolean; // exchange_rate != 1.000000000000
+  is_cross_currency: boolean;  // exchange_rate != 1.000000000000
+  account_deleted:  boolean;   // true when linked account has been soft-deleted
 }
 
 export type UpdateResult =
@@ -193,8 +194,8 @@ export async function getTransactionCard(
       // Callers handle null gracefully (show "not found" message).
       `SELECT
          t.id,
-         ROUND(t.base_amount, 2)::text  AS base_amount,
-         ROUND(t.original_amount, 2)::text AS original_amount,
+         ROUND(t.base_amount, 2)::text     AS base_amount,
+         ROUND(t.original_amount, 2)::text  AS original_amount,
          t.base_currency,
          t.currency,
          t.exchange_rate::text,
@@ -204,7 +205,8 @@ export async function getTransactionCard(
          COALESCE(a.name, '—')  AS account_name,
          t.account_id,
          t.item_name,
-         (t.exchange_rate != 1.000000000000) AS is_cross_currency
+         (t.exchange_rate != 1.000000000000)                    AS is_cross_currency,
+         (t.account_id IS NOT NULL AND a.deleted_at IS NOT NULL) AS account_deleted
        FROM transactions t
        LEFT JOIN categories     c ON c.id = t.category_id
        LEFT JOIN account_sources a ON a.id = t.account_id
@@ -435,7 +437,9 @@ export async function getWorkspaceAccounts(
 ): Promise<AccountItem[]> {
   const result = await withTenantTransaction(workspaceId, userId, async (client) => {
     const r = await client.query<AccountItem>(
-      `SELECT id, name, currency FROM account_sources WHERE workspace_id = $1 ORDER BY name`,
+      // Only offer active (non-deleted) accounts in the picker.
+      // Deleted accounts remain linked to historical transactions but cannot be selected for new ones.
+      `SELECT id, name, currency FROM account_sources WHERE workspace_id = $1 AND deleted_at IS NULL ORDER BY name`,
       [workspaceId],
     );
     return r.rows;
@@ -450,8 +454,8 @@ export async function getWorkspaceAccounts(
 const INTENT_LABELS: Record<string, string> = {
   income:        '💰 Доход',
   expense:       '💸 Расход',
-  debt_given:    '🔴 Долг выдан',
-  debt_received: '🟢 Долг получен',
+  debt_given:    '🤝 Долг (дал)',
+  debt_received: '🤲 Долг (взял)',
   transfer:      '🔄 Перевод',
 };
 
@@ -506,7 +510,8 @@ export function formatTransactionCard(card: TransactionCard): string {
     `${intent}\n` +
     `💰 Сумма:     <b>${amount} ${escapeHtml(card.base_currency)}</b>\n` +
     `📁 Категория: <b>${escapeHtml(card.category_name)}</b>\n` +
-    `🏦 Счёт:      <b>${escapeHtml(card.account_name)}</b>\n` +
+    // Archived account: keep name visible (audit trail) but add a subtle badge.
+    `🏦 Счёт:      <b>${escapeHtml(card.account_name)}</b>${card.account_deleted ? ' · <i>архив</i>' : ''}\n` +
     `📅 Дата:      ${date}\n`;
 
   if (card.is_cross_currency) {
