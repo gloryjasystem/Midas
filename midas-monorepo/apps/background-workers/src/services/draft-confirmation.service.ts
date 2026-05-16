@@ -97,6 +97,35 @@ export type ConfirmActionResult =
  * @param userId - User ID for RLS context (SEC-03)
  * @returns ConfirmActionResult with outcome
  */
+
+/**
+ * Build a guaranteed non-null item_name for every transaction.
+ *
+ * Professional accounting rule: every ledger entry MUST have a description.
+ * This is the L2 safety net — fires when:
+ *   - AI did not extract an item_name from the user's message
+ *   - User created a transaction via an automated flow with no description
+ *
+ * Priority: explicit AI name > category hint (trimmed) > intent label.
+ *
+ * SEC-12: this function is pure and does not log user content.
+ */
+function buildItemNameFallback(
+  intent: string | null,
+  categoryHint: string | null,
+): string {
+  // Use the category hint if AI provided one — it's more descriptive than the intent label.
+  const hint = categoryHint?.trim() || null;
+  switch (intent) {
+    case 'expense':       return hint ?? 'Расход';
+    case 'income':        return hint ?? 'Доход';
+    case 'transfer':      return 'Перевод';
+    case 'debt_given':    return hint ?? 'Долг (дал)';
+    case 'debt_received': return hint ?? 'Долг (взял)';
+    default:              return hint ?? 'Операция';
+  }
+}
+
 export async function approveDraft(
   draftId: string,
   workspaceId: string,
@@ -336,7 +365,9 @@ export async function approveDraft(
         categoryId,                 // $6  — Phase 1.35
         accountId,                  // $7
         draftId,                    // $8
-        draft.item_name ?? null,    // $9  — Phase 1.35
+        // L2 item_name guarantee: every transaction MUST have a description.
+        // buildItemNameFallback() synthesizes one from intent + category hint when AI didn't provide it.
+        draft.item_name ?? buildItemNameFallback(draft.parsed_intent, draft.parsed_category_hint),  // $9
         draft.parsed_intent,        // $10 — Phase 1.8-A
         isXfx,                      // $11 — XFX flag (boolean)
         debitAmtStr ?? amountStr,   // $12 — debitAmt for rate calc (fallback to txAmt)
