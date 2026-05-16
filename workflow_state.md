@@ -1420,3 +1420,98 @@ buildAccountActionsKeyboard(
 - l:v:{id} — view_account: рендерит ЛИБО мульти-карточку (если child_count > 0), ЛИБО одиночную карточку
 - l:vs:{id} — view_account_single: ВСЕГДА рендерит одиночную карточку (для строки родительской валюты в мульти-карточке)
 - Кнопка «Назад» в iew_account_single теперь = l:v:{accountId} (не l:back)
+
+
+---
+
+## SESSION LOG — 2026-05-16 (Конец сессии)
+
+### Изменения: Category Picker UX + Confirmation Card Balance Block Fix
+
+---
+
+### 1. Category Picker — удаление кнопки ✅ текущей категории
+
+**Проблема:** В пикере категорий (`tx:catg:` и `field_cat`) отображалась отдельная кнопка `✅ <ТекущаяКатегория>`, которая занимала место и создавала визуальный шум.
+
+**Решение:** Убрана кнопка ✅ из клавиатуры. Вместо неё текущая категория отображается в тексте заголовка сообщения:
+- `📁 Категория: 🛒 Продукты` — когда категория уже выбрана
+- `📂 Выберите категорию:` — когда категория ещё не выбрана
+
+**Файлы:**
+- `apps/telegram-bot/src/routes/webhook.route.ts` — строки 1783–1811 (handler `tx:catg:`), строки 1946–1970 (handler `field_cat`)
+
+**Поведение:**
+- Скрин 1 (группы Жизнь/Бизнес): заголовок с текущей категорией из БД (не AI-хинт)
+- Скрин 2 (список категорий в группе): полная иерархия без дублирования
+- Единый UX для обоих entry points (`tx:catg:` и `field_cat`)
+
+---
+
+### 2. Confirmation Card — исправление блока «Итог» (баланс)
+
+**Проблема:** В карточке «✅ Записано» не отображался блок с информацией о счёте и изменении баланса (строки «🏦 Сбербанк · RUB» и «Итог: 5 000 − 1 000 = 4 000 RUB»).
+
+**Root Cause Analysis (два бага):**
+
+1. **SQL-запрос баланса мог возвращать NULL:** Выражение `a.initial_balance + COALESCE(SUM(...), 0)` даёт `NULL` если `a.initial_balance = NULL` в БД (старые аккаунты без `DEFAULT 0`). Исправлено: `COALESCE(a.initial_balance, 0)`.
+
+2. **Условие показа блока было слишком строгим:** Блок баланса показывался только при `balanceBefore != null`. Но `balanceBefore` вычисляется через `numericReverse()` из `balanceAfter` — если `numericReverse` бросал исключение или `balanceAfter` был null, весь блок скрывался.
+
+**Исправления:**
+
+#### `apps/background-workers/src/services/draft-confirmation.service.ts`
+- `a.initial_balance` → `COALESCE(a.initial_balance, 0)` в SQL-запросе баланса
+- Добавлен `console.warn` когда `balanceBefore` остаётся null (для диагностики в Railway Logs):
+  - при ошибке `numericReverse` — логирует `balanceAfterRaw`, `debitAmountRaw`, `errorMessage`
+  - при `balanceAfterRaw = null` — логирует `accountId`, `draftId`, `workspaceId`
+
+#### `apps/background-workers/src/utils/screen-builder.ts` (buildConfirmedScreen)
+- Условие показа блока: `balanceBefore != null` → `balanceAfter != null` (достаточно знать текущий баланс)
+- Когда `balanceBefore` недоступен — показывается `Баланс: <b>4 000 RUB</b>` вместо математики
+- Когда `balanceBefore` доступен — показывается полная математика `Итог: 5 000 − 1 000 = <b>4 000 RUB</b>`
+- Аккаунт в строке `📁 Категория` теперь НЕ дублируется — он всегда идёт в блоке баланса снизу
+
+#### `apps/telegram-bot/src/utils/screen-builder.ts` (buildConfirmedScreen)
+- Те же изменения, что и в background-workers версии (используется для `formatRestoredSuccessCard`)
+- Добавлен fallback `Баланс: <b>X RUB</b>` когда только `balanceAfter` доступен
+
+**Результат — карточка «✅ Записано» теперь выглядит:**
+```
+✅ Записано
+
+<blockquote>💸 1 000 RUB
+юржан</blockquote>
+
+📁 Другое
+🕐 18:54, 16 мая
+
+🏦 Сбербанк · RUB
+Итог: 5 000 − 1 000 = 4 000 RUB
+```
+
+**Коммиты этой сессии:**
+
+| SHA | Сообщение |
+|---|---|
+| `cc84678` | `fix: always show account+balance block on confirmation card (balance after tx, not before)` |
+
+- **Файлы затронуты:** 3
+  - `apps/background-workers/src/services/draft-confirmation.service.ts`
+  - `apps/background-workers/src/utils/screen-builder.ts`
+  - `apps/telegram-bot/src/utils/screen-builder.ts`
+- **tsc:** 0 ошибок
+- **Pushed:** main ✅
+- **Railway:** auto-deploy triggered
+
+---
+
+### Состояние на момент закрытия сессии (2026-05-16 22:32 UTC+3)
+
+| Параметр | Значение |
+|---|---|
+| **PHASE** | Confirmation Card Balance Block Fix — DEPLOYED |
+| **LAST COMMIT** | `cc84678` pushed to main |
+| **BLOCKER** | None — Railway logs покажут `console.warn` если `balanceBefore` всё ещё null |
+| **NEXT ACTION** | Тест: создать транзакцию → подтвердить → убедиться что блок «🏦 Счёт · Итог» отображается |
+| **KNOWN ISSUE** | Если Railway logs показывают `balanceAfterRaw is null` — значит аккаунт не найден в запросе баланса (RLS или `WHERE`). Если `numericReverse failed` — значит неожиданный формат числа |

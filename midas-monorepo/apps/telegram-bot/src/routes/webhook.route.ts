@@ -107,7 +107,7 @@ import {
 } from '../services/telegram-api.js';
 import { redisConnection } from '../queues/redis.js';
 import { pool } from '@midas/database'; // Phase 1.39: DB persistence for preview msg
-import { searchCurrencies } from '../services/currencies.js';
+import { searchCurrencies, STABLECOINS, CRYPTO } from '../services/currencies.js';
 import {
   parseSettingsCallback,
   buildSettingsMainKeyboard,
@@ -3137,13 +3137,45 @@ Midas создан, чтобы сделать учет денег максима
               await reply.status(200).send({ ok: true });
               return;
             }
+            // Read old currency before patch to detect real change
+            const draftBefore = await getDraftFields(curResolved.workspaceId, curResolved.userId, curDraftId);
+            const oldCur = (draftBefore?.parsed_currency ?? '').toUpperCase();
             const patchRes = await patchDraftCurrency(
               curResolved.workspaceId, curResolved.userId, curDraftId, validCur,
             );
             if (patchRes.status === 'ready') {
-              // Refresh draft and restore confirm card
+              // Refresh draft and handle account/currency compatibility
               const refreshed = await getDraftFields(curResolved.workspaceId, curResolved.userId, curDraftId);
               if (refreshed) {
+                const newCur = validCur.toUpperCase();
+                const isNewStable = (STABLECOINS as readonly string[]).includes(newCur);
+                const isNewCrypto = !isNewStable && (CRYPTO as readonly string[]).includes(newCur);
+
+                // Only manipulate account if currency actually changed
+                if (newCur !== oldCur && refreshed.account_id) {
+                  const allAccts = await getWorkspaceAccountsWithBalances(
+                    curResolved.workspaceId, curResolved.userId, refreshed.parsed_intent, newCur,
+                  );
+                  const currentAcct = allAccts.find(a => a.id === refreshed.account_id);
+                  const accountMatches = !!currentAcct && currentAcct.currency.toUpperCase() === newCur;
+
+                  if (!accountMatches) {
+                    if (!isNewStable && !isNewCrypto) {
+                      // FIAT: if matching account found — switch to it (same-currency, clean preview).
+                      // If no matching account — keep current account as-is → cross-currency mode
+                      // activates automatically: preview shows «Указать сумму в {accountCurrency}».
+                      const fiatAcct = allAccts.find(a => a.currency.toUpperCase() === newCur);
+                      if (fiatAcct) {
+                        await patchDraftAccount(curResolved.workspaceId, curResolved.userId, curDraftId, fiatAcct.id);
+                      }
+                      // else: account stays linked → buildConfirmKeyboard shows xfx button
+                    } else {
+                      // CRYPTO/STABLE: delink — preview will block confirm and show «Выбрать счёт»
+                      await patchDraftAccount(curResolved.workspaceId, curResolved.userId, curDraftId, null);
+                    }
+                  }
+                }
+
                 const previewRes = await confirmPreviewFull(curResolved.workspaceId, curResolved.userId, curDraftId);
                 if (cq.message?.message_id) {
                   void editMessageText(chatId, String(cq.message.message_id), previewRes.text, confirmKbForDraft(curDraftId, previewRes));
@@ -3156,33 +3188,34 @@ Midas создан, чтобы сделать учет денег максима
               void upsertBotMessage(telegramUserId, chatId, '⏰ <b>Черновик истёк</b>\n\nОтправьте сообщение повторно.');
             }
           } else {
-            // Show currency picker
-            // Top-8 currencies as inline buttons
-            const currencyKeyboard = {
+            // Show currency picker — type-aware (fiat shows fiat, crypto shows crypto, etc.)
+            const curDraftPick = await getDraftFields(curResolved.workspaceId, curResolved.userId, curDraftId);
+            const curCode = (curDraftPick?.parsed_currency ?? 'USD').toUpperCase();
+            const isStablePick = (STABLECOINS as readonly string[]).includes(curCode);
+            const isCryptoPick = !isStablePick && (CRYPTO as readonly string[]).includes(curCode);
+
+            let pickerText: string;
+            let pickerCodes: string[];
+            if (isCryptoPick) {
+              pickerText = '₿ <b>Выбери криптовалюту:</b>';
+              pickerCodes = ['BTC', 'ETH', 'BNB', 'SOL', 'TON', 'TRX', 'XRP', 'DOGE'];
+            } else if (isStablePick) {
+              pickerText = '💵 <b>Выбери стейблкоин:</b>';
+              pickerCodes = ['USDT', 'USDC', 'DAI', 'BUSD', 'TUSD', 'FDUSD', 'PYUSD', 'USDE'];
+            } else {
+              // Fiat — only fiat currencies
+              pickerText = '🏦 <b>Выбери валюту:</b>';
+              pickerCodes = ['USD', 'EUR', 'RUB', 'GBP', 'UAH', 'PLN', 'CNY', 'CHF'];
+            }
+            // Byte: draft:setcur:USDC:{26} = 44 ✓ (USDC longest stable = 4 chars)
+            const pickerKeyboard = {
               inline_keyboard: [
-                [
-                  { text: 'USDT', callback_data: `draft:setcur:USDT:${curDraftId}` },
-                  { text: 'USD', callback_data: `draft:setcur:USD:${curDraftId}` },
-                  { text: 'EUR', callback_data: `draft:setcur:EUR:${curDraftId}` },
-                  { text: 'RUB', callback_data: `draft:setcur:RUB:${curDraftId}` },
-                ],
-                [
-                  { text: 'BTC', callback_data: `draft:setcur:BTC:${curDraftId}` },
-                  { text: 'ETH', callback_data: `draft:setcur:ETH:${curDraftId}` },
-                  { text: 'GBP', callback_data: `draft:setcur:GBP:${curDraftId}` },
-                  { text: 'CNY', callback_data: `draft:setcur:CNY:${curDraftId}` },
-                ],
-                [
-                  { text: '◀️ Назад', callback_data: `draft:back:${curDraftId}` },
-                ],
+                pickerCodes.slice(0, 4).map(c => ({ text: c, callback_data: `draft:setcur:${c}:${curDraftId}` })),
+                pickerCodes.slice(4, 8).map(c => ({ text: c, callback_data: `draft:setcur:${c}:${curDraftId}` })),
+                [{ text: '◀️ Назад', callback_data: `draft:back:${curDraftId}` }],
               ],
             };
-            // Byte: draft:setcur:USDT:{26} = 44 ✓
-            void upsertBotMessage(
-              telegramUserId, chatId,
-              '💱 <b>Выбери валюту:</b>',
-              currencyKeyboard,
-            );
+            void upsertBotMessage(telegramUserId, chatId, pickerText, pickerKeyboard);
           }
         } catch (err: unknown) {
           const errorClass = err instanceof Error ? err.constructor.name : 'UnknownError';
