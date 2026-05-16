@@ -2113,7 +2113,7 @@ function getCurrencySearchContext(
   }
   if (accountType === 'cash') return { label: 'валюты', examples: 'RUB, USD, EUR, KZT, GEL' };
   if (accountType === 'card') return { label: 'валюты', examples: 'RUB, USD, EUR, UAH, KZT' };
-  return { label: 'валюты', examples: 'USD, EUR, RUB, BTC, USDT' };
+  return { label: 'валюты', examples: 'USD, EUR, RUB' };
 }
 
 /**
@@ -2212,7 +2212,7 @@ export function buildCurrencySearchNoResultsText(
     `🔍 По запросу «${query}»\n` +
     nameBlock +
     `Ничего не нашли. Попробуйте иначе:\n` +
-    `<blockquote>Например: рубль, dollar, BTC, евро</blockquote>`
+    `<blockquote>Например: рубль, dollar, евро, yuan</blockquote>`
   );
 }
 

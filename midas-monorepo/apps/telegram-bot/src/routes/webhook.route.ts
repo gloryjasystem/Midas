@@ -206,12 +206,14 @@ import {
   buildDeleteConfirmKeyboard as buildBalanceDeleteConfirmKeyboard, // Phase 2.1
   buildCurrencyWarningKeyboard,      // Phase 2.1
   buildBalanceFiatCurrencyKeyboard,  // Phase 2.1
+  buildBalanceCryptoCurrencyKeyboard, // Phase B-9: crypto-specific change-currency picker
   buildAddCurrencyKeyboard,          // Phase B-2+: filtered add-currency picker
   formatAccountDetailText,           // Phase 2.1
   formatMultiCurrencyDetailText,     // Phase V2: multi-currency parent card text
   buildMultiCurrencyActionsKeyboard, // Phase V2: multi-currency parent card keyboard
   formatSubAccountDetailText,        // Phase V2: sub-account card text
   buildSubAccountActionsKeyboard,    // Phase V2: sub-account card keyboard
+  classifyAccountGroup,              // Phase B-9: fiat/crypto classification
   type MultiCurrencyEntry,           // Phase V2
   type BalanceAccountRow,            // Phase 2.1
 } from '../services/balance-keyboard.service.js';
@@ -3452,6 +3454,12 @@ Midas создан, чтобы сделать учет денег максима
             await upsertBotMessage(telegramUserId, chatId, '✏️ Введите новое название счёта:');
 
           } else if (blCmd.cmd === 'change_currency') {
+            // Phase B-9: fetch account type to show correct currency picker
+            const cvDetail = await getAccountDetail(blResolved.workspaceId, blResolved.userId, blCmd.accountId);
+            const cvGroup  = cvDetail ? classifyAccountGroup(cvDetail.name, cvDetail.currency, cvDetail.type) : 'bank';
+            const cvIsCrypto = cvGroup === 'crypto_exchange' || cvGroup === 'crypto_wallet';
+            const cvKeyboard = cvIsCrypto ? buildBalanceCryptoCurrencyKeyboard() : buildBalanceFiatCurrencyKeyboard();
+
             // Check if account has transactions — warn if so
             const txCount = await getAccountTxCount(blResolved.workspaceId, blResolved.userId, blCmd.accountId);
             if (txCount > 0) {
@@ -3462,22 +3470,24 @@ Midas создан, чтобы сделать учет денег максима
               );
             } else {
               // No transactions — show currency picker directly
-              await redisConnection.set(blKey, JSON.stringify({ action: 'currency', accountId: blCmd.accountId }), 'EX', 120);
-              await upsertBotMessage(
-                telegramUserId, chatId,
-                '💱 Выберите новую валюту:',
-                buildBalanceFiatCurrencyKeyboard(),
-              );
+              await redisConnection.set(blKey, JSON.stringify({
+                action: 'currency', accountId: blCmd.accountId,
+                accountType: cvDetail?.type, isCrypto: cvIsCrypto,
+              }), 'EX', 120);
+              await upsertBotMessage(telegramUserId, chatId, '💱 Выберите новую валюту:', cvKeyboard);
             }
 
           } else if (blCmd.cmd === 'change_currency_force') {
-            // User confirmed currency change despite having transactions
-            await redisConnection.set(blKey, JSON.stringify({ action: 'currency', accountId: blCmd.accountId }), 'EX', 120);
-            await upsertBotMessage(
-              telegramUserId, chatId,
-              '💱 Выберите новую валюту:',
-              buildBalanceFiatCurrencyKeyboard(),
-            );
+            // Phase B-9: same type-aware picker after user confirmed the change
+            const cvfDetail  = await getAccountDetail(blResolved.workspaceId, blResolved.userId, blCmd.accountId);
+            const cvfGroup   = cvfDetail ? classifyAccountGroup(cvfDetail.name, cvfDetail.currency, cvfDetail.type) : 'bank';
+            const cvfIsCrypto = cvfGroup === 'crypto_exchange' || cvfGroup === 'crypto_wallet';
+            const cvfKeyboard = cvfIsCrypto ? buildBalanceCryptoCurrencyKeyboard() : buildBalanceFiatCurrencyKeyboard();
+            await redisConnection.set(blKey, JSON.stringify({
+              action: 'currency', accountId: blCmd.accountId,
+              accountType: cvfDetail?.type, isCrypto: cvfIsCrypto,
+            }), 'EX', 120);
+            await upsertBotMessage(telegramUserId, chatId, '💱 Выберите новую валюту:', cvfKeyboard);
 
           } else if (blCmd.cmd === 'currency_set') {
             // User picked a currency from bl: picker
@@ -3527,13 +3537,15 @@ Midas создан, чтобы сделать учет денег максима
             }
 
           } else if (blCmd.cmd === 'currency_input') {
-            // Free-text currency input
+            // Phase B-9: Free-text currency input — context-aware prompt
             const rawState = await redisConnection.get(blKey);
             if (rawState) {
-              const state = JSON.parse(rawState) as { action: string; accountId: string };
+              const state = JSON.parse(rawState) as { action: string; accountId: string; isCrypto?: boolean };
+              const ciIsCrypto = state.isCrypto === true;
+              const ciExamples = ciIsCrypto ? 'USDT, BTC, ETH, SOL' : 'USD, EUR, GBP, KZT';
               state.action = 'currency_input';
               await redisConnection.set(blKey, JSON.stringify(state), 'EX', 120);
-              await upsertBotMessage(telegramUserId, chatId, '✏️ Введите код валюты (например: USD, BTC):');
+              await upsertBotMessage(telegramUserId, chatId, `✏️ Введите код валюты (например: ${ciExamples}):`);
             }
 
           } else if (blCmd.cmd === 'set_balance') {
@@ -3594,9 +3606,15 @@ Midas создан, чтобы сделать учет денег максима
             const usedCurrencies = await getChildAccountCurrencies(blResolved.workspaceId, blResolved.userId, blCmd.accountId);
             if (parentForPicker) usedCurrencies.add(parentForPicker.currency); // parent's own currency is already taken
 
+            // Phase B-9: classify type for downstream currency_input prompt
+            const acGroup = parentForPicker
+              ? classifyAccountGroup(parentForPicker.name, parentForPicker.currency, parentForPicker.type)
+              : 'bank';
+            const acIsCrypto = acGroup === 'crypto_exchange' || acGroup === 'crypto_wallet';
+
             await redisConnection.set(
               blKey,
-              JSON.stringify({ action: 'add_currency', accountId: blCmd.accountId }),
+              JSON.stringify({ action: 'add_currency', accountId: blCmd.accountId, isCrypto: acIsCrypto }),
               'EX', 300,
             );
 
@@ -4071,22 +4089,40 @@ Midas создан, чтобы сделать учет денег максима
         }
 
         if (blState.action === 'currency_input') {
-          // Free-text currency code
+          // Phase B-9: Free-text currency code — validate format then type-compatibility
           const code = userInput.toUpperCase().replace(/\s/g, '');
+          const ciStateTyped = blState as { action: string; accountId: string; isCrypto?: boolean; accountType?: string };
+          const ciIsCrypto  = ciStateTyped.isCrypto === true;
+          const ciExamples  = ciIsCrypto ? 'USDT, ETH, BTC, SOL' : 'USD, EUR, GBP, KZT';
+
           if (!/^[A-Z]{1,10}$/.test(code)) {
-            void upsertBotMessage(telegramUserId, chatId, '⚠️ Код валюты должен содержать 1–10 латинских букв (например: USD, BTC).');
+            // Format error — show context-aware example
+            void upsertBotMessage(
+              telegramUserId, chatId,
+              `⚠️ Код валюты должен содержать 1–10 латинских букв (например: ${ciExamples}).`,
+            );
           } else {
-            await changeAccountCurrency(blResolved.workspaceId, blResolved.userId, blState.accountId, code);
-            await redisConnection.del(blStateKey);
-            const detail = await getAccountDetail(blResolved.workspaceId, blResolved.userId, blState.accountId);
-            if (detail) {
-              // Phase LD++: fetch roles after currency change
-              const roles = await getAccountRoles(blResolved.workspaceId, blResolved.userId, blState.accountId);
-              void upsertBotMessage(
-                telegramUserId, chatId,
-                `✅ Валюта изменена на <b>${escapeHtml(code)}</b>.\n\n` + formatAccountDetailText(detail, roles),
-                buildAccountActionsKeyboard(blState.accountId, roles, detail.parent_account_id === null),
-              );
+            // Phase B-9: type-compatibility validation
+            const ciDetail = await getAccountDetail(blResolved.workspaceId, blResolved.userId, blState.accountId);
+            const ciType   = ciDetail?.type;
+            // Derive walletSubtype from type field if available (stored as type/subtype pair)
+            const validation = validateAccountCurrency(ciType, undefined, undefined, code);
+            if (!validation.valid) {
+              // Validator already has a user-friendly message — use it directly
+              void upsertBotMessage(telegramUserId, chatId, validation.errorMessage);
+            } else {
+              await changeAccountCurrency(blResolved.workspaceId, blResolved.userId, blState.accountId, code);
+              await redisConnection.del(blStateKey);
+              const detail = await getAccountDetail(blResolved.workspaceId, blResolved.userId, blState.accountId);
+              if (detail) {
+                // Phase LD++: fetch roles after currency change
+                const roles = await getAccountRoles(blResolved.workspaceId, blResolved.userId, blState.accountId);
+                void upsertBotMessage(
+                  telegramUserId, chatId,
+                  `✅ Валюта изменена на <b>${escapeHtml(code)}</b>.\n\n` + formatAccountDetailText(detail, roles),
+                  buildAccountActionsKeyboard(blState.accountId, roles, detail.parent_account_id === null),
+                );
+              }
             }
           }
           await reply.status(200).send({ ok: true });
