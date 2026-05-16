@@ -679,6 +679,8 @@ export const PROVIDER_ICONS: ReadonlyMap<string, string> = new Map([
   ['telegramwallet', '📲'], ['tonkeeper', '📲'], ['tonspace', '📲'],
   ['phoenix', '⚡'], ['breez', '⚡'], ['zeus', '⚡'], ['strike', '⚡'],
   ['yoomoney', '🟡'], ['qiwi', '🦃'], ['webmoney', '🟣'],
+  ['skrill', '📱'], ['neteller', '📱'], ['payoneer', '📱'],
+  ['payeer', '📱'], ['advcash', '📱'], ['volet', '📱'],
   ['visa', '💳'], ['mastercard', '💳'], ['mir', '💳'],
 ]);
 
@@ -1136,37 +1138,38 @@ export function buildFreeTextPromptKeyboard(
  * name/currency/balance come from createdAccount* state fields.
  */
 /**
- * Returns realistic {expense, income} example strings for a given currency.
+ * Returns realistic {expense, income, transfer} example strings for a given currency.
  * Used in all success/account-added screens and /help.
+ * Three examples are displayed comma-separated in a blockquote.
  */
-export function getCurrencyExamples(currency: string): { expense: string; income: string } {
+export function getCurrencyExamples(currency: string): { expense: string; income: string; transfer: string } {
   const cur = currency.toUpperCase();
   // Stablecoins
   if (['USDT','USDC','BUSD','DAI','TUSD'].includes(cur))
-    return { expense: `подписка 15 ${cur}`, income: `фриланс 500 ${cur}` };
+    return { expense: `подписка 15 ${cur}`, income: `фриланс 500 ${cur}`, transfer: `перевод 200 ${cur}` };
   // BTC
   if (cur === 'BTC')
-    return { expense: `комиссия 0.0005 ${cur}`, income: `продажа 0.1 ${cur}` };
+    return { expense: `комиссия 0.0005 ${cur}`, income: `продажа 0.1 ${cur}`, transfer: `вывод 0.05 ${cur}` };
   // ETH
   if (cur === 'ETH')
-    return { expense: `газ 0.003 ${cur}`, income: `продажа 0.5 ${cur}` };
+    return { expense: `газ 0.003 ${cur}`, income: `продажа 0.5 ${cur}`, transfer: `вывод 0.2 ${cur}` };
   // Other crypto
   if (['SOL','TON','BNB','XRP','TRX','LTC','DOGE','AVAX','NOT','DOGS'].includes(cur))
-    return { expense: `комиссия 0.01 ${cur}`, income: `продажа 5 ${cur}` };
+    return { expense: `комиссия 0.01 ${cur}`, income: `продажа 5 ${cur}`, transfer: `вывод 2 ${cur}` };
   // Fiat — всегда на русском
-  if (cur === 'RUB') return { expense: `кофе 350 ${cur}`,     income: `зарплата 95 000 ${cur}` };
-  if (cur === 'UAH') return { expense: `кофе 95 ${cur}`,      income: `зарплата 25 000 ${cur}` };
-  if (cur === 'KZT') return { expense: `кофе 2 500 ${cur}`,   income: `зарплата 450 000 ${cur}` };
-  if (cur === 'USD') return { expense: `кофе 4 ${cur}`,       income: `зарплата 3 500 ${cur}` };
-  if (cur === 'EUR') return { expense: `кофе 4 ${cur}`,       income: `зарплата 3 000 ${cur}` };
-  if (cur === 'GBP') return { expense: `кофе 3 ${cur}`,       income: `зарплата 3 000 ${cur}` };
-  if (cur === 'TRY') return { expense: `кофе 150 ${cur}`,     income: `зарплата 50 000 ${cur}` };
-  if (cur === 'CNY') return { expense: `кофе 30 ${cur}`,      income: `зарплата 8 000 ${cur}` };
-  if (cur === 'SGD') return { expense: `кофе 6 ${cur}`,       income: `зарплата 5 000 ${cur}` };
-  if (cur === 'AED') return { expense: `кофе 18 ${cur}`,      income: `зарплата 12 000 ${cur}` };
-  if (cur === 'GEL') return { expense: `кофе 12 ${cur}`,      income: `зарплата 3 000 ${cur}` };
+  if (cur === 'RUB') return { expense: `кофе 350 ${cur}`,     income: `зарплата 95 000 ${cur}`,  transfer: `перевод 5 000 ${cur}` };
+  if (cur === 'UAH') return { expense: `кофе 95 ${cur}`,      income: `зарплата 25 000 ${cur}`,  transfer: `перевод 2 000 ${cur}` };
+  if (cur === 'KZT') return { expense: `кофе 2 500 ${cur}`,   income: `зарплата 450 000 ${cur}`, transfer: `перевод 20 000 ${cur}` };
+  if (cur === 'USD') return { expense: `кофе 4 ${cur}`,       income: `зарплата 3 500 ${cur}`,   transfer: `перевод 200 ${cur}` };
+  if (cur === 'EUR') return { expense: `кофе 4 ${cur}`,       income: `зарплата 3 000 ${cur}`,   transfer: `перевод 200 ${cur}` };
+  if (cur === 'GBP') return { expense: `кофе 3 ${cur}`,       income: `зарплата 3 000 ${cur}`,   transfer: `перевод 150 ${cur}` };
+  if (cur === 'TRY') return { expense: `кофе 150 ${cur}`,     income: `зарплата 50 000 ${cur}`,  transfer: `перевод 5 000 ${cur}` };
+  if (cur === 'CNY') return { expense: `кофе 30 ${cur}`,      income: `зарплата 8 000 ${cur}`,   transfer: `перевод 500 ${cur}` };
+  if (cur === 'SGD') return { expense: `кофе 6 ${cur}`,       income: `зарплата 5 000 ${cur}`,   transfer: `перевод 300 ${cur}` };
+  if (cur === 'AED') return { expense: `кофе 18 ${cur}`,      income: `зарплата 12 000 ${cur}`,  transfer: `перевод 1 000 ${cur}` };
+  if (cur === 'GEL') return { expense: `кофе 12 ${cur}`,      income: `зарплата 3 000 ${cur}`,   transfer: `перевод 200 ${cur}` };
   // Fallback
-  return { expense: `расход 50 ${cur}`, income: `доход 500 ${cur}` };
+  return { expense: `расход 50 ${cur}`, income: `доход 500 ${cur}`, transfer: `перевод 100 ${cur}` };
 }
 
 export function buildSuccessScreenText(
@@ -1180,16 +1183,13 @@ export function buildSuccessScreenText(
   const balStr = balance
     ? `${balance}\u00a0${currency}`
     : (nameEndsWithCur ? '' : currency);
-  const roleLine = isDefault
-    ? '⭐ Основной  ·  Готов к работе'
-    : 'Готов к работе';
-  const { expense, income } = getCurrencyExamples(currency);
+  const roleLine = isDefault ? '⭐ Основной счёт' : '◦ Обычный счёт';
+  const { expense, income, transfer } = getCurrencyExamples(currency);
   return (
     `✅ <b>Счёт создан</b>\n\n` +
     `${icon} <b>${name}</b>${balStr ? `  ·  ${balStr}` : ''}\n` +
     `<i>${roleLine}</i>\n\n` +
-    `▸ ${expense}\n` +
-    `▸ ${income}\n\n` +
+    `<blockquote>Например: ${expense}, ${income}, ${transfer}</blockquote>\n\n` +
     `Пишите текстом или голосом — Midas распознает всё.`
   );
 }

@@ -510,13 +510,12 @@ function buildAccountAddedD4Text(
   const balStr = newBalance !== undefined
     ? `${newBalance} ${newCurrency}`
     : (newNameEndsCur ? '' : newCurrency);
-  const { expense, income } = getCurrencyExamples(newCurrency);
+  const { expense, income, transfer } = getCurrencyExamples(newCurrency);
   return (
     `✅ <b>Счёт добавлен</b>\n\n` +
     `${newIcon} <b>${newName}</b>${balStr ? `  ·  ${balStr}` : ''}\n` +
-    `<i>Обычный  ·  Готов к работе</i>\n\n` +
-    `▸ ${expense}\n` +
-    `▸ ${income}\n\n` +
+    `<i>◦ Обычный счёт</i>\n\n` +
+    `<blockquote>Например: ${expense}, ${income}, ${transfer}</blockquote>\n\n` +
     `Пишите текстом или голосом — Midas распознает всё.`
   );
 }
