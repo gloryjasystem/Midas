@@ -409,25 +409,47 @@ export function buildBalanceCryptoCurrencyKeyboard(): InlineKeyboardMarkup {
 /**
  * Build the "add currency" picker for multi-currency accounts.
  * Phase B-2+: Filters currencies already used (parent + children).
- * Shows top mixed preset with flag emojis.
+ * Phase B-9: Shows only FIAT presets for bank/cash accounts,
+ *             only CRYPTO presets for crypto_exchange/crypto_wallet accounts.
  *
- * @param parentAccountId - ULID of the parent account (for back navigation)
- * @param usedCurrencies  - Currencies already present (to exclude from picker)
+ * @param parentAccountId   - ULID of the parent account (for back navigation)
+ * @param usedCurrencies    - Currencies already present (to exclude from picker)
+ * @param parentCurrency    - Parent account's own currency (used for classification)
+ * @param parentName        - Parent account name (used for classification)
+ * @param parentType        - Parent account type (used for classification)
  */
 export function buildAddCurrencyKeyboard(
   parentAccountId: string,
   usedCurrencies: ReadonlySet<string>,
+  parentCurrency?: string,
+  parentName?: string,
+  parentType?: string,
 ): InlineKeyboardMarkup {
-  const MIXED_PRESETS = [
-    'USD', 'EUR', 'RUB', 'UAH', 'GBP', 'PLN',
-    'CHF', 'KZT', 'AED', 'USDT', 'BTC', 'ETH',
+  // ── Classify parent to decide which preset list to show ──────
+  const group = (parentCurrency && parentName && parentType)
+    ? classifyAccountGroup(parentName, parentCurrency, parentType)
+    : 'bank';
+
+  const isCrypto = group === 'crypto_exchange' || group === 'crypto_wallet';
+
+  const FIAT_PRESETS = [
+    'USD', 'EUR', 'UAH', 'GBP', 'PLN',
+    'CHF', 'KZT', 'AED', 'GEL', 'TRY', 'BYN', 'CNY',
   ] as const;
 
-  const available = MIXED_PRESETS.filter((c) => !usedCurrencies.has(c));
+  const CRYPTO_PRESETS = [
+    'USDT', 'BTC', 'ETH', 'BNB', 'SOL',
+    'TON', 'USDC', 'XRP', 'TRX', 'DOGE',
+  ] as const;
 
-  // Up to 3 rows of 3
+  // For bank/cash — fiat only. For crypto — crypto only.
+  const PRESETS: readonly string[] = isCrypto ? CRYPTO_PRESETS : FIAT_PRESETS;
+
+  const available = PRESETS.filter((c) => !usedCurrencies.has(c));
+
+  // Up to 4 rows of 3 (crypto list is longer)
   const rows: { text: string; callback_data: string }[][] = [];
-  for (let i = 0; i < available.length && rows.length < 3; i += 3) {
+  for (let i = 0; i < available.length && rows.length < 4; i += 3) {
     const row = available.slice(i, i + 3).map((code) => ({
       text: `${getCurrencyFlag(code)} ${code}`,
       callback_data: `bl:cs:${code}`,

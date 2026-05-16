@@ -3608,7 +3608,13 @@ Midas создан, чтобы сделать учет денег максима
             await upsertBotMessage(
               telegramUserId, chatId,
               pickerHeader,
-              buildAddCurrencyKeyboard(blCmd.accountId, usedCurrencies),
+              buildAddCurrencyKeyboard(
+                blCmd.accountId,
+                usedCurrencies,
+                parentForPicker?.currency,
+                parentForPicker?.name,
+                parentForPicker?.type,
+              ),
             );
 
           // ── Phase B-2+: skip balance → create child with 0 ──────
