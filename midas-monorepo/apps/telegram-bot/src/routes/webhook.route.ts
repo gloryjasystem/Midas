@@ -250,6 +250,7 @@ import {
   validateCurrencyCode,              // Phase 1.35
   patchDraftAccount,                 // Phase 2.4 PR9: delink (null) / relink account on draft
   patchDraftCategoryHint,            // Phase 2.5: smart category detector
+  updateDraftCurrentScreen,          // Phase 2.6: keep current_screen in sync for reminder mirroring
 } from '../services/clarification.service.js';
 import { detectCategoryFromItem } from '../services/item-category-detector.service.js'; // Phase 2.5
 import { validateAccountCurrency } from '../services/account-currency-validator.service.js'; // Phase 2.5
@@ -1555,6 +1556,10 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
                 const previewRes = await confirmPreviewFull(iaResolved.workspaceId, iaResolved.userId, iaCmd.draftId);
                 void editMessageText(chatId, iaMsgId, previewRes.text, confirmKbForDraft(iaCmd.draftId, previewRes));
                 try { await redisConnection.set(`midas:preview:${iaCmd.draftId}`, iaMsgId, 'EX', 3600); } catch { /* non-fatal */ }
+                // Phase 2.6: track current_screen for reminder mirroring
+                // screen1b = cross-currency with no debit amount yet; screen2 = ready to confirm
+                const newScreen = previewRes.isCrossCurrency && !previewRes.hasCrossAmount ? 'screen1b' : 'screen2';
+                void updateDraftCurrentScreen(iaResolved.workspaceId, iaResolved.userId, iaCmd.draftId, newScreen).catch(() => {});
               }
               request.log.info({ msg: '[midas:bot:webhook] ia:pk: account picked', workspaceId: iaResolved.workspaceId });
             }
@@ -1602,6 +1607,8 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
                 buildAccountPickerForDraft(iaCmd.draftId, fullPickerEntries, null),
               );
             }
+            // Phase 2.6: account delinked → user is back to account picker screen
+            void updateDraftCurrentScreen(iaResolved.workspaceId, iaResolved.userId, iaCmd.draftId, 'screen1').catch(() => {});
             request.log.info({ msg: '[midas:bot:webhook] ia:delink: account delinked → full picker shown', workspaceId: iaResolved.workspaceId });
 
           // ── Phase 2.4 PR13: ia:back — user tapped "◀️ Назад" on account picker screen ────
@@ -4935,6 +4942,8 @@ Midas создан, чтобы сделать учет денег максима
                 const previewRes = await confirmPreviewFull(xfxResolved.workspaceId, xfxResolved.userId, xfxDraftId);
                 void upsertBotMessage(telegramUserId, chatId, previewRes.text, confirmKbForDraft(xfxDraftId, previewRes));
               }
+              // Phase 2.6: debit amount entered → draft is now fully ready to confirm
+              void updateDraftCurrentScreen(xfxResolved.workspaceId, xfxResolved.userId, xfxDraftId, 'screen2').catch(() => {});
 
               request.log.info({ msg: '[midas:bot:webhook] xfx: debit amount saved', workspaceId: xfxResolved.workspaceId });
               await reply.status(200).send({ ok: true });

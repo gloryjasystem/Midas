@@ -584,6 +584,54 @@ export async function patchDraftDebitAmount(
 // patchDraftCategoryHint — Phase 2.5 Smart Category Detector
 // ─────────────────────────────────────────────────────────────
 
+// ─────────────────────────────────────────────────────────────
+// updateDraftCurrentScreen — Phase 2.6 Reminder Screen Mirror
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Lightweight update of current_screen on a draft.
+ *
+ * Called after every screen transition to keep the DB in sync:
+ *   - After setDraftAccountId()  (account selected)       → screen2 or screen1b
+ *   - After patchDraftDebitAmount() (cross-amount entered) → screen2
+ *   - After patchDraftAccount(null) (account delinked)     → screen1
+ *
+ * The value drives draft-expiration.worker.ts reminder rendering:
+ * the worker mirrors the exact buttons the user sees at the moment of inactivity.
+ *
+ * Non-throwing (best-effort) — a missed update only degrades the reminder UX,
+ * never the confirmation flow. Log only on unexpected error.
+ *
+ * @param draftId      — draft ULID
+ * @param workspaceId  — workspace ULID (for RLS-scoped UPDATE)
+ * @param screen       — new screen value
+ *
+ * SEC-12: No user PII. Only system-controlled enum value stored.
+ * SEC-03: withTenantTransaction enforces RLS.
+ */
+export async function updateDraftCurrentScreen(
+  workspaceId: string,
+  userId: string,
+  draftId: string,
+  screen: 'screen1' | 'screen1b' | 'screen2',
+): Promise<void> {
+  try {
+    await withTenantTransaction(workspaceId, userId, async (client) => {
+      await client.query(
+        `UPDATE transaction_drafts
+         SET current_screen = $1, updated_at = NOW()
+         WHERE id = $2
+           AND workspace_id = $3
+           AND status IN ('pending_user', 'needs_clarification')
+           AND expires_at > NOW()`,
+        [screen, draftId, workspaceId],
+      );
+    });
+  } catch {
+    // Non-fatal — reminder will fall back to 'screen1' (safe default).
+  }
+}
+
 /**
  * Patch parsed_category_hint on a draft with a detector-resolved category name.
  *

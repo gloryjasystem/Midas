@@ -27,6 +27,7 @@ import { markReminderSent } from '../services/draft.service.js';
 import {
   buildExpiredDraftScreen,
   buildReminderScreen,
+  buildConfirmKeyboard,
 } from '../utils/screen-builder.js';
 import { getWorkspaceAccountsForPicker, type WorkspaceAccountEntry } from '../services/draft.service.js';
 import { ulid } from 'ulid';
@@ -170,30 +171,13 @@ async function processExpiration(job: Job): Promise<void> {
 
     const alertId = ulid();
 
-    // Phase 2.5 (revised): Reminder ALWAYS shows the account picker.
-    // UX goal: one tap on an account = select + confirm.
-    // This is simpler and more action-oriented than showing a "Confirm" button.
-    // Callbacks ia:pk:{accountId}:{draftId} already handle both
-    // "set account" and "rebuild confirm card" in the webhook route.
-    let pickerAccounts: WorkspaceAccountEntry[] = [];
-    try {
-      const allAccounts = await getWorkspaceAccountsForPicker(draft.workspaceId);
-      const txCur = draft.parsedCurrency;
-      pickerAccounts = txCur
-        ? filterPickerAccounts(allAccounts, txCur)
-        : allAccounts;
-    } catch { /* non-fatal: fall back to empty picker */ }
-
-    // Build picker inline keyboard
-    const intent = draft.parsedIntent;
-    const pickerHeader = (intent === 'income' || intent === 'debt_received')
-      ? '\n\n\uD83C\uDFE6 <b>\u041D\u0430 \u043A\u0430\u043A\u043E\u0439 \u0441\u0447\u0451\u0442 \u0437\u0430\u0447\u0438\u0441\u043B\u0438\u0442\u044C?</b>'
-      : '\n\n\uD83C\uDFE6 <b>\u0421 \u043A\u0430\u043A\u043E\u0433\u043e \u0441\u0447\u0451\u0442\u0430 \u0441\u043F\u0438\u0441\u0430\u0442\u044C?</b>';
-
+    // Phase 2.6 — Screen Mirror: render the reminder to match the current screen.
+    // currentScreen is read from DB (set by webhook at each transition) so the
+    // reminder mirrors exactly what the user sees at the moment of inactivity.
     let reminderKeyboard: object;
     let reminderMessage: string;
 
-    const reminderBase = buildReminderScreen({
+    const reminderHeader = buildReminderScreen({
       parsedIntent: draft.parsedIntent,
       parsedAmount: draft.parsedAmount,
       parsedCurrency: draft.parsedCurrency,
@@ -201,23 +185,85 @@ async function processExpiration(job: Job): Promise<void> {
       itemName: draft.itemName,
     });
 
-    if (pickerAccounts.length > 0) {
-      const pickerRows = pickerAccounts.slice(0, 8).map((acc) => {
-        const balDisplay = acc.balance.replace(/\.?0+$/, '') || '0';
-        return [{
-          text: `\uD83C\uDFE6 ${acc.name} \u00B7 ${balDisplay} ${acc.currency}`,
-          callback_data: `ia:pk:${acc.id}:${draft.draftId}`,
-        }];
-      });
-      // Cancel button — always last
-      pickerRows.push([{ text: '\u2716\uFE0F \u041E\u0442\u043C\u0435\u043D\u0430', callback_data: `ia:cancel:${draft.draftId}` }]);
+    switch (draft.currentScreen) {
+      // ── Screen 2: Account already selected + cross-amount entered (or same-currency).
+      // Mirror: ✅ Подтвердить | 🔄 Сменить счёт: {name} | ✏️ Изменить | ✖️ Отмена
+      case 'screen2': {
+        const acct = draft.accountId
+          ? { id: draft.accountId, name: draft.accountName ?? '', currency: '' }
+          : null;
+        const kb = buildConfirmKeyboard(
+          draft.draftId,
+          acct,
+          // xfx.hasCrossAmount=true: debit amount is already entered → Подтвердить not blocked
+          acct ? { hasCrossAmount: true } : null,
+        );
+        reminderKeyboard = kb;
+        reminderMessage = reminderHeader;
+        break;
+      }
 
-      reminderKeyboard = { inline_keyboard: pickerRows };
-      reminderMessage = reminderBase + pickerHeader;
-    } else {
-      // No accounts in workspace: fallback to plain cancel button
-      reminderKeyboard = { inline_keyboard: [[{ text: '\u2716\uFE0F \u041E\u0442\u043C\u0435\u043D\u0430', callback_data: `ia:cancel:${draft.draftId}` }]] };
-      reminderMessage = reminderBase;
+      // ── Screen 1b: Account selected but cross-currency debit amount not entered yet.
+      // Mirror: 🔄 Сменить счёт: {name} | ✏️ Указать сумму в {cur} | ✏️ Изменить | ✖️ Отмена
+      // Note: Confirm button is NOT shown (blocked by hasCrossAmount=false), matching the live card.
+      case 'screen1b': {
+        const acctB = draft.accountId
+          ? { id: draft.accountId, name: draft.accountName ?? '', currency: draft.parsedCurrency ?? '' }
+          : null;
+        const kbB = buildConfirmKeyboard(
+          draft.draftId,
+          acctB,
+          acctB ? { hasCrossAmount: false } : null,
+        );
+        reminderKeyboard = kbB;
+        reminderMessage = reminderHeader;
+        break;
+      }
+
+      // ── Screen 1 (default): No account linked — show account picker.
+      // Mirror: [🏦 Acc · bal cur] buttons + ✖️ Отмена
+      case 'screen1':
+      default: {
+        let pickerAccounts: WorkspaceAccountEntry[] = [];
+        try {
+          const allAccounts = await getWorkspaceAccountsForPicker(draft.workspaceId);
+          const txCur = draft.parsedCurrency;
+          pickerAccounts = txCur
+            ? filterPickerAccounts(allAccounts, txCur)
+            : allAccounts;
+        } catch { /* non-fatal: fall back to empty picker */ }
+
+        const intent = draft.parsedIntent;
+        const pickerHeader = (intent === 'income' || intent === 'debt_received')
+          ? '\n\n\uD83C\uDFE6 <b>\u041D\u0430 \u043A\u0430\u043A\u043E\u0439 \u0441\u0447\u0451\u0442 \u0437\u0430\u0447\u0438\u0441\u043B\u0438\u0442\u044C?</b>'
+          : '\n\n\uD83C\uDFE6 <b>\u0421 \u043A\u0430\u043A\u043E\u0433\u043e \u0441\u0447\u0451\u0442\u0430 \u0441\u043F\u0438\u0441\u0430\u0442\u044C?</b>';
+
+        if (pickerAccounts.length > 0) {
+          const pickerRows = pickerAccounts.slice(0, 8).map((acc) => {
+            const balDisplay = acc.balance.replace(/\.?0+$/, '') || '0';
+            return [{
+              text: `\uD83C\uDFE6 ${acc.name} \u00B7 ${balDisplay} ${acc.currency}`,
+              callback_data: `ia:pk:${acc.id}:${draft.draftId}`,
+            }];
+          });
+          pickerRows.push([{ text: '\u2716\uFE0F \u041E\u0442\u043C\u0435\u043D\u0430', callback_data: `ia:cancel:${draft.draftId}` }]);
+          reminderKeyboard = { inline_keyboard: pickerRows };
+          reminderMessage = reminderHeader + pickerHeader;
+        } else {
+          reminderKeyboard = { inline_keyboard: [[{ text: '\u2716\uFE0F \u041E\u0442\u043C\u0435\u043D\u0430', callback_data: `ia:cancel:${draft.draftId}` }]] };
+          reminderMessage = reminderHeader;
+        }
+        break;
+      }
+    }
+
+    // Phase 2.6 — Chat hygiene: delete old preview card BEFORE sending reminder.
+    // deleteMessageId is passed in the notification payload; notifications.worker.ts
+    // calls deleteTelegramMessage() before sending the new card.
+    // Clears midas:preview Redis key so T+60 expire edit doesn't warn on missing msg.
+    const deleteOldPreview = draft.previewMessageId ?? undefined;
+    if (deleteOldPreview) {
+      void redisConnection.del(`midas:preview:${draft.draftId}`).catch(() => {});
     }
 
     await notificationsQueue.add(
@@ -230,6 +276,8 @@ async function processExpiration(job: Job): Promise<void> {
         message: reminderMessage,
         inlineKeyboardJson: JSON.stringify(reminderKeyboard),
         cacheStoreKey: `midas:reminder:${draft.draftId}`,
+        // Phase 2.6: delete old preview card before sending this reminder
+        deleteMessageId: deleteOldPreview,
       },
       { jobId: IdempotencyKeyBuilder.notification(draft.workspaceId, alertId) },
     );

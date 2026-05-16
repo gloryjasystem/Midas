@@ -53,6 +53,10 @@ export interface ReminderDraft {
   accountId: string | null;
   /** Phase 2.5: cross-currency debit amount (null = same currency) */
   accountDebitAmount: string | null;
+  /** Phase 2.6: which screen the draft is currently on — used to mirror buttons in reminder */
+  currentScreen: 'screen1' | 'screen1b' | 'screen2';
+  /** Phase 2.6: display name of linked account (from account_sources JOIN) */
+  accountName: string | null;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -128,12 +132,14 @@ export async function findDraftsNeedingReminder(leadSeconds: number = 600): Prom
     parsed_category_hint: string | null;
     account_id: string | null;
     account_debit_amount: string | null;
+    current_screen: string | null;
+    account_name: string | null;
   }>(
-    // Phase 2.5: also select account_id + account_debit_amount for keyboard building
+    // Phase 2.6: also select current_screen + account_name for reminder mirroring
     `SELECT d.draft_id, d.workspace_id, d.preview_message_id, d.preview_chat_id,
             d.parsed_intent, d.parsed_amount, d.parsed_currency,
             d.item_name, d.parsed_category_hint,
-            d.account_id, d.account_debit_amount::TEXT AS account_debit_amount
+            d.account_id, d.account_debit_amount, d.current_screen, d.account_name
      FROM system_find_drafts_needing_reminder($1) d`,
     [leadSeconds],
   );
@@ -150,5 +156,7 @@ export async function findDraftsNeedingReminder(leadSeconds: number = 600): Prom
     parsedCategoryHint: r.parsed_category_hint,
     accountId: r.account_id,
     accountDebitAmount: r.account_debit_amount,
+    currentScreen: (r.current_screen ?? 'screen1') as ReminderDraft['currentScreen'],
+    accountName: r.account_name,
   }));
 }
