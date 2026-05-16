@@ -3448,6 +3448,21 @@ Midas создан, чтобы сделать учет денег максима
               );
             }
 
+          } else if (blCmd.cmd === 'view_account_single') {
+            // Phase B-9: Open single-account settings for parent from multi-currency card.
+            // Triggered by bl:vs:{id} — renders single card regardless of child_count.
+            const detailSingle = await getAccountDetail(blResolved.workspaceId, blResolved.userId, blCmd.accountId);
+            if (detailSingle) {
+              const rolesSingle = await getAccountRoles(blResolved.workspaceId, blResolved.userId, blCmd.accountId);
+              await upsertBotMessage(
+                telegramUserId, chatId,
+                formatAccountDetailText(detailSingle, rolesSingle),
+                buildAccountActionsKeyboard(blCmd.accountId, rolesSingle, detailSingle.parent_account_id === null),
+              );
+            } else {
+              await upsertBotMessage(telegramUserId, chatId, '⚠️ Счёт не найден.');
+            }
+
           } else if (blCmd.cmd === 'rename') {
             // Set text intercept for rename
             await redisConnection.set(blKey, JSON.stringify({ action: 'rename', accountId: blCmd.accountId }), 'EX', 120);
@@ -3650,13 +3665,40 @@ Midas создан, чтобы сделать учет денег максима
                 const detailSkip = await getAccountDetail(blResolved.workspaceId, blResolved.userId, balState.accountId);
                 if (detailSkip) {
                   const prefixSkip = childResultSkip.status === 'duplicate'
-                    ? `\u26A0\uFE0F \u0421\u0447\u0451\u0442 <b>${escapeHtml(balState.childName)}</b> \u0443\u0436\u0435 \u0441\u0443\u0449\u0435\u0441\u0442\u0432\u0443\u0435\u0442.\n\n`
-                    : `\u2705 \u0421\u0447\u0451\u0442 <b>${escapeHtml(balState.childName)}</b> \u0434\u043e\u0431\u0430\u0432\u043b\u0435\u043d \u0441 \u043d\u0443\u043b\u0435\u0432\u044b\u043c \u0431\u0430\u043b\u0430\u043d\u0441\u043e\u043c.\n\n`;
-                  await upsertBotMessage(
-                    telegramUserId, chatId,
-                    prefixSkip + formatAccountDetailText(detailSkip, rolesSkip),
-                    buildAccountActionsKeyboard(balState.accountId, rolesSkip, detailSkip.parent_account_id === null),
-                  );
+                    ? `\u26A0\uFE0F \u0421\u0447\u0451\u0442 <b>${escapeHtml(balState.childName)}</b> \u0443\u0436\u0435 \u0441\u0443\u0449\u0435\u0441\u0442\u0432\u0443\u0435\u0442.`
+                    : `\u2705 \u0421\u0447\u0451\u0442 <b>${escapeHtml(balState.childName)}</b> \u0434\u043e\u0431\u0430\u0432\u043b\u0435\u043d \u0441 \u043d\u0443\u043b\u0435\u0432\u044b\u043c \u0431\u0430\u043b\u0430\u043d\u0441\u043e\u043c.`;
+                  if (detailSkip.child_count > 0) {
+                    // Phase B-9: parent now has children — show multi-currency card (Screenshot 2)
+                    const childrenSkip = await getChildAccountDetails(blResolved.workspaceId, blResolved.userId, balState.accountId);
+                    const flagsSkip: Record<string, string> = {
+                      USD: '\uD83C\uDDFA\uD83C\uDDF8', EUR: '\uD83C\uDDEA\uD83C\uDDFA', RUB: '\uD83C\uDDF7\uD83C\uDDFA',
+                      UAH: '\uD83C\uDDFA\uD83C\uDDE6', GBP: '\uD83C\uDDEC\uD83C\uDDE7', PLN: '\uD83C\uDDF5\uD83C\uDDF1',
+                      KZT: '\uD83C\uDDF0\uD83C\uDDFF', GEL: '\uD83C\uDDEC\uD83C\uDDEA', TRY: '\uD83C\uDDF9\uD83C\uDDF7',
+                      CNY: '\uD83C\uDDE8\uD83C\uDDF3', SGD: '\uD83C\uDDF8\uD83C\uDDEC', AED: '\uD83C\uDDE6\uD83C\uDDEA',
+                      BYN: '\uD83C\uDDE7\uD83C\uDDFE', CHF: '\uD83C\uDDE8\uD83C\uDDED', BTC: '\u20BF',
+                      ETH: '\u27E0', USDT: '\uD83D\uDCB5', USDC: '\uD83D\uDCB5',
+                    };
+                    const getFlagSkip = (code: string) => flagsSkip[code] ?? '\uD83D\uDCB1';
+                    const allCurrenciesSkip: import('../services/balance-keyboard.service.js').MultiCurrencyEntry[] = [
+                      { subAccountId: balState.accountId, code: detailSkip.currency, balance: detailSkip.balance, flag: getFlagSkip(detailSkip.currency) },
+                      ...childrenSkip.map((c) => ({ subAccountId: c.subAccountId, code: c.currency, balance: c.balance, flag: getFlagSkip(c.currency) })),
+                    ];
+                    const typeLabelsSkip: Record<string, string> = { manual: '\u0420\u0443\u0447\u043D\u043E\u0439 \u0432\u0432\u043E\u0434', crypto_read_only: '\u0422\u043E\u043B\u044C\u043A\u043E \u0447\u0442\u0435\u043D\u0438\u0435', bank_sync: '\u0411\u0430\u043D\u043A\u043E\u0432\u0441\u043A\u0430\u044F \u0441\u0438\u043D\u0445\u0440.' };
+                    const typeLabelSkip = typeLabelsSkip[detailSkip.type] ?? detailSkip.type;
+                    const createdSkip = (() => { try { const d = new Date(detailSkip.created_at); return `${String(d.getDate()).padStart(2,'0')}.${String(d.getMonth()+1).padStart(2,'0')}.${d.getFullYear()}`; } catch { return detailSkip.created_at; } })();
+                    await upsertBotMessage(
+                      telegramUserId, chatId,
+                      prefixSkip + '\n\n' + formatMultiCurrencyDetailText(detailSkip.name, allCurrenciesSkip, typeLabelSkip, createdSkip, detailSkip.type, detailSkip.currency),
+                      buildMultiCurrencyActionsKeyboard(balState.accountId, allCurrenciesSkip),
+                    );
+                  } else {
+                    // Fallback: single-currency account
+                    await upsertBotMessage(
+                      telegramUserId, chatId,
+                      prefixSkip + '\n\n' + formatAccountDetailText(detailSkip, rolesSkip),
+                      buildAccountActionsKeyboard(balState.accountId, rolesSkip, detailSkip.parent_account_id === null),
+                    );
+                  }
                 }
               } else {
                 await answerCallbackQuery(cq.id, '\u26A0\uFE0F \u0421\u0435\u0441\u0441\u0438\u044f \u0438\u0441\u0442\u0435\u043a\u043b\u0430, \u043d\u0430\u0447\u043d\u0438\u0442\u0435 \u0437\u0430\u043d\u043e\u0432\u043e');
@@ -4163,13 +4205,38 @@ Midas создан, чтобы сделать учет денег максима
             const detailBal = await getAccountDetail(blResolved.workspaceId, blResolved.userId, blState.accountId);
             if (detailBal) {
               const prefixBal = childResultBal.status === 'duplicate'
-                ? `⚠️ Счёт <b>${escapeHtml(childName)}</b> уже существует.\n\n`
-                : `✅ Счёт <b>${escapeHtml(childName)}</b> добавлен с балансом ${amountStr}\u00a0${escapeHtml(currency)}.\n\n`;
-              void upsertBotMessage(
-                telegramUserId, chatId,
-                prefixBal + formatAccountDetailText(detailBal, rolesBal),
-                buildAccountActionsKeyboard(blState.accountId, rolesBal, detailBal.parent_account_id === null),
-              );
+                ? `⚠️ Счёт <b>${escapeHtml(childName)}</b> уже существует.`
+                : `✅ Счёт <b>${escapeHtml(childName)}</b> добавлен с балансом ${amountStr}\u00a0${escapeHtml(currency)}.`;
+              if (detailBal.child_count > 0) {
+                // Phase B-9: parent now has children — show multi-currency card (Screenshot 2)
+                const childrenBal = await getChildAccountDetails(blResolved.workspaceId, blResolved.userId, blState.accountId);
+                const flagsBal: Record<string, string> = {
+                  USD: '🇺🇸', EUR: '🇪🇺', RUB: '🇷🇺', UAH: '🇺🇦', GBP: '🇬🇧',
+                  PLN: '🇵🇱', KZT: '🇰🇿', GEL: '🇬🇪', TRY: '🇹🇷', CNY: '🇨🇳',
+                  SGD: '🇸🇬', AED: '🇦🇪', BYN: '🇧🇾', CHF: '🇨🇭',
+                  BTC: '₿', ETH: '⟠', USDT: '💵', USDC: '💵',
+                };
+                const getFlagBal = (code: string) => flagsBal[code] ?? '💱';
+                const allCurrenciesBal: import('../services/balance-keyboard.service.js').MultiCurrencyEntry[] = [
+                  { subAccountId: blState.accountId, code: detailBal.currency, balance: detailBal.balance, flag: getFlagBal(detailBal.currency) },
+                  ...childrenBal.map((c) => ({ subAccountId: c.subAccountId, code: c.currency, balance: c.balance, flag: getFlagBal(c.currency) })),
+                ];
+                const typeLabelsBal: Record<string, string> = { manual: 'Ручной ввод', crypto_read_only: 'Только чтение', bank_sync: 'Банковская синхр.' };
+                const typeLabelBal = typeLabelsBal[detailBal.type] ?? detailBal.type;
+                const createdBal = (() => { try { const d = new Date(detailBal.created_at); return `${String(d.getDate()).padStart(2,'0')}.${String(d.getMonth()+1).padStart(2,'0')}.${d.getFullYear()}`; } catch { return detailBal.created_at; } })();
+                void upsertBotMessage(
+                  telegramUserId, chatId,
+                  prefixBal + '\n\n' + formatMultiCurrencyDetailText(detailBal.name, allCurrenciesBal, typeLabelBal, createdBal, detailBal.type, detailBal.currency),
+                  buildMultiCurrencyActionsKeyboard(blState.accountId, allCurrenciesBal),
+                );
+              } else {
+                // Fallback: single-currency account
+                void upsertBotMessage(
+                  telegramUserId, chatId,
+                  prefixBal + '\n\n' + formatAccountDetailText(detailBal, rolesBal),
+                  buildAccountActionsKeyboard(blState.accountId, rolesBal, detailBal.parent_account_id === null),
+                );
+              }
             }
           }
           await reply.status(200).send({ ok: true });

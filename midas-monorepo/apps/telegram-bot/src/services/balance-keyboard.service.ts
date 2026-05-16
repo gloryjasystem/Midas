@@ -94,7 +94,10 @@ export type BalanceCallbackCmd =
   // Phase B-2+: skip initial balance input when adding child account
   | { cmd: 'add_currency_skip_bal'; accountId: string }
   // Phase LD++: default account role toggles (cyclical)
-  | { cmd: 'set_role'; role: 'none' | 'expense' | 'income' | 'main'; accountId: string };
+  | { cmd: 'set_role'; role: 'none' | 'expense' | 'income' | 'main'; accountId: string }
+  // Phase B-9: open single-account settings for parent account from multi-card (fixes recursive loop)
+  | { cmd: 'view_account_single'; accountId: string };
+
 
 // ─────────────────────────────────────────────────────────────
 // Parser — SEC-01 allowlist
@@ -157,7 +160,9 @@ export function parseBalanceCallback(data: string): BalanceCallbackCmd | null {
   const accountId = parts[2] ?? '';
   if (accountId.length === 0) return null;
 
-  if (sub === 'v') return { cmd: 'view_account', accountId };
+  if (sub === 'v')  return { cmd: 'view_account',        accountId };
+  if (sub === 'vs') return { cmd: 'view_account_single', accountId };
+
   if (sub === 'rn') return { cmd: 'rename', accountId };
   if (sub === 'cv') return { cmd: 'change_currency', accountId };
   if (sub === 'cvf') return { cmd: 'change_currency_force', accountId };
@@ -615,9 +620,13 @@ export function buildMultiCurrencyActionsKeyboard(
 ): InlineKeyboardMarkup {
   return {
     inline_keyboard: [
-      ...currencies.map((c) => [{
+      ...currencies.map((c, idx) => [{
         text: `${c.flag} ${c.code} · ${formatBalanceShort(c.balance)}\u00a0${multiSym(c.code)}`,
-        callback_data: `bl:v:${c.subAccountId}`,
+        // idx=0 — parent currency: open single-settings (bl:vs) to avoid recursive loop back to multi-card
+        // idx>0 — child currencies: open sub-account card (bl:v)
+        callback_data: idx === 0
+          ? `bl:vs:${c.subAccountId}`
+          : `bl:v:${c.subAccountId}`,
       }]),
       [{ text: '➕ Добавить валюту', callback_data: `bl:ac:${parentAccountId}` }],
       [{ text: '✏️ Переименовать',   callback_data: `bl:rn:${parentAccountId}` }],
