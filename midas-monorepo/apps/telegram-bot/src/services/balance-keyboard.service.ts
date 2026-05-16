@@ -209,8 +209,12 @@ export interface AccountDetail {
 // Keyboard builders
 // ─────────────────────────────────────────────────────────────
 
-
-
+/** Type label map for display. */
+const TYPE_LABELS: Record<string, string> = {
+  manual: 'Ручной ввод',
+  crypto_read_only: 'Только чтение',
+  bank_sync: 'Банковская синхр.',
+};
 
 // ─────────────────────────────────────────────────────────────
 // Phase B-2: plural form for child currency count
@@ -483,6 +487,7 @@ export function formatAccountDetailText(
   roles?: AccountRoleState,
 ): string {
   const name = escapeHtml(acc.name);
+  const typeLabel = TYPE_LABELS[acc.type] ?? acc.type;
   const created = formatDate(acc.created_at);
 
   // Currency symbol (not code): ₽, $, € etc.
@@ -503,9 +508,9 @@ export function formatAccountDetailText(
   const icon  = GROUP_EMOJI[group];
 
   return (
-    `${icon} <b>${name}</b>${mainMark}\n` +
-    `▸ ${balance}\u00a0${sym}\n` +
-    `  <i>Обновлён ${created}</i>`
+    `${icon} <b>${name}</b>${mainMark}\n\n` +
+    `💰 ${balance}\u00a0${sym}\n` +
+    `📊 ${escapeHtml(typeLabel)} · ${created}`
   );
 }
 
@@ -585,7 +590,7 @@ const multiSym = (code: string): string => MULTI_CCY_SYM[code] ?? code;
 export function formatMultiCurrencyDetailText(
   parentName: string,
   currencies: MultiCurrencyEntry[],
-  _typeLabel: string,
+  typeLabel: string,
   created: string,
   accountType?: string,
   accountCurrency?: string,
@@ -599,9 +604,9 @@ export function formatMultiCurrencyDetailText(
     : 'bank' as const;
   const icon = GROUP_EMOJI[group];
   return (
-    `${icon} <b>${escapeHtml(parentName)}</b>\n` +
-    `${lines.join('\n')}\n` +
-    `  <i>Обновлён ${created}</i>`
+    `${icon} <b>${escapeHtml(parentName)}</b>\n\n` +
+    `${lines.join('\n')}\n\n` +
+    `📊 ${escapeHtml(typeLabel)} · ${created}`
   );
 }
 
@@ -662,9 +667,9 @@ export function formatSubAccountDetailText(
     : 'bank' as const;
   const icon = GROUP_EMOJI[group];
   return (
-    `${icon} <b>${escapeHtml(parentName)} · ${flagStr}${escapeHtml(currency)}</b>${mainMark}\n` +
-    `▸ ${formatBalanceShort(balance)}\u00a0${sym}\n` +
-    `  <i>Обновлён ${created}</i>`
+    `${icon} <b>${escapeHtml(parentName)} · ${flagStr}${escapeHtml(currency)}</b>${mainMark}\n\n` +
+    `💰 ${formatBalanceShort(balance)}\u00a0${sym}\n` +
+    `📅 Добавлен: ${created}`
   );
 }
 
