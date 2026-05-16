@@ -407,10 +407,11 @@ export function buildConfirmedScreen(data: ConfirmedScreenData): string {
   lines.push(`<blockquote>${blockContent}</blockquote>`);
   lines.push('');
 
-  // ── Details: category (· legacy accountName only without balance snapshot) ──
+  // ── Details: category only (account shown in balance block below) ──────────
   const details: string[] = [];
   if (data.categoryName) details.push(`📁 ${data.categoryName}`);
-  if (data.accountName && !data.balanceBefore) details.push(`🏦 ${data.accountName}`);
+  // Account name shown inline only when no balance snapshot available
+  if (data.accountName && data.balanceAfter == null) details.push(`🏦 ${data.accountName}`);
   if (details.length > 0) {
     lines.push(details.join('   ·   '));
   }
@@ -421,8 +422,8 @@ export function buildConfirmedScreen(data: ConfirmedScreenData): string {
     if (ts) lines.push(`🕐 <i>${ts}</i>`);
   }
 
-  // ── Phase 2.4 PR13: «Итог» — balance snapshot block ───────────
-  if (data.accountName && data.balanceBefore != null) {
+  // ── Phase 2.4 PR13: «Итог» — balance snapshot block (shows when balanceAfter is available) ──
+  if (data.accountName && data.balanceAfter != null) {
     const acctCurrency = data.accountCurrency ?? data.currency;
     const debitAmt = data.debitAmount ?? data.amount;
     const debitCur = data.debitCurrency ?? acctCurrency;
@@ -441,7 +442,7 @@ export function buildConfirmedScreen(data: ConfirmedScreenData): string {
     }
 
     // Math line: balanceBefore ± debitAmt = balanceAfter
-    if (data.balanceAfter != null) {
+    if (data.balanceBefore != null) {
       const isIncome = data.intent === 'income' || data.intent === 'debt_received';
       const sign = isIncome ? '+' : '−';
       const before = formatAmount(data.balanceBefore!);
@@ -452,6 +453,14 @@ export function buildConfirmedScreen(data: ConfirmedScreenData): string {
         ? `⚠️ <b>${after} ${debitCur}</b>`
         : `<b>${after} ${debitCur}</b>`;
       lines.push(`Итог: ${before} ${sign} ${debit} = ${afterFmt}`);
+    } else {
+      // balanceBefore unavailable — show final balance only
+      const after = formatAmount(data.balanceAfter);
+      const afterIsNeg = data.balanceAfter.startsWith('-');
+      const afterFmt = afterIsNeg
+        ? `⚠️ <b>${after} ${acctCurrency}</b>`
+        : `<b>${after} ${acctCurrency}</b>`;
+      lines.push(`Баланс: ${afterFmt}`);
     }
   }
 

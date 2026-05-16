@@ -337,51 +337,60 @@ export function buildConfirmedScreen(data: ConfirmedScreenData): string {
   lines.push(`<blockquote>${blockContent}</blockquote>`);
   lines.push('');
 
-  // ── Details: category (· legacy accountName only without balance snapshot) ──
+  // ── Details: category only (account shown in balance block below) ──────────
   const details: string[] = [];
-  if (data.categoryName) details.push(`📁 ${escapeHtml(data.categoryName)}`);
-  if (data.accountName && !data.balanceBefore) details.push(`🏦 ${escapeHtml(data.accountName)}`);
+  if (data.categoryName) details.push(`\ud83d\udcc1 ${escapeHtml(data.categoryName)}`);
+  // Account name shown inline only when no balance snapshot available
+  if (data.accountName && data.balanceAfter == null) details.push(`\ud83c\udfe6 ${escapeHtml(data.accountName)}`);
   if (details.length > 0) {
-    lines.push(details.join('   ·   '));
+    lines.push(details.join('   \u00b7   '));
   }
 
   // ── Timestamp ─────────────────────────────────────────────────────────
   if (data.transactionTime) {
     const ts = formatTransactionTime(data.transactionTime);
-    if (ts) lines.push(`🕐 <i>${ts}</i>`);
+    if (ts) lines.push(`\u23f0 <i>${ts}</i>`);
   }
 
-  // ── Phase 2.4 PR13: «Итог» — balance snapshot block ──────────────────
-  if (data.accountName && data.balanceBefore != null) {
+  // ── Phase 2.4 PR13: \u00abИтог\u00bb \u2014 balance snapshot block (shows when balanceAfter is available) ──
+  if (data.accountName && data.balanceAfter != null) {
     const acctCurrency = data.accountCurrency ?? data.currency;
     const debitAmt     = data.debitAmount ?? data.amount;
     const debitCur     = data.debitCurrency ?? acctCurrency;
 
     lines.push('');
-    // Only append currency suffix if not already present in account name (child accounts like "DASD · UAH").
-    const _bsSuffix = data.accountName.toUpperCase().endsWith(acctCurrency.toUpperCase()) ? '' : ` · ${escapeHtml(acctCurrency)}`;
-    lines.push(`🏦 <b>${escapeHtml(data.accountName)}</b>${_bsSuffix}`);
+    // Only append currency suffix if not already present in account name.
+    const _bsSuffix = data.accountName.toUpperCase().endsWith(acctCurrency.toUpperCase()) ? '' : ` \u00b7 ${escapeHtml(acctCurrency)}`;
+    lines.push(`\ud83c\udfe6 <b>${escapeHtml(data.accountName)}</b>${_bsSuffix}`);
 
     // Cross-currency rate line (only when debitCurrency differs from txCurrency)
     const isCross = !!data.debitAmount && !!data.debitCurrency && data.debitCurrency !== data.currency;
     if (isCross) {
       const rate = calcRate(data.amount, data.debitAmount!);
       const rateSuffix = rate ? ` (${rate} ${data.debitCurrency}/${data.currency})` : '';
-      lines.push(`🔁 ${escapeHtml(data.amount)} ${escapeHtml(data.currency)} → ${formatAmount(data.debitAmount!)} ${escapeHtml(data.debitCurrency!)}${rateSuffix}`);
+      lines.push(`\ud83d\udd01 ${escapeHtml(data.amount)} ${escapeHtml(data.currency)} \u2192 ${formatAmount(data.debitAmount!)} ${escapeHtml(data.debitCurrency!)}${rateSuffix}`);
     }
 
-    // Math line: balanceBefore ± debitAmt = balanceAfter
-    if (data.balanceAfter != null) {
+    // Math line: balanceBefore \u00b1 debitAmt = balanceAfter
+    if (data.balanceBefore != null) {
       const isIncome = data.intent === 'income' || data.intent === 'debt_received';
-      const sign     = isIncome ? '+' : '−';
-      const before   = formatAmount(data.balanceBefore!);
+      const sign     = isIncome ? '+' : '\u2212';
+      const before   = formatAmount(data.balanceBefore);
       const debit    = formatAmount(debitAmt);
       const after    = formatAmount(data.balanceAfter);
       const afterIsNeg = data.balanceAfter.startsWith('-');
       const afterFmt   = afterIsNeg
-        ? `⚠️ <b>${after} ${escapeHtml(debitCur)}</b>`
+        ? `\u26a0\ufe0f <b>${after} ${escapeHtml(debitCur)}</b>`
         : `<b>${after} ${escapeHtml(debitCur)}</b>`;
-      lines.push(`Итог: ${before} ${sign} ${debit} = ${afterFmt}`);
+      lines.push(`\u0418\u0442\u043e\u0433: ${before} ${sign} ${debit} = ${afterFmt}`);
+    } else {
+      // balanceBefore unavailable \u2014 show final balance only
+      const after = formatAmount(data.balanceAfter);
+      const afterIsNeg = data.balanceAfter.startsWith('-');
+      const afterFmt = afterIsNeg
+        ? `\u26a0\ufe0f <b>${after} ${escapeHtml(acctCurrency)}</b>`
+        : `<b>${after} ${escapeHtml(acctCurrency)}</b>`;
+      lines.push(`\u0411\u0430\u043b\u0430\u043d\u0441: ${afterFmt}`);
     }
   }
 

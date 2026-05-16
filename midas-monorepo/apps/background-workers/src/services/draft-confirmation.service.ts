@@ -406,7 +406,7 @@ export async function approveDraft(
     // SEC-02: All arithmetic in PostgreSQL NUMERIC — no JS float.
     const balanceSnapResult = await client.query<{ balance: string }>(
       `SELECT (
-         a.initial_balance
+         COALESCE(a.initial_balance, 0)
          + COALESCE(SUM(CASE WHEN t.transaction_intent = 'income'        AND t.base_currency = a.currency THEN t.base_amount END), 0)
          + COALESCE(SUM(CASE WHEN t.transaction_intent = 'debt_received' AND t.base_currency = a.currency THEN t.base_amount END), 0)
          - COALESCE(SUM(CASE WHEN t.transaction_intent = 'expense'       AND t.base_currency = a.currency THEN t.base_amount END), 0)
@@ -435,7 +435,18 @@ export async function approveDraft(
       try {
         const isIncome = draft.parsed_intent === 'income' || draft.parsed_intent === 'debt_received';
         balanceBeforeRaw = numericReverse(balanceAfterRaw, debitAmountRaw, isIncome);
-      } catch { /* non-fatal: balanceBefore stays null */ }
+      } catch (e) {
+        console.warn('[midas:draft-confirmation] numericReverse failed — balanceBefore stays null', {
+          draftId, workspaceId,
+          balanceAfterRaw,
+          debitAmountRaw,
+          errorMessage: e instanceof Error ? e.message : String(e),
+        });
+      }
+    } else {
+      console.warn('[midas:draft-confirmation] balanceAfterRaw is null — balance snapshot skipped', {
+        draftId, workspaceId, accountId,
+      });
     }
 
     return {
