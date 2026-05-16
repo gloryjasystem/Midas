@@ -25,19 +25,19 @@
 // ─────────────────────────────────────────────────────────────
 
 const INTENT_EMOJI: Record<string, string> = {
-  expense:       '💸',
-  income:        '💰',
-  debt_given:    '🤝',
+  expense: '💸',
+  income: '💰',
+  debt_given: '🤝',
   debt_received: '🤲',
-  transfer:      '🔄',
+  transfer: '🔄',
 };
 
 const INTENT_LABEL: Record<string, string> = {
-  expense:       'Расход',
-  income:        'Доход',
-  debt_given:    'Долг (дал)',
+  expense: 'Расход',
+  income: 'Доход',
+  debt_given: 'Долг (дал)',
   debt_received: 'Долг (взял)',
-  transfer:      'Перевод',
+  transfer: 'Перевод',
 };
 
 /** Get emoji for a transaction intent. Fallback: 📝 */
@@ -124,10 +124,10 @@ export function _numericAdd(a: string, b: string, subtract: boolean): string {
   const [bInt, bDec] = toFixed4(b).split('.') as [string, string];
   const aScaled = BigInt(`${aInt}${aDec}`);
   const bScaled = BigInt(`${bInt}${bDec}`);
-  const result  = subtract ? aScaled - bScaled : aScaled + bScaled;
+  const result = subtract ? aScaled - bScaled : aScaled + bScaled;
 
-  const sign   = result < 0n ? '-' : '';
-  const abs    = result < 0n ? -result : result;
+  const sign = result < 0n ? '-' : '';
+  const abs = result < 0n ? -result : result;
   const absStr = abs.toString().padStart(5, '0');
   const intPart = absStr.slice(0, -4) || '0';
   const decPart = absStr.slice(-4).replace(/0+$/, '');
@@ -150,15 +150,15 @@ export function calcRate(txAmount: string, debitAmount: string): string | null {
       const [int = '0', dec = ''] = s.split('.');
       return `${int}.${dec.padEnd(4, '0').slice(0, 4)}`;
     };
-    const [txInt, txDec]     = toFixed4(txAmount).split('.') as [string, string];
-    const [debInt, debDec]   = toFixed4(debitAmount).split('.') as [string, string];
-    const txScaled  = BigInt(`${txInt}${txDec}`);
+    const [txInt, txDec] = toFixed4(txAmount).split('.') as [string, string];
+    const [debInt, debDec] = toFixed4(debitAmount).split('.') as [string, string];
+    const txScaled = BigInt(`${txInt}${txDec}`);
     const debScaled = BigInt(`${debInt}${debDec}`);
     if (txScaled === 0n || debScaled === 0n) return null;
     // rate * 100 (2 decimal places) = (debScaled * 100) / txScaled
     const rateX100 = (debScaled * 100n) / txScaled;
-    const rateInt  = (rateX100 / 100n).toString();
-    const rateDec  = (rateX100 % 100n).toString().padStart(2, '0');
+    const rateInt = (rateX100 / 100n).toString();
+    const rateDec = (rateX100 % 100n).toString().padStart(2, '0');
     return `~${rateInt}.${rateDec}`;
   } catch {
     return null;
@@ -205,9 +205,9 @@ export function buildAccountBalanceBlock(data: AccountBalanceBlock): string {
   const balanceAfter = _numericAdd(data.currentBalance, amtToMath, subtract);
 
   const before = formatAmount(data.currentBalance);
-  const debit  = formatAmount(amtToMath);
-  const after  = formatAmount(balanceAfter);
-  const sign   = subtract ? '−' : '+';
+  const debit = formatAmount(amtToMath);
+  const after = formatAmount(balanceAfter);
+  const sign = subtract ? '−' : '+';
   const afterIsNeg = balanceAfter.startsWith('-');
   const afterFmt = afterIsNeg ? `⚠️ <b>${after} ${data.accountCurrency}</b>` : `<b>${after} ${data.accountCurrency}</b>`;
 
@@ -268,7 +268,7 @@ export function buildPreviewScreen(data: PreviewScreenData): string {
   const label = intentLabel(data.intent);
 
   const lines: string[] = [];
-  
+
   if (data.gateAlert) {
     lines.push(data.gateAlert);
     lines.push('');
@@ -355,7 +355,7 @@ function formatTransactionTime(iso: string): string {
     const hh = d.getHours().toString().padStart(2, '0');
     const mm = d.getMinutes().toString().padStart(2, '0');
     const months = ['янв', 'фев', 'мар', 'апр', 'мая', 'июн',
-                    'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
+      'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
     const month = months[d.getMonth()] ?? '';
     return `${hh}:${mm}, ${d.getDate().toString()} ${month}`;
   } catch {
@@ -422,8 +422,8 @@ export function buildConfirmedScreen(data: ConfirmedScreenData): string {
   // ── Phase 2.4 PR13: «Итог» — balance snapshot block ───────────
   if (data.accountName && data.balanceBefore != null) {
     const acctCurrency = data.accountCurrency ?? data.currency;
-    const debitAmt     = data.debitAmount ?? data.amount;
-    const debitCur     = data.debitCurrency ?? acctCurrency;
+    const debitAmt = data.debitAmount ?? data.amount;
+    const debitCur = data.debitCurrency ?? acctCurrency;
 
     lines.push('');
     lines.push(`🏦 <b>${data.accountName}</b> · ${acctCurrency}`);
@@ -439,12 +439,12 @@ export function buildConfirmedScreen(data: ConfirmedScreenData): string {
     // Math line: balanceBefore ± debitAmt = balanceAfter
     if (data.balanceAfter != null) {
       const isIncome = data.intent === 'income' || data.intent === 'debt_received';
-      const sign     = isIncome ? '+' : '−';
-      const before   = formatAmount(data.balanceBefore!);
-      const debit    = formatAmount(debitAmt);
-      const after    = formatAmount(data.balanceAfter);
+      const sign = isIncome ? '+' : '−';
+      const before = formatAmount(data.balanceBefore!);
+      const debit = formatAmount(debitAmt);
+      const after = formatAmount(data.balanceAfter);
       const afterIsNeg = data.balanceAfter.startsWith('-');
-      const afterFmt   = afterIsNeg
+      const afterFmt = afterIsNeg
         ? `⚠️ <b>${after} ${debitCur}</b>`
         : `<b>${after} ${debitCur}</b>`;
       lines.push(`Итог: ${before} ${sign} ${debit} = ${afterFmt}`);
@@ -509,20 +509,20 @@ export function formatRestoredSuccessCard(
 ): string {
   const isIncome = card.transaction_intent === 'income' || card.transaction_intent === 'debt_received';
   const data: ConfirmedScreenData = {
-    intent:          card.transaction_intent,
-    amount:          formatAmount(card.original_amount), // strip trailing .00
-    currency:        card.currency,
-    categoryName:    card.category_name,
-    accountName:     card.account_name,
-    itemName:        card.item_name ?? null,
+    intent: card.transaction_intent,
+    amount: formatAmount(card.original_amount), // strip trailing .00
+    currency: card.currency,
+    categoryName: card.category_name,
+    accountName: card.account_name,
+    itemName: card.item_name ?? null,
     transactionTime: card.transaction_time,
   };
   if (account) {
     data.accountCurrency = account.currency;
-    data.balanceAfter    = account.balance;
-    data.debitAmount     = card.base_amount;
-    data.debitCurrency   = account.currency;
-    data.balanceBefore   = _numericAdd(account.balance, card.base_amount, isIncome);
+    data.balanceAfter = account.balance;
+    data.debitAmount = card.base_amount;
+    data.debitCurrency = account.currency;
+    data.balanceBefore = _numericAdd(account.balance, card.base_amount, isIncome);
   }
   return buildConfirmedScreen(data);
 }
@@ -759,7 +759,7 @@ export function buildPostConfirmKeyboard(transactionId: string): InlineKeyboard 
       ],
       [
         { text: '💼 Баланс', callback_data: 'nav:balance' },
-        { text: '📊 Отчёт',  callback_data: 'nav:report' },
+        { text: '📊 Отчёт', callback_data: 'nav:report' },
       ],
     ],
   };
@@ -775,7 +775,7 @@ export function buildNavKeyboard(): InlineKeyboard {
     inline_keyboard: [
       [
         { text: '💼 Баланс', callback_data: 'nav:balance' },
-        { text: '📊 Отчёт',  callback_data: 'nav:report' },
+        { text: '📊 Отчёт', callback_data: 'nav:report' },
       ],
     ],
   };
@@ -811,7 +811,7 @@ export function buildConfirmKeyboard(
 
   rows.push([
     { text: '✏️ Изменить', callback_data: `draft:edit:${draftId}` },
-    { text: '✖️ Отмена',   callback_data: `reject:${draftId}` },
+    { text: '✖️ Отмена', callback_data: `reject:${draftId}` },
   ]);
 
   // Phase 2.4 PR12: account row
@@ -862,10 +862,10 @@ export interface ReplyKeyboardMarkup {
  *
  * Phase 2.0: unique icons per button (💰 📋 📊 ⚙️).
  */
-export const NAV_BTN_BALANCE      = '💼 Баланс';
+export const NAV_BTN_BALANCE = '💼 Баланс';
 export const NAV_BTN_TRANSACTIONS = '📋 Транзакции';  // Phase 2.0
-export const NAV_BTN_REPORT       = '📊 Отчёт';
-export const NAV_BTN_SETTINGS     = '⚙️ Настройки';
+export const NAV_BTN_REPORT = '📊 Отчёт';
+export const NAV_BTN_SETTINGS = '⚙️ Настройки';
 
 /**
  * Build the persistent bottom navigation keyboard (ReplyKeyboardMarkup).
