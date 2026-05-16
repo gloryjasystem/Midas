@@ -108,7 +108,6 @@ export function parseSettingsArgs(text: string): SettingsCommand {
       `Неизвестная подкоманда: «${parts[1] ?? ''}».\n` +
       'Доступные:\n' +
       '  /settings — показать настройки\n' +
-      '  /settings currency <КОД> — сменить базовую валюту\n' +
       '  /settings timezone <Зона> — сменить часовой пояс',
   };
 }
@@ -281,7 +280,6 @@ export function searchTimezones(query: string): string[] {
 // ─────────────────────────────────────────────────────────────
 
 export function formatSettingsView(settings: WorkspaceSettings): string {
-  const currency = escapeHtml(settings.default_currency);
   const timezone = escapeHtml(settings.timezone);
   const mainAcct = settings.main_account_name
     ? escapeHtml(settings.main_account_name)
@@ -289,15 +287,14 @@ export function formatSettingsView(settings: WorkspaceSettings): string {
 
   return (
     '⚙️ <b>Настройки Midas</b>\n\n' +
-    `💵 Основная валюта: <b>${currency}</b>\n` +
-    `🏦 Основной счет: ${mainAcct}\n` +
+    `🏦 Основной счёт: ${mainAcct}\n` +
     `🕒 Часовой пояс: <b>${timezone}</b>`
   );
 }
 
 export function formatCurrencyUpdated(newCode: string, oldCode: string): string {
   return (
-    `✅ Базовая валюта обновлена: <b>${escapeHtml(newCode)}</b>\n` +
+    `✅ Валюта обновлена: <b>${escapeHtml(newCode)}</b>\n` +
     `   (было: ${escapeHtml(oldCode)})\n\n` +
     'Новые транзакции без явной валюты будут записаны в ' +
     `<b>${escapeHtml(newCode)}</b>.\n` +

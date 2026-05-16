@@ -218,7 +218,7 @@ export function buildSearchResultsKeyboard(codes: string[]): InlineKeyboardMarku
  */
 export function formatPickConfirmText(newCode: string, oldCode: string): string {
   return (
-    `✅ Базовая валюта: <b>${escapeHtml(newCode)}</b>\n` +
+    `✅ Валюта обновлена: <b>${escapeHtml(newCode)}</b>\n` +
     `   (было: ${escapeHtml(oldCode)})\n\n` +
     `Новые транзакции без явной валюты → <b>${escapeHtml(newCode)}</b>\n` +
     'Прошлые записи не изменены.'
