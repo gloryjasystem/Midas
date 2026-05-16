@@ -10,10 +10,11 @@
  *         income        → +1  (money enters account)
  *         debt_given    → −1  (cash lent, leaves account; D2 = integrated)
  *         debt_received → +1  (cash received, enters account; D2 = integrated)
- *         transfer      → neutral (D3 = excluded from sum, shown as footnote)
+ *         transfer      → −1  (D3: treated as expense — money leaves account)
  *
  *   D2  Debt integrated into balance (not shown as separate section).
- *   D3  Transfer excluded from balance sum; shown as informational footnote.
+ *   D3  Transfer deducted from balance (same sign as expense).
+ *       Rationale: an external transfer reduces the account balance.
  *   D4  initial_balance NUMERIC(19,4) NOT NULL DEFAULT 0 on account_sources.
  *       Negative allowed (credit cards, loans). No date anchor.
  *   D5  Per-account breakdown + workspace currency totals.
@@ -60,10 +61,8 @@ interface AccountBalanceRow {
   name: string;
   type: string;
   currency: string;
-  /** Computed in SQL: initial_balance + matched-currency income/debt − expense/debt_given */
+  /** Computed in SQL: initial_balance + matched-currency income/debt − expense/debt_given/transfer */
   balance: { toFixed: (dp: number) => string }; // Decimal (pg NUMERIC parser)
-  transfer_count: string; // COUNT() returns string from pg
-  transfer_sum: { toFixed: (dp: number) => string }; // Decimal
   /** Phase 1.27: transactions excluded due to base_currency ≠ account.currency */
   mismatch_count: string;
   /** Phase LD++: true if this account is workspace default for expenses */
@@ -94,7 +93,7 @@ const PER_ACCOUNT_SQL = `
     a.type,
     a.currency,
     a.parent_account_id,
-    -- Balance formula: D1 sign rules, D2 debt integrated, D3 transfer excluded.
+    -- Balance formula: D1 sign rules, D2 debt integrated, D3 transfer = expense.
     -- Phase 1.27: ONLY transactions with base_currency = account currency are summed.
     -- This prevents silent cross-currency mixing (e.g. EUR amounts counted as USD).
     -- All arithmetic in PostgreSQL NUMERIC — SEC-02: no JS float math.
@@ -111,17 +110,14 @@ const PER_ACCOUNT_SQL = `
       - COALESCE(SUM(CASE
           WHEN t.transaction_intent = 'debt_given'    AND t.base_currency = a.currency
           THEN t.base_amount END), 0)
+      - COALESCE(SUM(CASE
+          WHEN t.transaction_intent = 'transfer'      AND t.base_currency = a.currency
+          THEN t.base_amount END), 0)
       AS balance,
-    -- Transfer: counted + summed but NOT added to balance (D3 = neutral).
-    COUNT(CASE WHEN t.transaction_intent = 'transfer' THEN 1 END) AS transfer_count,
-    COALESCE(SUM(CASE WHEN t.transaction_intent = 'transfer' THEN t.base_amount END), 0)
-      AS transfer_sum,
-    -- Phase 1.27: count transactions excluded due to base_currency ≠ account.currency
-    -- (excluding transfer intent which is always neutral).
+    -- Phase 1.27: count transactions excluded due to base_currency ≠ account.currency.
     COUNT(CASE
       WHEN t.base_currency IS NOT NULL
        AND t.base_currency != a.currency
-       AND t.transaction_intent != 'transfer'
       THEN 1 END) AS mismatch_count,
     -- Phase LD++: role flags — computed by comparing account id against workspace FK columns.
     -- LEFT JOIN workspaces w is safe: workspace always exists for RLS-isolated tenant query.
@@ -378,6 +374,9 @@ const ACCOUNT_DETAIL_SQL = `
       - COALESCE(SUM(CASE
           WHEN t.transaction_intent = 'debt_given'    AND t.base_currency = a.currency
           THEN t.base_amount END), 0)
+      - COALESCE(SUM(CASE
+          WHEN t.transaction_intent = 'transfer'      AND t.base_currency = a.currency
+          THEN t.base_amount END), 0)
       AS balance,
     COUNT(t.id) AS tx_count,
     (SELECT COUNT(*)::INT
@@ -498,9 +497,10 @@ export async function setAccountBalanceById(
                WHEN t.transaction_intent = 'debt_received' THEN  t.base_amount
                WHEN t.transaction_intent = 'expense'       THEN -t.base_amount
                WHEN t.transaction_intent = 'debt_given'    THEN -t.base_amount
+               WHEN t.transaction_intent = 'transfer'      THEN -t.base_amount
                ELSE 0 END)
-             FROM transactions t
-             WHERE t.account_id  = $2
+               FROM transactions t
+               WHERE t.account_id  = $2
                AND t.workspace_id = $1
                AND t.deleted_at IS NULL
            ), 0)
@@ -607,6 +607,7 @@ export async function getChildAccountDetails(
                   + COALESCE(SUM(CASE WHEN t.transaction_intent = 'debt_received' THEN  t.base_amount END), 0)
                   - COALESCE(SUM(CASE WHEN t.transaction_intent = 'expense'       THEN  t.base_amount END), 0)
                   - COALESCE(SUM(CASE WHEN t.transaction_intent = 'debt_given'    THEN  t.base_amount END), 0)
+                  - COALESCE(SUM(CASE WHEN t.transaction_intent = 'transfer'      THEN  t.base_amount END), 0)
                   AS balance
          FROM account_sources a
          LEFT JOIN transactions t

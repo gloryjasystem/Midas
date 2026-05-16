@@ -380,6 +380,7 @@ export async function approveDraft(
          + COALESCE(SUM(CASE WHEN t.transaction_intent = 'debt_received' AND t.base_currency = a.currency THEN t.base_amount END), 0)
          - COALESCE(SUM(CASE WHEN t.transaction_intent = 'expense'       AND t.base_currency = a.currency THEN t.base_amount END), 0)
          - COALESCE(SUM(CASE WHEN t.transaction_intent = 'debt_given'    AND t.base_currency = a.currency THEN t.base_amount END), 0)
+         - COALESCE(SUM(CASE WHEN t.transaction_intent = 'transfer'      AND t.base_currency = a.currency THEN t.base_amount END), 0)
        )::TEXT AS balance
        FROM account_sources a
        LEFT JOIN transactions t
