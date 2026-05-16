@@ -1135,30 +1135,58 @@ export function buildFreeTextPromptKeyboard(
  * Matches the format from the Phase 2.3 success screen.
  * name/currency/balance come from createdAccount* state fields.
  */
+/**
+ * Returns realistic {expense, income} example strings for a given currency.
+ * Used in all success/account-added screens and /help.
+ */
+export function getCurrencyExamples(currency: string): { expense: string; income: string } {
+  const cur = currency.toUpperCase();
+  // Stablecoins
+  if (['USDT','USDC','BUSD','DAI','TUSD'].includes(cur))
+    return { expense: `Netflix 15 ${cur}`, income: `фриланс 500 ${cur}` };
+  // BTC
+  if (cur === 'BTC')
+    return { expense: `комиссия 0.0005 ${cur}`, income: `продажа 0.1 ${cur}` };
+  // ETH
+  if (cur === 'ETH')
+    return { expense: `газ 0.003 ${cur}`, income: `продажа 0.5 ${cur}` };
+  // Other crypto
+  if (['SOL','TON','BNB','XRP','TRX','LTC','DOGE','AVAX','NOT','DOGS'].includes(cur))
+    return { expense: `комиссия 0.01 ${cur}`, income: `продажа 5 ${cur}` };
+  // Fiat
+  if (cur === 'RUB') return { expense: `кофе 350 ${cur}`, income: `зарплата 95 000 ${cur}` };
+  if (cur === 'UAH') return { expense: `кава 95 ${cur}`,   income: `зарплата 25 000 ${cur}` };
+  if (cur === 'KZT') return { expense: `кофе 2 500 ${cur}`, income: `зарплата 450 000 ${cur}` };
+  if (cur === 'USD') return { expense: `coffee 4 ${cur}`,  income: `salary 3 500 ${cur}` };
+  if (cur === 'EUR') return { expense: `Kaffee 4 ${cur}`,  income: `Gehalt 3 000 ${cur}` };
+  if (cur === 'GBP') return { expense: `coffee 3 ${cur}`,  income: `salary 3 000 ${cur}` };
+  if (cur === 'TRY') return { expense: `kahve 150 ${cur}`, income: `maaş 50 000 ${cur}` };
+  // Fallback
+  return { expense: `расход 50 ${cur}`, income: `доход 500 ${cur}` };
+}
+
 export function buildSuccessScreenText(
   name: string,
   currency: string,
   balance?: string,
   icon = '💳',
-): string { // eslint-disable-line @typescript-eslint/no-unused-vars — icon used below
-  const balanceLine = balance
-    ? ` · ${balance}`
-    : '';
-  // Dedup: if name already ends with the currency (e.g. "Наличные CHF"), don't repeat it.
-  const nameEndsWithCur = name.trimEnd().endsWith(currency);
-  const currencyPart = nameEndsWithCur ? '' : ` · ${currency}`;
-  // Currency-aware operation examples
-  const exCoffee   = `«кофе 350 ${currency}»`;
-  const exSalary   = `«зарплата 5 000 ${currency}»`;
-  const exTransfer = `«перевод Максу 200 ${currency}»`;
+): string {
+  // Header: icon + name + balance/currency (dedup if name already includes currency)
+  const nameEndsWithCur = name.trimEnd().toUpperCase().endsWith(currency.toUpperCase());
+  const balStr = balance
+    ? `${balance} ${currency}`
+    : (nameEndsWithCur ? '' : currency);
+  const headerLine = balStr
+    ? `${icon} <b>${name}</b> · ${balStr}  ⭐`
+    : `${icon} <b>${name}</b>  ⭐`;
+  const { expense, income } = getCurrencyExamples(currency);
   return (
-    `✅ <b>Готово. Можно начинать.</b>\n\n` +
-    `Запишите первую операцию — просто напишите \n` +
-    `что потратили или получили:\n` +
-    `<i>${exCoffee} · ${exSalary} · ${exTransfer}</i>\n\n` +
-    `Midas распознает сумму, тип и категорию автоматически.\n\n` +
-    `<b>Счёт по умолчанию:</b> ${icon} ${name}${currencyPart}${balanceLine}\n` +
-    `<i>Добавить карты и биржи → 🏦 Баланс</i>`
+    `✅ <b>Всё готово!</b>\n\n` +
+    `${headerLine}\n\n` +
+    `Попробуйте прямо сейчас:\n` +
+    `<blockquote>${expense}\n${income}</blockquote>\n` +
+    `Midas поймёт сам.\n` +
+    `/help — все возможности бота`
   );
 }
 

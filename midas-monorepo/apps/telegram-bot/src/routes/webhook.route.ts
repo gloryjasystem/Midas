@@ -85,7 +85,6 @@ import {
   softDeletePlaceholderAccount,    // Phase LD: soft-delete Default when user creates custom account
   activatePlaceholderAccount,      // Phase LD: promote Default to real account when user skips
   getWorkspaceDefaultAccount,      // Phase LD+: fetch real default account for success screen
-  getWorkspaceActiveAccounts,      // Phase LD+: fetch all accounts for D.4 portfolio line
   getAccountRoles,                 // Phase LD++: role flags for account card
   setAccountRole,                  // Phase LD++: set cyclical role
 } from '../services/account.service.js';
@@ -179,6 +178,7 @@ import {
   buildFreeTextPromptText,           // Phase 2.3: re-prompt after cus_keep
   buildFreeTextPromptKeyboard,       // Phase 2.3: keyboard for re-prompt
   buildSuccessScreenText,            // Phase 2.3: post-creation success screen
+  getCurrencyExamples,               // Phase 2.4: realistic currency-aware examples
   buildCurrencyPickerText,           // Phase 2.3: context-aware currency picker header
   buildBalancePromptText,            // Phase 2.3: context-aware balance prompt
   // getProviderIcon removed — replaced by getIconByName(name, PROVIDER_ICONS) everywhere
@@ -383,22 +383,25 @@ const KNOWN_COMMANDS = new Set(['/start', '/report', '/help', '/category', '/add
  * Phase 1.28: /edit
  */
 const HELP_TEXT =
-  'ℹ️ <b>Доступные команды Midas:</b>\n\n' +
-  '/start — Регистрация и приветствие\n' +
-  '/report — Отчёт о доходах и расходах за текущий месяц\n' +
-  '/balance — Баланс по всем счетам (за всё время)\n' +
-  '/set_balance <название> <сумма> — Синхронизировать баланс счёта\n' +
-  '/settings — Настройки (валюта, часовой пояс)\n' +
-  '/category — Список категорий вашего кошелька\n' +
-  '/add_category <группа> <название> — Добавить категорию\n' +
-  '/accounts — Список ваших счетов\n' +
-  '/add_account <название> — Добавить счёт\n' +
-  '/edit — Редактировать последние транзакции\n' +
-  '/help — Показать это сообщение\n\n' +
-  'Группы для /add_category: Бизнес, Жизнь\n' +
-  'Пример: /add_category Жизнь Кофе\n\n' +
-  'Для записи транзакции просто напишите мне сообщение, например:\n' +
-  '<i>«Потратил 500 рублей на кофе»</i>';
+  '🏦 <b>Midas — справочник</b>\n\n' +
+  '📝 <b>КАК ЗАПИСАТЬ ОПЕРАЦИЮ</b>\n' +
+  'Просто напишите в чат:\n' +
+  '<blockquote>кофе 350 RUB\n' +
+  'Netflix 15 USDT\n' +
+  'зарплата 95 000 RUB\n' +
+  'перевод Максу 5 000</blockquote>\n' +
+  'Бот распознаёт сумму, тип и категорию автоматически.\n\n' +
+  '⭐ <b>ОСНОВНОЙ СЧЁТ</b>\n' +
+  'Если у вас выбран ⭐ основной счёт — валюту можно не указывать.\n' +
+  'Просто напишите «кофе 15» — Midas сам поймёт куда записать.\n\n' +
+  '<i>Изменить: 🏦 Баланс → выберите счёт → Сделать основным</i>\n\n' +
+  '🎤 <b>ГОЛОСОВЫЕ СООБЩЕНИЯ</b>\n' +
+  'Запишите голосовое — бот транскрибирует и создаст транзакцию.\n\n' +
+  '📊 <b>ОТЧЁТЫ</b>\n' +
+  'Нажмите 📊 Отчёт и выберите нужный период.\n\n' +
+  '⚙️ <b>НАСТРОЙКИ</b>\n' +
+  '/settings — Часовой пояс и уведомления\n\n' +
+  '❓ Вопросы → @midas_support';
 
 /** Message returned for any unrecognised slash command. */
 const UNKNOWN_COMMAND_TEXT = 'Команда не распознана или пока находится в разработке.';
@@ -491,40 +494,28 @@ function getIconByName(name: string, providerIconsMap: ReadonlyMap<string, strin
  * Used when user adds their 2nd, 3rd, … N-th account.
  * Previous success card is deleted before this is sent.
  *
- * Format:
- *   ✅ Счёт добавлен
- *
- *   {icon} {name}[ · {balance} {currency}]
- *
- *   Напишите операцию — «кофе 350 {currency}» или «зарплата 45 000 {currency}».
- *   Midas распознает сумму, тип и категорию автоматически.
+ * Phase 2.4: uses getCurrencyExamples for realistic, currency-aware examples.
+ * Dead params _portfolio and _providerIconsMap removed.
  */
 function buildAccountAddedD4Text(
   newIcon: string,
   newName: string,
   newCurrency: string,
   newBalance: number | string | undefined,
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  _portfolio: Array<{ name: string; currency: string; type: string }>,
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  _providerIconsMap: ReadonlyMap<string, string>,
 ): string {
-  // If balance is set: show «icon Name · 10000 USDT» (no redundant currency separator)
-  // If balance is absent: show «icon Name · USDT»
-  const balPart = newBalance !== undefined
-    ? ` · ${newBalance} ${newCurrency}`
-    : ` · ${newCurrency}`;
-  // Dedup: if name already ends with currency (e.g. "Наличные PLN"), skip currency suffix entirely
+  // Dedup: if name already ends with currency (e.g. "Наличные PLN"), skip suffix
   const newNameEndsCur = newName.trimEnd().toUpperCase().endsWith(newCurrency.toUpperCase());
-  const headerSuffix = newNameEndsCur && newBalance === undefined ? '' : balPart;
-  // Currency-aware operation examples
-  const exampleExpense = `«кофе 350 ${newCurrency}»`;
-  const exampleIncome  = `«зарплата 45 000 ${newCurrency}»`;
+  const balStr = newBalance !== undefined
+    ? `${newBalance} ${newCurrency}`
+    : (newNameEndsCur ? '' : newCurrency);
+  const headerSuffix = balStr ? ` · ${balStr}` : '';
+  const { expense, income } = getCurrencyExamples(newCurrency);
   return (
     `✅ Счёт добавлен\n\n` +
     `${newIcon} <b>${newName}</b>${headerSuffix}\n\n` +
-    `Напишите операцию — ${exampleExpense} или ${exampleIncome}.\n` +
-    `Midas распознает сумму, тип и категорию автоматически.`
+    `Напишите операцию:\n` +
+    `<blockquote>${expense}\n${income}</blockquote>\n` +
+    `Midas разберёт сам.`
   );
 }
 
@@ -607,8 +598,8 @@ function chooseCurKeyboard(typ: string, sub?: string) {
 const CUR_PROMPT_MSG =
   '💱 <b>В какой валюте записать?</b>' +
   '\n\n<blockquote>руб · USD · USDT · EUR · $ · BTC · доллар · евро</blockquote>' +
-  '\n\n<blockquote>💡 Чтобы не спрашивало каждый раз — установи валюту по умолчанию:\n' +
-  '⚙️ Настройки → Базовая валюта</blockquote>';
+  '\n\n<blockquote>💡 Чтобы не спрашивало — установи ⭐ основной счёт:\n' +
+  '🏦 Баланс → выберите счёт → Сделать основным</blockquote>';
 
 /**
  * Phase 1.38: Extract the first valid number from free-form text.
@@ -1259,10 +1250,8 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
                 // D.4 Hybrid: 2nd+ account — delete old success card, send fresh one
                 const oldSuccessId = await redisConnection.get(lastSuccessMsgKey(telegramUserId, chatId));
                 if (oldSuccessId) void deleteMessage(chatId, oldSuccessId);
-                const portfolio = await getWorkspaceActiveAccounts(acResolved.workspaceId, acResolved.userId).catch(() => []);
                 const d4Text = buildAccountAddedD4Text(
-                  skippedIcon, escapeHtml(skippedName), skippedCur, undefined, portfolio,
-                  PROVIDER_ICONS,
+                  skippedIcon, escapeHtml(skippedName), skippedCur, undefined,
                 );
                 const newSuccessId = await sendMessageWithReplyKeyboard(chatId, d4Text, buildMainMenuKeyboard());
                 if (newSuccessId) void redisConnection.set(lastSuccessMsgKey(telegramUserId, chatId), newSuccessId, 'EX', LAST_SUCCESS_MSG_TTL_SEC);
@@ -5474,10 +5463,8 @@ Midas создан, чтобы сделать учет денег максима
                 // D.4 Hybrid: 2nd+ account — delete old success card, send fresh one
                 const oldSuccessIdCi = await redisConnection.get(lastSuccessMsgKey(telegramUserId, chatId));
                 if (oldSuccessIdCi) void deleteMessage(chatId, oldSuccessIdCi);
-                const portfolioCi = await getWorkspaceActiveAccounts(resolved.workspaceId, resolved.userId).catch(() => []);
                 const d4TextCi = buildAccountAddedD4Text(
-                  icon, escapeHtml(accountName), escapeHtml(rawCode), undefined, portfolioCi,
-                  PROVIDER_ICONS,
+                  icon, escapeHtml(accountName), escapeHtml(rawCode), undefined,
                 );
                 const newSuccessIdCi = await sendMessageWithReplyKeyboard(chatId, d4TextCi, buildMainMenuKeyboard());
                 if (newSuccessIdCi) void redisConnection.set(lastSuccessMsgKey(telegramUserId, chatId), newSuccessIdCi, 'EX', LAST_SUCCESS_MSG_TTL_SEC);
@@ -5570,10 +5557,8 @@ Midas создан, чтобы сделать учет денег максима
               // D.4 Hybrid: 2nd+ account — delete old success card, send fresh one
               const oldSuccessIdBi = await redisConnection.get(lastSuccessMsgKey(telegramUserId, chatId));
               if (oldSuccessIdBi) void deleteMessage(chatId, oldSuccessIdBi);
-              const portfolioBi = await getWorkspaceActiveAccounts(resolved.workspaceId, resolved.userId).catch(() => []);
               const d4TextBi = buildAccountAddedD4Text(
-                icon, escapeHtml(acName), escapeHtml(acCur), amount, portfolioBi,
-                PROVIDER_ICONS,
+                icon, escapeHtml(acName), escapeHtml(acCur), amount,
               );
               const newSuccessIdBi = await sendMessageWithReplyKeyboard(chatId, d4TextBi, buildMainMenuKeyboard());
               if (newSuccessIdBi) void redisConnection.set(lastSuccessMsgKey(telegramUserId, chatId), newSuccessIdBi, 'EX', LAST_SUCCESS_MSG_TTL_SEC);
