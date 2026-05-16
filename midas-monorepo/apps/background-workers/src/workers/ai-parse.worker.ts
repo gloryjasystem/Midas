@@ -760,9 +760,25 @@ async function processAiParse(job: Job<AiParseJobPayload>): Promise<void> {
           workspaceId, draftId, accountCount: pickerAccounts.length,
         });
       } else {
-        // No accounts in workspace — plain confirm card.
-        inlineKeyboard = buildConfirmKeyboard(draftId);
-        previewMsg = richPreview;
+        // No accounts in workspace yet (fresh user / after reset).
+        // Do NOT show plain confirm keyboard — that looks like "old buttons" and allows
+        // confirming without any account context.
+        // Instead: prompt to create the first account.
+        const intentNoAcc = aiData?.intent ?? null;
+        const noAcctHeader = (intentNoAcc === 'income' || intentNoAcc === 'debt_received')
+          ? '\uD83C\uDFE6 <b>\u041D\u0430 \u043A\u0430\u043A\u043E\u0439 \u0441\u0447\u0451\u0442 \u0437\u0430\u0447\u0438\u0441\u043B\u0438\u0442\u044C?</b>'
+          : '\uD83C\uDFE6 <b>\u0421 \u043A\u0430\u043A\u043E\u0433\u043E \u0441\u0447\u0451\u0442\u0430 \u0441\u043F\u0438\u0441\u0430\u0442\u044C?</b>';
+        inlineKeyboard = {
+          inline_keyboard: [
+            [{ text: '\u2795 \u0421\u043E\u0437\u0434\u0430\u0442\u044C \u0441\u0447\u0451\u0442', callback_data: `ia:newac:${draftId}` }],
+            [{ text: '\u2716\uFE0F \u041E\u0442\u043C\u0435\u043D\u0430', callback_data: `ia:cancel:${draftId}` }],
+          ],
+        };
+        previewMsg = richPreview + '\n\n' + noAcctHeader
+          + '\n\n<i>\u0423 \u0432\u0430\u0441 \u043F\u043E\u043A\u0430 \u043D\u0435\u0442 \u0441\u0447\u0435\u0442\u043E\u0432. \u0421\u043E\u0437\u0434\u0430\u0439\u0442\u0435 \u043F\u0435\u0440\u0432\u044B\u0439 \u0441\u0447\u0451\u0442, \u0447\u0442\u043E\u0431\u044B \u0437\u0430\u043F\u0438\u0441\u0430\u0442\u044C \u0442\u0440\u0430\u043D\u0437\u0430\u043A\u0446\u0438\u044E.</i>';
+        console.log('[midas:ai-parse-worker] No accounts in workspace \u2014 showing create-account prompt', {
+          workspaceId, draftId,
+        });
       }
     }
 
