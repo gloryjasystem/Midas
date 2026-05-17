@@ -40,6 +40,7 @@ function localiseIntent(intent: string): string {
   switch (intent) {
     case 'expense':       return '💸 Расход';
     case 'income':        return '💰 Доход';
+    case 'transfer':      return '🔄 Перевод';
     case 'debt_given':    return '🤝 Долг (дал)';
     case 'debt_received': return '🤲 Долг (взял)';
     default:              return intent;
@@ -50,9 +51,10 @@ function intentColour(intent: string): string {
   switch (intent) {
     case 'expense':       return C_EXPENSE;
     case 'income':        return C_INCOME;
+    case 'transfer':      return '9B59B6'; // purple
     case 'debt_given':    return C_DEBT_GIVE;
     case 'debt_received': return C_DEBT_RECV;
-    default:              return '000000';
+    default:              return '555555';
   }
 }
 
@@ -191,25 +193,30 @@ function buildSheet1(wb: ExcelJS.Workbook, rows: TxRow[], from: Date, to: Date):
   titleCell.alignment = { horizontal: 'center', vertical: 'middle' };
   ws.getRow(1).height = 36;
 
-  // ── Rows 2–8: Summary block (right side K–N) ─────────────────
-  const income   = rows.filter(r => r.transaction_intent === 'income')
-                       .reduce((s, r) => s + parseFloat(r.original_amount), 0);
-  const expense  = rows.filter(r => r.transaction_intent === 'expense')
-                       .reduce((s, r) => s + parseFloat(r.original_amount), 0);
-  const debtGive = rows.filter(r => r.transaction_intent === 'debt_given')
-                       .reduce((s, r) => s + parseFloat(r.original_amount), 0);
-  const debtRecv = rows.filter(r => r.transaction_intent === 'debt_received')
-                       .reduce((s, r) => s + parseFloat(r.original_amount), 0);
+  // ── Rows 2–8: Summary block (right side L–M) ─────────────────
+  const income    = rows.filter(r => r.transaction_intent === 'income')
+                        .reduce((s, r) => s + parseFloat(r.original_amount), 0);
+  const expense   = rows.filter(r => r.transaction_intent === 'expense')
+                        .reduce((s, r) => s + parseFloat(r.original_amount), 0);
+  const transfer  = rows.filter(r => r.transaction_intent === 'transfer')
+                        .reduce((s, r) => s + parseFloat(r.original_amount), 0);
+  const debtGive  = rows.filter(r => r.transaction_intent === 'debt_given')
+                        .reduce((s, r) => s + parseFloat(r.original_amount), 0);
+  const debtRecv  = rows.filter(r => r.transaction_intent === 'debt_received')
+                        .reduce((s, r) => s + parseFloat(r.original_amount), 0);
+  const net = income - expense;
 
-  const summaryLines: [string, number][] = [
-    ['💰 Доходы:', income],
-    ['💸 Расходы:', expense],
-    ['🤝 Долги (дал):', debtGive],
-    ['🤲 Долги (взял):', debtRecv],
-    ['📊 Чистый баланс:', income - expense],
+  // Summary lines: [label, value, isBold, colourPositive, colourNegative]
+  const summaryLines: [string, number, boolean][] = [
+    ['💰 Доходы:',        income,    false],
+    ['💸 Расходы:',       expense,   false],
+    ['🔄 Переводы:',      transfer,  false],
+    ['🤝 Долги (дал):',   debtGive,  false],
+    ['🤲 Долги (взял):',  debtRecv,  false],
+    ['📊 Чистый баланс:', net,       true ],
   ];
 
-  summaryLines.forEach(([label, val], idx) => {
+  summaryLines.forEach(([label, val, bold], idx) => {
     const rowNum = idx + 3;
     const labelCell = ws.getCell(rowNum, 12); // col L
     const valCell   = ws.getCell(rowNum, 13); // col M
@@ -220,16 +227,25 @@ function buildSheet1(wb: ExcelJS.Workbook, rows: TxRow[], from: Date, to: Date):
     valCell.value = parseFloat(val.toFixed(2));
     valCell.numFmt = '#,##0.00';
     valCell.font = {
-      bold: idx === 4,
-      color: idx === 4 ? { argb: val >= 0 ? `FF${C_INCOME}` : `FF${C_EXPENSE}` } : undefined,
+      bold,
+      color: bold ? { argb: val >= 0 ? `FF${C_INCOME}` : `FF${C_EXPENSE}` } : undefined,
       size: 9, name: 'Calibri',
     };
     valCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_GREY_BG}` } };
     valCell.alignment = { horizontal: 'right' };
   });
 
+  // «Всего операций: N» — row 2 summary area
+  const totalOpsCell = ws.getCell(2, 12);
+  totalOpsCell.value = `Всего операций: ${rows.length}`;
+  totalOpsCell.font = { italic: true, size: 8, name: 'Calibri', color: { argb: 'FF666666' } };
+  totalOpsCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_GREY_BG}` } };
+  totalOpsCell.alignment = { horizontal: 'right' };
+  ws.getCell(2, 13).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_GREY_BG}` } };
+
   // ── Row 9: Empty spacer ──────────────────────────────────────
   ws.getRow(9).height = 6;
+
 
   // ── Row 10: Column headers ───────────────────────────────────
   const HDR_ROW = 10;
@@ -266,29 +282,43 @@ function buildSheet1(wb: ExcelJS.Workbook, rows: TxRow[], from: Date, to: Date):
     const isOdd = idx % 2 === 0;
     const bgColor = isOdd ? 'FFFFFFFF' : `FF${C_ROW_ODD}`;
 
-    const txDate = new Date(row.transaction_time);
-    const amtNum  = parseFloat(row.original_amount);
-    const debitNum = row.account_debit_amount ? parseFloat(row.account_debit_amount) : null;
+    const txDate   = new Date(row.transaction_time);
+    const amtNum   = parseFloat(row.original_amount);
     const rateNum  = parseFloat(row.exchange_rate ?? '1');
     const colour   = intentColour(row.transaction_intent);
+
+    // «Выплачено»: если account_debit_amount NULL (та же валюта), fallback = original_amount
+    const debitRaw  = row.account_debit_amount;
+    const debitNum  = debitRaw !== null ? parseFloat(debitRaw) : amtNum;
+    const debitCur  = row.account_debit_currency ?? row.currency;
+    // Если валюта суммы и валюта выплаты совпадают — скрываем дублирующую колонку
+    const sameCur  = debitCur === row.currency;
+
+    // «Исполнитель»: person_name из БД, иначе попытка найти имя в item_name
+    // (простая эвристика: последнее слово, начинающееся с заглавной, если длиннее 2 символов)
+    let executor = row.person_name ?? '';
+    if (!executor && row.item_name) {
+      const words = row.item_name.trim().split(/\s+/);
+      const lastCapital = words.reverse().find(w => w.length > 2 && /^[А-ЯA-Z]/.test(w));
+      executor = lastCapital ?? '';
+    }
 
     const cellValues: (string | number | null)[] = [
       idx + 1,
       fmtDate(txDate),
       fmtTime(txDate),
       localiseIntent(row.transaction_intent),
-      row.person_name ?? '—',
+      executor || '—',
       row.account_name,
       row.account_currency,
       amtNum,
       row.currency,
-      debitNum,
-      row.account_debit_currency ?? (debitNum ? row.account_currency : null),
-      rateNum !== 1 ? rateNum : null,
+      sameCur ? null : debitNum,     // Выплачено: скрыть если совпадает
+      sameCur ? '' : debitCur,        // Вал.выплаты: скрыть если совпадает
+      rateNum,                        // Курс: всегда показываем
       row.category_name,
       row.category_group,
       row.item_name ?? '',
-      // Col P (16): empty — user fills hours; Col Q would be formula but we leave one col for it
     ];
 
     cellValues.forEach((val, ci) => {
