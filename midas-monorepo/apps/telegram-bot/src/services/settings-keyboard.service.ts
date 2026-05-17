@@ -53,7 +53,7 @@ export function buildSettingsMainKeyboard(): InlineKeyboardMarkup {
     inline_keyboard: [
       [{ text: '🕒 Часовой пояс', callback_data: 'st:tz' }],
       [{ text: '🔔 Уведомления', callback_data: 'st:ntf' }],
-      [{ text: '📥 Экспорт Excel', callback_data: 'st:xl' }],
+      [{ text: '📤 Экспорт', callback_data: 'st:exp' }],
       [{ text: '💬 Поддержка', url: 'https://t.me/midas_support' }],
       [{ text: '✖️ Закрыть', callback_data: 'st:cancel' }],
     ],
@@ -279,6 +279,11 @@ export type SettingsCallbackCmd =
   | { cmd: 'export_csv' }
   | { cmd: 'export_excel' }
   | { cmd: 'export_excel_period'; period: 'cur' | 'prev' | '90d' | 'all' }
+  // Phase 2.0 Sprint 0: unified export flow (Task 0.5)
+  | { cmd: 'exp_start' }
+  | { cmd: 'exp_period'; period: 'tm' | 'lm' | '3m' | 'yr' }
+  | { cmd: 'exp_account'; accountId: string }    // 'all' or ULID
+  | { cmd: 'exp_format'; format: 'xlsx' | 'csv' }
   | { cmd: 'info' }
   // Phase 2.2: timezone
   | { cmd: 'timezone_menu' }
@@ -336,8 +341,26 @@ export function parseSettingsCallback(data: string): SettingsCallbackCmd | null 
   }
   if (sub === 'exp') {
     const action = parts[2] ?? '';
-    if (!action) return { cmd: 'export_menu' };
-    if (action === 'csv') return { cmd: 'export_csv' };
+    if (!action) return { cmd: 'exp_start' };
+    // st:exp:p:tm|lm|3m|yr  — period selection
+    if (action === 'p') {
+      const period = parts[3] ?? '';
+      if (!['tm', 'lm', '3m', 'yr'].includes(period)) return null;
+      return { cmd: 'exp_period', period: period as 'tm' | 'lm' | '3m' | 'yr' };
+    }
+    // st:exp:a:all | st:exp:a:{ULID}  — account selection
+    if (action === 'a') {
+      const accId = parts[3] ?? '';
+      if (!accId) return null;
+      if (accId !== 'all' && !/^[0-9A-Z]{26}$/.test(accId)) return null;
+      return { cmd: 'exp_account', accountId: accId };
+    }
+    // st:exp:fmt:xlsx | st:exp:fmt:csv  — format selection + generate
+    if (action === 'fmt') {
+      const fmt = parts[3] ?? '';
+      if (!['xlsx', 'csv'].includes(fmt)) return null;
+      return { cmd: 'exp_format', format: fmt as 'xlsx' | 'csv' };
+    }
     return null;
   }
   if (sub === 'xl') {

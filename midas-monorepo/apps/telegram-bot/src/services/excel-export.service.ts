@@ -72,6 +72,21 @@ function fmtMon(d: Date): string {
   return `${months[d.getMonth()] ?? ''} ${String(d.getFullYear())}`;
 }
 
+/** Signed amount for summary cells: "+ 10 000.00" | "− 1 000.00" | "—" */
+function fmtAmtSigned(val: number): string {
+  if (val === 0) return '—';
+  const abs = Math.abs(val).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+  return val > 0 ? `+ ${abs}` : `\u2212 ${abs}`;
+}
+
+/** Russian plural for операция */
+function countStr(n: number): string {
+  const a = Math.abs(n);
+  if (a % 10 === 1 && a % 100 !== 11) return `${String(n)} операция`;
+  if ([2, 3, 4].includes(a % 10) && ![12, 13, 14].includes(a % 100)) return `${String(n)} операции`;
+  return `${String(n)} операций`;
+}
+
 // ─────────────────────────────────────────────────────────────
 // DB row types
 // ─────────────────────────────────────────────────────────────
@@ -112,14 +127,16 @@ export async function exportTransactionsExcel(
   userId: string,
   dateFrom?: Date,
   dateTo?: Date,
+  accountId?: string,
 ): Promise<Buffer> {
   const from = dateFrom ?? new Date(0);
   const to   = dateTo   ?? new Date();
 
   const rows = await withTenantTransaction(workspaceId, userId, async (client) => {
-    // We compute the running balance for each transaction using a window function.
-    // The window covers ALL transactions on the account (not just the export window),
-    // so the balance is accurate even when exporting a sub-period.
+    const accFilter = accountId ? `AND t.account_id = $4` : '';
+    const params: (string | Date)[] = [workspaceId, from.toISOString(), to.toISOString()];
+    if (accountId) params.push(accountId);
+
     const r = await client.query<TxRow>(
       `WITH all_tx AS (
          SELECT
@@ -138,14 +155,13 @@ export async function exportTransactionsExcel(
            t.item_name,
            t.person_id,
            t.deleted_at,
-           -- signed debit on the account: income/debt_received = positive, rest = negative
            CASE
              WHEN t.transaction_intent IN ('income', 'debt_received')
                THEN  COALESCE(t.account_debit_amount, t.original_amount)
              ELSE   -COALESCE(t.account_debit_amount, t.original_amount)
            END AS signed_debit
          FROM transactions t
-         WHERE t.workspace_id = $1 AND t.deleted_at IS NULL
+         WHERE t.workspace_id = $1 AND t.deleted_at IS NULL ${accFilter}
        ),
        with_balance AS (
          SELECT
@@ -181,7 +197,7 @@ export async function exportTransactionsExcel(
        WHERE wb.transaction_time >= $2
          AND wb.transaction_time <= $3
        ORDER BY wb.transaction_time DESC`,
-      [workspaceId, from.toISOString(), to.toISOString()],
+      params,
     );
     return r.rows;
   });
@@ -191,6 +207,7 @@ export async function exportTransactionsExcel(
   wb.creator = 'Midas Finance Bot';
   wb.created = new Date();
 
+  buildSheet0Summary(wb, rows, from, to);
   buildSheet1(wb, rows, from, to);
   buildSheet2(wb, rows);
   buildSheet3(wb, rows);
@@ -215,6 +232,202 @@ function hdr(ws: ExcelJS.Worksheet, col: number, row: number, text: string, widt
     right:  { style: 'thin', color: { argb: 'FFAAAAAA' } },
   };
   ws.getColumn(col).width = width;
+}
+
+// ─────────────────────────────────────────────────────────────
+// Sheet 0: Сводка — FIRST SHEET (Tasks 0.3 + 0.6)
+// ─────────────────────────────────────────────────────────────
+
+function buildSheet0Summary(wb: ExcelJS.Workbook, rows: TxRow[], from: Date, to: Date): void {
+  const ws = wb.addWorksheet('Сводка');
+  const periodStr = `${fmtDate(from)} — ${fmtDate(to)}`;
+  const days = Math.max(1, Math.round((to.getTime() - from.getTime()) / (1000 * 60 * 60 * 24)));
+
+  ws.getColumn(1).width = 26;
+  ws.getColumn(2).width = 12;
+  ws.getColumn(3).width = 18;
+  ws.getColumn(4).width = 18;
+  ws.getColumn(5).width = 18;
+
+  let r = 1;
+
+  const mergeFill = (fromRow: number, fromCol: number, toRow: number, toCol: number, bg: string) => {
+    ws.mergeCells(fromRow, fromCol, toRow, toCol);
+    const c = ws.getCell(fromRow, fromCol);
+    c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${bg}` } };
+    return c;
+  };
+
+  const cell = (row: number, col: number, val: string | number, bold = false, color?: string, numFmt?: string) => {
+    const c = ws.getCell(row, col);
+    c.value = val;
+    c.font = { size: 9, name: 'Calibri', bold, color: color ? { argb: color } : undefined };
+    c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_GREY_BG}` } };
+    c.alignment = { vertical: 'middle', horizontal: typeof val === 'number' ? 'right' : 'left' };
+    if (numFmt) c.numFmt = numFmt;
+    return c;
+  };
+
+  const sectionHdr = (title: string) => {
+    mergeFill(r, 1, r, 5, C_COL_HDR_BG);
+    const c = ws.getCell(r, 1);
+    c.value = title;
+    c.font = { bold: true, size: 9, color: { argb: `FF${C_COL_HDR_FG}` }, name: 'Calibri' };
+    ws.getRow(r).height = 18;
+    r++;
+  };
+
+  // ── Title ──────────────────────────────────────────────────
+  const title = mergeFill(r, 1, r, 5, C_HEADER_BG);
+  title.value = 'MIDAS — Финансовый отчёт';
+  title.font = { bold: true, size: 14, color: { argb: `FF${C_COL_HDR_FG}` }, name: 'Calibri' };
+  title.alignment = { horizontal: 'center', vertical: 'middle' };
+  ws.getRow(r).height = 30;
+  r++;
+
+  cell(r, 1, 'Период:', true); cell(r, 2, `${periodStr} (${String(days)} дн.)`); r++;
+  cell(r, 1, 'Сформирован:', true); cell(r, 2, `${fmtDate(new Date())} ${fmtTime(new Date())}`); r++;
+  r++; // spacer
+
+  // ── СВОДКА ЗА ПЕРИОД ──────────────────────────────────────
+  sectionHdr('СВОДКА ЗА ПЕРИОД');
+
+  type ITotals = { count: number; total: number };
+  type IntentKey = 'income' | 'expense' | 'transfer' | 'debt_given' | 'debt_received';
+  const im: Record<IntentKey, ITotals> = {
+    income:        { count: 0, total: 0 },
+    expense:       { count: 0, total: 0 },
+    transfer:      { count: 0, total: 0 },
+    debt_given:    { count: 0, total: 0 },
+    debt_received: { count: 0, total: 0 },
+  };
+  for (const row of rows) {
+    const key = row.transaction_intent as IntentKey;
+    if (key in im) { im[key].count++; im[key].total += parseFloat(row.original_amount); }
+  }
+
+  const intentRows: [string, string, number, boolean][] = [
+    ['💰 Доходы',        countStr(im.income.count),        im.income.total,       false],
+    ['💸 Расходы',       countStr(im.expense.count),       -im.expense.total,     false],
+    ['🔄 Переводы',      countStr(im.transfer.count),      im.transfer.total,     false],
+    ['🤝 Долги (дал)',   countStr(im.debt_given.count),    -im.debt_given.total,  false],
+    ['🤲 Долги (взял)',  countStr(im.debt_received.count), im.debt_received.total, false],
+  ];
+  for (const [label, cnt, amt] of intentRows) {
+    cell(r, 1, label); cell(r, 2, cnt); cell(r, 3, fmtAmtSigned(amt));
+    r++;
+  }
+  const netTotal = im.income.total + im.debt_received.total - im.expense.total - im.transfer.total - im.debt_given.total;
+  const totalC = cell(r, 1, 'Итог за период', true, undefined);
+  totalC.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_TOTAL_BG}` } };
+  const netCell = cell(r, 3, fmtAmtSigned(netTotal), true, netTotal >= 0 ? `FF${C_INCOME}` : `FF${C_EXPENSE}`);
+  netCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_TOTAL_BG}` } };
+  r++; r++; // spacer
+
+  // ── ОСТАТКИ ПО СЧЕТАМ ────────────────────────────────────
+  sectionHdr('ОСТАТКИ ПО СЧЕТАМ');
+  // Column sub-headers
+  ['Счёт', 'Валюта', 'Нач. периода', 'Кон. периода', 'Изменение'].forEach((h, i) => {
+    const c = ws.getCell(r, i + 1);
+    c.value = h;
+    c.font = { bold: true, size: 8, name: 'Calibri' };
+    c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_GREY_BG}` } };
+    c.alignment = { horizontal: i > 1 ? 'right' : 'left' };
+  });
+  r++;
+
+  // Per-account: rows are DESC sorted, first occurrence = most recent = end balance
+  type AccSumm = { currency: string; endBal: number; netChange: number };
+  const accMap = new Map<string, AccSumm>();
+  for (const row of rows) {
+    const k = row.account_name;
+    if (!accMap.has(k)) {
+      accMap.set(k, { currency: row.account_currency, endBal: parseFloat(row.balance_after), netChange: 0 });
+    }
+    const acc = accMap.get(k)!;
+    const debitAbs = parseFloat(row.account_debit_amount ?? row.original_amount);
+    const isInflow = row.transaction_intent === 'income' || row.transaction_intent === 'debt_received';
+    acc.netChange += isInflow ? debitAbs : -debitAbs;
+  }
+  for (const [name, acc] of accMap) {
+    const startBal = acc.endBal - acc.netChange;
+    cell(r, 1, name); cell(r, 2, acc.currency);
+    cell(r, 3, fmtAmtSigned(startBal)); cell(r, 4, fmtAmtSigned(acc.endBal));
+    const chg = acc.endBal - startBal;
+    cell(r, 5, fmtAmtSigned(chg), false, chg >= 0 ? `FF${C_INCOME}` : `FF${C_EXPENSE}`);
+    r++;
+  }
+  r++; // spacer
+
+  // ── СВОДКА ПО ВАЛЮТАМ ─────────────────────────────────────
+  sectionHdr('СВОДКА ПО ВАЛЮТАМ');
+  ['Валюта', 'Операций', 'Доходы', 'Расходы', 'Итог'].forEach((h, i) => {
+    const c = ws.getCell(r, i + 1);
+    c.value = h;
+    c.font = { bold: true, size: 8, name: 'Calibri' };
+    c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_GREY_BG}` } };
+  });
+  r++;
+
+  type CurTotals2 = { count: number; income: number; expense: number };
+  const byCur = new Map<string, CurTotals2>();
+  for (const row of rows) {
+    const cur = row.currency;
+    const t = byCur.get(cur) ?? { count: 0, income: 0, expense: 0 };
+    t.count++;
+    if (row.transaction_intent === 'income')  t.income  += parseFloat(row.original_amount);
+    if (row.transaction_intent === 'expense') t.expense += parseFloat(row.original_amount);
+    byCur.set(cur, t);
+  }
+  for (const [cur, t] of byCur) {
+    const net = t.income - t.expense;
+    cell(r, 1, cur); cell(r, 2, String(t.count));
+    cell(r, 3, fmtAmtSigned(t.income)); cell(r, 4, fmtAmtSigned(-t.expense));
+    cell(r, 5, fmtAmtSigned(net), false, net >= 0 ? `FF${C_INCOME}` : `FF${C_EXPENSE}`);
+    r++;
+  }
+  r++; // spacer
+
+  // ── ТОП КАТЕГОРИЙ РАСХОДОВ ────────────────────────────────
+  sectionHdr('ТОП КАТЕГОРИЙ РАСХОДОВ');
+  const catMap = new Map<string, { total: number; count: number }>();
+  for (const row of rows) {
+    if (row.transaction_intent !== 'expense') continue;
+    const k = row.category_name;
+    const c = catMap.get(k) ?? { total: 0, count: 0 };
+    c.total += parseFloat(row.original_amount); c.count++;
+    catMap.set(k, c);
+  }
+  const totalExpense = im.expense.total || 1;
+  const topCats = [...catMap.entries()].sort((a, b) => b[1].total - a[1].total).slice(0, 5);
+  if (topCats.length === 0) { cell(r, 1, '—'); r++; }
+  for (const [i, [name, c]] of topCats.entries()) {
+    const pct = Math.round((c.total / totalExpense) * 100);
+    cell(r, 1, `${String(i + 1)}.  ${name}`);
+    cell(r, 2, countStr(c.count));
+    cell(r, 3, fmtAmtSigned(-c.total));
+    cell(r, 4, `${String(pct)}%`);
+    r++;
+  }
+  r++; r++; // spacer before footer
+
+  // ── Audit Trail Footer (Task 0.6) ─────────────────────────
+  const footerStyle = (row: number) => {
+    ws.mergeCells(row, 1, row, 5);
+    const c = ws.getCell(row, 1);
+    c.font = { size: 8, italic: true, color: { argb: 'FF888888' }, name: 'Calibri' };
+    c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF9F9F9' } };
+    return c;
+  };
+  footerStyle(r).value = '─────────────────────────────────────────────────────────'; r++;
+  footerStyle(r).value = 'Документ сформирован системой MIDAS v2.0'; r++;
+  footerStyle(r).value = `Дата экспорта: ${fmtDate(new Date())} ${fmtTime(new Date())}`; r++;
+  footerStyle(r).value = `Период: ${periodStr}`; r++;
+  footerStyle(r).value = `Количество записей: ${String(rows.length)}`; r++;
+  footerStyle(r).value = '─────────────────────────────────────────────────────────'; r++;
+  footerStyle(r).value = 'Документ является информационным. Для официального подтверждения операций обратитесь в банк или платёжную систему.'; r++;
+
+  ws.views = [{ state: 'normal', activeCell: 'A1' }];
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -448,6 +661,47 @@ function buildSheet1(wb: ExcelJS.Workbook, rows: TxRow[], from: Date, to: Date):
     ws.getCell(totalRow, 11).value = '∑ ±';
     ws.getCell(totalRow, 11).font = { italic: true, size: 7, name: 'Calibri', color: { argb: 'FF888888' } };
     ws.getCell(totalRow, 11).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_TOTAL_BG}` } };
+  }
+
+  // ── Task 0.2: Остатки по счетам на конец периода ────────────
+  if (rows.length > 0) {
+    const accBRow = DATA_START + rows.length + 2; // +1 ИТОГО +1 blank spacer
+    ws.mergeCells(accBRow, 1, accBRow, 16);
+    const accHdr = ws.getCell(accBRow, 1);
+    accHdr.value = 'ОСТАТКИ ПО СЧЕТАМ НА КОНЕЦ ПЕРИОДА';
+    accHdr.font = { bold: true, size: 9, color: { argb: `FF${C_COL_HDR_FG}` }, name: 'Calibri' };
+    accHdr.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_COL_HDR_BG}` } };
+
+    // Per-account end balance (rows DESC → first occurrence = most recent)
+    type BalSumm = { currency: string; endBal: string };
+    const balMap = new Map<string, BalSumm>();
+    for (const row of rows) {
+      if (!balMap.has(row.account_name)) {
+        balMap.set(row.account_name, { currency: row.account_currency, endBal: row.balance_after });
+      }
+    }
+
+    let bRow = accBRow + 1;
+    // Sub-header
+    const subCols = ['Счёт', 'Валюта', 'Остаток'];
+    subCols.forEach((h, i) => {
+      const c = ws.getCell(bRow, i + 1);
+      c.value = h;
+      c.font = { bold: true, size: 8, name: 'Calibri' };
+      c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_GREY_BG}` } };
+    });
+    bRow++;
+
+    for (const [name, { currency, endBal }] of balMap) {
+      const balNum = parseFloat(endBal);
+      [name, currency, fmtAmtSigned(balNum)].forEach((v, i) => {
+        const c = ws.getCell(bRow, i + 1);
+        c.value = v;
+        c.font = { size: 9, name: 'Calibri', color: balNum < 0 && i === 2 ? { argb: `FF${C_EXPENSE}` } : undefined };
+        c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_GREY_BG}` } };
+      });
+      bRow++;
+    }
   }
 
   // ── Auto-filter on header row ────────────────────────────────

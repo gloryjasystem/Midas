@@ -2768,71 +2768,112 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
             const langLabel = cmd.lang === 'ru' ? '🇷🇺 Русский' : cmd.lang === 'en' ? '🇬🇧 English' : '🇺🇦 Українська';
             if (messageId) void editMessageText(chatId, messageId, `✅ Язык: <b>${langLabel}</b>`, { inline_keyboard: [[{ text: '← Назад', callback_data: 'st:back' }]] });
           }
-          else if (cmd.cmd === 'export_menu' || cmd.cmd === 'export_csv') {
-            if (cmd.cmd === 'export_menu') {
-              const kb = {
-                inline_keyboard: [
-                  [{ text: '📄 Скачать CSV', callback_data: 'st:exp:csv' }],
-                  [{ text: '← Назад', callback_data: 'st:back' }],
-                ]
-              };
-              if (messageId) void editMessageText(chatId, messageId, '📤 <b>Экспорт данных</b>\n\nВыберите формат:', kb);
-            } else {
-              // Generate CSV and send as document
-              const { exportTransactionsCSV } = await import('../services/settings-advanced.service.js');
-              const csvBuf = await exportTransactionsCSV(stResolved.workspaceId, stResolved.userId);
-              const { sendDocument } = await import('../services/telegram-api.js');
-              await sendDocument(chatId, csvBuf, 'midas_export.csv', 'Экспорт транзакций Midas');
-              if (messageId) void editMessageText(chatId, messageId, '✅ Файл отправлен.', { inline_keyboard: [[{ text: '← Назад', callback_data: 'st:back' }]] });
-            }
-          }
-          // ── Excel export ─────────────────────────────────────────
-          else if (cmd.cmd === 'export_excel') {
-            // Show period picker
-            const xkb = {
+          // ── Sprint 0 Task 0.5: unified export flow ────────────────
+          // Entry: st:exp → period → account → format → file
+          else if (cmd.cmd === 'exp_start' || cmd.cmd === 'export_menu') {
+            // Clear any stale params and show period picker
+            const expKey = `midas:exp:params:${telegramUserId}:${chatId}`;
+            void redisConnection.del(expKey);
+            const kb = {
               inline_keyboard: [
-                [{ text: '📅 Этот месяц',      callback_data: 'st:xl:cur'  }],
-                [{ text: '📅 Прошлый месяц',   callback_data: 'st:xl:prev' }],
-                [{ text: '📅 Последние 90 дн.', callback_data: 'st:xl:90d'  }],
-                [{ text: '📅 Весь период',      callback_data: 'st:xl:all'  }],
-                [{ text: '← Назад',             callback_data: 'st:back'    }],
+                [
+                  { text: '📅 Этот месяц',    callback_data: 'st:exp:p:tm' },
+                  { text: '📅 Прошлый месяц', callback_data: 'st:exp:p:lm' },
+                ],
+                [
+                  { text: '📅 3 месяца',      callback_data: 'st:exp:p:3m' },
+                  { text: '📅 Весь период',    callback_data: 'st:exp:p:yr' },
+                ],
+                [{ text: '← Назад', callback_data: 'st:back' }],
               ],
             };
-            const xText =
-              '📊 <b>Экспорт Excel</b>\n\n' +
-              'Будет сформирован файл <b>.xlsx</b> с 4 листами:\n' +
-              '  • Транзакции (17 колонок)\n' +
-              '  • Сводка по счетам\n' +
-              '  • Сводка по категориям\n' +
-              '  • Динамика по месяцам\n\n' +
-              'Выберите период:';
-            if (messageId) void editMessageText(chatId, messageId, xText, xkb);
+            const txt =
+              '📤 <b>Экспорт данных</b>\n\n' +
+              'Шаг 1 из 3 — выберите <b>период</b>:';
+            if (messageId) void editMessageText(chatId, messageId, txt, kb);
           }
-          else if (cmd.cmd === 'export_excel_period') {
-            // Compute date range
+          else if (cmd.cmd === 'exp_period') {
+            // Store period, show account picker
+            const expKey = `midas:exp:params:${telegramUserId}:${chatId}`;
+            await redisConnection.set(expKey, JSON.stringify({ period: cmd.period }), 'EX', 300);
+
+            const accounts = await getWorkspaceAccounts(stResolved.workspaceId, stResolved.userId);
+            const accRows = accounts.map(a => ([{
+              // st:exp:a:{ULID} — max 35 bytes ✓
+              text: `🏦 ${a.name} · ${a.currency}`,
+              callback_data: `st:exp:a:${a.id}`,
+            }]));
+            const kb = {
+              inline_keyboard: [
+                [{ text: '🏦 Все счета', callback_data: 'st:exp:a:all' }],
+                ...accRows,
+                [{ text: '← Назад', callback_data: 'st:exp' }],
+              ],
+            };
+            const periodLabels: Record<string, string> = {
+              tm: 'этот месяц', lm: 'прошлый месяц', '3m': '3 месяца', yr: 'весь период',
+            };
+            const txt =
+              '📤 <b>Экспорт данных</b>\n\n' +
+              `Период: <b>${periodLabels[cmd.period] ?? cmd.period}</b>\n\n` +
+              'Шаг 2 из 3 — выберите <b>счёт</b>:';
+            if (messageId) void editMessageText(chatId, messageId, txt, kb);
+          }
+          else if (cmd.cmd === 'exp_account') {
+            // Store accountId, show format picker
+            const expKey = `midas:exp:params:${telegramUserId}:${chatId}`;
+            const raw = await redisConnection.get(expKey);
+            const params = raw ? (JSON.parse(raw) as { period?: string }) : {};
+            await redisConnection.set(expKey, JSON.stringify({ ...params, accountId: cmd.accountId }), 'EX', 300);
+
+            const kb = {
+              inline_keyboard: [
+                [
+                  { text: '📊 Excel (.xlsx)', callback_data: 'st:exp:fmt:xlsx' },
+                  { text: '📄 CSV (.csv)',    callback_data: 'st:exp:fmt:csv'  },
+                ],
+                [{ text: '← Назад', callback_data: 'st:exp' }],
+              ],
+            };
+            const accLabel = cmd.accountId === 'all' ? 'Все счета' : cmd.accountId;
+            const txt =
+              '📤 <b>Экспорт данных</b>\n\n' +
+              `Счёт: <b>${escapeHtml(accLabel)}</b>\n\n` +
+              'Шаг 3 из 3 — выберите <b>формат файла</b>:';
+            if (messageId) void editMessageText(chatId, messageId, txt, kb);
+          }
+          else if (cmd.cmd === 'exp_format') {
+            // Read params, compute dates, generate and send file
+            const expKey = `midas:exp:params:${telegramUserId}:${chatId}`;
+            const raw = await redisConnection.get(expKey);
+            void redisConnection.del(expKey);
+            const params = raw ? (JSON.parse(raw) as { period?: string; accountId?: string }) : {};
+
+            const period    = params.period    ?? 'yr';
+            const accountId = params.accountId && params.accountId !== 'all' ? params.accountId : undefined;
+
             const now = new Date();
             let dateFrom: Date;
             let dateTo: Date = now;
             let periodLabel: string;
 
-            if (cmd.period === 'cur') {
+            if (period === 'tm') {
               dateFrom = new Date(now.getFullYear(), now.getMonth(), 1);
               periodLabel = `${String(now.getMonth() + 1).padStart(2, '0')}.${String(now.getFullYear())}`;
-            } else if (cmd.period === 'prev') {
+            } else if (period === 'lm') {
               const y = now.getMonth() === 0 ? now.getFullYear() - 1 : now.getFullYear();
               const m = now.getMonth() === 0 ? 11 : now.getMonth() - 1;
               dateFrom = new Date(y, m, 1);
               dateTo   = new Date(y, m + 1, 0, 23, 59, 59);
               periodLabel = `${String(m + 1).padStart(2, '0')}.${String(y)}`;
-            } else if (cmd.period === '90d') {
+            } else if (period === '3m') {
               dateFrom = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
-              periodLabel = '90 дней';
+              periodLabel = '3 месяца';
             } else {
               dateFrom = new Date(0);
-              periodLabel = 'всё время';
+              periodLabel = 'весь период';
             }
 
-            // Notify user — generation may take a moment
             if (messageId) {
               void editMessageText(chatId, messageId,
                 '⏳ <b>Генерирую файл…</b>\n\nЭто займёт несколько секунд.',
@@ -2840,35 +2881,49 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
               );
             }
 
-            const { exportTransactionsExcel } = await import('../services/excel-export.service.js');
-            const { sendDocument: sendDoc }   = await import('../services/telegram-api.js');
-
-            const xlBuf = await exportTransactionsExcel(
-              stResolved.workspaceId,
-              stResolved.userId,
-              dateFrom,
-              dateTo,
-            );
-
-            // File name: Midas_Транзакции_YYYY-MM.xlsx
             const nowStr = now.toISOString().slice(0, 7); // YYYY-MM
-            const fileName = `Midas_Транзакции_${nowStr}.xlsx`;
-            const caption  = `📊 Экспорт транзакций · ${periodLabel}`;
 
-            await sendDoc(chatId, xlBuf, fileName, caption);
+            if (cmd.format === 'xlsx') {
+              const { exportTransactionsExcel } = await import('../services/excel-export.service.js');
+              const { sendDocument: sendDoc }   = await import('../services/telegram-api.js');
+              const xlBuf = await exportTransactionsExcel(
+                stResolved.workspaceId, stResolved.userId, dateFrom, dateTo, accountId,
+              );
+              const fileName = `MIDAS_Report_${nowStr}.xlsx`;
+              await sendDoc(chatId, xlBuf, fileName, `📊 Midas · ${periodLabel} · Excel`);
+            } else {
+              const { exportTransactionsCSV } = await import('../services/settings-advanced.service.js');
+              const { sendDocument: sendDoc }  = await import('../services/telegram-api.js');
+              const csvBuf = await exportTransactionsCSV(stResolved.workspaceId, stResolved.userId);
+              const fileName = `MIDAS_Report_${nowStr}.csv`;
+              await sendDoc(chatId, csvBuf, fileName, `📄 Midas · ${periodLabel} · CSV`);
+            }
 
             if (messageId) {
               void editMessageText(chatId, messageId,
-                `✅ <b>Файл отправлен!</b>\n\nПериод: ${periodLabel}`,
-                { inline_keyboard: [[{ text: '← Назад', callback_data: 'st:back' }]] },
+                `✅ <b>Готово!</b>\n\nПериод: ${periodLabel}`,
+                { inline_keyboard: [[{ text: '← В настройки', callback_data: 'st:back' }]] },
               );
             }
-
-            request.log.info({
-              msg: '[midas:bot:webhook] excel export generated',
-              telegramUserId,
-              period: cmd.period,
-            });
+            request.log.info({ msg: '[midas:bot:webhook] unified export generated', telegramUserId, period, format: cmd.format });
+          }
+          // ── Legacy Excel export (backward compat for old inline buttons) ──
+          else if (cmd.cmd === 'export_excel') {
+            // Redirect to unified flow entry point
+            const expKey = `midas:exp:params:${telegramUserId}:${chatId}`;
+            void redisConnection.del(expKey);
+            const kb = { inline_keyboard: [
+              [{ text: '📅 Этот месяц', callback_data: 'st:exp:p:tm' }, { text: '📅 Прошлый месяц', callback_data: 'st:exp:p:lm' }],
+              [{ text: '📅 3 месяца',   callback_data: 'st:exp:p:3m' }, { text: '📅 Весь период',    callback_data: 'st:exp:p:yr' }],
+              [{ text: '← Назад', callback_data: 'st:back' }],
+            ]};
+            if (messageId) void editMessageText(chatId, messageId, '📤 <b>Экспорт</b>\n\nШаг 1 из 3 — выберите <b>период</b>:', kb);
+          }
+          else if (cmd.cmd === 'export_excel_period' || cmd.cmd === 'export_csv') {
+            // Legacy: redirect to new entry point gracefully
+            if (messageId) void editMessageText(chatId, messageId,
+              '📤 <b>Экспорт обновлён!</b>\n\nИспользуйте кнопку «Экспорт» в настройках.',
+              { inline_keyboard: [[{ text: '⚙️ Настройки', callback_data: 'st:back' }]] });
           }
           else if (cmd.cmd === 'info') {
             const infoText = `✨ <b>Midas — ваш интеллектуальный финансовый ассистент.</b>

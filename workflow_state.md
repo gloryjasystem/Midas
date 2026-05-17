@@ -1,4 +1,4 @@
-﻿# WORKFLOW_STATE.MD � ��������� ����� ��-������ Midas
+# WORKFLOW_STATE.MD � ��������� ����� ��-������ Midas
 
 > **���:** MUTABLE � ��������������� ������ ������. ����������� �� ������ ���� ������.
 > **�������:** 2026-05-15 10:20 (UTC+3)
@@ -1515,3 +1515,43 @@ buildAccountActionsKeyboard(
 | **BLOCKER** | None — Railway logs покажут `console.warn` если `balanceBefore` всё ещё null |
 | **NEXT ACTION** | Тест: создать транзакцию → подтвердить → убедиться что блок «🏦 Счёт · Итог» отображается |
 | **KNOWN ISSUE** | Если Railway logs показывают `balanceAfterRaw is null` — значит аккаунт не найден в запросе баланса (RLS или `WHERE`). Если `numericReverse failed` — значит неожиданный формат числа |
+
+---
+
+### 3. Navigation UX — Фикс "залипания" кнопок Reply Keyboard (Phase 2.11)
+
+**Проблема:** При нажатии на нижние кнопки ("💼 Баланс", "⚙️ Настройки" и т.д.) происходило "залипание". Бот мгновенно удалял текстовое сообщение пользователя, находил в памяти ID старой панели высоко в истории чата и успешно обновлял её вне экрана. Внизу чата оставалась пустота, и пользователь считал, что меню не открывается.
+
+**Исправление:**
+- В `apps/telegram-bot/src/routes/webhook.route.ts` добавлен жесткий перехватчик для текстовых сообщений от нижних кнопок (`NAV_BTN_BALANCE`, `NAV_BTN_TRANSACTIONS`, `NAV_BTN_REPORT`, `NAV_BTN_SETTINGS`).
+- При нажатии на любую из этих кнопок бот теперь выполняет два действия:
+  1. Читает из памяти ID предыдущего меню (`getNavMessageId`) и удаляет это сообщение из чата (`deleteMessage`).
+  2. Очищает указатель в памяти (`clearNavMessageId`).
+- Это гарантирует, что функция `sendNavMessage` всегда отправит **совершенно новое сообщение в самый низ чата**, обеспечивая чистоту чата (без дублей) и 100% видимость панели для пользователя.
+- Исправлена опечатка в константе `NAV_BTN_TXS` -> `NAV_BTN_TRANSACTIONS`, которая ломала сборку `tsc`.
+
+**Коммиты этой сессии:**
+
+| SHA | Сообщение |
+|---|---|
+| `e80522f` | `feat: delete old nav message before sending fresh one` |
+| `6a48760` | `fix: force fresh nav panel on reply keyboard press (forced update for typo fix)` |
+| `db3a47e` | `fix: force fresh nav panel on reply keyboard press` |
+
+- **Файлы затронуты:** 1
+  - `apps/telegram-bot/src/routes/webhook.route.ts`
+- **tsc:** 0 ошибок
+- **Pushed:** main ✅
+- **Railway:** auto-deploy triggered
+
+---
+
+### Состояние на момент закрытия сессии (2026-05-17 13:00 UTC+3)
+
+| Параметр | Значение |
+|---|---|
+| **PHASE** | Navigation Reply Keyboard Fix — DEPLOYED |
+| **LAST COMMIT** | `e80522f` pushed to main |
+| **BLOCKER** | None. |
+| **NEXT ACTION** | Тест: нажать «Баланс», затем «Настройки» на нижней клавиатуре → старое меню должно удалиться, а новое появиться снизу. |
+| **KNOWN ISSUE** | None. |
