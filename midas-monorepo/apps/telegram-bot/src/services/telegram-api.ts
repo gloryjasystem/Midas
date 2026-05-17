@@ -85,10 +85,19 @@ async function telegramPost(method: string, body: Record<string, unknown>): Prom
     });
 
     clearTimeout(timeout);
-    if (!response.ok) return false;
+    if (!response.ok) {
+      try {
+        const errorData = await response.json();
+        console.error(`[Telegram API Error] ${method}:`, errorData);
+      } catch (e) {
+        console.error(`[Telegram API Error] ${method}: HTTP ${response.status}`);
+      }
+      return false;
+    }
     const data = (await response.json()) as { ok: boolean };
     return data.ok;
-  } catch {
+  } catch (err: unknown) {
+    console.error(`[Telegram API Exception] ${method}:`, err);
     return false;
   }
 }
@@ -118,9 +127,18 @@ async function telegramPostFull(
     });
 
     clearTimeout(timeout);
-    if (!response.ok) return null;
+    if (!response.ok) {
+      try {
+        const errorData = await response.json();
+        console.error(`[Telegram API Error] ${method}:`, errorData);
+      } catch (e) {
+        console.error(`[Telegram API Error] ${method}: HTTP ${response.status}`);
+      }
+      return null;
+    }
     return (await response.json()) as { ok: boolean; result?: { message_id?: number } };
-  } catch {
+  } catch (err: unknown) {
+    console.error(`[Telegram API Exception] ${method}:`, err);
     return null;
   }
 }
