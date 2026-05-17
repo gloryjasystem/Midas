@@ -91,6 +91,7 @@ interface TxRow {
   account_type: string;
   item_name: string | null;
   person_name: string | null;
+  balance_after: string; // running balance on the account after this transaction
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -116,35 +117,75 @@ export async function exportTransactionsExcel(
   const to   = dateTo   ?? new Date();
 
   const rows = await withTenantTransaction(workspaceId, userId, async (client) => {
+    // We compute the running balance for each transaction using a window function.
+    // The window covers ALL transactions on the account (not just the export window),
+    // so the balance is accurate even when exporting a sub-period.
     const r = await client.query<TxRow>(
-      `SELECT
-         t.transaction_time,
-         t.transaction_intent,
-         t.original_amount::text,
-         t.currency,
-         t.account_debit_amount::text,
-         t.account_debit_currency,
-         COALESCE(t.exchange_rate, 1)::text AS exchange_rate,
-         COALESCE(c.name, '—')   AS category_name,
+      `WITH all_tx AS (
+         SELECT
+           t.id,
+           t.workspace_id,
+           t.transaction_time,
+           t.created_at,
+           t.transaction_intent,
+           t.original_amount,
+           t.currency,
+           t.account_debit_amount,
+           t.account_debit_currency,
+           COALESCE(t.exchange_rate, 1)  AS exchange_rate,
+           t.account_id,
+           t.category_id,
+           t.item_name,
+           t.person_id,
+           t.deleted_at,
+           -- signed debit on the account: income/debt_received = positive, rest = negative
+           CASE
+             WHEN t.transaction_intent IN ('income', 'debt_received')
+               THEN  COALESCE(t.account_debit_amount, t.original_amount)
+             ELSE   -COALESCE(t.account_debit_amount, t.original_amount)
+           END AS signed_debit
+         FROM transactions t
+         WHERE t.workspace_id = $1 AND t.deleted_at IS NULL
+       ),
+       with_balance AS (
+         SELECT
+           tx.*,
+           a.initial_balance + SUM(tx.signed_debit) OVER (
+             PARTITION BY tx.account_id
+             ORDER BY tx.transaction_time, tx.created_at
+             ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+           ) AS balance_after
+         FROM all_tx tx
+         JOIN account_sources a ON a.id = tx.account_id
+       )
+       SELECT
+         wb.transaction_time,
+         wb.transaction_intent,
+         wb.original_amount::text,
+         wb.currency,
+         wb.account_debit_amount::text,
+         wb.account_debit_currency,
+         wb.exchange_rate::text,
+         COALESCE(c.name, '—')        AS category_name,
          COALESCE(c.group::text, '—') AS category_group,
-         COALESCE(a.name, '—')   AS account_name,
-         COALESCE(a.currency, '—') AS account_currency,
-         COALESCE(a.type::text, '—') AS account_type,
-         t.item_name,
-         p.canonical_name AS person_name
-       FROM transactions t
-       LEFT JOIN categories    c ON c.id = t.category_id
-       LEFT JOIN account_sources a ON a.id = t.account_id
-       LEFT JOIN persons        p ON p.id = t.person_id
-       WHERE t.workspace_id = $1
-         AND t.deleted_at IS NULL
-         AND t.transaction_time >= $2
-         AND t.transaction_time <= $3
-       ORDER BY t.transaction_time DESC`,
+         COALESCE(a.name, '—')        AS account_name,
+         COALESCE(a.currency, '—')    AS account_currency,
+         COALESCE(a.type::text, '—')  AS account_type,
+         wb.item_name,
+         p.canonical_name             AS person_name,
+         ROUND(wb.balance_after, 2)::text AS balance_after
+       FROM with_balance wb
+       LEFT JOIN categories    c ON c.id = wb.category_id
+       LEFT JOIN account_sources a ON a.id = wb.account_id
+       LEFT JOIN persons        p ON p.id = wb.person_id
+       WHERE wb.transaction_time >= $2
+         AND wb.transaction_time <= $3
+       ORDER BY wb.transaction_time DESC`,
       [workspaceId, from.toISOString(), to.toISOString()],
     );
     return r.rows;
   });
+
 
   const wb = new ExcelJS.Workbook();
   wb.creator = 'Midas Finance Bot';
@@ -267,9 +308,16 @@ function buildSheet1(wb: ExcelJS.Workbook, rows: TxRow[], from: Date, to: Date):
     ['Категория',         16],
     ['Группа',            12],
     ['Комментарий',       25],
-    ['Ставка/час\n(вручную)', 13],
+    ['Остаток\nна счету', 14],  // col 16 — running balance
+    ['Часов\n(вручную)', 13],  // col 17
+    ['Ставка/час\n(авто)', 13],  // col 18
   ];
   cols.forEach(([text, width], i) => hdr(ws, i + 1, HDR_ROW, text, width));
+
+  // Col 16 «Остаток» header: use a distinct background to set it apart
+  ws.getCell(HDR_ROW, 16).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1A5276' } };
+  // Col 17 «Часов» header: light-yellow tint
+  ws.getCell(HDR_ROW, 17).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF7D6608' } };
 
   // ── Rows 11+: Data ───────────────────────────────────────────
   const DATA_START = 11;
@@ -313,12 +361,13 @@ function buildSheet1(wb: ExcelJS.Workbook, rows: TxRow[], from: Date, to: Date):
       row.account_currency,
       amtNum,
       row.currency,
-      sameCur ? null : debitNum,     // Выплачено: скрыть если совпадает
-      sameCur ? '' : debitCur,        // Вал.выплаты: скрыть если совпадает
-      rateNum,                        // Курс: всегда показываем
+      sameCur ? null : debitNum,       // Выплачено: скрыть если совпадает
+      sameCur ? '' : debitCur,          // Вал.выплаты: скрыть если совпадает
+      rateNum,                          // Курс: всегда показываем
       row.category_name,
       row.category_group,
       row.item_name ?? '',
+      parseFloat(row.balance_after),    // col 16 — Остаток на счету после транзакции
     ];
 
     cellValues.forEach((val, ci) => {
@@ -328,23 +377,34 @@ function buildSheet1(wb: ExcelJS.Workbook, rows: TxRow[], from: Date, to: Date):
       cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: bgColor } };
       cell.alignment = { vertical: 'middle' };
 
-      // Colour amount (col H = 8) and type (col D = 4)
+      // Colour type (col D=4) and amount (col H=8)
       if (ci === 3 || ci === 7) {
         cell.font = { size: 9, name: 'Calibri', color: { argb: `FF${colour}` }, bold: ci === 3 };
       }
       // Number format for amounts
       if (ci === 7 || ci === 9) cell.numFmt = '#,##0.00';
       if (ci === 11) cell.numFmt = '0.0000';
+      // col 16 (ci === 15): Остаток — format + colour by sign
+      if (ci === 15) {
+        const bal = val as number;
+        cell.numFmt = '#,##0.00';
+        cell.font = {
+          size: 9, name: 'Calibri', bold: true,
+          color: { argb: bal >= 0 ? `FF${C_INCOME}` : `FF${C_EXPENSE}` },
+        };
+        cell.fill = { type: 'pattern', pattern: 'solid',
+          fgColor: { argb: bal >= 0 ? 'FFE8F8F5' : 'FFFDEDEC' } };
+      }
     });
 
-    // Col P (16): «Часов» — empty, ready for user input
-    const hoursCell = ws.getCell(rNum, 16);
-    hoursCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF9C4' } }; // light yellow hint
+    // Col Q (17): «Часов» — empty, ready for user input (light yellow)
+    const hoursCell = ws.getCell(rNum, 17);
+    hoursCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF9C4' } };
     hoursCell.numFmt = '0.00';
 
-    // Col Q (17): «Ставка/час» — Excel formula =IFERROR(H{n}/P{n},"")
-    const rateCell = ws.getCell(rNum, 17);
-    rateCell.value = { formula: `IFERROR(H${rNum}/P${rNum},"")` };
+    // Col R (18): «Ставка/час» — Excel formula =IFERROR(H{n}/Q{n},"")
+    const rateCell = ws.getCell(rNum, 18);
+    rateCell.value = { formula: `IFERROR(H${rNum}/Q${rNum},"")` };
     rateCell.numFmt = '#,##0.00';
     rateCell.font = { size: 9, name: 'Calibri', italic: true };
     rateCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: bgColor } };
@@ -375,14 +435,12 @@ function buildSheet1(wb: ExcelJS.Workbook, rows: TxRow[], from: Date, to: Date):
   }
 
   // ── Auto-filter on header row ────────────────────────────────
-  ws.autoFilter = { from: { row: HDR_ROW, column: 1 }, to: { row: HDR_ROW, column: 15 } };
+  ws.autoFilter = { from: { row: HDR_ROW, column: 1 }, to: { row: HDR_ROW, column: 16 } };
 
-  // ── Freeze first 10 rows (header + columns) ──────────────────
+  // ── Freeze pane below header ──────────────────────────────────
   ws.views = [{ state: 'frozen', ySplit: HDR_ROW, xSplit: 0, activeCell: `A${DATA_START}` }];
-
-  hdr(ws, 16, HDR_ROW, 'Часов\n(вручную)', 13);
-  hdr(ws, 17, HDR_ROW, 'Ставка/час\n(авто)', 13);
 }
+
 
 // ─────────────────────────────────────────────────────────────
 // Sheet 2: Счета
