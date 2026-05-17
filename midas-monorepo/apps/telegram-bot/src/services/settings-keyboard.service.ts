@@ -53,6 +53,7 @@ export function buildSettingsMainKeyboard(): InlineKeyboardMarkup {
     inline_keyboard: [
       [{ text: '🕒 Часовой пояс', callback_data: 'st:tz' }],
       [{ text: '🔔 Уведомления', callback_data: 'st:ntf' }],
+      [{ text: '📥 Экспорт Excel', callback_data: 'st:xl' }],
       [{ text: '💬 Поддержка', url: 'https://t.me/midas_support' }],
       [{ text: '✖️ Закрыть', callback_data: 'st:cancel' }],
     ],
@@ -276,6 +277,8 @@ export type SettingsCallbackCmd =
   | { cmd: 'lang_set'; lang: string }
   | { cmd: 'export_menu' }
   | { cmd: 'export_csv' }
+  | { cmd: 'export_excel' }
+  | { cmd: 'export_excel_period'; period: 'cur' | 'prev' | '90d' | 'all' }
   | { cmd: 'info' }
   // Phase 2.2: timezone
   | { cmd: 'timezone_menu' }
@@ -335,6 +338,15 @@ export function parseSettingsCallback(data: string): SettingsCallbackCmd | null 
     const action = parts[2] ?? '';
     if (!action) return { cmd: 'export_menu' };
     if (action === 'csv') return { cmd: 'export_csv' };
+    return null;
+  }
+  if (sub === 'xl') {
+    const action = parts[2] ?? '';
+    if (!action) return { cmd: 'export_excel' };
+    const VALID_PERIODS = ['cur', 'prev', '90d', 'all'] as const;
+    if (VALID_PERIODS.includes(action as typeof VALID_PERIODS[number])) {
+      return { cmd: 'export_excel_period', period: action as 'cur' | 'prev' | '90d' | 'all' };
+    }
     return null;
   }
   if (sub === 'info') return { cmd: 'info' };

@@ -2786,6 +2786,90 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
               if (messageId) void editMessageText(chatId, messageId, '✅ Файл отправлен.', { inline_keyboard: [[{ text: '← Назад', callback_data: 'st:back' }]] });
             }
           }
+          // ── Excel export ─────────────────────────────────────────
+          else if (cmd.cmd === 'export_excel') {
+            // Show period picker
+            const xkb = {
+              inline_keyboard: [
+                [{ text: '📅 Этот месяц',      callback_data: 'st:xl:cur'  }],
+                [{ text: '📅 Прошлый месяц',   callback_data: 'st:xl:prev' }],
+                [{ text: '📅 Последние 90 дн.', callback_data: 'st:xl:90d'  }],
+                [{ text: '📅 Весь период',      callback_data: 'st:xl:all'  }],
+                [{ text: '← Назад',             callback_data: 'st:back'    }],
+              ],
+            };
+            const xText =
+              '📊 <b>Экспорт Excel</b>\n\n' +
+              'Будет сформирован файл <b>.xlsx</b> с 4 листами:\n' +
+              '  • Транзакции (17 колонок)\n' +
+              '  • Сводка по счетам\n' +
+              '  • Сводка по категориям\n' +
+              '  • Динамика по месяцам\n\n' +
+              'Выберите период:';
+            if (messageId) void editMessageText(chatId, messageId, xText, xkb);
+          }
+          else if (cmd.cmd === 'export_excel_period') {
+            // Compute date range
+            const now = new Date();
+            let dateFrom: Date;
+            let dateTo: Date = now;
+            let periodLabel: string;
+
+            if (cmd.period === 'cur') {
+              dateFrom = new Date(now.getFullYear(), now.getMonth(), 1);
+              periodLabel = `${String(now.getMonth() + 1).padStart(2, '0')}.${String(now.getFullYear())}`;
+            } else if (cmd.period === 'prev') {
+              const y = now.getMonth() === 0 ? now.getFullYear() - 1 : now.getFullYear();
+              const m = now.getMonth() === 0 ? 11 : now.getMonth() - 1;
+              dateFrom = new Date(y, m, 1);
+              dateTo   = new Date(y, m + 1, 0, 23, 59, 59);
+              periodLabel = `${String(m + 1).padStart(2, '0')}.${String(y)}`;
+            } else if (cmd.period === '90d') {
+              dateFrom = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
+              periodLabel = '90 дней';
+            } else {
+              dateFrom = new Date(0);
+              periodLabel = 'всё время';
+            }
+
+            // Notify user — generation may take a moment
+            if (messageId) {
+              void editMessageText(chatId, messageId,
+                '⏳ <b>Генерирую файл…</b>\n\nЭто займёт несколько секунд.',
+                { inline_keyboard: [] },
+              );
+            }
+
+            const { exportTransactionsExcel } = await import('../services/excel-export.service.js');
+            const { sendDocument: sendDoc }   = await import('../services/telegram-api.js');
+
+            const xlBuf = await exportTransactionsExcel(
+              stResolved.workspaceId,
+              stResolved.userId,
+              dateFrom,
+              dateTo,
+            );
+
+            // File name: Midas_Транзакции_YYYY-MM.xlsx
+            const nowStr = now.toISOString().slice(0, 7); // YYYY-MM
+            const fileName = `Midas_Транзакции_${nowStr}.xlsx`;
+            const caption  = `📊 Экспорт транзакций · ${periodLabel}`;
+
+            await sendDoc(chatId, xlBuf, fileName, caption);
+
+            if (messageId) {
+              void editMessageText(chatId, messageId,
+                `✅ <b>Файл отправлен!</b>\n\nПериод: ${periodLabel}`,
+                { inline_keyboard: [[{ text: '← Назад', callback_data: 'st:back' }]] },
+              );
+            }
+
+            request.log.info({
+              msg: '[midas:bot:webhook] excel export generated',
+              telegramUserId,
+              period: cmd.period,
+            });
+          }
           else if (cmd.cmd === 'info') {
             const infoText = `✨ <b>Midas — ваш интеллектуальный финансовый ассистент.</b>
 
