@@ -4250,6 +4250,16 @@ Midas создан, чтобы сделать учет денег максима
     // Reply Keyboard buttons send their label text as a plain message.
     // Intercept here — before AI parse — and route to the correct handler.
     const navText = message.text.trim();
+    
+    // Phase 2.11: If the user presses ANY Reply Keyboard button, the chat advances.
+    // We MUST clear the nav pointer so the bot sends a fresh panel at the bottom
+    // rather than silently editing an off-screen message.
+    if (navText === NAV_BTN_BALANCE || navText === '💰 Баланс' ||
+        navText === NAV_BTN_REPORT || navText === '📊 Отчеты' || navText === '📊 Отчет' ||
+        navText === NAV_BTN_SETTINGS ||
+        navText === NAV_BTN_TRANSACTIONS) {
+      void clearNavMessageId(telegramUserId, chatId);
+    }
 
     if (navText === NAV_BTN_BALANCE || navText === '💰 Баланс') {
       // Phase 2.9: sendNavMessage — always sends NEW message, never edits/deletes tx records
