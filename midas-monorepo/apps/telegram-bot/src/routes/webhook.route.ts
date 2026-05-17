@@ -5955,6 +5955,7 @@ Midas создан, чтобы сделать учет денег максима
               );
               const newSuccessIdBi = await sendMessageWithReplyKeyboard(chatId, d4TextBi, buildMainMenuKeyboard());
               if (newSuccessIdBi) void redisConnection.set(lastSuccessMsgKey(telegramUserId, chatId), newSuccessIdBi, 'EX', LAST_SUCCESS_MSG_TTL_SEC);
+              void clearNavMessageId(telegramUserId, chatId);
             } else {
               // First account — full onboarding success screen with balance
               const defIconBi = defBi ? getIconByName(defBi.name, PROVIDER_ICONS) : icon;
@@ -5966,6 +5967,7 @@ Midas создан, чтобы сделать учет денег максима
                 buildMainMenuKeyboard(),
               );
               if (firstSuccessIdBi) void redisConnection.set(lastSuccessMsgKey(telegramUserId, chatId), firstSuccessIdBi, 'EX', LAST_SUCCESS_MSG_TTL_SEC);
+              void clearNavMessageId(telegramUserId, chatId);
             }
             request.log.info({ msg: '[midas:bot:webhook] ac: balance set via onboarding', workspaceId: resolved.workspaceId });
           } catch (err: unknown) {

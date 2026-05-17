@@ -206,6 +206,16 @@ export async function upsertBotMessage(
   // Step 4: Update pointer
   if (newMsgId) {
     void setActiveMessageId(telegramUserId, chatId, newMsgId);
+
+    // Phase 2.9+: If we had to send a NEW active message (pushing the chat down),
+    // invalidate the nav message pointer so that the next nav button press
+    // sends a fresh nav message at the bottom instead of silently updating an off-screen one.
+    getNavMessageId(telegramUserId, chatId).then((oldNavId) => {
+      if (oldNavId) {
+        void deleteMessage(chatId, oldNavId);
+        void clearNavMessageId(telegramUserId, chatId);
+      }
+    }).catch(() => { /* silent */ });
   }
 
   return newMsgId;
