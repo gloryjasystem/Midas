@@ -234,58 +234,61 @@ function buildSheet1(wb: ExcelJS.Workbook, rows: TxRow[], from: Date, to: Date):
   titleCell.alignment = { horizontal: 'center', vertical: 'middle' };
   ws.getRow(1).height = 36;
 
-  // ── Rows 2–8: Summary block (right side L–M) ─────────────────
-  const income    = rows.filter(r => r.transaction_intent === 'income')
-                        .reduce((s, r) => s + parseFloat(r.original_amount), 0);
-  const expense   = rows.filter(r => r.transaction_intent === 'expense')
-                        .reduce((s, r) => s + parseFloat(r.original_amount), 0);
-  const transfer  = rows.filter(r => r.transaction_intent === 'transfer')
-                        .reduce((s, r) => s + parseFloat(r.original_amount), 0);
-  const debtGive  = rows.filter(r => r.transaction_intent === 'debt_given')
-                        .reduce((s, r) => s + parseFloat(r.original_amount), 0);
-  const debtRecv  = rows.filter(r => r.transaction_intent === 'debt_received')
-                        .reduce((s, r) => s + parseFloat(r.original_amount), 0);
-  const net = income - expense;
+  // ── Summary block (rows 2–9, cols L–N): grouped BY CURRENCY ──
+  // Never add PLN + UAH + USD together — that's meaningless.
+  type CurTotals = { income: number; expense: number; transfer: number; debtGive: number; debtRecv: number };
+  const byCur = new Map<string, CurTotals>();
+  for (const r of rows) {
+    const cur = r.currency;
+    const amt = parseFloat(r.original_amount);
+    const t   = byCur.get(cur) ?? { income: 0, expense: 0, transfer: 0, debtGive: 0, debtRecv: 0 };
+    if (r.transaction_intent === 'income')        t.income   += amt;
+    if (r.transaction_intent === 'expense')       t.expense  += amt;
+    if (r.transaction_intent === 'transfer')      t.transfer += amt;
+    if (r.transaction_intent === 'debt_given')    t.debtGive += amt;
+    if (r.transaction_intent === 'debt_received') t.debtRecv += amt;
+    byCur.set(cur, t);
+  }
 
-  // Summary lines: [label, value, isBold, colourPositive, colourNegative]
-  const summaryLines: [string, number, boolean][] = [
-    ['💰 Доходы:',        income,    false],
-    ['💸 Расходы:',       expense,   false],
-    ['🔄 Переводы:',      transfer,  false],
-    ['🤝 Долги (дал):',   debtGive,  false],
-    ['🤲 Долги (взял):',  debtRecv,  false],
-    ['📊 Чистый баланс:', net,       true ],
-  ];
+  // Header row 2
+  const summHdrCell = ws.getCell(2, 12);
+  summHdrCell.value = `Сводка по валютам · ${rows.length} операций`;
+  summHdrCell.font = { bold: true, size: 9, name: 'Calibri', color: { argb: `FF${C_COL_HDR_FG}` } };
+  summHdrCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_HEADER_BG}` } };
+  summHdrCell.alignment = { horizontal: 'center' };
+  ws.mergeCells(2, 12, 2, 14);
 
-  summaryLines.forEach(([label, val, bold], idx) => {
-    const rowNum = idx + 3;
-    const labelCell = ws.getCell(rowNum, 12); // col L
-    const valCell   = ws.getCell(rowNum, 13); // col M
-    labelCell.value = label;
-    labelCell.font = { bold: true, size: 9, name: 'Calibri' };
-    labelCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_GREY_BG}` } };
-    labelCell.alignment = { horizontal: 'right' };
-    valCell.value = parseFloat(val.toFixed(2));
-    valCell.numFmt = '#,##0.00';
-    valCell.font = {
-      bold,
-      color: bold ? { argb: val >= 0 ? `FF${C_INCOME}` : `FF${C_EXPENSE}` } : undefined,
-      size: 9, name: 'Calibri',
-    };
-    valCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_GREY_BG}` } };
-    valCell.alignment = { horizontal: 'right' };
-  });
+  // Rows 3–9: fill per currency (max 7 rows available before row 10 header)
+  let summRow = 3;
+  for (const [cur, t] of byCur) {
+    if (summRow > 9) break;
+    const net = t.income + t.debtRecv - t.expense - t.transfer - t.debtGive;
+    // One compact line per currency: "USD  +10000 / -5000 = +5000"
+    const lc = ws.getCell(summRow, 12);
+    lc.value = `${cur}  💰${t.income.toFixed(0)}  💸${t.expense.toFixed(0)}  🔄${t.transfer.toFixed(0)}`;
+    lc.font  = { size: 8, name: 'Calibri' };
+    lc.fill  = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_GREY_BG}` } };
+    lc.alignment = { horizontal: 'left' };
 
-  // «Всего операций: N» — row 2 summary area
-  const totalOpsCell = ws.getCell(2, 12);
-  totalOpsCell.value = `Всего операций: ${rows.length}`;
-  totalOpsCell.font = { italic: true, size: 8, name: 'Calibri', color: { argb: 'FF666666' } };
-  totalOpsCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_GREY_BG}` } };
-  totalOpsCell.alignment = { horizontal: 'right' };
-  ws.getCell(2, 13).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_GREY_BG}` } };
+    const vc = ws.getCell(summRow, 13);
+    vc.value  = parseFloat(net.toFixed(2));
+    vc.numFmt = '+#,##0.00;-#,##0.00';
+    vc.font   = { bold: true, size: 8, name: 'Calibri',
+      color: { argb: net >= 0 ? `FF${C_INCOME}` : `FF${C_EXPENSE}` } };
+    vc.fill   = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_GREY_BG}` } };
+    vc.alignment = { horizontal: 'right' };
+
+    const cc = ws.getCell(summRow, 14);
+    cc.value = cur;
+    cc.font  = { italic: true, size: 8, name: 'Calibri', color: { argb: 'FF888888' } };
+    cc.fill  = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_GREY_BG}` } };
+    summRow++;
+  }
 
   // ── Row 9: Empty spacer ──────────────────────────────────────
   ws.getRow(9).height = 6;
+
+
 
 
   // ── Row 10: Column headers ───────────────────────────────────
@@ -335,15 +338,16 @@ function buildSheet1(wb: ExcelJS.Workbook, rows: TxRow[], from: Date, to: Date):
     const rateNum  = parseFloat(row.exchange_rate ?? '1');
     const colour   = intentColour(row.transaction_intent);
 
-    // «Выплачено»: если account_debit_amount NULL (та же валюта), fallback = original_amount
-    const debitRaw  = row.account_debit_amount;
-    const debitNum  = debitRaw !== null ? parseFloat(debitRaw) : amtNum;
-    const debitCur  = row.account_debit_currency ?? row.currency;
-    // Если валюта суммы и валюта выплаты совпадают — скрываем дублирующую колонку
-    const sameCur  = debitCur === row.currency;
+    // «Выплачено» = фактическое движение по счёту:
+    //   income / debt_received → положительное (зачисление)
+    //   expense / transfer / debt_given → отрицательное (списание)
+    const debitRaw = row.account_debit_amount;
+    const debitAbs = parseFloat(debitRaw ?? row.original_amount);
+    const debitCur = row.account_debit_currency ?? row.currency;
+    const isInflow = row.transaction_intent === 'income' || row.transaction_intent === 'debt_received';
+    const debitSigned = isInflow ? debitAbs : -debitAbs;
 
-    // «Исполнитель»: person_name из БД, иначе попытка найти имя в item_name
-    // (простая эвристика: последнее слово, начинающееся с заглавной, если длиннее 2 символов)
+    // «Исполнитель»: person_name из БД, иначе эвристика из item_name
     let executor = row.person_name ?? '';
     if (!executor && row.item_name) {
       const words = row.item_name.trim().split(/\s+/);
@@ -361,13 +365,13 @@ function buildSheet1(wb: ExcelJS.Workbook, rows: TxRow[], from: Date, to: Date):
       row.account_currency,
       amtNum,
       row.currency,
-      sameCur ? null : debitNum,       // Выплачено: скрыть если совпадает
-      sameCur ? '' : debitCur,          // Вал.выплаты: скрыть если совпадает
-      rateNum,                          // Курс: всегда показываем
+      debitSigned,    // col J: Выплачено — ВСЕГДА, со знаком
+      debitCur,       // col K: Вал. выплаты — ВСЕГДА
+      rateNum,        // col L: Курс
       row.category_name,
       row.category_group,
       row.item_name ?? '',
-      parseFloat(row.balance_after),    // col 16 — Остаток на счету после транзакции
+      parseFloat(row.balance_after), // col P: Остаток на счету
     ];
 
     cellValues.forEach((val, ci) => {
@@ -382,7 +386,14 @@ function buildSheet1(wb: ExcelJS.Workbook, rows: TxRow[], from: Date, to: Date):
         cell.font = { size: 9, name: 'Calibri', color: { argb: `FF${colour}` }, bold: ci === 3 };
       }
       // Number format for amounts
-      if (ci === 7 || ci === 9) cell.numFmt = '#,##0.00';
+      if (ci === 7) cell.numFmt = '#,##0.00';
+      // col J (ci=9): Выплачено — signed, colour by sign
+      if (ci === 9) {
+        const sv = val as number;
+        cell.numFmt = '#,##0.00';
+        cell.font = { size: 9, name: 'Calibri',
+          color: { argb: sv >= 0 ? `FF${C_INCOME}` : `FF${C_EXPENSE}` } };
+      }
       if (ci === 11) cell.numFmt = '0.0000';
       // col 16 (ci === 15): Остаток — format + colour by sign
       if (ci === 15) {
@@ -420,7 +431,7 @@ function buildSheet1(wb: ExcelJS.Workbook, rows: TxRow[], from: Date, to: Date):
     totalLabel.font = { bold: true, size: 9, name: 'Calibri' };
     totalLabel.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_TOTAL_BG}` } };
 
-    // SUM for amount (H) and debit (J)
+    // SUM for amount (col H) and Выплачено (col J) - signed
     const amtTotal = ws.getCell(totalRow, 8);
     amtTotal.value = { formula: `SUM(H${DATA_START}:H${totalRow - 1})` };
     amtTotal.numFmt = '#,##0.00';
@@ -430,8 +441,13 @@ function buildSheet1(wb: ExcelJS.Workbook, rows: TxRow[], from: Date, to: Date):
     const debitTotal = ws.getCell(totalRow, 10);
     debitTotal.value = { formula: `SUM(J${DATA_START}:J${totalRow - 1})` };
     debitTotal.numFmt = '#,##0.00';
-    debitTotal.font = { bold: true, size: 9, name: 'Calibri' };
+    debitTotal.font = { bold: true, size: 9, name: 'Calibri',
+      color: { argb: 'FF333333' } };
     debitTotal.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_TOTAL_BG}` } };
+    // note: col J sums signed values (inflow + / outflow -)
+    ws.getCell(totalRow, 11).value = '∑ ±';
+    ws.getCell(totalRow, 11).font = { italic: true, size: 7, name: 'Calibri', color: { argb: 'FF888888' } };
+    ws.getCell(totalRow, 11).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_TOTAL_BG}` } };
   }
 
   // ── Auto-filter on header row ────────────────────────────────
