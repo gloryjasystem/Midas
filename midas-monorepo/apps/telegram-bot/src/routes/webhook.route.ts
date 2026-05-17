@@ -4258,7 +4258,11 @@ Midas создан, чтобы сделать учет денег максима
         navText === NAV_BTN_REPORT || navText === '📊 Отчеты' || navText === '📊 Отчет' ||
         navText === NAV_BTN_SETTINGS ||
         navText === NAV_BTN_TRANSACTIONS) {
-      void clearNavMessageId(telegramUserId, chatId);
+      const oldNavId = await getNavMessageId(telegramUserId, chatId);
+      if (oldNavId) {
+        void deleteMessage(chatId, oldNavId);
+        void clearNavMessageId(telegramUserId, chatId);
+      }
     }
 
     if (navText === NAV_BTN_BALANCE || navText === '💰 Баланс') {
