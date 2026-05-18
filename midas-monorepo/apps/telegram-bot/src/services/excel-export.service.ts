@@ -979,7 +979,7 @@ function buildSheet0Summary(
       c.value = h;
       c.font = { bold: true, size: 9, name: 'Calibri', color: { argb: 'FF2D6A9F' } };
       c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_GREY_BG}` } };
-      c.alignment = { horizontal: i === 3 ? 'right' : i === 0 ? 'right' : 'left', vertical: 'middle' };
+      c.alignment = { horizontal: i === 3 ? 'center' : i === 0 ? 'right' : 'left', vertical: 'middle' };
       c.border = { bottom: { style: 'thin', color: { argb: `FF${C_TBL_BORDER}` } } };
     });
     ws.getRow(r).height = 16;
@@ -1033,22 +1033,21 @@ function buildSheet0Summary(
       rc3.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_GREY_BG}` } };
       rc3.alignment = { horizontal: 'left', vertical: 'middle' };
 
-      // Col 4 — percentage (right-aligned, muted, Largest Remainder)
+      // Col 4 — percentage (center-aligned, muted, Largest Remainder)
       const rc4 = ws.getCell(r, 4);
       rc4.value = `${String(pct)}%`;
       rc4.font = { size: 9, name: 'Calibri', color: { argb: 'FF888888' } };
       rc4.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_GREY_BG}` } };
-      rc4.alignment = { horizontal: 'right', vertical: 'middle' };
+      rc4.alignment = { horizontal: 'center', vertical: 'middle' };
 
-      // #6 — Col 5: suppress duplicate if only USD; otherwise compact K-format
+      // Col 5 — always show original currencies breakdown
       const origParts: string[] = [];
       for (const [cur, amt] of cs.originals) origParts.push(fmtK(amt, cur));
       if (cs.uncovered.size > 0) {
         for (const [cur, amt] of cs.uncovered) origParts.push(`${fmtAmtSigned(-amt)} ${cur} (?)`);
       }
-      const isUsdOnly = cs.originals.size === 1 && cs.originals.has('USD') && cs.uncovered.size === 0;
       const rc5 = ws.getCell(r, 5);
-      rc5.value = isUsdOnly ? '—' : origParts.join('  |  ');
+      rc5.value = origParts.join('  |  ');
       rc5.font = { size: 8, italic: true, name: 'Calibri', color: { argb: 'FFAAAAAA' } };
       rc5.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_GREY_BG}` } };
       rc5.alignment = { horizontal: 'left', vertical: 'middle' };
