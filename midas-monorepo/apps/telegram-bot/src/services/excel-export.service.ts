@@ -96,27 +96,25 @@ type RateSource = 'hardcoded' | 'fiat-api' | 'crypto-api';
 /**
  * Returns { rates, sources } where:
  *   rates   — Map<CURRENCY, USD_PER_1_UNIT>
- *   sources — Map<CURRENCY, RateSource>   (for transparent footnotes in Excel)
+ *   sources — Map<CURRENCY, RateSource>
  *
- * Sources:
- *   • Stablecoins (USDT/USDC/BUSD/DAI) — hardcoded 1
- *   • Fiat — open.er-api.com (free, no API key)
- *   • Crypto — api.mexc.com (free, no API key, no strict geo-block)
- *   • Timeout 4s per provider, Graceful Degradation via Promise.allSettled
+ * Priority (highest → lowest):
+ *   1. Hardcoded stablecoins  (always 1:1, never overwritten)
+ *   2. Fiat API  (open.er-api.com) — authoritative for all fiat currencies
+ *   3. Crypto API (mexc.com) — only fills currencies NOT already covered by fiat
+ *
+ * WHY isolated maps + priority merge?
+ *   MEXC lists thousands of tokens. Some have tickers that collide with fiat codes
+ *   (e.g., MEXC has a token "PLN" ≈ 0.006 USDT, not the Polish Złoty ≈ 0.25 USD).
+ *   Running both fetchers in parallel with a shared map causes a non-deterministic
+ *   race: whichever API responds first "wins". The priority merge guarantees fiat
+ *   always beats any MEXC token with the same ticker.
  */
 async function fetchUsdRates(): Promise<{ rates: Map<string, number>; sources: Map<string, RateSource> }> {
-  const rates   = new Map<string, number>();
-  const sources = new Map<string, RateSource>();
 
-  // ── Hardcoded stablecoins (always present, never overwritten) ──────────────
-  const STABLES: Array<[string, number]> = [
-    ['USD', 1], ['USDT', 1], ['USDC', 1],
-    ['BUSD', 1], ['DAI', 1], ['TUSD', 1], ['USDP', 1],
-  ];
-  for (const [cur, rate] of STABLES) {
-    rates.set(cur, rate);
-    sources.set(cur, 'hardcoded');
-  }
+  // ── Isolated staging maps per source ──────────────────────────────────────
+  const fiatStaging   = new Map<string, number>();
+  const cryptoStaging = new Map<string, number>();
 
   const fetchFiat = async () => {
     const res = await fetch('https://open.er-api.com/v6/latest/USD', {
@@ -126,11 +124,7 @@ async function fetchUsdRates(): Promise<{ rates: Map<string, number>; sources: M
     const data = await res.json() as { result: string; rates: Record<string, number> };
     if (data.result === 'success' && data.rates) {
       for (const [cur, fxRate] of Object.entries(data.rates)) {
-        const key = cur.toUpperCase();
-        if (!rates.has(key) && fxRate > 0) {
-          rates.set(key, 1 / fxRate);
-          sources.set(key, 'fiat-api');
-        }
+        if (fxRate > 0) fiatStaging.set(cur.toUpperCase(), 1 / fxRate);
       }
     }
   };
@@ -142,12 +136,14 @@ async function fetchUsdRates(): Promise<{ rates: Map<string, number>; sources: M
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json() as Array<{ symbol: string; price: string }>;
     for (const item of data) {
+      // Only accept *USDT pairs for coins in our known CRYPTO_SET.
+      // This prevents MEXC tokens like "PLN", "UAH", "RUB" (DeFi projects)
+      // from poisoning real fiat exchange rates.
       if (item.symbol.endsWith('USDT')) {
-        const coin  = item.symbol.slice(0, -4);
+        const coin  = item.symbol.slice(0, -4).toUpperCase();
         const price = parseFloat(item.price);
-        if (!rates.has(coin) && price > 0) {
-          rates.set(coin, price);
-          sources.set(coin, 'crypto-api');
+        if (CRYPTO_SET.has(coin) && price > 0) {
+          cryptoStaging.set(coin, price);
         }
       }
     }
@@ -160,6 +156,32 @@ async function fetchUsdRates(): Promise<{ rates: Map<string, number>; sources: M
       console.warn(`[ExcelExport] ${apiName} fetch failed:`, r.reason instanceof Error ? r.reason.message : r.reason);
     }
   });
+
+  // ── Priority merge: hardcoded → fiat → crypto ─────────────────────────────
+  const rates   = new Map<string, number>();
+  const sources = new Map<string, RateSource>();
+
+  // 1. Hardcoded stablecoins (highest priority — immutable)
+  for (const cur of ['USD', 'USDT', 'USDC', 'BUSD', 'DAI', 'TUSD', 'USDP']) {
+    rates.set(cur, 1);
+    sources.set(cur, 'hardcoded');
+  }
+
+  // 2. Fiat API (fills all fiat; never overwrites stablecoins)
+  for (const [cur, rate] of fiatStaging) {
+    if (!rates.has(cur)) {
+      rates.set(cur, rate);
+      sources.set(cur, 'fiat-api');
+    }
+  }
+
+  // 3. Crypto API (fills only what fiat didn't cover — strict CRYPTO_SET only)
+  for (const [cur, rate] of cryptoStaging) {
+    if (!rates.has(cur)) {
+      rates.set(cur, rate);
+      sources.set(cur, 'crypto-api');
+    }
+  }
 
   return { rates, sources };
 }
@@ -545,40 +567,50 @@ function buildSheet0Summary(
   sectionHdr('ИТОГ ЗА ПЕРИОД');
 
   // Sub-header row: column labels
-  const colLabels = ['Валюта', 'Нетто за период', 'Курс к USD', '≈ USD', 'Источник курса'];
+  const thinBorder = {
+    top:    { style: 'thin' as const, color: { argb: 'FFCCCCCC' } },
+    bottom: { style: 'thin' as const, color: { argb: 'FFCCCCCC' } },
+    left:   { style: 'thin' as const, color: { argb: 'FFCCCCCC' } },
+    right:  { style: 'thin' as const, color: { argb: 'FFCCCCCC' } },
+  };
+  const colLabels = ['Валюта', 'Нетто за период', 'Курс к USD', '≈ USD', 'Источник'];
   colLabels.forEach((lbl, i) => {
     const c = ws.getCell(r, i + 1);
     c.value = lbl;
-    c.font  = { bold: true, size: 8, name: 'Calibri', color: { argb: 'FF555555' } };
+    c.font  = { bold: true, size: 8, name: 'Calibri', color: { argb: 'FF444444' } };
     c.fill  = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEAD8A0' } };
-    c.alignment = { horizontal: i >= 2 ? 'right' : 'left' };
-    c.border = { bottom: { style: 'thin', color: { argb: 'FFCCCCCC' } } };
+    c.alignment = { horizontal: 'center', vertical: 'middle' };
+    c.border = thinBorder;
   });
+  ws.getRow(r).height = 16;
   r++;
 
   // Data rows — one per currency
   for (const row of convRows) {
-    const netClr  = row.net >= 0 ? `FF${C_INCOME}` : `FF${C_EXPENSE}`;
-    const usdClr  = (row.usd ?? 0) >= 0 ? `FF${C_INCOME}` : `FF${C_EXPENSE}`;
-    const fillBg  = { type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb: `FF${C_TOTAL_BG}` } };
+    const netClr = row.net >= 0 ? `FF${C_INCOME}` : `FF${C_EXPENSE}`;
+    const usdClr = (row.usd ?? 0) >= 0 ? `FF${C_INCOME}` : `FF${C_EXPENSE}`;
+    const fillBg = { type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb: `FF${C_TOTAL_BG}` } };
 
-    // Col 1 — Currency code
+    // Col 1 — Currency code (bold, left)
     const c1 = ws.getCell(r, 1);
     c1.value = row.currency;
-    c1.font  = { bold: true, size: 9, name: 'Calibri' };
+    c1.font  = { bold: true, size: 9, name: 'Calibri', color: { argb: 'FF333333' } };
     c1.fill  = fillBg;
+    c1.border = thinBorder;
+    c1.alignment = { horizontal: 'left', vertical: 'middle' };
 
-    // Col 2 — Net amount in original currency
+    // Col 2 — Net amount (right-aligned, coloured)
     const c2 = ws.getCell(r, 2);
     c2.value = fmtAmtSigned(row.net);
     c2.font  = { bold: true, size: 9, name: 'Calibri', color: { argb: netClr } };
     c2.fill  = fillBg;
-    c2.alignment = { horizontal: 'right' };
+    c2.border = thinBorder;
+    c2.alignment = { horizontal: 'right', vertical: 'middle' };
 
-    // Col 3 — Exchange rate description
+    // Col 3 — Exchange rate (right-aligned, descriptive)
     const c3 = ws.getCell(r, 3);
     if (row.source === 'hardcoded') {
-      c3.value = '1 : 1 (стейблкоин/USD)';
+      c3.value = '1 : 1  (стейблкоин)';
       c3.font  = { italic: true, size: 8, name: 'Calibri', color: { argb: 'FF888888' } };
     } else if (row.rate !== null) {
       c3.value = `1 ${row.currency} = ${row.rate.toFixed(4)} USD`;
@@ -588,9 +620,10 @@ function buildSheet0Summary(
       c3.font  = { italic: true, size: 8, name: 'Calibri', color: { argb: 'FFE67E22' } };
     }
     c3.fill      = fillBg;
-    c3.alignment = { horizontal: 'right' };
+    c3.border    = thinBorder;
+    c3.alignment = { horizontal: 'right', vertical: 'middle' };
 
-    // Col 4 — USD equivalent
+    // Col 4 — ≈ USD equivalent (right-aligned, coloured)
     const c4 = ws.getCell(r, 4);
     if (row.usd !== null) {
       c4.value = fmtAmtSigned(row.usd);
@@ -600,70 +633,86 @@ function buildSheet0Summary(
       c4.font  = { italic: true, size: 8, name: 'Calibri', color: { argb: 'FFE67E22' } };
     }
     c4.fill      = fillBg;
-    c4.alignment = { horizontal: 'right' };
+    c4.border    = thinBorder;
+    c4.alignment = { horizontal: 'right', vertical: 'middle' };
 
-    // Col 5 — Source tag
+    // Col 5 — Source tag (small, grey, centred)
     const c5 = ws.getCell(r, 5);
     const srcLabel: Record<string, string> = {
-      hardcoded:  'hardcoded',
-      'fiat-api': 'er-api.com',
-      'crypto-api': 'mexc.com',
-      uncovered:  '—',
+      hardcoded:    '—',
+      'fiat-api':   'er-api',
+      'crypto-api': 'mexc',
+      uncovered:    '?',
     };
     c5.value = srcLabel[row.source] ?? row.source;
     c5.font  = { size: 7, italic: true, name: 'Calibri', color: { argb: 'FFAAAAAA' } };
     c5.fill  = fillBg;
-    c5.alignment = { horizontal: 'center' };
+    c5.border = thinBorder;
+    c5.alignment = { horizontal: 'center', vertical: 'middle' };
 
     r++;
   }
 
-  // Separator row
-  for (let ci = 1; ci <= 5; ci++) {
-    ws.getCell(r, ci).border = { top: { style: 'thin', color: { argb: 'FFCCCCCC' } } };
-    ws.getCell(r, ci).fill   = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEAD8A0' } };
-  }
-  r++;
+  // ── Grand total row (yellow, prominent) ──────────────────────────────────
+  const gtFill   = { type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb: 'FFFFF0CC' } };
+  const gtClr    = usdTotal >= 0 ? `FF${C_INCOME}` : `FF${C_EXPENSE}`;
+  const gtBorder = {
+    top:    { style: 'medium' as const, color: { argb: 'FFCCAA00' } },
+    bottom: { style: 'medium' as const, color: { argb: 'FFCCAA00' } },
+    left:   { style: 'thin'   as const, color: { argb: 'FFCCCCCC' } },
+    right:  { style: 'thin'   as const, color: { argb: 'FFCCCCCC' } },
+  };
 
-  // Grand total USD row (yellow highlight)
-  const gtFill = { type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb: 'FFFFF0CC' } };
-  const gtClr  = usdTotal >= 0 ? `FF${C_INCOME}` : `FF${C_EXPENSE}`;
-
+  // Label in col 1 (+ optional uncovered note in col 2)
   const gt1 = ws.getCell(r, 1);
   gt1.value = '≈ ИТОГО в USD';
-  gt1.font  = { bold: true, size: 9, name: 'Calibri', color: { argb: 'FF555555' } };
+  gt1.font  = { bold: true, size: 10, name: 'Calibri', color: { argb: 'FF555555' } };
   gt1.fill  = gtFill;
+  gt1.border = gtBorder;
+  gt1.alignment = { horizontal: 'left', vertical: 'middle' };
 
   const gt2 = ws.getCell(r, 2);
-  gt2.value = uncoveredC.length > 0 ? `(без: ${uncoveredC.join(', ')})` : '(все валюты)';
-  gt2.font  = { italic: true, size: 8, name: 'Calibri', color: { argb: 'FF888888' } };
+  gt2.value = uncoveredC.length > 0 ? `без: ${uncoveredC.join(', ')}` : '';
+  gt2.font  = { italic: true, size: 7, name: 'Calibri', color: { argb: 'FFAAAAAA' } };
   gt2.fill  = gtFill;
+  gt2.border = gtBorder;
+  gt2.alignment = { horizontal: 'right', vertical: 'middle' };
 
+  const gt3 = ws.getCell(r, 3);
+  gt3.fill   = gtFill;
+  gt3.border = gtBorder;
+
+  // USD total in col 4 — largest, most prominent number
   const gt4 = ws.getCell(r, 4);
   gt4.value = `≈ ${fmtAmtSigned(usdTotal)} USD`;
-  gt4.font  = { bold: true, size: 11, name: 'Calibri', color: { argb: gtClr } };
+  gt4.font  = { bold: true, size: 12, name: 'Calibri', color: { argb: gtClr } };
   gt4.fill  = gtFill;
-  gt4.alignment = { horizontal: 'right' };
+  gt4.border = gtBorder;
+  gt4.alignment = { horizontal: 'right', vertical: 'middle' };
 
-  for (const ci of [3, 5]) {
-    ws.getCell(r, ci).fill = gtFill;
-  }
+  const gt5 = ws.getCell(r, 5);
+  gt5.fill   = gtFill;
+  gt5.border = gtBorder;
+
+  ws.getRow(r).height = 20;
   r++;
 
-  // Footnote
+  // Footnote (merged, small grey)
   ws.mergeCells(r, 1, r, 5);
   const fn = ws.getCell(r, 1);
-  const fnSources = [
-    ...([...rateSources.values()].includes('fiat-api') ? ['Fiat: open.er-api.com'] : []),
-    ...([...rateSources.values()].includes('crypto-api') ? ['Crypto: mexc.com'] : []),
-    'Курс на дату экспорта отчёта',
-    ...(uncoveredC.length > 0 ? [`Без конвертации: ${uncoveredC.join(', ')}`] : []),
+  const fnParts = [
+    'Курс на дату экспорта',
+    ...(([...rateSources.values()].includes('fiat-api')) ? ['Fiat: open.er-api.com'] : []),
+    ...(([...rateSources.values()].includes('crypto-api')) ? ['Crypto: mexc.com'] : []),
+    ...(uncoveredC.length > 0 ? [`без конвертации: ${uncoveredC.join(', ')}`] : []),
   ];
-  fn.value = fnSources.join(' · ');
+  fn.value = fnParts.join('  ·  ');
   fn.font  = { size: 7, italic: true, name: 'Calibri', color: { argb: 'FFAAAAAA' } };
   fn.fill  = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_GREY_BG}` } };
   r++;
   r++; // spacer
+
+
 
 
   // ── СОСТОЯНИЕ СЧЕТОВ ──────────────────────────────────────
