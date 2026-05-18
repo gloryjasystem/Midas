@@ -1216,22 +1216,22 @@ function buildSheet1(wb: ExcelJS.Workbook, rows: TxRow[], from: Date, to: Date):
   ws.getRow(HDR_ROW).height = 40; // extra height for 3-line headers
 
   const cols: Array<[string, number]> = [
-    ['№',                   5],  // A=1
+    ['№',                   20],  // A=1  — wider for account names in ОСТАТКИ section
     ['Дата',               12],  // B=2
     ['Время',               8],  // C=3
-    ['Операция',           18],  // D=4  (was «Тип», 16)
+    ['Операция',           18],  // D=4
     ['Исполнитель',        16],  // E=5
     ['Счёт',               18],  // F=6
     ['Вал.\nсчёта',         8],  // G=7
-    ['Сумма',              18],  // H=8  (wider — includes currency suffix)
-    ['Выплачено',          18],  // I=9  (was J=10; includes currency suffix)
-    ['Курс',               22],  // J=10 (was L=12)
-    ['Категория',          20],  // K=11 (was M=13)
-    ['Группа',             12],  // L=12 (was N=14)
-    ['Комментарий',        32],  // M=13 (was O=15; wider)
-    ['Остаток\nна счету',  16],  // N=14 (was P=16)
-    ['Часов\nработы\n(Q)', 13],  // O=15 (was Q=17)
-    ['Ставка/час\n= H÷O\n(авто)', 15],  // P=16 (was R=18)
+    ['Сумма',              18],  // H=8
+    ['Выплачено',          18],  // I=9
+    ['Курс',               30],  // J=10 — wider for summary block + long rate strings
+    ['Категория',          20],  // K=11
+    ['Группа',             12],  // L=12
+    ['Комментарий',        32],  // M=13
+    ['Остаток\nна счету',  22],  // N=14 — wider for 3 122 213 PLN
+    ['Часов\nработы\n(Q)', 13],  // O=15
+    ['Ставка/час\n= H÷O\n(авто)', 15],  // P=16
   ];
   cols.forEach(([text, width], i) => hdr(ws, i + 1, HDR_ROW, text, width));
 
