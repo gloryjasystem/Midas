@@ -90,19 +90,33 @@ const CRYPTO_SET = new Set([
 // Live exchange-rate fetcher
 // ─────────────────────────────────────────────────────────────
 
+/** Rate source tag for UI transparency */
+type RateSource = 'hardcoded' | 'fiat-api' | 'crypto-api';
+
 /**
- * Returns Map<CURRENCY, USD_PER_1_UNIT>.
+ * Returns { rates, sources } where:
+ *   rates   — Map<CURRENCY, USD_PER_1_UNIT>
+ *   sources — Map<CURRENCY, RateSource>   (for transparent footnotes in Excel)
+ *
  * Sources:
  *   • Stablecoins (USDT/USDC/BUSD/DAI) — hardcoded 1
  *   • Fiat — open.er-api.com (free, no API key)
  *   • Crypto — api.mexc.com (free, no API key, no strict geo-block)
- *   • Timeout 4s, Graceful Degradation via Promise.allSettled
+ *   • Timeout 4s per provider, Graceful Degradation via Promise.allSettled
  */
-async function fetchUsdRates(): Promise<Map<string, number>> {
-  const rates = new Map<string, number>([
-    ['USD',  1], ['USDT', 1], ['USDC', 1],
-    ['BUSD', 1], ['DAI',  1], ['TUSD', 1], ['USDP', 1],
-  ]);
+async function fetchUsdRates(): Promise<{ rates: Map<string, number>; sources: Map<string, RateSource> }> {
+  const rates   = new Map<string, number>();
+  const sources = new Map<string, RateSource>();
+
+  // ── Hardcoded stablecoins (always present, never overwritten) ──────────────
+  const STABLES: Array<[string, number]> = [
+    ['USD', 1], ['USDT', 1], ['USDC', 1],
+    ['BUSD', 1], ['DAI', 1], ['TUSD', 1], ['USDP', 1],
+  ];
+  for (const [cur, rate] of STABLES) {
+    rates.set(cur, rate);
+    sources.set(cur, 'hardcoded');
+  }
 
   const fetchFiat = async () => {
     const res = await fetch('https://open.er-api.com/v6/latest/USD', {
@@ -114,7 +128,8 @@ async function fetchUsdRates(): Promise<Map<string, number>> {
       for (const [cur, fxRate] of Object.entries(data.rates)) {
         const key = cur.toUpperCase();
         if (!rates.has(key) && fxRate > 0) {
-          rates.set(key, 1 / fxRate); // 1 USD = fxRate units → 1 unit = 1/fxRate USD
+          rates.set(key, 1 / fxRate);
+          sources.set(key, 'fiat-api');
         }
       }
     }
@@ -128,17 +143,17 @@ async function fetchUsdRates(): Promise<Map<string, number>> {
     const data = await res.json() as Array<{ symbol: string; price: string }>;
     for (const item of data) {
       if (item.symbol.endsWith('USDT')) {
-        const coin = item.symbol.slice(0, -4); // remove USDT
+        const coin  = item.symbol.slice(0, -4);
         const price = parseFloat(item.price);
         if (!rates.has(coin) && price > 0) {
-          rates.set(coin, price); // 1 coin = price USD
+          rates.set(coin, price);
+          sources.set(coin, 'crypto-api');
         }
       }
     }
   };
 
   const results = await Promise.allSettled([fetchFiat(), fetchCrypto()]);
-  
   results.forEach((r, idx) => {
     if (r.status === 'rejected') {
       const apiName = idx === 0 ? 'Fiat (er-api)' : 'Crypto (mexc)';
@@ -146,7 +161,7 @@ async function fetchUsdRates(): Promise<Map<string, number>> {
     }
   });
 
-  return rates;
+  return { rates, sources };
 }
 
 
@@ -271,7 +286,7 @@ export async function exportTransactionsExcel(
              ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
            ) AS balance_after
          FROM all_tx tx
-         JOIN account_sources a ON a.id = tx.account_id
+         JOIN account_sources a ON a.id = tx.account_id AND a.deleted_at IS NULL
        )
        SELECT
          wb.transaction_time,
@@ -290,9 +305,9 @@ export async function exportTransactionsExcel(
          p.canonical_name             AS person_name,
          ROUND(wb.balance_after, 2)::text AS balance_after
        FROM with_balance wb
-       LEFT JOIN categories    c ON c.id = wb.category_id
-       LEFT JOIN account_sources a ON a.id = wb.account_id
-       LEFT JOIN persons        p ON p.id = wb.person_id
+        LEFT JOIN categories    c ON c.id = wb.category_id
+        LEFT JOIN account_sources a ON a.id = wb.account_id AND a.deleted_at IS NULL
+        LEFT JOIN persons        p ON p.id = wb.person_id
        WHERE wb.transaction_time >= $2
          AND wb.transaction_time <= $3
        ORDER BY wb.transaction_time DESC`,
@@ -333,10 +348,10 @@ export async function exportTransactionsExcel(
     return Buffer.from(arrayBuffer);
   }
 
-  // Fetch live rates once — fiat + stablecoins → USD (open.er-api.com)
-  const usdRates = await fetchUsdRates();
+  // Fetch live rates once — fiat (er-api) + crypto (mexc) → USD, Promise.allSettled
+  const { rates: usdRates, sources: rateSources } = await fetchUsdRates();
 
-  buildSheet0Summary(wb, rows, from, to, usdRates);
+  buildSheet0Summary(wb, rows, from, to, usdRates, rateSources);
   buildSheet1(wb, rows, from, to);
   buildSheet2(wb, rows);
   buildSheet3(wb, rows);
@@ -373,20 +388,18 @@ function buildSheet0Summary(
   from: Date,
   to: Date,
   usdRates: Map<string, number>,
+  rateSources: Map<string, RateSource>,
 ): void {
   const ws = wb.addWorksheet('Сводка');
 
-  // Show the user-requested period — industry standard (QuickBooks, Xero, SAP, banks):
-  // the report covers the period the user asked for; the fact that data starts mid-period
-  // is fine — absence of data IS valid data (zero activity for those days).
   const periodStr = `${fmtDate(from)} \u2014 ${fmtDate(to)}`;
   const days      = Math.max(1, Math.round((to.getTime() - from.getTime()) / (1000 * 60 * 60 * 24)));
 
-  ws.getColumn(1).width = 30;
-  ws.getColumn(2).width = 38;
-  ws.getColumn(3).width = 22;
-  ws.getColumn(4).width = 22;
-  ws.getColumn(5).width = 22;
+  ws.getColumn(1).width = 22; // Валюта / Тип
+  ws.getColumn(2).width = 38; // Нетто / Период
+  ws.getColumn(3).width = 28; // Курс к USD
+  ws.getColumn(4).width = 20; // ≈ USD
+  ws.getColumn(5).width = 16; // Источник курса
 
   let r = 1;
 
@@ -470,28 +483,6 @@ function buildSheet0Summary(
     im[key].byCur.set(row.currency, (im[key].byCur.get(row.currency) ?? 0) + amt);
   }
 
-  // ── USD-эквивалент (live курс, open.er-api.com) ───────────────────────────
-  // Все валюты конвертируются: фиат через API, стейблкоины хардкодом.
-  // original_amount в валюте транзакции × rate → USD-сумма.
-  let usdEquiv     = 0;
-  let usdCovered   = 0;
-  const uncoveredC = new Set<string>();
-  for (const row of rows) {
-    const isInflow = row.transaction_intent === 'income' || row.transaction_intent === 'debt_received';
-    const sign     = isInflow ? 1 : -1;
-    const amt      = parseFloat(row.original_amount);
-    const cur      = row.currency.toUpperCase();
-    const rate     = usdRates.get(cur);
-    if (rate !== undefined) {
-      usdEquiv += sign * amt * rate;
-      usdCovered++;
-    } else {
-      uncoveredC.add(row.currency); // API не вернул курс — помечаем для сноски
-    }
-  }
-  const nonUsdNote = uncoveredC.size > 0
-    ? `* курс на дату экспорта · open.er-api.com; без конвертации: ${[...uncoveredC].join(', ')}`
-    : '★ курс на дату экспорта · open.er-api.com';
 
   const intentDefs: [string, IntentKey, 1 | -1][] = [
     ['💰 Доходы',       'income',        1],
@@ -521,12 +512,20 @@ function buildSheet0Summary(
     r++;
   }
 
-  // ── Итог по валютам (net = income + debtRecv - expense - transfer - debtGiven) ──
+  // ── Net per currency (income + debtRecv − expense − transfer − debtGiven) ──
   const allCurs = new Set<string>();
   for (const key of Object.keys(im) as IntentKey[]) {
     for (const cur of im[key].byCur.keys()) allCurs.add(cur);
   }
-  const netByCur = new Map<string, number>();
+
+  interface ConvRow {
+    currency: string;
+    net:      number;
+    rate:     number | null;
+    usd:      number | null;
+    source:   RateSource | 'uncovered';
+  }
+  const convRows: ConvRow[] = [];
   for (const cur of allCurs) {
     const net =
       (im.income.byCur.get(cur) ?? 0) +
@@ -534,67 +533,138 @@ function buildSheet0Summary(
       (im.expense.byCur.get(cur) ?? 0) -
       (im.transfer.byCur.get(cur) ?? 0) -
       (im.debt_given.byCur.get(cur) ?? 0);
-    netByCur.set(cur, net);
+    const rate   = usdRates.get(cur.toUpperCase()) ?? null;
+    const source = (rateSources.get(cur.toUpperCase()) ?? 'uncovered') as RateSource | 'uncovered';
+    convRows.push({ currency: cur, net, rate, usd: rate !== null ? net * rate : null, source });
   }
 
-  // ── Итог по валютам — вертикальный layout, ничего не теряется ──
-  // Заголовок крок
-  const totalHdr = cell(r, 1, 'Итог за период', true);
-  totalHdr.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_TOTAL_BG}` } };
-  const totalSubHdr = ws.getCell(r, 3);
-  totalSubHdr.value = 'по каждой валюте отдельно';
-  totalSubHdr.font = { italic: true, size: 8, name: 'Calibri', color: { argb: 'FF888888' } };
-  totalSubHdr.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_TOTAL_BG}` } };
-  totalSubHdr.alignment = { horizontal: 'center' };
+  const usdTotal    = convRows.reduce((s, x) => s + (x.usd ?? 0), 0);
+  const uncoveredC  = convRows.filter(x => x.source === 'uncovered').map(x => x.currency);
+
+  // ── Section header ────────────────────────────────────────────────────────
+  sectionHdr('ИТОГ ЗА ПЕРИОД');
+
+  // Sub-header row: column labels
+  const colLabels = ['Валюта', 'Нетто за период', 'Курс к USD', '≈ USD', 'Источник курса'];
+  colLabels.forEach((lbl, i) => {
+    const c = ws.getCell(r, i + 1);
+    c.value = lbl;
+    c.font  = { bold: true, size: 8, name: 'Calibri', color: { argb: 'FF555555' } };
+    c.fill  = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEAD8A0' } };
+    c.alignment = { horizontal: i >= 2 ? 'right' : 'left' };
+    c.border = { bottom: { style: 'thin', color: { argb: 'FFCCCCCC' } } };
+  });
   r++;
 
-  // Одна строка на каждую валюту — все валюты видны
-  for (const [cur, net] of netByCur) {
-    const curC = ws.getCell(r, 2);
-    curC.value = cur;
-    curC.font  = { size: 8, name: 'Calibri', color: { argb: 'FF555555' }, italic: true };
-    curC.fill  = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_TOTAL_BG}` } };
-    curC.alignment = { horizontal: 'left' };
+  // Data rows — one per currency
+  for (const row of convRows) {
+    const netClr  = row.net >= 0 ? `FF${C_INCOME}` : `FF${C_EXPENSE}`;
+    const usdClr  = (row.usd ?? 0) >= 0 ? `FF${C_INCOME}` : `FF${C_EXPENSE}`;
+    const fillBg  = { type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb: `FF${C_TOTAL_BG}` } };
 
-    const netC = ws.getCell(r, 3);
-    netC.value = fmtAmtSigned(net);
-    netC.font  = { bold: true, size: 9, name: 'Calibri',
-      color: { argb: net >= 0 ? `FF${C_INCOME}` : `FF${C_EXPENSE}` } };
-    netC.fill  = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_TOTAL_BG}` } };
-    netC.alignment = { horizontal: 'left' };
-    // cols 1, 4, 5 — amber fill
-    for (const c of [1, 4, 5]) {
-      ws.getCell(r, c).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_TOTAL_BG}` } };
+    // Col 1 — Currency code
+    const c1 = ws.getCell(r, 1);
+    c1.value = row.currency;
+    c1.font  = { bold: true, size: 9, name: 'Calibri' };
+    c1.fill  = fillBg;
+
+    // Col 2 — Net amount in original currency
+    const c2 = ws.getCell(r, 2);
+    c2.value = fmtAmtSigned(row.net);
+    c2.font  = { bold: true, size: 9, name: 'Calibri', color: { argb: netClr } };
+    c2.fill  = fillBg;
+    c2.alignment = { horizontal: 'right' };
+
+    // Col 3 — Exchange rate description
+    const c3 = ws.getCell(r, 3);
+    if (row.source === 'hardcoded') {
+      c3.value = '1 : 1 (стейблкоин/USD)';
+      c3.font  = { italic: true, size: 8, name: 'Calibri', color: { argb: 'FF888888' } };
+    } else if (row.rate !== null) {
+      c3.value = `1 ${row.currency} = ${row.rate.toFixed(4)} USD`;
+      c3.font  = { size: 8, name: 'Calibri', color: { argb: 'FF444444' } };
+    } else {
+      c3.value = '— курс недоступен';
+      c3.font  = { italic: true, size: 8, name: 'Calibri', color: { argb: 'FFE67E22' } };
     }
+    c3.fill      = fillBg;
+    c3.alignment = { horizontal: 'right' };
+
+    // Col 4 — USD equivalent
+    const c4 = ws.getCell(r, 4);
+    if (row.usd !== null) {
+      c4.value = fmtAmtSigned(row.usd);
+      c4.font  = { bold: true, size: 9, name: 'Calibri', color: { argb: usdClr } };
+    } else {
+      c4.value = 'не учтён';
+      c4.font  = { italic: true, size: 8, name: 'Calibri', color: { argb: 'FFE67E22' } };
+    }
+    c4.fill      = fillBg;
+    c4.alignment = { horizontal: 'right' };
+
+    // Col 5 — Source tag
+    const c5 = ws.getCell(r, 5);
+    const srcLabel: Record<string, string> = {
+      hardcoded:  'hardcoded',
+      'fiat-api': 'er-api.com',
+      'crypto-api': 'mexc.com',
+      uncovered:  '—',
+    };
+    c5.value = srcLabel[row.source] ?? row.source;
+    c5.font  = { size: 7, italic: true, name: 'Calibri', color: { argb: 'FFAAAAAA' } };
+    c5.fill  = fillBg;
+    c5.alignment = { horizontal: 'center' };
+
     r++;
   }
 
-  // ── USD-эквивалент (исторические курсы) ──────────────────────────
-  if (usdCovered > 0) {
-    const usdLbl = cell(r, 1, '≈ USD-эквивалент', false, 'FF555555');
-    usdLbl.font  = { italic: true, size: 9, name: 'Calibri', color: { argb: 'FF555555' } };
-    usdLbl.fill  = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF0CC' } };
-
-    const usdVal = ws.getCell(r, 3);
-    usdVal.value = `≈ ${fmtAmtSigned(usdEquiv)} USD`;
-    usdVal.font  = { bold: true, size: 10, name: 'Calibri',
-      color: { argb: usdEquiv >= 0 ? `FF${C_INCOME}` : `FF${C_EXPENSE}` } };
-    usdVal.fill  = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF0CC' } };
-    usdVal.alignment = { horizontal: 'left' };
-    for (const c of [2, 4, 5]) {
-      ws.getCell(r, c).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF0CC' } };
-    }
-    r++;
-
-    // Сноска
-    ws.mergeCells(r, 1, r, 5);
-    const noteC = ws.getCell(r, 1);
-    noteC.value = nonUsdNote;
-    noteC.font  = { size: 7, italic: true, name: 'Calibri', color: { argb: 'FFAAAAAA' } };
-    noteC.fill  = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_GREY_BG}` } };
-    r++;
+  // Separator row
+  for (let ci = 1; ci <= 5; ci++) {
+    ws.getCell(r, ci).border = { top: { style: 'thin', color: { argb: 'FFCCCCCC' } } };
+    ws.getCell(r, ci).fill   = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEAD8A0' } };
   }
+  r++;
+
+  // Grand total USD row (yellow highlight)
+  const gtFill = { type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb: 'FFFFF0CC' } };
+  const gtClr  = usdTotal >= 0 ? `FF${C_INCOME}` : `FF${C_EXPENSE}`;
+
+  const gt1 = ws.getCell(r, 1);
+  gt1.value = '≈ ИТОГО в USD';
+  gt1.font  = { bold: true, size: 9, name: 'Calibri', color: { argb: 'FF555555' } };
+  gt1.fill  = gtFill;
+
+  const gt2 = ws.getCell(r, 2);
+  gt2.value = uncoveredC.length > 0 ? `(без: ${uncoveredC.join(', ')})` : '(все валюты)';
+  gt2.font  = { italic: true, size: 8, name: 'Calibri', color: { argb: 'FF888888' } };
+  gt2.fill  = gtFill;
+
+  const gt4 = ws.getCell(r, 4);
+  gt4.value = `≈ ${fmtAmtSigned(usdTotal)} USD`;
+  gt4.font  = { bold: true, size: 11, name: 'Calibri', color: { argb: gtClr } };
+  gt4.fill  = gtFill;
+  gt4.alignment = { horizontal: 'right' };
+
+  for (const ci of [3, 5]) {
+    ws.getCell(r, ci).fill = gtFill;
+  }
+  r++;
+
+  // Footnote
+  ws.mergeCells(r, 1, r, 5);
+  const fn = ws.getCell(r, 1);
+  const fnSources = [
+    ...([...rateSources.values()].includes('fiat-api') ? ['Fiat: open.er-api.com'] : []),
+    ...([...rateSources.values()].includes('crypto-api') ? ['Crypto: mexc.com'] : []),
+    'Курс на дату экспорта отчёта',
+    ...(uncoveredC.length > 0 ? [`Без конвертации: ${uncoveredC.join(', ')}`] : []),
+  ];
+  fn.value = fnSources.join(' · ');
+  fn.font  = { size: 7, italic: true, name: 'Calibri', color: { argb: 'FFAAAAAA' } };
+  fn.fill  = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_GREY_BG}` } };
+  r++;
   r++; // spacer
+
 
   // ── СОСТОЯНИЕ СЧЕТОВ ──────────────────────────────────────
   // We only show what we actually know:
