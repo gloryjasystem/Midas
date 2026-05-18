@@ -474,20 +474,16 @@ function buildSheet0Summary(
   // ── СВОДКА ЗА ПЕРИОД ──────────────────────────────────────
   sectionHdr('СВОДКА ЗА ПЕРИОД');
 
-  // Sub-headers for the intent block
-  ['Тип операции', 'Операций', 'Сумма (USD)', 'Сумма (other)'].slice(0, 3).forEach((h, i) => {
+  // Individual column headers — consistent with the ИТОГ table structure below
+  ['Тип операции', 'Операций', 'Сумма 1', 'Сумма 2', 'Сумма 3'].forEach((h, i) => {
     const c = ws.getCell(r, i + 1);
-    c.value = h;
+    c.value = i >= 2 ? '' : h; // cols 3-5: no header text, currency data speaks for itself
     c.font = { bold: true, size: 8, name: 'Calibri' };
     c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_GREY_BG}` } };
-    c.alignment = { horizontal: i > 1 ? 'right' : 'left' };
+    c.alignment = { horizontal: 'left', vertical: 'middle' };
+    c.border = { bottom: { style: 'thin', color: { argb: `FF${C_TBL_BORDER}` } } };
   });
-  // col 3 header «Сумма» spans to col 5
-  ws.mergeCells(r, 3, r, 5);
-  ws.getCell(r, 3).value = 'Суммы по валютам';
-  ws.getCell(r, 3).font = { bold: true, size: 8, name: 'Calibri' };
-  ws.getCell(r, 3).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_GREY_BG}` } };
-  ws.getCell(r, 3).alignment = { horizontal: 'center' };
+  ws.getRow(r).height = 16;
   r++;
 
   type IntentKey = 'income' | 'expense' | 'transfer' | 'debt_given' | 'debt_received';
@@ -717,6 +713,8 @@ function buildSheet0Summary(
   fn.value = fnParts.join('  ·  ');
   fn.font  = { size: 7, italic: true, name: 'Calibri', color: { argb: 'FFAAAAAA' } };
   fn.fill  = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_GREY_BG}` } };
+  // Thin top border separates audit disclaimer from the grand total value above
+  fn.border = { top: { style: 'thin', color: { argb: `FF${C_TBL_BORDER}` } } };
   r++;
   r++; // spacer
 
