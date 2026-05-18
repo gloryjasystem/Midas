@@ -227,6 +227,20 @@ function countStr(n: number): string {
   return `${String(n)} операций`;
 }
 
+/**
+ * Strip emoji / pictographic Unicode from text before writing to Excel.
+ * Guarantees clean output on all MS Office versions, and future-proofs
+ * custom categories that may or may not have an icon prefix.
+ */
+function stripEmoji(text: string): string {
+  return (text ?? '')
+    .replace(/[\u{1F000}-\u{1FFFF}]/gu, '') // Misc pictographs, emoji
+    .replace(/[\u{2600}-\u{27BF}]/gu,   '') // Misc symbols & dingbats
+    .replace(/[\uFE00-\uFE0F]/gu,       '') // Variation selectors
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 // ─────────────────────────────────────────────────────────────
 // DB row types
 // ─────────────────────────────────────────────────────────────
@@ -778,88 +792,160 @@ function buildSheet0Summary(
   }
   r++; // spacer
 
-  // ── СВОДКА ПО ВАЛЮТАМ ─────────────────────────────────────
-  sectionHdr('СВОДКА ПО ВАЛЮТАМ');
-  ['Валюта', 'Операций', 'Доходы', 'Расходы', 'Итог*'].forEach((h, i) => {
+  // ── СВОДКА CASH FLOW ПО ВАЛЮТАМ ─────────────────────────────
+  // 3-level model: Operational / Capital movement / Total position
+  sectionHdr('СВОДКА CASH FLOW ПО ВАЛЮТАМ');
+  ['Валюта', 'Доходы ↑', 'Расходы ↓', 'Опер. нетто', 'Итого позиции*'].forEach((h, i) => {
     const c = ws.getCell(r, i + 1);
     c.value = h;
-    c.font = { bold: true, size: 8, name: 'Calibri' };
-    c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_GREY_BG}` } };
-    c.alignment = { horizontal: i >= 2 ? 'right' : 'left', vertical: 'middle' };
-    c.border = { bottom: { style: 'thin', color: { argb: `FF${C_TBL_BORDER}` } } };
+    c.font = { bold: true, size: 8, name: 'Calibri', color: { argb: 'FF2D6A9F' } };
+    c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_TOTAL_HDR}` } };
+    c.alignment = { horizontal: i >= 1 ? 'right' : 'left', vertical: 'middle' };
+    c.border = { bottom: { style: 'thin', color: { argb: `FF${C_TBL_BORDER}` } }, top: { style: 'thin', color: { argb: `FF${C_TBL_BORDER}` } } };
   });
   ws.getRow(r).height = 16;
   r++;
 
-  type CurTotals2 = { count: number; income: number; expense: number };
-  const byCur = new Map<string, CurTotals2>();
+  // Full Cash Flow aggregation per currency
+  type CurFlow = { count: number; income: number; expense: number; transfer: number; debtGiven: number; debtRecv: number };
+  const cfByCur = new Map<string, CurFlow>();
   for (const row of rows) {
     const cur = row.currency;
-    const t = byCur.get(cur) ?? { count: 0, income: 0, expense: 0 };
-    t.count++;
-    if (row.transaction_intent === 'income')  t.income  += parseFloat(row.original_amount);
-    if (row.transaction_intent === 'expense') t.expense += parseFloat(row.original_amount);
-    byCur.set(cur, t);
-  }
-  for (const [cur, t] of byCur) {
-    const net = t.income - t.expense;
-    cell(r, 1, cur); cell(r, 2, String(t.count));
-    const inc = cell(r, 3, fmtAmtSigned(t.income));
-    inc.alignment = { horizontal: 'right', vertical: 'middle' };
-    const exp = cell(r, 4, fmtAmtSigned(-t.expense));
-    exp.alignment = { horizontal: 'right', vertical: 'middle' };
-    const netC = cell(r, 5, fmtAmtSigned(net), true, net >= 0 ? `FF${C_INCOME}` : `FF${C_EXPENSE}`);
-    netC.alignment = { horizontal: 'right', vertical: 'middle' };
-    for (let ci = 1; ci <= 5; ci++) {
-      ws.getCell(r, ci).border = { bottom: { style: 'thin', color: { argb: `FF${C_TBL_BORDER}` } } };
+    const f = cfByCur.get(cur) ?? { count: 0, income: 0, expense: 0, transfer: 0, debtGiven: 0, debtRecv: 0 };
+    f.count++;
+    const amt = parseFloat(row.original_amount);
+    switch (row.transaction_intent) {
+      case 'income':        f.income    += amt; break;
+      case 'expense':       f.expense   += amt; break;
+      case 'transfer':      f.transfer  += amt; break;
+      case 'debt_given':    f.debtGiven += amt; break;
+      case 'debt_received': f.debtRecv  += amt; break;
     }
+    cfByCur.set(cur, f);
+  }
+
+  const thinB = { style: 'thin' as const, color: { argb: `FF${C_TBL_BORDER}` } };
+  const capBg = { type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb: 'FFE8EEF4' } }; // tinted steel = capital
+  const opBg  = { type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb: `FF${C_TOTAL_BG}` } };
+  const totBg = { type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb: 'FFD6EAF8' } }; // pale steel = total position
+
+  for (const [cur, f] of cfByCur) {
+    const operNet  = f.income - f.expense;
+    const debtNet  = f.debtRecv - f.debtGiven;
+    const totalPos = operNet + debtNet - f.transfer; // identical to ИТОГ ЗА ПЕРИОД
+    const opClr  = operNet  >= 0 ? `FF${C_INCOME}` : `FF${C_EXPENSE}`;
+    const totClr = totalPos >= 0 ? `FF${C_INCOME}` : `FF${C_EXPENSE}`;
+
+    // ── Row 1: Operational (standard)
+    const r1c1 = ws.getCell(r, 1); r1c1.value = cur; r1c1.font = { bold: true, size: 9, name: 'Calibri' }; r1c1.fill = opBg; r1c1.border = { bottom: thinB, right: thinB }; r1c1.alignment = { horizontal: 'left', vertical: 'middle' };
+    const r1c2 = ws.getCell(r, 2); r1c2.value = fmtAmtSigned(f.income);   r1c2.font = { size: 9, name: 'Calibri', color: { argb: f.income  > 0 ? `FF${C_INCOME}` : 'FF888888' } }; r1c2.fill = opBg; r1c2.border = { bottom: thinB, right: thinB }; r1c2.alignment = { horizontal: 'right', vertical: 'middle' };
+    const r1c3 = ws.getCell(r, 3); r1c3.value = fmtAmtSigned(-f.expense); r1c3.font = { size: 9, name: 'Calibri', color: { argb: f.expense > 0 ? `FF${C_EXPENSE}` : 'FF888888' } }; r1c3.fill = opBg; r1c3.border = { bottom: thinB, right: thinB }; r1c3.alignment = { horizontal: 'right', vertical: 'middle' };
+    const r1c4 = ws.getCell(r, 4); r1c4.value = fmtAmtSigned(operNet);    r1c4.font = { bold: true, size: 9, name: 'Calibri', color: { argb: opClr } };  r1c4.fill = opBg; r1c4.border = { bottom: thinB, right: thinB }; r1c4.alignment = { horizontal: 'right', vertical: 'middle' };
+    const r1c5 = ws.getCell(r, 5); r1c5.value = fmtAmtSigned(totalPos);   r1c5.font = { bold: true, size: 9, name: 'Calibri', color: { argb: totClr } }; r1c5.fill = totBg; r1c5.border = { bottom: thinB }; r1c5.alignment = { horizontal: 'right', vertical: 'middle' };
     ws.getRow(r).height = 18;
     r++;
+
+    // ── Row 2: Capital movement detail (only if transfers or debts exist)
+    const hasCapital = f.transfer !== 0 || f.debtGiven !== 0 || f.debtRecv !== 0;
+    if (hasCapital) {
+      const parts: string[] = [];
+      if (f.transfer  !== 0) parts.push(`переводы: ${fmtAmtSigned(-f.transfer)}`);
+      if (f.debtGiven !== 0) parts.push(`долги (дал): ${fmtAmtSigned(-f.debtGiven)}`);
+      if (f.debtRecv  !== 0) parts.push(`долги (взял): ${fmtAmtSigned(f.debtRecv)}`);
+      ws.getCell(r, 1).fill = capBg;
+      ws.mergeCells(r, 2, r, 4);
+      const capC = ws.getCell(r, 2);
+      capC.value = parts.join('  ·  ');
+      capC.font  = { italic: true, size: 7, name: 'Calibri', color: { argb: 'FF666666' } };
+      capC.fill  = capBg;
+      capC.alignment = { horizontal: 'left', vertical: 'middle' };
+      ws.getCell(r, 5).fill = capBg;
+      for (let ci = 1; ci <= 5; ci++) ws.getCell(r, ci).border = { bottom: { style: 'thin', color: { argb: `FF${C_TBL_BORDER}` } } };
+      ws.getRow(r).height = 13;
+      r++;
+    }
   }
-  // Footnote: explain * in header
+
+  // Footnote: full formula transparency
   ws.mergeCells(r, 1, r, 5);
-  const byCurFn = ws.getCell(r, 1);
-  byCurFn.value = '* Итог = Доходы − Расходы. Переводы между счетами не учитываются.';
-  byCurFn.font  = { size: 7, italic: true, name: 'Calibri', color: { argb: 'FFAAAAAA' } };
-  byCurFn.fill  = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_GREY_BG}` } };
+  const cfFn = ws.getCell(r, 1);
+  cfFn.value = '* Итого позиции = Доходы − Расходы + Долги получ. − Долги выд. − Переводы. Совпадает с «ИТОГ ЗА ПЕРИОД».';
+  cfFn.font  = { size: 7, italic: true, name: 'Calibri', color: { argb: 'FFAAAAAA' } };
+  cfFn.fill  = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_GREY_BG}` } };
+  cfFn.border = { top: { style: 'thin', color: { argb: `FF${C_TBL_BORDER}` } } };
   r++;
   r++; // spacer
 
-  // ── ТОП КАТЕГОРИЙ РАСХОДОВ (по валюте) ──────────────────
-  // Each currency gets its own block — mixing currencies and computing % on a
-  // combined total (e.g. UAH + USD) is mathematically meaningless.
-  const catByCur = new Map<string, Map<string, { total: number; count: number }>>();
+  // ── ТОП РАСХОДОВ — единый рейтинг в USD ────────────────────
+  // Only `expense` intent. debt_given is an asset (receivable), not a spend.
+  // Each transaction is converted to USD via live usdRates; currencies without
+  // a rate are shown separately at the bottom with a '?' marker.
+  type CatEntry = { count: number; usdTotal: number; origParts: string[]; hasUncovered: boolean };
+  const catUSD = new Map<string, CatEntry>();
   for (const row of rows) {
     if (row.transaction_intent !== 'expense') continue;
-    const cur = row.currency;
-    if (!catByCur.has(cur)) catByCur.set(cur, new Map());
-    const cm  = catByCur.get(cur)!;
-    const k   = row.category_name;
-    const cv  = cm.get(k) ?? { total: 0, count: 0 };
-    cv.total += parseFloat(row.original_amount); cv.count++;
-    cm.set(k, cv);
+    const cur    = row.currency.toUpperCase();
+    const amt    = parseFloat(row.original_amount);
+    const rate   = usdRates.get(cur);
+    const catKey = stripEmoji(row.category_name ?? '—') || '—';
+    const e      = catUSD.get(catKey) ?? { count: 0, usdTotal: 0, origParts: [], hasUncovered: false };
+    e.count++;
+    if (rate !== undefined) {
+      e.usdTotal += amt * rate;
+      e.origParts.push(`${fmtAmtSigned(-amt)} ${cur}`);
+    } else {
+      e.hasUncovered = true;
+      e.origParts.push(`${fmtAmtSigned(-amt)} ${cur}(?)`);
+    }
+    catUSD.set(catKey, e);
   }
-  if (catByCur.size === 0) {
-    sectionHdr('ТОП КАТЕГОРИЙ РАСХОДОВ');
+
+  if (catUSD.size === 0) {
+    sectionHdr('ТОП РАСХОДОВ — ≈ USD');
     cell(r, 1, '— нет расходов за период'); r++;
-  }
-  for (const [cur, cm] of catByCur) {
-    sectionHdr(`ТОП РАСХОДОВ — ${cur}`);
-    const totalExpCur = im.expense.byCur.get(cur) ?? 1;
-    const topCats = [...cm.entries()].sort((a, b) => b[1].total - a[1].total).slice(0, 5);
-    for (const [i, [name, c]] of topCats.entries()) {
-      const pct = Math.round((c.total / totalExpCur) * 100);
+  } else {
+    sectionHdr('ТОП РАСХОДОВ — ≈ USD');
+    // Column headers
+    ['Категория', 'Операций', 'Детали', '≈ USD', '%'].forEach((h, i) => {
+      const c = ws.getCell(r, i + 1);
+      c.value = h;
+      c.font  = { bold: true, size: 8, name: 'Calibri', color: { argb: 'FF2D6A9F' } };
+      c.fill  = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_TOTAL_HDR}` } };
+      c.alignment = { horizontal: i >= 3 ? 'right' : 'left', vertical: 'middle' };
+      c.border = { bottom: { style: 'thin', color: { argb: `FF${C_TBL_BORDER}` } } };
+    });
+    ws.getRow(r).height = 16; r++;
+
+    const ranked = [...catUSD.entries()]
+      .sort((a, b) => b[1].usdTotal - a[1].usdTotal)
+      .slice(0, 8);
+    const grandUSD = ranked.reduce((s, [, e]) => s + e.usdTotal, 0);
+
+    for (const [i, [name, e]] of ranked.entries()) {
+      const pct     = grandUSD > 0 ? Math.round((e.usdTotal / grandUSD) * 100) : 0;
+      const details = [...new Set(e.origParts)].join(', ');
+      const usdStr  = e.usdTotal > 0 ? `− ${e.usdTotal.toFixed(2)}` : (e.hasUncovered ? '? (нет курса)' : '—');
+
       cell(r, 1, `${String(i + 1)}.  ${name}`);
-      cell(r, 2, countStr(c.count));
-      const amtC = cell(r, 3, `${fmtAmtSigned(-c.total)} ${cur}`);
-      amtC.font = { size: 9, name: 'Calibri', color: { argb: `FF${C_EXPENSE}` } };
-      const pctC = cell(r, 4, `${String(pct)}%`);
+      cell(r, 2, countStr(e.count));
+      const detC = ws.getCell(r, 3);
+      detC.value = details;
+      detC.font  = { size: 7, italic: true, name: 'Calibri', color: { argb: 'FF777777' } };
+      detC.alignment = { horizontal: 'left', vertical: 'middle' };
+      const usdC = ws.getCell(r, 4);
+      usdC.value = usdStr;
+      usdC.font  = { bold: true, size: 9, name: 'Calibri', color: { argb: `FF${C_EXPENSE}` } };
+      usdC.alignment = { horizontal: 'right', vertical: 'middle' };
+      const pctC = ws.getCell(r, 5);
+      pctC.value = `${String(pct)}%`;
       pctC.alignment = { horizontal: 'right', vertical: 'middle' };
       for (let ci = 1; ci <= 5; ci++) {
         ws.getCell(r, ci).border = { bottom: { style: 'thin', color: { argb: `FF${C_TBL_BORDER}` } } };
+        if (!ws.getCell(r, ci).fill || (ws.getCell(r, ci).fill as any).fgColor === undefined) {
+          ws.getCell(r, ci).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_TOTAL_BG}` } };
+        }
       }
-      ws.getRow(r).height = 18;
-      r++;
+      ws.getRow(r).height = 18; r++;
     }
   }
   r++; r++; // spacer before footer
