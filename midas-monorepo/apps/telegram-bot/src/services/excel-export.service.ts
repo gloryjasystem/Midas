@@ -678,23 +678,16 @@ function buildSheet0Summary(
     right:  { style: 'thin'   as const, color: { argb: `FF${C_TBL_BORDER}` } },
   };
 
+  // Merge cols 1-3 for label → right-aligned text visually "touches" the value in col 4
+  ws.mergeCells(r, 1, r, 3);
   const gt1 = ws.getCell(r, 1);
-  gt1.value = '≈ ИТОГО в USD';
+  gt1.value = uncoveredC.length > 0
+    ? `≈ ИТОГО в USD  (без: ${uncoveredC.join(', ')})`
+    : '≈ ИТОГО в USD';
   gt1.font  = { bold: true, size: 10, name: 'Calibri', color: { argb: `FF${C_GRAND_FG}` } };
   gt1.fill  = gtFill;
   gt1.border = gtBorder;
-  gt1.alignment = { horizontal: 'left', vertical: 'middle' };
-
-  const gt2 = ws.getCell(r, 2);
-  gt2.value = uncoveredC.length > 0 ? `без: ${uncoveredC.join(', ')}` : '';
-  gt2.font  = { italic: true, size: 7, name: 'Calibri', color: { argb: 'FFAAAAAA' } };
-  gt2.fill  = gtFill;
-  gt2.border = gtBorder;
-  gt2.alignment = { horizontal: 'right', vertical: 'middle' };
-
-  const gt3 = ws.getCell(r, 3);
-  gt3.fill   = gtFill;
-  gt3.border = gtBorder;
+  gt1.alignment = { horizontal: 'right', vertical: 'middle' };
 
   // ≈ USD number — white, large, right-aligned
   const usdTotalClr = usdTotal >= 0 ? 'FF7DCEA0' : 'FFE57373'; // soft green/red on dark bg
@@ -764,13 +757,18 @@ function buildSheet0Summary(
   for (const [name, acc] of accMap) {
     cell(r, 1, name);
     cell(r, 2, acc.currency);
-    const balC = cell(r, 3, fmtAmtSigned(acc.endBal), false,
+    // Balance: no '+' prefix for positive — bank statement standard (Revolut/Wise style)
+    const balDisplay = acc.endBal >= 0
+      ? fmtAmtSigned(acc.endBal).replace(/^\+ /, '')
+      : fmtAmtSigned(acc.endBal);
+    const balC = cell(r, 3, balDisplay, false,
       acc.endBal >= 0 ? `FF${C_INCOME}` : `FF${C_EXPENSE}`);
     balC.alignment = { horizontal: 'right', vertical: 'middle' };
     const mv    = acc.netChange;
     const arrow = mv > 0 ? '▲ ' : mv < 0 ? '▼ ' : '';
     const mvClr = mv > 0 ? `FF${C_INCOME}` : mv < 0 ? `FF${C_EXPENSE}` : 'FF888888';
-    const mvStr = mv === 0 ? '— нет операций' : `${arrow}${fmtAmtSigned(mv)} ${acc.currency}`;
+    // Currency is already shown in col B — no duplication in movement string
+    const mvStr = mv === 0 ? '— нет операций' : `${arrow}${fmtAmtSigned(mv)}`;
     const mvC   = cell(r, 4, mvStr, false, mvClr);
     mvC.alignment = { horizontal: 'center', vertical: 'middle' }; // centred in wide column
     // thin bottom border on every account row
