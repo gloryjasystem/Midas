@@ -73,10 +73,44 @@ function fmtMon(d: Date): string {
   return `${months[d.getMonth()] ?? ''} ${String(d.getFullYear())}`;
 }
 
-/** Signed amount for summary cells: "+ 10 000.00" | "− 1 000.00" | "—" */
-function fmtAmtSigned(val: number): string {
+// ─────────────────────────────────────────────────────────────
+// Smart number formatting
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Crypto currencies that may have up to 8 significant decimal places.
+ * All others are treated as fiat (max 2 dp).
+ */
+const CRYPTO_SET = new Set([
+  'BTC', 'ETH', 'USDT', 'USDC', 'BNB', 'SOL', 'TON', 'TRX', 'XRP',
+  'DOGE', 'LTC', 'MATIC', 'DOT', 'ADA', 'AVAX', 'ATOM', 'LINK',
+]);
+
+/**
+ * Returns the Excel numFmt string for a given currency:
+ *   - Crypto  → '#,##0.########'   (up to 8 dp, no trailing zeros)
+ *   - Fiat    → '#,##0.##'         (up to 2 dp, no trailing zeros)
+ *
+ * Examples:
+ *   100        → "100"     (not "100.00")
+ *   100.5      → "100.5"   (not "100.50")
+ *   0.00012345 → "0.00012345"  (crypto precision)
+ */
+function smartNumFmt(currency: string): string {
+  return CRYPTO_SET.has((currency ?? '').toUpperCase())
+    ? '#,##0.########'
+    : '#,##0.##';
+}
+
+/** Signed amount for summary cells: "+ 10 000" | "+ 10 000.50" | "− 1 000" | "—" */
+function fmtAmtSigned(val: number, currency?: string): string {
   if (val === 0) return '—';
-  const abs = Math.abs(val).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+  const isCrypto = CRYPTO_SET.has((currency ?? '').toUpperCase());
+  const decimals = isCrypto ? 8 : 2;
+  // Strip trailing zeros after decimal
+  let abs = Math.abs(val).toFixed(decimals).replace(/\.?0+$/, '');
+  // Add space thousands separator
+  abs = abs.replace(/\B(?=(\d{3})+(?!\d))/g, '\u00A0');
   return val > 0 ? `+ ${abs}` : `\u2212 ${abs}`;
 }
 
@@ -599,20 +633,21 @@ function buildSheet1(wb: ExcelJS.Workbook, rows: TxRow[], from: Date, to: Date):
       if (ci === 3 || ci === 7) {
         cell.font = { size: 9, name: 'Calibri', color: { argb: `FF${colour}` }, bold: ci === 3 };
       }
-      // Number format for amounts
-      if (ci === 7) cell.numFmt = '#,##0.00';
-      // col J (ci=9): Выплачено — signed, colour by sign
+      // col H (ci=7): сумма в валюте транзакции
+      if (ci === 7) cell.numFmt = smartNumFmt(row.currency);
+      // col J (ci=9): Выплачено в валюте счёта — signed, colour by sign
       if (ci === 9) {
         const sv = val as number;
-        cell.numFmt = '#,##0.00';
+        cell.numFmt = smartNumFmt(debitCur);
         cell.font = { size: 9, name: 'Calibri',
           color: { argb: sv >= 0 ? `FF${C_INCOME}` : `FF${C_EXPENSE}` } };
       }
-      if (ci === 11) cell.numFmt = '0.0000';
-      // col 16 (ci === 15): Остаток — format + colour by sign
+      // col L (ci=11): Курс — 4dp max, no trailing zeros
+      if (ci === 11) cell.numFmt = '#,##0.####';
+      // col P (ci=15): Остаток на счету — same currency as account
       if (ci === 15) {
         const bal = val as number;
-        cell.numFmt = '#,##0.00';
+        cell.numFmt = smartNumFmt(row.account_currency);
         cell.font = {
           size: 9, name: 'Calibri', bold: true,
           color: { argb: bal >= 0 ? `FF${C_INCOME}` : `FF${C_EXPENSE}` },
@@ -648,13 +683,13 @@ function buildSheet1(wb: ExcelJS.Workbook, rows: TxRow[], from: Date, to: Date):
     // SUM for amount (col H) and Выплачено (col J) - signed
     const amtTotal = ws.getCell(totalRow, 8);
     amtTotal.value = { formula: `SUM(H${DATA_START}:H${totalRow - 1})` };
-    amtTotal.numFmt = '#,##0.00';
+    amtTotal.numFmt = '#,##0.##';   // no trailing zeros on totals row
     amtTotal.font = { bold: true, size: 9, name: 'Calibri' };
     amtTotal.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_TOTAL_BG}` } };
 
     const debitTotal = ws.getCell(totalRow, 10);
     debitTotal.value = { formula: `SUM(J${DATA_START}:J${totalRow - 1})` };
-    debitTotal.numFmt = '#,##0.00';
+    debitTotal.numFmt = '#,##0.##'; // no trailing zeros on totals row
     debitTotal.font = { bold: true, size: 9, name: 'Calibri',
       color: { argb: 'FF333333' } };
     debitTotal.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_TOTAL_BG}` } };
@@ -752,7 +787,7 @@ function buildSheet2(wb: ExcelJS.Workbook, rows: TxRow[]): void {
     data.forEach((val, ci) => {
       const cell = ws.getCell(rowNum, ci + 1);
       cell.value = val;
-      if (ci >= 3) cell.numFmt = '#,##0.00';
+      if (ci >= 3) cell.numFmt = smartNumFmt(acc.currency);
       cell.font = { size: 9, name: 'Calibri', bold: ci === 6,
         color: ci === 6 ? { argb: net >= 0 ? `FF${C_INCOME}` : `FF${C_EXPENSE}` } : undefined };
       cell.fill = { type: 'pattern', pattern: 'solid',
@@ -803,7 +838,8 @@ function buildSheet3(wb: ExcelJS.Workbook, rows: TxRow[]): void {
     data.forEach((val, ci) => {
       const cell = ws.getCell(rowNum, ci + 1);
       cell.value = val;
-      if (ci >= 3) cell.numFmt = '#,##0.00';
+      // Categories are mixed-currency — use generic fiat format (2dp, no trailing zeros)
+      if (ci >= 3) cell.numFmt = '#,##0.##';
       cell.font = { size: 9, name: 'Calibri' };
       cell.fill = { type: 'pattern', pattern: 'solid',
         fgColor: { argb: rowNum % 2 === 0 ? `FF${C_ROW_ODD}` : 'FFFFFFFF' } };
@@ -845,14 +881,26 @@ function buildSheet4(wb: ExcelJS.Workbook, rows: TxRow[]): void {
     monMap.set(mon, m);
   }
 
+  // Sort months chronologically (key = "Январь 2026" — sort by year then month index)
+  const RU_MONTHS = ['Январь','Февраль','Март','Апрель','Май','Июнь',
+                     'Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
+  const sortedMons = [...monMap.entries()].sort(([a], [b]) => {
+    const parseMonKey = (k: string) => {
+      const [mon, yr] = k.split(' ');
+      return parseInt(yr ?? '0') * 12 + (RU_MONTHS.indexOf(mon ?? '') ?? 0);
+    };
+    return parseMonKey(a) - parseMonKey(b);
+  });
+
   let rowNum = 3;
-  for (const [mon, m] of monMap) {
+  for (const [mon, m] of sortedMons) {
     const net = m.income - m.expense;
     const data = [mon, m.income, m.expense, m.debtGive, m.debtRecv, net];
     data.forEach((val, ci) => {
       const cell = ws.getCell(rowNum, ci + 1);
       cell.value = val;
-      if (ci >= 1) cell.numFmt = '#,##0.00';
+      // Monthly sheet is mixed-currency: use generic fiat format (2dp, no trailing zeros)
+      if (ci >= 1) cell.numFmt = '#,##0.##';
       cell.font = { size: 9, name: 'Calibri', bold: ci === 5,
         color: ci === 5 ? { argb: (net as number) >= 0 ? `FF${C_INCOME}` : `FF${C_EXPENSE}` } : undefined };
       cell.fill = { type: 'pattern', pattern: 'solid',
