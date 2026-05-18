@@ -478,17 +478,17 @@ function buildSheet0Summary(
   sectionHdr('СВОДКА ЗА ПЕРИОД');
 
   // Individual column headers — consistent with the ИТОГ table structure below
-  // #5 — cols D-E get "Суммы по валютам" label
-  ['Тип операции', 'Операций', '', 'Суммы по валютам', ''].forEach((h, i) => {
+  // #5 — "Суммы по валютам" merged C-E, centered
+  ['Тип операции', 'Операций', 'Суммы по валютам', '', ''].forEach((h, i) => {
     const c = ws.getCell(r, i + 1);
     c.value = h;
     c.font = { bold: true, size: 8, name: 'Calibri' };
     c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_GREY_BG}` } };
-    c.alignment = { horizontal: i === 3 ? 'center' : 'left', vertical: 'middle' };
+    c.alignment = { horizontal: i === 2 ? 'center' : 'left', vertical: 'middle' };
     c.border = { bottom: { style: 'thin', color: { argb: `FF${C_TBL_BORDER}` } } };
   });
-  // merge D-E for the label
-  ws.mergeCells(r, 4, r, 5);
+  // merge C-E for the label (cols 3-5)
+  ws.mergeCells(r, 3, r, 5);
   ws.getRow(r).height = 16;
   r++;
 
@@ -592,7 +592,7 @@ function buildSheet0Summary(
     left:   { style: 'thin' as const, color: { argb: `FF${C_TBL_BORDER}` } },
     right:  { style: 'thin' as const, color: { argb: `FF${C_TBL_BORDER}` } },
   };
-  const colLabels = ['Валюта', 'Нетто за период', 'Курс к USD', '≈ USD', 'Источник'];
+  const colLabels = ['Валюта', 'Нетто за период', 'Курс к USD', 'USD', 'Источник'];
   colLabels.forEach((lbl, i) => {
     const c = ws.getCell(r, i + 1);
     c.value = lbl;
@@ -640,7 +640,7 @@ function buildSheet0Summary(
     }
     c3.fill      = fillBg;
     c3.border    = thinBorder;
-    c3.alignment = { horizontal: 'right', vertical: 'middle' };
+    c3.alignment = { horizontal: 'center', vertical: 'middle' };
 
     // Col 4 — ≈ USD equivalent (right-aligned, coloured)
     const c4 = ws.getCell(r, 4);
@@ -769,7 +769,7 @@ function buildSheet0Summary(
       : fmtAmtSigned(acc.endBal);
     const balC = cell(r, 3, balDisplay, false,
       acc.endBal >= 0 ? `FF${C_INCOME}` : `FF${C_EXPENSE}`);
-    balC.alignment = { horizontal: 'right', vertical: 'middle' };
+    balC.alignment = { horizontal: 'center', vertical: 'middle' };
     const mv    = acc.netChange;
     const arrow = mv > 0 ? '▲ ' : mv < 0 ? '▼ ' : '';
     const mvClr = mv > 0 ? `FF${C_INCOME}` : mv < 0 ? `FF${C_EXPENSE}` : 'FF888888';
