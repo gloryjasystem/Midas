@@ -1149,98 +1149,22 @@ function buildSheet1(wb: ExcelJS.Workbook, rows: TxRow[], from: Date, to: Date, 
   titleCell.alignment = { horizontal: 'center', vertical: 'middle' };
   ws.getRow(1).height = 36;
 
-  // ── Summary block (rows 2–9, cols L–N): grouped BY CURRENCY ──
-  // Never add PLN + UAH + USD together — that's meaningless.
-  type CurTotals = { income: number; expense: number; transfer: number; debtGive: number; debtRecv: number };
-  const byCur = new Map<string, CurTotals>();
-  for (const r of rows) {
-    const cur = r.currency;
-    const amt = parseFloat(r.original_amount);
-    const t   = byCur.get(cur) ?? { income: 0, expense: 0, transfer: 0, debtGive: 0, debtRecv: 0 };
-    if (r.transaction_intent === 'income')        t.income   += amt;
-    if (r.transaction_intent === 'expense')       t.expense  += amt;
-    if (r.transaction_intent === 'transfer')      t.transfer += amt;
-    if (r.transaction_intent === 'debt_given')    t.debtGive += amt;
-    if (r.transaction_intent === 'debt_received') t.debtRecv += amt;
-    byCur.set(cur, t);
-  }
+  // ── Row 2: Statement meta (ops count + generation date) ───────
+  const metaRow = 2;
+  ws.mergeCells(metaRow, 1, metaRow, 16);
+  const metaCell = ws.getCell(metaRow, 1);
+  metaCell.value = `${rows.length} операций  ·  Сгенерировано: ${fmtDate(new Date())} ${fmtTime(new Date())}`;
+  metaCell.font  = { size: 9, name: 'Calibri', italic: true, color: { argb: 'FFB0C8E0' } };
+  metaCell.fill  = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_HEADER_BG}` } };
+  metaCell.alignment = { horizontal: 'center', vertical: 'middle' };
+  ws.getRow(metaRow).height = 20;
 
-  // ── Summary block (rows 2–9, cols I–K): «Сводка по валютам» dashboard card ──
-  // Styled as embedded summary card: navy header + #F2F7FB background + steel-blue border
-  // (Mirrors QuickBooks/Xero export design pattern)
-  const SUMM_COL_START = 9;   // I
-  const SUMM_COL_END   = 11;  // K
-  const SUMM_ROW_START = 2;
+  // ── Row 3: Spacer ──────────────────────────────────────────────
+  ws.getRow(3).height = 4;
 
-  // Row 2: Navy merged header
-  ws.mergeCells(SUMM_ROW_START, SUMM_COL_START, SUMM_ROW_START, SUMM_COL_END);
-  const summHdrCell = ws.getCell(SUMM_ROW_START, SUMM_COL_START);
-  summHdrCell.value = `Сводка по валютам · ${rows.length} операций`;
-  summHdrCell.font = { bold: true, size: 9, name: 'Calibri', color: { argb: `FF${C_COL_HDR_FG}` } };
-  summHdrCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_HEADER_BG}` } };
-  summHdrCell.alignment = { horizontal: 'center', vertical: 'middle' };
-  // Apply outer border to header row cells
-  const summBorder = { style: 'thin' as const, color: { argb: `FF${C_TBL_BORDER}` } };
-  summHdrCell.border = { top: summBorder, left: summBorder, right: summBorder, bottom: summBorder };
-
-  // Rows 3–9: fill per currency (max 7 rows), #F2F7FB background + full border frame
-  let summRow = 3;
-  for (const [cur, t] of byCur) {
-    if (summRow > 9) break;
-    const net = t.income + t.debtRecv - t.expense - t.transfer - t.debtGive;
-    const summDataFill = { type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb: 'FFF2F7FB' } };
-    const summDataBorder = {
-      top:    summBorder,
-      bottom: summBorder,
-      left:   summBorder,
-      right:  summBorder,
-    };
-
-    const lc = ws.getCell(summRow, SUMM_COL_START);
-    lc.value = `${cur}  💰${t.income.toFixed(0)}  💸${t.expense.toFixed(0)}  🔄${t.transfer.toFixed(0)}`;
-    lc.font  = { size: 8, name: 'Calibri', color: { argb: 'FF333333' } };
-    lc.fill  = summDataFill;
-    lc.border = summDataBorder;
-    lc.alignment = { horizontal: 'left', vertical: 'middle' };
-
-    const vc = ws.getCell(summRow, 10);
-    vc.value  = parseFloat(net.toFixed(2));
-    vc.numFmt = '+#,##0.00;-#,##0.00';
-    vc.font   = { bold: true, size: 8, name: 'Calibri',
-      color: { argb: net >= 0 ? `FF${C_INCOME}` : `FF${C_EXPENSE}` } };
-    vc.fill   = summDataFill;
-    vc.border = summDataBorder;
-    vc.alignment = { horizontal: 'right', vertical: 'middle' };
-
-    const cc = ws.getCell(summRow, SUMM_COL_END);
-    cc.value = cur;
-    cc.font  = { italic: true, size: 8, name: 'Calibri', color: { argb: '55555555' } };
-    cc.fill  = { type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb: 'FFF2F7FB' } };
-    cc.border = summDataBorder;
-    cc.alignment = { horizontal: 'left', vertical: 'middle' };
-    summRow++;
-  }
-
-  // Pad remaining rows in the dashboard block (rows after last currency, up to row 9)
-  // This ensures the card has a clean rectangular appearance even with few currencies
-  for (let padRow = summRow; padRow <= 9; padRow++) {
-    for (let padCol = SUMM_COL_START; padCol <= SUMM_COL_END; padCol++) {
-      const pc = ws.getCell(padRow, padCol);
-      pc.fill   = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF2F7FB' } };
-      pc.border = { top: summBorder, bottom: summBorder, left: summBorder, right: summBorder };
-    }
-  }
-
-  // ── Row 9: Empty spacer ──────────────────────────────────────
-  ws.getRow(9).height = 6;
-
-
-
-
-  // ── Row 10: Column headers (16 cols: A–P) ───────────────────
-  // Cols I & K removed: currency now embedded in numFmt of H and I (Выплачено)
-  const HDR_ROW = 10;
-  ws.getRow(HDR_ROW).height = 40; // extra height for 3-line headers
+  // ── Row 4: Column headers (16 cols: A–P) ───────────────────
+  const HDR_ROW = 4;
+  ws.getRow(HDR_ROW).height = 42;
 
   const cols: Array<[string, number]> = [
     ['№',                            5],  // A=1
@@ -1251,17 +1175,15 @@ function buildSheet1(wb: ExcelJS.Workbook, rows: TxRow[], from: Date, to: Date, 
     ['Счёт',                        18],  // F=6
     ['Вал.\nсчёта',                  8],  // G=7
     ['Сумма',                       18],  // H=8
-    ['Курс к USD',                  22],  // I=9 — rate description text (was mislabeled «Выплачено»)
-    ['≈ USD',                       14],  // J=10 — numeric USD equivalent (narrowed + center)
+    ['Курс к USD',                  28],  // I=9 — widened for rate text
+    ['≈ USD',                       14],  // J=10
     ['Категория',                   20],  // K=11
     ['Группа',                      12],  // L=12
     ['Комментарий',                 32],  // M=13
-    ['Остаток\nна счету',           22],  // N=14 — wider for 3 122 213 PLN
-    ['Часов работы\n(введите вручную)', 18],  // O=15 — user-input column, explicit label
-    ['Ставка/час\n(авторасчёт)',    16],  // P=16 — formula column, explicit label
+    ['Остаток\nна счету',           22],  // N=14
+    ['Часов работы\n(введите вручную)', 18],  // O=15
+    ['Ставка/час\n(авторасчёт)',    16],  // P=16
   ];
-  // Header row needs extra height for 2-line labels in O and P
-  ws.getRow(HDR_ROW).height = 42;
   cols.forEach(([text, width], i) => hdr(ws, i + 1, HDR_ROW, text, width));
 
   // Col N=14 «Остаток» header: distinct dark-blue background (stands out as computed column)
@@ -1284,7 +1206,7 @@ function buildSheet1(wb: ExcelJS.Workbook, rows: TxRow[], from: Date, to: Date, 
   // USD accumulators for ИТОГО в USD footer row
   let usdGrandTotal = 0;
   let hasUncoveredUsd = false;
-  const DATA_START = 11;
+  const DATA_START = HDR_ROW + 1;  // = 5
 
   rows.forEach((row, idx) => {
     const rNum = DATA_START + idx;
@@ -1390,21 +1312,15 @@ function buildSheet1(wb: ExcelJS.Workbook, rows: TxRow[], from: Date, to: Date, 
       }
     });
 
-    // Col I=9: «Курс к USD» — descriptive rate text (shown only for cross-currency ops)
-    // Rule: if currency === account_currency → same-currency op → show '—' (no conversion)
-    //       if currency !== account_currency → cross-currency → show '1 UAH = 0.024 USD'
+    // Col I=9: «Курс к USD» — show rate for ALL non-stablecoin currencies
     const cur = row.currency.toUpperCase();
     const usdRate = usdRates.get(cur) ?? null;
-    const isCrossCurrency = row.currency.toUpperCase() !== row.account_currency.toUpperCase();
     const kursCel = ws.getCell(rNum, 9);
     kursCel.fill      = { type: 'pattern', pattern: 'solid', fgColor: { argb: bgColor } };
     kursCel.border    = dataBorder;
     kursCel.alignment = { vertical: 'middle', horizontal: 'left' };
-    if (!isCrossCurrency) {
-      // Same currency op: exchange rate not applicable
-      kursCel.value = '';
-      kursCel.font  = { size: 8, name: 'Calibri', color: { argb: 'FFCCCCCC' } };
-    } else if (['USD', 'USDT', 'USDC', 'BUSD', 'DAI'].includes(cur)) {
+    const STABLECOINS = ['USD', 'USDT', 'USDC', 'BUSD', 'DAI'];
+    if (STABLECOINS.includes(cur)) {
       kursCel.value = '1 : 1  (стейблкоин)';
       kursCel.font  = { size: 8, name: 'Calibri', italic: true, color: { argb: 'FF888888' } };
     } else if (usdRate !== null) {
@@ -1479,42 +1395,115 @@ function buildSheet1(wb: ExcelJS.Workbook, rows: TxRow[], from: Date, to: Date, 
     gtJ.alignment = { horizontal: 'right', vertical: 'middle' };
   }
 
-  // ── Остатки по счетам на конец периода ──────────────────────
+  // ── Premium Closing Balances Widget ──────────────────────────
   if (rows.length > 0) {
-    const accBRow = DATA_START + rows.length + 2; // +1 footer, +1 blank spacer
-    ws.mergeCells(accBRow, 1, accBRow, 16);
-    const accHdr = ws.getCell(accBRow, 1);
-    accHdr.value = 'ОСТАТКИ ПО СЧЕТАМ НА КОНЕЦ ПЕРИОДА';
-    accHdr.font  = { bold: true, size: 9, color: { argb: `FF${C_COL_HDR_FG}` }, name: 'Calibri' };
-    accHdr.fill  = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_COL_HDR_BG}` } };
+    const gapRow  = DATA_START + rows.length + 1;  // after ИТОГО footer row
+    const wStart  = gapRow + 1; // spacer row above widget
+    ws.getRow(gapRow).height = 6;
 
-    type BalSumm = { currency: string; endBal: string };
+    // Widget header (navy)
+    ws.mergeCells(wStart, 1, wStart, 6);
+    const wHdr = ws.getCell(wStart, 1);
+    wHdr.value = 'ОСТАТКИ НА КОНЕЦ ПЕРИОДА';
+    wHdr.font  = { bold: true, size: 9, name: 'Calibri', color: { argb: `FF${C_COL_HDR_FG}` } };
+    wHdr.fill  = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_HEADER_BG}` } };
+    wHdr.alignment = { horizontal: 'center', vertical: 'middle' };
+    ws.getRow(wStart).height = 24;
+    for (let ci = 1; ci <= 6; ci++) {
+      ws.getCell(wStart, ci).fill = wHdr.fill;
+      ws.getCell(wStart, ci).border = {
+        bottom: { style: 'thin', color: { argb: `FF${C_TBL_BORDER}` } },
+      };
+    }
+
+    // Widget sub-header
+    const wSubRow = wStart + 1;
+    const wSubHdrs = ['Счёт', 'Валюта', 'Остаток', '≈ USD', '', ''];
+    const wSubWidths = [24, 10, 18, 18, 0, 0];
+    wSubHdrs.forEach((h, i) => {
+      const c = ws.getCell(wSubRow, i + 1);
+      c.value = h;
+      c.font  = { bold: true, size: 8, name: 'Calibri', color: { argb: 'FF2D6A9F' } };
+      c.fill  = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_TOTAL_HDR}` } };
+      c.alignment = { horizontal: i >= 2 ? 'right' : 'left', vertical: 'middle' };
+      c.border = { bottom: { style: 'thin', color: { argb: `FF${C_TBL_BORDER}` } } };
+      if (wSubWidths[i]) ws.getColumn(i + 1).width = Math.max(ws.getColumn(i + 1).width ?? 0, wSubWidths[i]);
+    });
+    ws.getRow(wSubRow).height = 18;
+
+    // Widget data rows
+    type BalSumm = { currency: string; endBal: number };
     const balMap = new Map<string, BalSumm>();
     for (const row of rows) {
       if (!balMap.has(row.account_name))
-        balMap.set(row.account_name, { currency: row.account_currency, endBal: row.balance_after });
+        balMap.set(row.account_name, { currency: row.account_currency, endBal: parseFloat(row.balance_after) });
     }
 
-    let bRow = accBRow + 1;
-    ['Счёт', 'Валюта', 'Остаток'].forEach((h, i) => {
-      const c = ws.getCell(bRow, i + 1);
-      c.value = h;
-      c.font  = { bold: true, size: 8, name: 'Calibri' };
-      c.fill  = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_GREY_BG}` } };
-    });
-    bRow++;
+    let wRow = wSubRow + 1;
+    let netWorthUsd = 0;
+    const wBorder = {
+      top:    { style: 'thin' as const, color: { argb: `FF${C_TBL_BORDER}` } },
+      bottom: { style: 'thin' as const, color: { argb: `FF${C_TBL_BORDER}` } },
+      left:   { style: 'thin' as const, color: { argb: `FF${C_TBL_BORDER}` } },
+      right:  { style: 'thin' as const, color: { argb: `FF${C_TBL_BORDER}` } },
+    };
 
     for (const [name, { currency, endBal }] of balMap) {
-      const balNum = parseFloat(endBal);
-      [name, currency, fmtAmtSigned(balNum)].forEach((v, i) => {
-        const c = ws.getCell(bRow, i + 1);
-        c.value = v;
-        c.font  = { size: 9, name: 'Calibri',
-          color: balNum < 0 && i === 2 ? { argb: `FF${C_EXPENSE}` } : undefined };
-        c.fill  = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_GREY_BG}` } };
-      });
-      bRow++;
+      const bgArgb = wRow % 2 === 0 ? `FF${C_ROW_ODD}` : 'FFFFFFFF';
+      const fillBg = { type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb: bgArgb } };
+      const balClr = endBal >= 0 ? `FF${C_INCOME}` : `FF${C_EXPENSE}`;
+      ws.getRow(wRow).height = 18;
+
+      // Col A: Account name
+      const c1 = ws.getCell(wRow, 1);
+      c1.value = name; c1.font = { size: 9, name: 'Calibri', bold: true, color: { argb: 'FF1A3C5E' } };
+      c1.fill = fillBg; c1.border = wBorder; c1.alignment = { vertical: 'middle' };
+      // Col B: Currency
+      const c2 = ws.getCell(wRow, 2);
+      c2.value = currency; c2.font = { size: 9, name: 'Calibri' };
+      c2.fill = fillBg; c2.border = wBorder; c2.alignment = { horizontal: 'center', vertical: 'middle' };
+      // Col C: Balance (native currency)
+      const c3 = ws.getCell(wRow, 3);
+      c3.value = endBal; c3.numFmt = '+#,##0.00;-#,##0.00';
+      c3.font  = { size: 9, name: 'Calibri', bold: true, color: { argb: balClr } };
+      c3.fill = fillBg; c3.border = wBorder; c3.alignment = { horizontal: 'right', vertical: 'middle' };
+      // Col D: ≈ USD
+      const rate = usdRates.get(currency.toUpperCase()) ?? null;
+      const balUsd = rate !== null ? endBal * rate : null;
+      if (balUsd !== null) netWorthUsd += balUsd;
+      const c4 = ws.getCell(wRow, 4);
+      if (balUsd !== null) {
+        c4.value = balUsd; c4.numFmt = '+#,##0.00;-#,##0.00';
+        c4.font  = { size: 9, name: 'Calibri', color: { argb: balUsd >= 0 ? `FF${C_INCOME}` : `FF${C_EXPENSE}` } };
+      } else {
+        c4.value = '—'; c4.font = { size: 8, name: 'Calibri', italic: true, color: { argb: 'FFBBBBBB' } };
+      }
+      c4.fill = fillBg; c4.border = wBorder; c4.alignment = { horizontal: 'right', vertical: 'middle' };
+
+      wRow++;
     }
+
+    // Net Worth total row
+    const nwFill = { type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb: `FF${C_GRAND_BG}` } };
+    const nwBorder = {
+      top: { style: 'medium' as const, color: { argb: 'FF0D2840' } },
+      bottom: { style: 'medium' as const, color: { argb: 'FF0D2840' } },
+      left:   { style: 'thin' as const, color: { argb: `FF${C_TBL_BORDER}` } },
+      right:  { style: 'thin' as const, color: { argb: `FF${C_TBL_BORDER}` } },
+    };
+    ws.getRow(wRow).height = 22;
+    ws.mergeCells(wRow, 1, wRow, 3);
+    const nw1 = ws.getCell(wRow, 1);
+    nw1.value = 'Net Worth ≈ USD';
+    nw1.font  = { bold: true, size: 10, name: 'Calibri', color: { argb: 'FFB0C8E0' } };
+    nw1.fill  = nwFill; nw1.border = nwBorder;
+    nw1.alignment = { horizontal: 'right', vertical: 'middle' };
+    const nwClr = netWorthUsd >= 0 ? 'FF7DCEA0' : 'FFE57373';
+    const nw4 = ws.getCell(wRow, 4);
+    nw4.value = netWorthUsd; nw4.numFmt = '+#,##0.00;-#,##0.00';
+    nw4.font  = { bold: true, size: 11, name: 'Calibri', color: { argb: nwClr } };
+    nw4.fill  = nwFill; nw4.border = nwBorder;
+    nw4.alignment = { horizontal: 'right', vertical: 'middle' };
   }
 
   // ── Auto-filter on header row ────────────────────────────────
