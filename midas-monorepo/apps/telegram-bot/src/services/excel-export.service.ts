@@ -991,13 +991,13 @@ function buildSheet0Summary(
     );
     const lrRemainder = 100 - lrFloors.reduce((a, b) => a + b, 0);
     const lrOrder = mainTopList
-      .map((_, i) => ({
+      .map((entry, i) => ({
         i,
-        frac: grandTotalUsd > 0 ? (mainTopList[i][1].totalUsd / grandTotalUsd) * 100 % 1 : 0,
+        frac: grandTotalUsd > 0 ? (entry[1].totalUsd / grandTotalUsd) * 100 % 1 : 0,
       }))
       .sort((a, b) => b.frac - a.frac);
     const lrPcts = [...lrFloors];
-    lrOrder.slice(0, lrRemainder).forEach(({ i }) => { lrPcts[i]++; });
+    lrOrder.slice(0, lrRemainder).forEach(({ i }) => { lrPcts[i] = (lrPcts[i] ?? 0) + 1; });
 
     // #10 — Compact K-format for col E (amounts > 9999)
     const fmtK = (amt: number, cur: string): string => {
