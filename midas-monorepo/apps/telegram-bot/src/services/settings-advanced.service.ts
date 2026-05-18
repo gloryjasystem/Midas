@@ -286,8 +286,18 @@ interface CsvRow {
 export async function exportTransactionsCSV(
   workspaceId: string,
   userId: string,
+  dateFrom?: Date,
+  dateTo?: Date,
+  accountId?: string,
 ): Promise<Buffer> {
+  const from = dateFrom ?? new Date(0);
+  const to   = dateTo   ?? new Date();
+
   return await withTenantTransaction(workspaceId, userId, async (client) => {
+    const accFilter = accountId ? `AND t.account_source_id = $4` : '';
+    const params: (string | Date)[] = [workspaceId, from.toISOString(), to.toISOString()];
+    if (accountId) params.push(accountId);
+
     const r = await client.query<CsvRow>(
       `SELECT
          t.transaction_time::date::text AS tx_date,
@@ -302,8 +312,11 @@ export async function exportTransactionsCSV(
        LEFT JOIN account_sources a ON a.id = t.account_source_id
        WHERE t.workspace_id = $1
          AND t.deleted_at IS NULL
+         AND t.transaction_time >= $2
+         AND t.transaction_time <= $3
+         ${accFilter}
        ORDER BY t.transaction_time DESC`,
-      [workspaceId],
+      params,
     );
 
     const header = 'дата,тип,сумма,валюта,категория,счёт,товар\n';

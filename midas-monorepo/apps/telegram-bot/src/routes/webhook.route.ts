@@ -2820,11 +2820,24 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
             if (messageId) void editMessageText(chatId, messageId, txt, kb);
           }
           else if (cmd.cmd === 'exp_account') {
-            // Store accountId, show format picker
+            // Store accountId + accountName, show format picker
             const expKey = `midas:exp:params:${telegramUserId}:${chatId}`;
             const raw = await redisConnection.get(expKey);
             const params = raw ? (JSON.parse(raw) as { period?: string }) : {};
-            await redisConnection.set(expKey, JSON.stringify({ ...params, accountId: cmd.accountId }), 'EX', 300);
+
+            // Resolve human-readable account name for display in step 3
+            let accDisplayName = 'Все счета';
+            if (cmd.accountId !== 'all') {
+              const accounts = await getWorkspaceAccounts(stResolved.workspaceId, stResolved.userId);
+              const found = accounts.find(a => a.id === cmd.accountId);
+              accDisplayName = found ? `${found.name} · ${found.currency}` : cmd.accountId;
+            }
+
+            await redisConnection.set(
+              expKey,
+              JSON.stringify({ ...params, accountId: cmd.accountId, accountName: accDisplayName }),
+              'EX', 300,
+            );
 
             const kb = {
               inline_keyboard: [
@@ -2835,10 +2848,9 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
                 [{ text: '← Назад', callback_data: 'st:exp' }],
               ],
             };
-            const accLabel = cmd.accountId === 'all' ? 'Все счета' : cmd.accountId;
             const txt =
               '📤 <b>Экспорт данных</b>\n\n' +
-              `Счёт: <b>${escapeHtml(accLabel)}</b>\n\n` +
+              `Счёт: <b>${escapeHtml(accDisplayName)}</b>\n\n` +
               'Шаг 3 из 3 — выберите <b>формат файла</b>:';
             if (messageId) void editMessageText(chatId, messageId, txt, kb);
           }
@@ -2847,31 +2859,41 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
             const expKey = `midas:exp:params:${telegramUserId}:${chatId}`;
             const raw = await redisConnection.get(expKey);
             void redisConnection.del(expKey);
-            const params = raw ? (JSON.parse(raw) as { period?: string; accountId?: string }) : {};
+            const params = raw
+              ? (JSON.parse(raw) as { period?: string; accountId?: string; accountName?: string })
+              : {};
 
-            const period    = params.period    ?? 'yr';
-            const accountId = params.accountId && params.accountId !== 'all' ? params.accountId : undefined;
+            const period      = params.period    ?? 'yr';
+            const accountId   = params.accountId && params.accountId !== 'all' ? params.accountId : undefined;
+            const accountName = params.accountName ?? 'Все счета';
 
             const now = new Date();
             let dateFrom: Date;
             let dateTo: Date = now;
             let periodLabel: string;
+            let filenamePeriod: string; // YYYY-MM for tm/lm, descriptive otherwise
 
             if (period === 'tm') {
               dateFrom = new Date(now.getFullYear(), now.getMonth(), 1);
-              periodLabel = `${String(now.getMonth() + 1).padStart(2, '0')}.${String(now.getFullYear())}`;
+              const mm = String(now.getMonth() + 1).padStart(2, '0');
+              periodLabel    = `${mm}.${String(now.getFullYear())}`;
+              filenamePeriod = `${String(now.getFullYear())}-${mm}`;
             } else if (period === 'lm') {
               const y = now.getMonth() === 0 ? now.getFullYear() - 1 : now.getFullYear();
               const m = now.getMonth() === 0 ? 11 : now.getMonth() - 1;
               dateFrom = new Date(y, m, 1);
               dateTo   = new Date(y, m + 1, 0, 23, 59, 59);
-              periodLabel = `${String(m + 1).padStart(2, '0')}.${String(y)}`;
+              const mm = String(m + 1).padStart(2, '0');
+              periodLabel    = `${mm}.${String(y)}`;
+              filenamePeriod = `${String(y)}-${mm}`;
             } else if (period === '3m') {
               dateFrom = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
-              periodLabel = '3 месяца';
+              periodLabel    = '3 месяца';
+              filenamePeriod = `${now.toISOString().slice(0, 7)}_3m`;
             } else {
-              dateFrom = new Date(0);
-              periodLabel = 'весь период';
+              dateFrom       = new Date(0);
+              periodLabel    = 'весь период';
+              filenamePeriod = 'all';
             }
 
             if (messageId) {
@@ -2881,31 +2903,31 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
               );
             }
 
-            const nowStr = now.toISOString().slice(0, 7); // YYYY-MM
-
             if (cmd.format === 'xlsx') {
               const { exportTransactionsExcel } = await import('../services/excel-export.service.js');
               const { sendDocument: sendDoc }   = await import('../services/telegram-api.js');
               const xlBuf = await exportTransactionsExcel(
                 stResolved.workspaceId, stResolved.userId, dateFrom, dateTo, accountId,
               );
-              const fileName = `MIDAS_Report_${nowStr}.xlsx`;
-              await sendDoc(chatId, xlBuf, fileName, `📊 Midas · ${periodLabel} · Excel`);
+              const fileName = `MIDAS_Report_${filenamePeriod}.xlsx`;
+              await sendDoc(chatId, xlBuf, fileName, `📊 Midas · ${periodLabel} · ${accountName}`);
             } else {
               const { exportTransactionsCSV } = await import('../services/settings-advanced.service.js');
               const { sendDocument: sendDoc }  = await import('../services/telegram-api.js');
-              const csvBuf = await exportTransactionsCSV(stResolved.workspaceId, stResolved.userId);
-              const fileName = `MIDAS_Report_${nowStr}.csv`;
-              await sendDoc(chatId, csvBuf, fileName, `📄 Midas · ${periodLabel} · CSV`);
+              const csvBuf = await exportTransactionsCSV(
+                stResolved.workspaceId, stResolved.userId, dateFrom, dateTo, accountId,
+              );
+              const fileName = `MIDAS_Report_${filenamePeriod}.csv`;
+              await sendDoc(chatId, csvBuf, fileName, `📄 Midas · ${periodLabel} · ${accountName}`);
             }
 
             if (messageId) {
               void editMessageText(chatId, messageId,
-                `✅ <b>Готово!</b>\n\nПериод: ${periodLabel}`,
+                `✅ <b>Готово!</b>\n\nПериод: <b>${periodLabel}</b>\nСчёт: <b>${escapeHtml(accountName)}</b>`,
                 { inline_keyboard: [[{ text: '← В настройки', callback_data: 'st:back' }]] },
               );
             }
-            request.log.info({ msg: '[midas:bot:webhook] unified export generated', telegramUserId, period, format: cmd.format });
+            request.log.info({ msg: '[midas:bot:webhook] export generated', telegramUserId, period, format: cmd.format });
           }
           // ── Legacy Excel export (backward compat for old inline buttons) ──
           else if (cmd.cmd === 'export_excel') {
