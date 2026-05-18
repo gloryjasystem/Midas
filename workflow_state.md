@@ -10,12 +10,12 @@
 | Параметр | Значение |
 |---|---|
 | **PHASE** | Phase 2, Этап 2 — Excel Export Suite 2.0 — Audit-Grade Logic & Visual Polish |
-| **STEP** | Commit de84a69 (HEAD). Visual polish 5/5 fixes. Cash Flow 3-level FinTech model утверждён архитектурно — ожидает реализации. |
-| **AGENT STATUS** | tsc 0 errors. Sheet0 Сводка: navy/steel-blue palette, unified grid, freeze pane, merged grand total, clean column headers. Cash Flow методология задокументирована. |
+| **STEP** | Commit 2c43d95 (HEAD). Unified Top Expenses block реализован. Grand Total, Currency Summary, Top Expenses — все три секции полностью переработаны. |
+| **AGENT STATUS** | tsc 0 errors. Sheet0 Сводка: единый блок ТОП РАСХОДОВ (USD) с конвертацией через usdRates, grand total без ≈, сводка по валютам с inline-разбивкой по интентам. |
 | **DEPLOYMENT** | Railway (spirited-happiness) — Midas Online, background-workers Online. Health: https://midas-production-f4f1.up.railway.app/health > ok |
-| **LAST COMPLETED** | feat(excel): Visual polish 5-fix batch (de84a69) — navy theme, unified thin-border grid, freeze pane ySplit:1, merged grand total label, СВОДКА clean column headers, footnote border. |
+| **LAST COMPLETED** | feat(reports): unified top expenses block — single USD-ranked table, col «Все расходы», grandTotalUsd for %, uncovered appendix. Commits: 2b341d6, 7c81be6, 7b50779, 2c43d95. |
 | **BLOCKER** | None. |
-| **NEXT ACTION** | Реализовать Cash Flow 3-level model: (I) Operational: income/expense; (II) Capital: переводы/долги (отдельная строка, tinted steel); (III) Итого позиции ≡ ИТОГ ЗА ПЕРИОД. + Unified USD top-expenses ranking + stripEmoji(). Архитектура утверждена пользователем. |
+| **NEXT ACTION** | Проверить отчёт на реальных данных. Опционально: расширить categoryIcon() для кастомных пользовательских категорий. |}
 
 
 ---
