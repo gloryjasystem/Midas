@@ -91,34 +91,37 @@ const CRYPTO_SET = new Set([
 // ─────────────────────────────────────────────────────────────
 
 /**
- * Returns a map: currency code (upper) → USD value of 1 unit.
- * Strategy:
- *   1. Stablecoins (USDT, USDC, BUSD, DAI) → hardcoded 1
- *   2. Fiat + most crypto → open.er-api.com (free, no key, 1 500 req/month)
- *   3. Any currency missing from API → excluded from USD equivalent
- * Falls back gracefully if the API is unreachable (stablecoins still work).
+ * Returns Map<CURRENCY, USD_PER_1_UNIT>.
+ * Sources:
+ *   • Stablecoins (USDT/USDC/BUSD/DAI) — hardcoded 1
+ *   • Fiat + most crypto — open.er-api.com (free, no API key, 1 500 req/mo)
+ *   • Timeout 4 s; silently falls back to stablecoins-only on error
  */
 async function fetchUsdRates(): Promise<Map<string, number>> {
-  // Stablecoins are always 1:1 with USD
   const rates = new Map<string, number>([
-    ['USD', 1], ['USDT', 1], ['USDC', 1], ['BUSD', 1],
-    ['DAI', 1], ['TUSD', 1], ['USDP', 1],
+    ['USD',  1], ['USDT', 1], ['USDC', 1],
+    ['BUSD', 1], ['DAI',  1], ['TUSD', 1], ['USDP', 1],
   ]);
   try {
-    const res  = await fetch('https://open.er-api.com/v6/latest/USD', { signal: AbortSignal.timeout(4000) });
+    const res  = await fetch(
+      'https://open.er-api.com/v6/latest/USD',
+      { signal: AbortSignal.timeout(4000) },
+    );
     const data = await res.json() as { result: string; rates: Record<string, number> };
     if (data.result === 'success' && data.rates) {
       for (const [cur, fxRate] of Object.entries(data.rates)) {
-        if (!rates.has(cur.toUpperCase())) {
-          rates.set(cur.toUpperCase(), 1 / fxRate); // 1 USD = fxRate units → 1 unit = 1/fxRate USD
+        const key = cur.toUpperCase();
+        if (!rates.has(key) && fxRate > 0) {
+          rates.set(key, 1 / fxRate); // 1 USD = fxRate units  →  1 unit = 1/fxRate USD
         }
       }
     }
   } catch {
-    // Network error or timeout — stablecoins remain, other currencies fall back to uncovered
+    // Network error / timeout — stablecoins still work, others will be marked uncovered
   }
   return rates;
 }
+
 
 /**
  * Returns the Excel numFmt string for a given currency:
@@ -303,7 +306,7 @@ export async function exportTransactionsExcel(
     return Buffer.from(arrayBuffer);
   }
 
-  // Fetch live exchange rates once — all currencies → USD
+  // Fetch live rates once — fiat + stablecoins → USD (open.er-api.com)
   const usdRates = await fetchUsdRates();
 
   buildSheet0Summary(wb, rows, from, to, usdRates);
@@ -440,9 +443,9 @@ function buildSheet0Summary(
     im[key].byCur.set(row.currency, (im[key].byCur.get(row.currency) ?? 0) + amt);
   }
 
-  // ── USD-эквивалент (курс на дату экспорта · open.er-api.com) ─────────────
-  // Все валюты конвертируются: фиат через API, стейблкоины хардкодом (1:1).
-  // original_amount × usdRates.get(currency) → USD-эквивалент транзакции.
+  // ── USD-эквивалент (live курс, open.er-api.com) ───────────────────────────
+  // Все валюты конвертируются: фиат через API, стейблкоины хардкодом.
+  // original_amount в валюте транзакции × rate → USD-сумма.
   let usdEquiv     = 0;
   let usdCovered   = 0;
   const uncoveredC = new Set<string>();
@@ -456,7 +459,7 @@ function buildSheet0Summary(
       usdEquiv += sign * amt * rate;
       usdCovered++;
     } else {
-      uncoveredC.add(row.currency);
+      uncoveredC.add(row.currency); // API не вернул курс — помечаем для сноски
     }
   }
   const nonUsdNote = uncoveredC.size > 0
@@ -515,6 +518,7 @@ function buildSheet0Summary(
   totalSubHdr.value = 'по каждой валюте отдельно';
   totalSubHdr.font = { italic: true, size: 8, name: 'Calibri', color: { argb: 'FF888888' } };
   totalSubHdr.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_TOTAL_BG}` } };
+  totalSubHdr.alignment = { horizontal: 'center' };
   r++;
 
   // Одна строка на каждую валюту — все валюты видны
