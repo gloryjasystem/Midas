@@ -1170,27 +1170,26 @@ function buildSheet1(wb: ExcelJS.Workbook, rows: TxRow[], from: Date, to: Date, 
     byCur.set(cur, t);
   }
 
-  // Header row 2
-  const summHdrCell = ws.getCell(2, 12);
+  // Header row 2 — summary mini-block sits in cols J-L (10-12)
+  const summHdrCell = ws.getCell(2, 10);
   summHdrCell.value = `Сводка по валютам · ${rows.length} операций`;
   summHdrCell.font = { bold: true, size: 9, name: 'Calibri', color: { argb: `FF${C_COL_HDR_FG}` } };
   summHdrCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_HEADER_BG}` } };
   summHdrCell.alignment = { horizontal: 'center' };
-  ws.mergeCells(2, 12, 2, 14);
+  ws.mergeCells(2, 10, 2, 12);
 
-  // Rows 3–9: fill per currency (max 7 rows available before row 10 header)
+  // Rows 3–9: fill per currency (max 7 rows)
   let summRow = 3;
   for (const [cur, t] of byCur) {
     if (summRow > 9) break;
     const net = t.income + t.debtRecv - t.expense - t.transfer - t.debtGive;
-    // One compact line per currency: "USD  +10000 / -5000 = +5000"
-    const lc = ws.getCell(summRow, 12);
+    const lc = ws.getCell(summRow, 10);
     lc.value = `${cur}  💰${t.income.toFixed(0)}  💸${t.expense.toFixed(0)}  🔄${t.transfer.toFixed(0)}`;
     lc.font  = { size: 8, name: 'Calibri' };
     lc.fill  = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_GREY_BG}` } };
     lc.alignment = { horizontal: 'left' };
 
-    const vc = ws.getCell(summRow, 13);
+    const vc = ws.getCell(summRow, 11);
     vc.value  = parseFloat(net.toFixed(2));
     vc.numFmt = '+#,##0.00;-#,##0.00';
     vc.font   = { bold: true, size: 8, name: 'Calibri',
@@ -1198,7 +1197,7 @@ function buildSheet1(wb: ExcelJS.Workbook, rows: TxRow[], from: Date, to: Date, 
     vc.fill   = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_GREY_BG}` } };
     vc.alignment = { horizontal: 'right' };
 
-    const cc = ws.getCell(summRow, 14);
+    const cc = ws.getCell(summRow, 12);
     cc.value = cur;
     cc.font  = { italic: true, size: 8, name: 'Calibri', color: { argb: 'FF888888' } };
     cc.fill  = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_GREY_BG}` } };
@@ -1211,41 +1210,40 @@ function buildSheet1(wb: ExcelJS.Workbook, rows: TxRow[], from: Date, to: Date, 
 
 
 
-  // ── Row 10: Column headers ───────────────────────────────────
+  // ── Row 10: Column headers (16 cols: A–P) ───────────────────
+  // Cols I & K removed: currency now embedded in numFmt of H and I (Выплачено)
   const HDR_ROW = 10;
-  ws.getRow(HDR_ROW).height = 36;
+  ws.getRow(HDR_ROW).height = 40; // extra height for 3-line headers
 
   const cols: Array<[string, number]> = [
-    ['№',                  5],
-    ['Дата',              12],
-    ['Время',              8],
-    ['Тип',               16],
-    ['Исполнитель',       18],
-    ['Счёт',              18],
-    ['Вал.\nсчёта',        8],
-    ['Сумма',             14],
-    ['Вал.\nсуммы',        8],
-    ['Выплачено',         14],
-    ['Вал.\nвыплаты',      8],
-    ['Курс',              22],
-    ['Категория',         16],
-    ['Группа',            12],
-    ['Комментарий',       25],
-    ['Остаток\nна счету', 14],  // col 16 — running balance
-    ['Часов\nработы\n(Q)', 13],  // col 17 — user fills in hours manually
-    ['Ставка/час\n= H÷Q\n(авто)', 15],  // col 18 — formula: Amount / Hours
+    ['№',                   5],  // A=1
+    ['Дата',               12],  // B=2
+    ['Время',               8],  // C=3
+    ['Операция',           18],  // D=4  (was «Тип», 16)
+    ['Исполнитель',        16],  // E=5
+    ['Счёт',               18],  // F=6
+    ['Вал.\nсчёта',         8],  // G=7
+    ['Сумма',              18],  // H=8  (wider — includes currency suffix)
+    ['Выплачено',          18],  // I=9  (was J=10; includes currency suffix)
+    ['Курс',               22],  // J=10 (was L=12)
+    ['Категория',          20],  // K=11 (was M=13)
+    ['Группа',             12],  // L=12 (was N=14)
+    ['Комментарий',        32],  // M=13 (was O=15; wider)
+    ['Остаток\nна счету',  16],  // N=14 (was P=16)
+    ['Часов\nработы\n(Q)', 13],  // O=15 (was Q=17)
+    ['Ставка/час\n= H÷O\n(авто)', 15],  // P=16 (was R=18)
   ];
   cols.forEach(([text, width], i) => hdr(ws, i + 1, HDR_ROW, text, width));
 
-  // Col 16 «Остаток» header: distinct dark-blue background
-  ws.getCell(HDR_ROW, 16).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1A5276' } };
-  // Col 17 «Часов» header: amber tint — user-input column
-  ws.getCell(HDR_ROW, 17).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF7D6608' } };
-  // Col 17 note: explain what to enter and how col R is derived
-  ws.getCell(HDR_ROW, 17).note = {
-    texts: [{ font: { bold: true, size: 9 }, text: 'Часов работы (Q)\n' },
+  // Col 14 «Остаток» header: distinct dark-blue background
+  ws.getCell(HDR_ROW, 14).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1A5276' } };
+  // Col 15 «Часов» header: amber tint — user-input column
+  ws.getCell(HDR_ROW, 15).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF7D6608' } };
+  // Col 15 note: explain what to enter and how col P is derived
+  ws.getCell(HDR_ROW, 15).note = {
+    texts: [{ font: { bold: true, size: 9 }, text: 'Часов работы (O)\n' },
             { font: { size: 8 }, text: 'Введите вручную кол-во часов, потраченных на транзакцию.\n\n' },
-            { font: { bold: true, size: 8 }, text: 'Ставка/час (кол. R) = Сумма (H) ÷ Часов (Q)\n' },
+            { font: { bold: true, size: 8 }, text: 'Ставка/час (кол. P) = Сумма (H) ÷ Часов (O)\n' },
             { font: { size: 7, italic: true }, text: 'Пример: 10 000 UAH ÷ 8 ч = 1 250 UAH/ч' }],
   };
 
@@ -1292,203 +1290,115 @@ function buildSheet1(wb: ExcelJS.Workbook, rows: TxRow[], from: Date, to: Date, 
       executor = lastCapital ?? '';
     }
 
+    // Currency suffix embedded in numFmt — no separate currency columns needed
+    const fmtCur = (cur: string, signed = false): string => {
+      const prec = CRYPTO_SET.has(cur.toUpperCase()) ? '########' : '##';
+      const p = `#,##0.${prec} "${cur}"`;
+      return signed ? `${p};-#,##0.${prec} "${cur}"` : p;
+    };
+
     const cellValues: (string | number | null)[] = [
-      idx + 1,
-      fmtDate(txDate),
-      fmtTime(txDate),
-      localiseIntent(row.transaction_intent),
-      executor || '—',
-      row.account_name,
-      row.account_currency,
-      amtNum,
-      row.currency,
-      debitSigned,    // col J: Выплачено — ВСЕГДА, со знаком
-      debitCur,       // col K: Вал. выплаты — ВСЕГДА
-      null,           // col L: Курс — rendered separately below
-      row.category_name,
-      row.category_group,
-      row.item_name ?? '',
-      parseFloat(row.balance_after), // col P: Остаток на счету
+      idx + 1,                              // ci=0  A=1  №
+      fmtDate(txDate),                      // ci=1  B=2  Дата
+      fmtTime(txDate),                      // ci=2  C=3  Время
+      localiseIntent(row.transaction_intent), // ci=3  D=4  Операция
+      executor || '—',                      // ci=4  E=5  Исполнитель
+      row.account_name,                     // ci=5  F=6  Счёт
+      row.account_currency,                 // ci=6  G=7  Вал.счёта
+      amtNum,                               // ci=7  H=8  Сумма
+      debitSigned,                          // ci=8  I=9  Выплачено (signed)
+      null,                                 // ci=9  J=10 Курс — rendered separately
+      row.category_name,                    // ci=10 K=11 Категория
+      row.category_group,                   // ci=11 L=12 Группа
+      row.item_name ?? '',                  // ci=12 M=13 Комментарий
+      parseFloat(row.balance_after),        // ci=13 N=14 Остаток
     ];
+
+    const dataBorder = {
+      top:    { style: 'thin' as const, color: { argb: 'FFD5E8F5' } },
+      bottom: { style: 'thin' as const, color: { argb: 'FFD5E8F5' } },
+      left:   { style: 'thin' as const, color: { argb: 'FFD5E8F5' } },
+      right:  { style: 'thin' as const, color: { argb: 'FFD5E8F5' } },
+    };
 
     cellValues.forEach((val, ci) => {
       const cell = ws.getCell(rNum, ci + 1);
       cell.value = val;
       cell.font = { size: 9, name: 'Calibri' };
       cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: bgColor } };
-      cell.alignment = { vertical: 'middle' };
-
-      // Colour type (col D=4) and amount (col H=8)
-      if (ci === 3 || ci === 7) {
-        cell.font = { size: 9, name: 'Calibri', color: { argb: `FF${colour}` }, bold: ci === 3 };
+      cell.border = dataBorder;
+      // Alignment by column type
+      const horiz =
+        (ci === 7 || ci === 8 || ci === 13) ? 'right' as const :
+        (ci === 0 || ci === 1 || ci === 2 || ci === 6 || ci === 11) ? 'center' as const :
+        'left' as const;
+      cell.alignment = { vertical: 'middle', horizontal: horiz };
+      // D=4 (ci=3): Операция — colour + bold
+      if (ci === 3) {
+        cell.font = { size: 9, name: 'Calibri', color: { argb: `FF${colour}` }, bold: true };
       }
-      // col H (ci=7): сумма в валюте транзакции
-      if (ci === 7) cell.numFmt = smartNumFmt(row.currency);
-      // col J (ci=9): Выплачено в валюте счёта — signed, colour by sign
-      if (ci === 9) {
+      // H=8 (ci=7): Сумма — intent colour, numFmt with currency suffix
+      if (ci === 7) {
+        cell.font = { size: 9, name: 'Calibri', color: { argb: `FF${colour}` } };
+        cell.numFmt = fmtCur(row.currency);
+      }
+      // I=9 (ci=8): Выплачено — signed, colour by sign, numFmt with currency suffix
+      if (ci === 8) {
         const sv = val as number;
-        cell.numFmt = smartNumFmt(debitCur);
+        cell.numFmt = fmtCur(debitCur, true);
         cell.font = { size: 9, name: 'Calibri',
           color: { argb: sv >= 0 ? `FF${C_INCOME}` : `FF${C_EXPENSE}` } };
       }
-      // col L (ci=11): Курс — rendered as descriptive string below, skip here
-      if (ci === 11) { /* handled separately */ }
-      // col P (ci=15): Остаток на счету — same currency as account
-      if (ci === 15) {
+      // J=10 (ci=9): Курс — rendered separately below
+      if (ci === 9) { /* handled below */ }
+      // N=14 (ci=13): Остаток — bold, colour by sign, numFmt with currency suffix
+      if (ci === 13) {
         const bal = val as number;
-        cell.numFmt = smartNumFmt(row.account_currency);
-        cell.font = {
-          size: 9, name: 'Calibri', bold: true,
-          color: { argb: bal >= 0 ? `FF${C_INCOME}` : `FF${C_EXPENSE}` },
-        };
+        cell.numFmt = fmtCur(row.account_currency);
+        cell.font = { size: 9, name: 'Calibri', bold: true,
+          color: { argb: bal >= 0 ? `FF${C_INCOME}` : `FF${C_EXPENSE}` } };
         cell.fill = { type: 'pattern', pattern: 'solid',
           fgColor: { argb: bal >= 0 ? 'FFE8F8F5' : 'FFFDEDEC' } };
       }
     });
 
-    // Col L (12): Курс — descriptive format matching Сводка: "1 CUR = X USD"
-    const rateCell_L = ws.getCell(rNum, 12);
-    rateCell_L.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: bgColor } };
-    rateCell_L.font = { size: 8, name: 'Calibri', color: { argb: 'FF444444' } };
-    rateCell_L.alignment = { vertical: 'middle', horizontal: 'center' };
-    if (rateNum === 1 || row.currency === (row.account_debit_currency ?? row.currency)) {
-      // Same currency — no conversion
-      rateCell_L.value = '1 : 1';
-      rateCell_L.font = { size: 8, name: 'Calibri', italic: true, color: { argb: 'FF888888' } };
+    // Col J=10: Курс — blank for same-currency, descriptive for cross-currency
+    const kursCel = ws.getCell(rNum, 10);
+    kursCel.fill   = { type: 'pattern', pattern: 'solid', fgColor: { argb: bgColor } };
+    kursCel.border = dataBorder;
+    kursCel.alignment = { vertical: 'middle', horizontal: 'center' };
+    const isCrossCur = row.currency !== (row.account_debit_currency ?? row.currency) && rateNum !== 1;
+    if (isCrossCur) {
+      kursCel.value = `1 ${row.currency} = ${rateNum.toFixed(4).replace(/\.?0+$/, '')} ${row.account_debit_currency ?? 'USD'}`;
+      kursCel.font  = { size: 8, name: 'Calibri', color: { argb: 'FF444444' } };
     } else {
-      rateCell_L.value = `1 ${row.currency} = ${rateNum.toFixed(4).replace(/\.?0+$/, '')} ${row.account_debit_currency ?? 'USD'}`;
+      kursCel.value = null; // blank — no noise for same-currency rows
     }
 
-    // Col Q (17): «Часов» — empty, ready for user input (light yellow)
-    const hoursCell = ws.getCell(rNum, 17);
-    hoursCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF9C4' } };
+    // Col O=15: «Часов» — yellow, user input
+    const hoursCell = ws.getCell(rNum, 15);
+    hoursCell.fill   = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF9C4' } };
+    hoursCell.border = dataBorder;
     hoursCell.numFmt = '0.00';
+    hoursCell.alignment = { vertical: 'middle', horizontal: 'center' };
 
-    // Col R (18): «Ставка/час» — Excel formula =IFERROR(H{n}/Q{n},"")
-    const rateCell = ws.getCell(rNum, 18);
-    rateCell.value = { formula: `IFERROR(H${rNum}/Q${rNum},"")` };
-    rateCell.numFmt = '#,##0.00';
-    rateCell.font = { size: 9, name: 'Calibri', italic: true };
-    rateCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: bgColor } };
+    // Col P=16: «Ставка/час» — formula =IFERROR(H{n}/O{n},"")
+    const rateFCell = ws.getCell(rNum, 16);
+    rateFCell.value  = { formula: `IFERROR(H${rNum}/O${rNum},"")` };
+    rateFCell.numFmt = '#,##0.00';
+    rateFCell.font   = { size: 9, name: 'Calibri', italic: true };
+    rateFCell.fill   = { type: 'pattern', pattern: 'solid', fgColor: { argb: bgColor } };
+    rateFCell.border = dataBorder;
+    rateFCell.alignment = { vertical: 'middle', horizontal: 'right' };
   });
 
-  // ── ИТОГО: per-currency net + ≈ USD grand total ─────────────
-  // Each currency gets its own sub-row. Summing mixed currencies is meaningless,
-  // so we compute net per currency in TypeScript then show ≈ USD equivalent.
-  let nextFreeRow = DATA_START + rows.length;
-
-  if (rows.length > 0) {
-    // Compute per-currency signed nets
-    const curNets = new Map<string, number>();
-    for (const row of rows) {
-      const amt = parseFloat(row.original_amount);
-      const isInflow = row.transaction_intent === 'income' || row.transaction_intent === 'debt_received';
-      curNets.set(row.currency, (curNets.get(row.currency) ?? 0) + (isInflow ? amt : -amt));
-    }
-
-    const totalFill = { type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb: `FF${C_TOTAL_BG}` } };
-    let usdGrand = 0;
-    let hasUncovered = false;
-    let isFirstCurRow = true;
-
-    for (const [cur, net] of curNets) {
-      const rate   = usdRates.get(cur.toUpperCase()) ?? null;
-      const usdEq  = rate !== null ? net * rate : null;
-      if (usdEq !== null) usdGrand += usdEq; else hasUncovered = true;
-
-      ws.getRow(nextFreeRow).height = 18;
-
-      // Cols A–F: steel-blue background only
-      for (let ci = 1; ci <= 6; ci++) ws.getCell(nextFreeRow, ci).fill = totalFill;
-
-      // Col G: "ИТОГО" label on first currency row, blank on subsequent
-      const gc = ws.getCell(nextFreeRow, 7);
-      gc.value = isFirstCurRow ? 'ИТОГО' : '';
-      gc.font  = { bold: true, size: 9, name: 'Calibri', color: { argb: 'FF1A3C5E' } };
-      gc.fill  = totalFill;
-      gc.alignment = { horizontal: 'right', vertical: 'middle' };
-
-      // Col H: net amount (numeric, colour-coded)
-      const hc = ws.getCell(nextFreeRow, 8);
-      hc.value = net;
-      hc.numFmt = smartNumFmt(cur);
-      hc.font  = { bold: true, size: 10, name: 'Calibri',
-        color: { argb: net >= 0 ? `FF${C_INCOME}` : `FF${C_EXPENSE}` } };
-      hc.fill  = totalFill;
-      hc.alignment = { horizontal: 'right', vertical: 'middle' };
-
-      // Col I: currency code
-      const ic = ws.getCell(nextFreeRow, 9);
-      ic.value = cur;
-      ic.font  = { bold: true, size: 9, name: 'Calibri', color: { argb: 'FF555555' } };
-      ic.fill  = totalFill;
-      ic.alignment = { horizontal: 'left', vertical: 'middle' };
-
-      // Col J: ≈ USD equivalent
-      const jc = ws.getCell(nextFreeRow, 10);
-      if (usdEq !== null) {
-        jc.value = `≈ ${fmtAmtSigned(usdEq)} USD`;
-        jc.font  = { size: 8, italic: true, name: 'Calibri', color: { argb: 'FF555555' } };
-      } else {
-        jc.value = '— курс н/д';
-        jc.font  = { size: 8, italic: true, name: 'Calibri', color: { argb: 'FFE67E22' } };
-      }
-      jc.fill  = totalFill;
-      jc.alignment = { horizontal: 'left', vertical: 'middle' };
-
-      // Col K: rate multiplier hint
-      const kc = ws.getCell(nextFreeRow, 11);
-      kc.value = rate !== null && rate !== 1 ? `×${rate.toFixed(4).replace(/\.?0+$/, '')}` : '';
-      kc.font  = { size: 7, italic: true, name: 'Calibri', color: { argb: 'FFBBBBBB' } };
-      kc.fill  = totalFill;
-
-      // Cols L–P: background only
-      for (let ci = 12; ci <= 16; ci++) ws.getCell(nextFreeRow, ci).fill = totalFill;
-
-      nextFreeRow++;
-      isFirstCurRow = false;
-    }
-
-    // ── Grand total USD row (navy bookend) ────────────────────
-    ws.getRow(nextFreeRow).height = 24;
-    const grandFill   = { type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb: `FF${C_GRAND_BG}` } };
-    const grandBorder = { top: { style: 'medium' as const, color: { argb: 'FF0D2840' } },
-                          bottom: { style: 'medium' as const, color: { argb: 'FF0D2840' } } };
-    for (let ci = 1; ci <= 16; ci++) {
-      ws.getCell(nextFreeRow, ci).fill   = grandFill;
-      ws.getCell(nextFreeRow, ci).border = grandBorder;
-    }
-
-    // Cols A–G merged: right-aligned label
-    ws.mergeCells(nextFreeRow, 1, nextFreeRow, 7);
-    const gtLabel = ws.getCell(nextFreeRow, 1);
-    gtLabel.value = hasUncovered ? '≈ ИТОГО в USD  (часть валют без курса)' : '≈ ИТОГО в USD';
-    gtLabel.font  = { bold: true, size: 9, name: 'Calibri', color: { argb: 'FFB0C8E0' } };
-    gtLabel.fill  = grandFill;
-    gtLabel.alignment = { horizontal: 'right', vertical: 'middle' };
-
-    // Col H: USD grand total (numeric)
-    const usdClr = usdGrand >= 0 ? 'FF7DCEA0' : 'FFE57373';
-    const gtH = ws.getCell(nextFreeRow, 8);
-    gtH.value  = usdGrand;
-    gtH.numFmt = '#,##0.00';
-    gtH.font   = { bold: true, size: 11, name: 'Calibri', color: { argb: usdClr } };
-    gtH.fill   = grandFill;
-    gtH.alignment = { horizontal: 'right', vertical: 'middle' };
-
-    // Col I: "USD" label
-    const gtI = ws.getCell(nextFreeRow, 9);
-    gtI.value = 'USD';
-    gtI.font  = { bold: true, size: 9, name: 'Calibri', color: { argb: usdClr } };
-    gtI.fill  = grandFill;
-    gtI.alignment = { horizontal: 'left', vertical: 'middle' };
-
-    nextFreeRow++; // advance past grand total
-  }
+  // ── Остатки по счетам на конец периода ──────────────────────
+  // ИТОГО блок удалён — реестр (леджер) остаётся чистым.
+  // Итоги в листе «Сводка».
 
   // ── Остатки по счетам на конец периода ──────────────────────
   if (rows.length > 0) {
-    const accBRow = nextFreeRow + 1; // +1 blank spacer after totals block
+    const accBRow = DATA_START + rows.length + 2; // +1 data ends, +1 blank spacer
     ws.mergeCells(accBRow, 1, accBRow, 16);
     const accHdr = ws.getCell(accBRow, 1);
     accHdr.value = 'ОСТАТКИ ПО СЧЕТАМ НА КОНЕЦ ПЕРИОДА';
