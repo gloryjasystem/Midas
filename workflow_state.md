@@ -1,7 +1,7 @@
 # WORKFLOW_STATE.MD — Диспетчер задач ИИ-агента Midas
 
 > **Тип:** MUTABLE — кратковременная память агента. Обновляется на каждом шаге работы.
-> **Обновлён:** 2026-05-18 11:00 (UTC+3)
+> **Обновлён:** 2026-05-18 20:50 (UTC+3)
 
 ---
 
@@ -10,12 +10,12 @@
 | Параметр | Значение |
 |---|---|
 | **PHASE** | Phase 2, Этап 2 — Excel Export Suite 2.0 — Audit-Grade Logic & Visual Polish |
-| **STEP** | Commit 2c43d95 (HEAD). Unified Top Expenses block реализован. Grand Total, Currency Summary, Top Expenses — все три секции полностью переработаны. |
-| **AGENT STATUS** | tsc 0 errors. Sheet0 Сводка: единый блок ТОП РАСХОДОВ (USD) с конвертацией через usdRates, grand total без ≈, сводка по валютам с inline-разбивкой по интентам. |
+| **STEP** | Commit 2f4b88c (HEAD). Excel Report Sheet0 полностью выполирован — 20+ точечных правок за сессию. tsc 0 errors на всех коммитах. |
+| **AGENT STATUS** | tsc 0 errors. Sheet0 Сводка: все секции (СВОДКА ЗА ПЕРИОД, ИТОГ ЗА ПЕРИОД, СОСТОЯНИЕ СЧЕТОВ, СВОДКА ПО ВАЛЮТАМ, ТОП РАСХОДОВ ПО КАТЕГОРИЯМ) приведены к SAP/Bloomberg-стандарту. |
 | **DEPLOYMENT** | Railway (spirited-happiness) — Midas Online, background-workers Online. Health: https://midas-production-f4f1.up.railway.app/health > ok |
-| **LAST COMPLETED** | feat(reports): unified top expenses block — single USD-ranked table, col «Все расходы», grandTotalUsd for %, uncovered appendix. Commits: 2b341d6, 7c81be6, 7b50779, 2c43d95. |
+| **LAST COMPLETED** | Серия коммитов 2026-05-18 вечер: bb3904c (10 plan items), b5e71cd (TS2532 fix), 76c3def (col E always show, % center), ac7489a (5 fixes: signs, grey fill, headers, center), 2f4b88c (≈ remove, rate center, Суммы C-E, balance center). |
 | **BLOCKER** | None. |
-| **NEXT ACTION** | Проверить отчёт на реальных данных. Опционально: расширить categoryIcon() для кастомных пользовательских категорий. |}
+| **NEXT ACTION** | Проверить отчёт на реальных данных. Опционально: расширить categoryIcon() для кастомных категорий. Следующий этап — Phase 3.0 DB Schema (account_type/wallet_subtype). |}
 
 
 ---
