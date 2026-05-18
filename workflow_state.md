@@ -9,13 +9,13 @@
 
 | Параметр | Значение |
 |---|---|
-| **PHASE** | Phase 2, Этап 1 — Профессиональный экспорт 2.0 DEPLOYED |
-| **STEP** | Commit 2bf24d2 pushed to main. Fix: account name step3, correct filename, CSV filters. |
-| **AGENT STATUS** | 	sc 0 errors. Unified export UX: период -> счёт -> формат (xlsx/csv). 5 листов Excel. Redis: midas:exp:params. CSV фильтрует по dateFrom/dateTo/accountId. |
-| **DEPLOYMENT** | Railway (spirited-happiness) — Midas Online, background-workers Online, Postgres, Redis. Health: https://midas-production-f4f1.up.railway.app/health > ok |
-| **LAST COMPLETED** | ix(export) 2bf24d2: Step3 показывает «Bybit · USDT» вместо ULID. Filename = реальный период. exportTransactionsCSV(dateFrom,dateTo,accountId). pitch section 6 расширена (5 листов + UX + визстандарт). |
+| **PHASE** | Phase 2, Этап 1 — Excel Export Suite 2.0 — Smart Formatting |
+| **STEP** | Commit 6e597e0. Smart numFmt: fiat #,##0.## / crypto #,##0.######## / months sorted. Commit c1f3cd5: fix CSV SQL columns. |
+| **AGENT STATUS** | tsc 0 errors. 5-листовый Excel полностью рабочий. CRYPTO_SET 18 монет. smartNumFmt(currency). fmtAmtSigned без trailing zeros. Месяцы в Sheet4 отсортированы хронологически. |
+| **DEPLOYMENT** | Railway (spirited-happiness) — Midas Online, background-workers Online. Health: https://midas-production-f4f1.up.railway.app/health > ok |
+| **LAST COMPLETED** | feat(excel): smart number format + chronological months sort. fix(csv): account_id/original_amount/currency column names. fix(excel): JSDoc 5 sheets. |
 | **BLOCKER** | None. |
-| **NEXT ACTION** | Phase 2, Этап 2 — Расширенные настройки (уведомления, формат сумм, финальное тестирование). |
+| **NEXT ACTION** | Excel Phase 2 доработки: (1) netTotal на Сводке -> разбивка по валютам. (2) Цветные строки (тинт). (3) Empty state graceful. |
 
 
 ---
@@ -502,6 +502,8 @@ Phase B-1 (commit 75156b9, применено на live Railway Postgres):
 | 2026-05-17 10:00 | **fix: nav phantom edits on onboarding success (7a8a117). DEPLOYED.** Устранены phantom edits nav message при onboarding success. chore: telegram API error logging (267ed97). fix: force fresh nav panel on reply keyboard press (6a48760). |
 | 2026-05-18 11:00 | **docs: Restore workflow_state.md from CP1251 corruption.** Файл был в CP1251, записан как UTF-8 с U+FFFD вместо кириллицы. Восстановлен из git 83289493, перекодирован в UTF-8, добавлены записи 2026-05-15 -- 2026-05-18. |
 | 2026-05-18 11:30 | **docs: workflow_state.md восстановлен и актуализирован.** Файл был в CP1251, перезаписан с U+FFFD вместо кириллицы в коммите 588e038 (xAI Grok STT сессия). Восстановлен из git 83289493 (чистый CP1251 -> UTF-8). Добавлено 42 пропущенных changelog-записи за 2026-05-15..2026-05-18 (74 незадокументированных коммита). Секция 1 ТЕКУЩЕЕ СОСТОЯНИЕ обновлена. Orphan-секция перемещена в основную таблицу. Commits 58d9dc2, f96b13a, a1def96. |
+| 2026-05-18 12:00 | **fix(csv): Critical SQL column name bugs (c1f3cd5). DEPLOYED.** settings-advanced.service.ts: (1) account_source_id -> account_id; (2) base_amount -> original_amount; (3) base_currency -> currency. Баги не ловились tsc (SQL = string). Найдены ручным аудитом. excel-export.service.ts: JSDoc обновлён до 5 листов. |
+| 2026-05-18 12:30 | **feat(excel): Smart number formatting + chronological months (6e597e0). DEPLOYED.** CRYPTO_SET: 18 монет (BTC/ETH/USDT/USDC/BNB/SOL/TON/TRX/XRP/DOGE/LTC/MATIC/DOT/ADA/AVAX/ATOM/LINK). smartNumFmt(currency): fiat=#,##0.## (max 2dp без trailing zeros), crypto=#,##0.######## (max 8dp). Логика: 100.00->100, 15.50->15.5, 0.00012345->0.00012345. fmtAmtSigned() тоже без trailing zeros + NBSP разделитель тысяч. Sheet4 По месяцам: хронологическая сортировка через parseMonKey(). Курс: #,##0.#### (4dp). |
 
 
 ---
