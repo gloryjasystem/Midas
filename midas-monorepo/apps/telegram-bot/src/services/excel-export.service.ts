@@ -242,6 +242,33 @@ export async function exportTransactionsExcel(
   wb.creator = 'Midas Finance Bot';
   wb.created = new Date();
 
+  // ── Empty-state: 0 transactions in the selected period ─────────
+  if (rows.length === 0) {
+    const ws = wb.addWorksheet('Нет данных');
+    ws.getColumn(1).width = 55;
+    ws.getRow(1).height = 30;
+    ws.mergeCells('A1:A3');
+    const title = ws.getCell('A1');
+    title.value = 'MIDAS — Финансовый отчёт';
+    title.font  = { bold: true, size: 14, color: { argb: `FF${C_COL_HDR_FG}` }, name: 'Calibri' };
+    title.fill  = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_HEADER_BG}` } };
+    title.alignment = { horizontal: 'center', vertical: 'middle' };
+
+    const msg = ws.getCell('A4');
+    msg.value = `📭  За период ${fmtDate(from)} — ${fmtDate(to)} транзакций не найдено.`;
+    msg.font  = { size: 11, name: 'Calibri', italic: true, color: { argb: 'FF555555' } };
+    msg.alignment = { horizontal: 'center', vertical: 'middle' };
+    ws.getRow(4).height = 28;
+
+    const hint = ws.getCell('A5');
+    hint.value = 'Попробуйте расширить диапазон дат или выбрать другой счёт.';
+    hint.font  = { size: 9, name: 'Calibri', color: { argb: 'FF888888' } };
+    hint.alignment = { horizontal: 'center' };
+
+    const arrayBuffer = await wb.xlsx.writeBuffer();
+    return Buffer.from(arrayBuffer);
+  }
+
   buildSheet0Summary(wb, rows, from, to);
   buildSheet1(wb, rows, from, to);
   buildSheet2(wb, rows);
@@ -327,36 +354,99 @@ function buildSheet0Summary(wb: ExcelJS.Workbook, rows: TxRow[], from: Date, to:
   // ── СВОДКА ЗА ПЕРИОД ──────────────────────────────────────
   sectionHdr('СВОДКА ЗА ПЕРИОД');
 
-  type ITotals = { count: number; total: number };
+  // Sub-headers for the intent block
+  ['Тип операции', 'Операций', 'Сумма (USD)', 'Сумма (other)'].slice(0, 3).forEach((h, i) => {
+    const c = ws.getCell(r, i + 1);
+    c.value = h;
+    c.font = { bold: true, size: 8, name: 'Calibri' };
+    c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_GREY_BG}` } };
+    c.alignment = { horizontal: i > 1 ? 'right' : 'left' };
+  });
+  // col 3 header «Сумма» spans to col 5
+  ws.mergeCells(r, 3, r, 5);
+  ws.getCell(r, 3).value = 'Суммы по валютам';
+  ws.getCell(r, 3).font = { bold: true, size: 8, name: 'Calibri' };
+  ws.getCell(r, 3).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_GREY_BG}` } };
+  ws.getCell(r, 3).alignment = { horizontal: 'center' };
+  r++;
+
   type IntentKey = 'income' | 'expense' | 'transfer' | 'debt_given' | 'debt_received';
-  const im: Record<IntentKey, ITotals> = {
-    income:        { count: 0, total: 0 },
-    expense:       { count: 0, total: 0 },
-    transfer:      { count: 0, total: 0 },
-    debt_given:    { count: 0, total: 0 },
-    debt_received: { count: 0, total: 0 },
+
+  // Aggregate per intent AND per currency
+  type IntentByCur = Record<IntentKey, { count: number; byCur: Map<string, number> }>;
+  const im: IntentByCur = {
+    income:        { count: 0, byCur: new Map() },
+    expense:       { count: 0, byCur: new Map() },
+    transfer:      { count: 0, byCur: new Map() },
+    debt_given:    { count: 0, byCur: new Map() },
+    debt_received: { count: 0, byCur: new Map() },
   };
   for (const row of rows) {
     const key = row.transaction_intent as IntentKey;
-    if (key in im) { im[key].count++; im[key].total += parseFloat(row.original_amount); }
+    if (!(key in im)) continue;
+    im[key].count++;
+    const amt = parseFloat(row.original_amount);
+    im[key].byCur.set(row.currency, (im[key].byCur.get(row.currency) ?? 0) + amt);
   }
 
-  const intentRows: [string, string, number, boolean][] = [
-    ['💰 Доходы',        countStr(im.income.count),        im.income.total,       false],
-    ['💸 Расходы',       countStr(im.expense.count),       -im.expense.total,     false],
-    ['🔄 Переводы',      countStr(im.transfer.count),      im.transfer.total,     false],
-    ['🤝 Долги (дал)',   countStr(im.debt_given.count),    -im.debt_given.total,  false],
-    ['🤲 Долги (взял)',  countStr(im.debt_received.count), im.debt_received.total, false],
+  const intentDefs: [string, IntentKey, 1 | -1][] = [
+    ['💰 Доходы',       'income',        1],
+    ['💸 Расходы',      'expense',       -1],
+    ['🔄 Переводы',     'transfer',       1],
+    ['🤝 Долги (дал)',  'debt_given',    -1],
+    ['🤲 Долги (взял)', 'debt_received',  1],
   ];
-  for (const [label, cnt, amt] of intentRows) {
-    cell(r, 1, label); cell(r, 2, cnt); cell(r, 3, fmtAmtSigned(amt));
+  for (const [label, key, sign] of intentDefs) {
+    const d = im[key];
+    cell(r, 1, label);
+    cell(r, 2, countStr(d.count));
+    // Render each currency on the same row, cols 3+
+    let col = 3;
+    for (const [cur, total] of d.byCur) {
+      if (col > 5) break;
+      const signed = sign * total;
+      const c = ws.getCell(r, col);
+      c.value = `${fmtAmtSigned(signed)} ${cur}`;
+      c.font = { size: 9, name: 'Calibri',
+        color: { argb: signed >= 0 ? `FF${C_INCOME}` : `FF${C_EXPENSE}` } };
+      c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_GREY_BG}` } };
+      c.alignment = { horizontal: 'left' };
+      col++;
+    }
     r++;
   }
-  const netTotal = im.income.total + im.debt_received.total - im.expense.total - im.transfer.total - im.debt_given.total;
-  const totalC = cell(r, 1, 'Итог за период', true, undefined);
+
+  // ── Итог по валютам (net = income + debtRecv - expense - transfer - debtGiven) ──
+  const allCurs = new Set<string>();
+  for (const key of Object.keys(im) as IntentKey[]) {
+    for (const cur of im[key].byCur.keys()) allCurs.add(cur);
+  }
+  const netByCur = new Map<string, number>();
+  for (const cur of allCurs) {
+    const net =
+      (im.income.byCur.get(cur) ?? 0) +
+      (im.debt_received.byCur.get(cur) ?? 0) -
+      (im.expense.byCur.get(cur) ?? 0) -
+      (im.transfer.byCur.get(cur) ?? 0) -
+      (im.debt_given.byCur.get(cur) ?? 0);
+    netByCur.set(cur, net);
+  }
+
+  // Row label «Итог за период»
+  const totalC = cell(r, 1, 'Итог за период', true);
   totalC.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_TOTAL_BG}` } };
-  const netCell = cell(r, 3, fmtAmtSigned(netTotal), true, netTotal >= 0 ? `FF${C_INCOME}` : `FF${C_EXPENSE}`);
-  netCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_TOTAL_BG}` } };
+  cell(r, 2, '').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_TOTAL_BG}` } };
+  let netCol = 3;
+  for (const [cur, net] of netByCur) {
+    if (netCol > 5) break;
+    const nc = ws.getCell(r, netCol);
+    nc.value = `${fmtAmtSigned(net)} ${cur}`;
+    nc.font = { bold: true, size: 9, name: 'Calibri',
+      color: { argb: net >= 0 ? `FF${C_INCOME}` : `FF${C_EXPENSE}` } };
+    nc.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_TOTAL_BG}` } };
+    nc.alignment = { horizontal: 'left' };
+    netCol++;
+  }
   r++; r++; // spacer
 
   // ── ОСТАТКИ ПО СЧЕТАМ ────────────────────────────────────
@@ -433,7 +523,7 @@ function buildSheet0Summary(wb: ExcelJS.Workbook, rows: TxRow[], from: Date, to:
     c.total += parseFloat(row.original_amount); c.count++;
     catMap.set(k, c);
   }
-  const totalExpense = im.expense.total || 1;
+  const totalExpense = [...im.expense.byCur.values()].reduce((s, v) => s + v, 0) || 1;
   const topCats = [...catMap.entries()].sort((a, b) => b[1].total - a[1].total).slice(0, 5);
   if (topCats.length === 0) { cell(r, 1, '—'); r++; }
   for (const [i, [name, c]] of topCats.entries()) {
@@ -578,8 +668,16 @@ function buildSheet1(wb: ExcelJS.Workbook, rows: TxRow[], from: Date, to: Date):
     const wsRow = ws.getRow(rNum);
     wsRow.height = 18;
 
-    const isOdd = idx % 2 === 0;
-    const bgColor = isOdd ? 'FFFFFFFF' : `FF${C_ROW_ODD}`;
+    // Row background: income → light green, expense → light red, else alternate stripes
+    let bgColor: string;
+    if (row.transaction_intent === 'income' || row.transaction_intent === 'debt_received') {
+      bgColor = 'FFEAFAF1'; // light green
+    } else if (row.transaction_intent === 'expense') {
+      bgColor = 'FFFDEDEC'; // light red
+    } else {
+      const isOdd = idx % 2 === 0;
+      bgColor = isOdd ? 'FFFFFFFF' : `FF${C_ROW_ODD}`;
+    }
 
     const txDate   = new Date(row.transaction_time);
     const amtNum   = parseFloat(row.original_amount);
