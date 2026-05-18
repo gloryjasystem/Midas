@@ -86,6 +86,40 @@ const CRYPTO_SET = new Set([
   'DOGE', 'LTC', 'MATIC', 'DOT', 'ADA', 'AVAX', 'ATOM', 'LINK',
 ]);
 
+// ─────────────────────────────────────────────────────────────
+// Live exchange-rate fetcher
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Returns a map: currency code (upper) → USD value of 1 unit.
+ * Strategy:
+ *   1. Stablecoins (USDT, USDC, BUSD, DAI) → hardcoded 1
+ *   2. Fiat + most crypto → open.er-api.com (free, no key, 1 500 req/month)
+ *   3. Any currency missing from API → excluded from USD equivalent
+ * Falls back gracefully if the API is unreachable (stablecoins still work).
+ */
+async function fetchUsdRates(): Promise<Map<string, number>> {
+  // Stablecoins are always 1:1 with USD
+  const rates = new Map<string, number>([
+    ['USD', 1], ['USDT', 1], ['USDC', 1], ['BUSD', 1],
+    ['DAI', 1], ['TUSD', 1], ['USDP', 1],
+  ]);
+  try {
+    const res  = await fetch('https://open.er-api.com/v6/latest/USD', { signal: AbortSignal.timeout(4000) });
+    const data = await res.json() as { result: string; rates: Record<string, number> };
+    if (data.result === 'success' && data.rates) {
+      for (const [cur, fxRate] of Object.entries(data.rates)) {
+        if (!rates.has(cur.toUpperCase())) {
+          rates.set(cur.toUpperCase(), 1 / fxRate); // 1 USD = fxRate units → 1 unit = 1/fxRate USD
+        }
+      }
+    }
+  } catch {
+    // Network error or timeout — stablecoins remain, other currencies fall back to uncovered
+  }
+  return rates;
+}
+
 /**
  * Returns the Excel numFmt string for a given currency:
  *   - Crypto  → '#,##0.########'   (up to 8 dp, no trailing zeros)
@@ -269,7 +303,10 @@ export async function exportTransactionsExcel(
     return Buffer.from(arrayBuffer);
   }
 
-  buildSheet0Summary(wb, rows, from, to);
+  // Fetch live exchange rates once — all currencies → USD
+  const usdRates = await fetchUsdRates();
+
+  buildSheet0Summary(wb, rows, from, to, usdRates);
   buildSheet1(wb, rows, from, to);
   buildSheet2(wb, rows);
   buildSheet3(wb, rows);
@@ -300,7 +337,13 @@ function hdr(ws: ExcelJS.Worksheet, col: number, row: number, text: string, widt
 // Sheet 0: Сводка — FIRST SHEET (Tasks 0.3 + 0.6)
 // ─────────────────────────────────────────────────────────────
 
-function buildSheet0Summary(wb: ExcelJS.Workbook, rows: TxRow[], from: Date, to: Date): void {
+function buildSheet0Summary(
+  wb: ExcelJS.Workbook,
+  rows: TxRow[],
+  from: Date,
+  to: Date,
+  usdRates: Map<string, number>,
+): void {
   const ws = wb.addWorksheet('Сводка');
 
   // Show the user-requested period — industry standard (QuickBooks, Xero, SAP, banks):
@@ -397,38 +440,28 @@ function buildSheet0Summary(wb: ExcelJS.Workbook, rows: TxRow[], from: Date, to:
     im[key].byCur.set(row.currency, (im[key].byCur.get(row.currency) ?? 0) + amt);
   }
 
-  // ── USD-эквивалент (исторические курсы из БД) ────────────────────────────
-  // Стандарт SAP/Oracle: используем курс на дату транзакции, а не сегодняшний.
-  // Нет внешнего API — всё из exchange_rate каждой транзакции.
-  //
-  // Логика конверсии:
-  //   (a) Если валюта счёта = USD/USDT → account_debit_amount уже в USD
-  //   (b) Если валюта транзакции = USD/USDT → original_amount в USD
-  //   (c) Остальные (PLN, UAH, RUB) — исключены из USD-эквивалента
-  const USD_LIKE   = new Set(['USD', 'USDT']);
-  let   usdEquiv   = 0;
-  let   usdCovered = 0;
-  const nonUsdCurs = new Set<string>();
+  // ── USD-эквивалент (курс на дату экспорта · open.er-api.com) ─────────────
+  // Все валюты конвертируются: фиат через API, стейблкоины хардкодом (1:1).
+  // original_amount × usdRates.get(currency) → USD-эквивалент транзакции.
+  let usdEquiv     = 0;
+  let usdCovered   = 0;
+  const uncoveredC = new Set<string>();
   for (const row of rows) {
-    const isInflow  = row.transaction_intent === 'income' || row.transaction_intent === 'debt_received';
-    const sign      = isInflow ? 1 : -1;
-    const acctCur   = row.account_currency;
-    const origCur   = row.currency;
-    const debitAmt  = parseFloat(row.account_debit_amount ?? row.original_amount);
-    const origAmt   = parseFloat(row.original_amount);
-    if (USD_LIKE.has(acctCur)) {
-      usdEquiv += sign * debitAmt;   // account_debit_amount уже в USD
-      usdCovered++;
-    } else if (USD_LIKE.has(origCur)) {
-      usdEquiv += sign * origAmt;    // original_amount в USD
+    const isInflow = row.transaction_intent === 'income' || row.transaction_intent === 'debt_received';
+    const sign     = isInflow ? 1 : -1;
+    const amt      = parseFloat(row.original_amount);
+    const cur      = row.currency.toUpperCase();
+    const rate     = usdRates.get(cur);
+    if (rate !== undefined) {
+      usdEquiv += sign * amt * rate;
       usdCovered++;
     } else {
-      nonUsdCurs.add(acctCur);       // нельзя преобразовать — запоминаем для сноски
+      uncoveredC.add(row.currency);
     }
   }
-  const nonUsdNote = nonUsdCurs.size > 0
-    ? `* по курсам на дату каждой транзакции; ${[...nonUsdCurs].join(', ')}-счета — без конвертации в USD`
-    : '* по историческим курсам на дату каждой транзакции';
+  const nonUsdNote = uncoveredC.size > 0
+    ? `* курс на дату экспорта · open.er-api.com; без конвертации: ${[...uncoveredC].join(', ')}`
+    : '★ курс на дату экспорта · open.er-api.com';
 
   const intentDefs: [string, IntentKey, 1 | -1][] = [
     ['💰 Доходы',       'income',        1],
