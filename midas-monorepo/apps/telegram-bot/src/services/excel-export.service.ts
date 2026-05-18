@@ -310,7 +310,7 @@ function buildSheet0Summary(wb: ExcelJS.Workbook, rows: TxRow[], from: Date, to:
   const days      = Math.max(1, Math.round((to.getTime() - from.getTime()) / (1000 * 60 * 60 * 24)));
 
   ws.getColumn(1).width = 30;
-  ws.getColumn(2).width = 22;
+  ws.getColumn(2).width = 38;
   ws.getColumn(3).width = 22;
   ws.getColumn(4).width = 22;
   ws.getColumn(5).width = 22;
@@ -397,6 +397,39 @@ function buildSheet0Summary(wb: ExcelJS.Workbook, rows: TxRow[], from: Date, to:
     im[key].byCur.set(row.currency, (im[key].byCur.get(row.currency) ?? 0) + amt);
   }
 
+  // ── USD-эквивалент (исторические курсы из БД) ────────────────────────────
+  // Стандарт SAP/Oracle: используем курс на дату транзакции, а не сегодняшний.
+  // Нет внешнего API — всё из exchange_rate каждой транзакции.
+  //
+  // Логика конверсии:
+  //   (a) Если валюта счёта = USD/USDT → account_debit_amount уже в USD
+  //   (b) Если валюта транзакции = USD/USDT → original_amount в USD
+  //   (c) Остальные (PLN, UAH, RUB) — исключены из USD-эквивалента
+  const USD_LIKE   = new Set(['USD', 'USDT']);
+  let   usdEquiv   = 0;
+  let   usdCovered = 0;
+  const nonUsdCurs = new Set<string>();
+  for (const row of rows) {
+    const isInflow  = row.transaction_intent === 'income' || row.transaction_intent === 'debt_received';
+    const sign      = isInflow ? 1 : -1;
+    const acctCur   = row.account_currency;
+    const origCur   = row.currency;
+    const debitAmt  = parseFloat(row.account_debit_amount ?? row.original_amount);
+    const origAmt   = parseFloat(row.original_amount);
+    if (USD_LIKE.has(acctCur)) {
+      usdEquiv += sign * debitAmt;   // account_debit_amount уже в USD
+      usdCovered++;
+    } else if (USD_LIKE.has(origCur)) {
+      usdEquiv += sign * origAmt;    // original_amount в USD
+      usdCovered++;
+    } else {
+      nonUsdCurs.add(acctCur);       // нельзя преобразовать — запоминаем для сноски
+    }
+  }
+  const nonUsdNote = nonUsdCurs.size > 0
+    ? `* по курсам на дату каждой транзакции; ${[...nonUsdCurs].join(', ')}-счета — без конвертации в USD`
+    : '* по историческим курсам на дату каждой транзакции';
+
   const intentDefs: [string, IntentKey, 1 | -1][] = [
     ['💰 Доходы',       'income',        1],
     ['💸 Расходы',      'expense',       -1],
@@ -441,22 +474,63 @@ function buildSheet0Summary(wb: ExcelJS.Workbook, rows: TxRow[], from: Date, to:
     netByCur.set(cur, net);
   }
 
-  // Row label «Итог за период»
-  const totalC = cell(r, 1, 'Итог за период', true);
-  totalC.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_TOTAL_BG}` } };
-  cell(r, 2, '').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_TOTAL_BG}` } };
-  let netCol = 3;
+  // ── Итог по валютам — вертикальный layout, ничего не теряется ──
+  // Заголовок крок
+  const totalHdr = cell(r, 1, 'Итог за период', true);
+  totalHdr.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_TOTAL_BG}` } };
+  const totalSubHdr = ws.getCell(r, 3);
+  totalSubHdr.value = 'по каждой валюте отдельно';
+  totalSubHdr.font = { italic: true, size: 8, name: 'Calibri', color: { argb: 'FF888888' } };
+  totalSubHdr.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_TOTAL_BG}` } };
+  r++;
+
+  // Одна строка на каждую валюту — все валюты видны
   for (const [cur, net] of netByCur) {
-    if (netCol > 5) break;
-    const nc = ws.getCell(r, netCol);
-    nc.value = `${fmtAmtSigned(net)} ${cur}`;
-    nc.font = { bold: true, size: 9, name: 'Calibri',
+    const curC = ws.getCell(r, 2);
+    curC.value = cur;
+    curC.font  = { size: 8, name: 'Calibri', color: { argb: 'FF555555' }, italic: true };
+    curC.fill  = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_TOTAL_BG}` } };
+    curC.alignment = { horizontal: 'left' };
+
+    const netC = ws.getCell(r, 3);
+    netC.value = fmtAmtSigned(net);
+    netC.font  = { bold: true, size: 9, name: 'Calibri',
       color: { argb: net >= 0 ? `FF${C_INCOME}` : `FF${C_EXPENSE}` } };
-    nc.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_TOTAL_BG}` } };
-    nc.alignment = { horizontal: 'left' };
-    netCol++;
+    netC.fill  = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_TOTAL_BG}` } };
+    netC.alignment = { horizontal: 'left' };
+    // cols 1, 4, 5 — amber fill
+    for (const c of [1, 4, 5]) {
+      ws.getCell(r, c).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_TOTAL_BG}` } };
+    }
+    r++;
   }
-  r++; r++; // spacer
+
+  // ── USD-эквивалент (исторические курсы) ──────────────────────────
+  if (usdCovered > 0) {
+    const usdLbl = cell(r, 1, '≈ USD-эквивалент', false, 'FF555555');
+    usdLbl.font  = { italic: true, size: 9, name: 'Calibri', color: { argb: 'FF555555' } };
+    usdLbl.fill  = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF0CC' } };
+
+    const usdVal = ws.getCell(r, 3);
+    usdVal.value = `≈ ${fmtAmtSigned(usdEquiv)} USD`;
+    usdVal.font  = { bold: true, size: 10, name: 'Calibri',
+      color: { argb: usdEquiv >= 0 ? `FF${C_INCOME}` : `FF${C_EXPENSE}` } };
+    usdVal.fill  = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF0CC' } };
+    usdVal.alignment = { horizontal: 'left' };
+    for (const c of [2, 4, 5]) {
+      ws.getCell(r, c).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF0CC' } };
+    }
+    r++;
+
+    // Сноска
+    ws.mergeCells(r, 1, r, 5);
+    const noteC = ws.getCell(r, 1);
+    noteC.value = nonUsdNote;
+    noteC.font  = { size: 7, italic: true, name: 'Calibri', color: { argb: 'FFAAAAAA' } };
+    noteC.fill  = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_GREY_BG}` } };
+    r++;
+  }
+  r++; // spacer
 
   // ── СОСТОЯНИЕ СЧЕТОВ ──────────────────────────────────────
   // We only show what we actually know:
