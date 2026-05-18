@@ -478,14 +478,17 @@ function buildSheet0Summary(
   sectionHdr('СВОДКА ЗА ПЕРИОД');
 
   // Individual column headers — consistent with the ИТОГ table structure below
-  ['Тип операции', 'Операций', 'Сумма 1', 'Сумма 2', 'Сумма 3'].forEach((h, i) => {
+  // #5 — cols D-E get "Суммы по валютам" label
+  ['Тип операции', 'Операций', '', 'Суммы по валютам', ''].forEach((h, i) => {
     const c = ws.getCell(r, i + 1);
-    c.value = i >= 2 ? '' : h; // cols 3-5: no header text, currency data speaks for itself
+    c.value = h;
     c.font = { bold: true, size: 8, name: 'Calibri' };
     c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_GREY_BG}` } };
-    c.alignment = { horizontal: 'left', vertical: 'middle' };
+    c.alignment = { horizontal: i === 3 ? 'center' : 'left', vertical: 'middle' };
     c.border = { bottom: { style: 'thin', color: { argb: `FF${C_TBL_BORDER}` } } };
   });
+  // merge D-E for the label
+  ws.mergeCells(r, 4, r, 5);
   ws.getRow(r).height = 16;
   r++;
 
@@ -530,7 +533,8 @@ function buildSheet0Summary(
       c.font = { size: 9, name: 'Calibri',
         color: { argb: signed >= 0 ? `FF${C_INCOME}` : `FF${C_EXPENSE}` } };
       c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_GREY_BG}` } };
-      c.alignment = { horizontal: 'left', vertical: 'middle' };
+      // #4 — center-align amounts in cols C-E of СВОДКА ЗА ПЕРИОД
+      c.alignment = { horizontal: 'center', vertical: 'middle' };
       col++;
     }
     // fill remaining cols with grey
@@ -772,7 +776,10 @@ function buildSheet0Summary(
     // Currency is already shown in col B — no duplication in movement string
     const mvStr = mv === 0 ? '— нет операций' : `${arrow}${fmtAmtSigned(mv)}`;
     const mvC   = cell(r, 4, mvStr, false, mvClr);
-    mvC.alignment = { horizontal: 'center', vertical: 'middle' }; // centred in wide column
+    mvC.alignment = { horizontal: 'center', vertical: 'middle' };
+    // #2 — fill col 5 with grey so accounts section has no white gap
+    const e5 = ws.getCell(r, 5);
+    e5.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_GREY_BG}` } };
     // thin bottom border on every account row
     for (let ci = 1; ci <= 5; ci++) {
       ws.getCell(r, ci).border = { bottom: { style: 'thin', color: { argb: `FF${C_TBL_BORDER}` } } };
@@ -788,13 +795,14 @@ function buildSheet0Summary(
   // Below each row — a compact inline breakdown by intent (income / expense / transfer etc).
   sectionHdr('СВОДКА ПО ВАЛЮТАМ');
 
-  // Sub-header columns: Currency | Операций | Нетто
-  ['Валюта', 'Операций', 'Нетто за период', '', ''].forEach((h, i) => {
+  // Sub-header columns: Currency | Операций | Нетто | (breakdown) | Нетто итого
+  // #3 — col E gets header "Нетто", center-aligned
+  ['Валюта', 'Операций', 'Нетто за период', '', 'Нетто'].forEach((h, i) => {
     const c = ws.getCell(r, i + 1);
     c.value = h;
     c.font = { bold: true, size: 8, name: 'Calibri', color: { argb: 'FF2D6A9F' } };
     c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_TOTAL_HDR}` } };
-    c.alignment = { horizontal: i >= 2 ? 'right' : 'left', vertical: 'middle' };
+    c.alignment = { horizontal: i === 4 ? 'center' : i >= 2 ? 'right' : 'left', vertical: 'middle' };
     c.border = { bottom: { style: 'thin', color: { argb: `FF${C_TBL_BORDER}` } } };
   });
   ws.getRow(r).height = 16;
@@ -867,13 +875,14 @@ function buildSheet0Summary(
     c3.border = thinB;
     c3.alignment = { horizontal: 'left', vertical: 'middle' };
 
-    // Col 5 — Net amount coloured
+    // Col 5 — Net amount coloured, center-aligned
+    // #3 — center-align net amount in col E of currency summary
     const c5 = ws.getCell(r, 5);
     c5.value = `${fmtAmtSigned(net)} ${cur}`;
     c5.font = { bold: true, size: 9, name: 'Calibri', color: { argb: netClr } };
     c5.fill = fillBg;
     c5.border = thinB;
-    c5.alignment = { horizontal: 'right', vertical: 'middle' };
+    c5.alignment = { horizontal: 'center', vertical: 'middle' };
 
     ws.getRow(r).height = 20;
     r++;
@@ -999,12 +1008,11 @@ function buildSheet0Summary(
     const lrPcts = [...lrFloors];
     lrOrder.slice(0, lrRemainder).forEach(({ i }) => { lrPcts[i] = (lrPcts[i] ?? 0) + 1; });
 
-    // #10 — Compact K-format for col E (amounts > 9999)
+    // #1 — fmtK always shows minus (outflow context, originals stored as positive)
     const fmtK = (amt: number, cur: string): string => {
       const abs = Math.abs(amt);
-      const sign = amt < 0 ? '− ' : '+ ';
-      if (abs >= 10000) return `${sign}${(abs / 1000).toFixed(1).replace(/\.0$/, '')}K ${cur}`;
-      return `${fmtAmtSigned(-amt)} ${cur}`;
+      if (abs >= 10000) return `− ${(abs / 1000).toFixed(1).replace(/\.0$/, '')}K ${cur}`;
+      return `${fmtAmtSigned(-abs)} ${cur}`;
     };
 
     // Data rows — top-8
