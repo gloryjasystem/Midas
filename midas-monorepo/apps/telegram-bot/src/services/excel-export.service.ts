@@ -22,16 +22,20 @@ import { withTenantTransaction } from '@midas/database';
 // Brand colours
 // ─────────────────────────────────────────────────────────────
 
-const C_HEADER_BG   = '1A3C5E'; // deep navy — sheet header
-const C_COL_HDR_BG  = '2D6A9F'; // mid-blue — column header row
+const C_HEADER_BG   = '1A3C5E'; // deep navy — sheet header / grand total bookend
+const C_COL_HDR_BG  = '2D6A9F'; // mid-blue — section headers
 const C_COL_HDR_FG  = 'FFFFFF';
 const C_ROW_ODD     = 'F4F8FC';
-const C_TOTAL_BG    = 'FFF3CD'; // amber — totals row
+const C_TOTAL_BG    = 'EEF5FB'; // light steel-blue — итог data rows (replaces amber)
+const C_TOTAL_HDR   = 'D0E8F8'; // slightly darker steel-blue — sub-header of итог table
+const C_GRAND_BG    = '1A3C5E'; // same navy as header — grand total row
+const C_GRAND_FG    = 'FFFFFF'; // white text on grand total
 const C_EXPENSE     = 'C0392B'; // red
 const C_INCOME      = '27AE60'; // green
 const C_DEBT_GIVE   = '2980B9'; // blue
 const C_DEBT_RECV   = 'E67E22'; // orange
-const C_GREY_BG     = 'F2F2F2'; // summary block bg
+const C_GREY_BG     = 'F2F2F2'; // light grey — general cells
+const C_TBL_BORDER  = 'BDD5E8'; // steel-blue border for all tables
 
 // ─────────────────────────────────────────────────────────────
 // Intent localisation
@@ -509,16 +513,15 @@ function buildSheet0Summary(
   const intentDefs: [string, IntentKey, 1 | -1][] = [
     ['💰 Доходы',       'income',        1],
     ['💸 Расходы',      'expense',       -1],
-    ['🔄 Переводы',     'transfer',       1],
+    ['🔄 Переводы',     'transfer',      -1],
     ['🤝 Долги (дал)',  'debt_given',    -1],
     ['🤲 Долги (взял)', 'debt_received',  1],
   ];
   for (const [label, key, sign] of intentDefs) {
     const d = im[key];
-    if (d.count === 0) continue; // skip types with zero activity
+    if (d.count === 0) continue;
     cell(r, 1, label);
     cell(r, 2, countStr(d.count));
-    // Render each currency on the same row, cols 3+
     let col = 3;
     for (const [cur, total] of d.byCur) {
       if (col > 5) break;
@@ -528,9 +531,22 @@ function buildSheet0Summary(
       c.font = { size: 9, name: 'Calibri',
         color: { argb: signed >= 0 ? `FF${C_INCOME}` : `FF${C_EXPENSE}` } };
       c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_GREY_BG}` } };
-      c.alignment = { horizontal: 'left' };
+      c.alignment = { horizontal: 'left', vertical: 'middle' };
       col++;
     }
+    // fill remaining cols with grey
+    for (let ci = col; ci <= 5; ci++) {
+      ws.getCell(r, ci).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_GREY_BG}` } };
+    }
+    // thin border on each row
+    for (let ci = 1; ci <= 5; ci++) {
+      const bc = ws.getCell(r, ci);
+      bc.border = {
+        bottom: { style: 'thin', color: { argb: `FF${C_TBL_BORDER}` } },
+        right:  { style: 'thin', color: { argb: `FF${C_TBL_BORDER}` } },
+      };
+    }
+    ws.getRow(r).height = 18;
     r++;
   }
 
@@ -568,17 +584,17 @@ function buildSheet0Summary(
 
   // Sub-header row: column labels
   const thinBorder = {
-    top:    { style: 'thin' as const, color: { argb: 'FFCCCCCC' } },
-    bottom: { style: 'thin' as const, color: { argb: 'FFCCCCCC' } },
-    left:   { style: 'thin' as const, color: { argb: 'FFCCCCCC' } },
-    right:  { style: 'thin' as const, color: { argb: 'FFCCCCCC' } },
+    top:    { style: 'thin' as const, color: { argb: `FF${C_TBL_BORDER}` } },
+    bottom: { style: 'thin' as const, color: { argb: `FF${C_TBL_BORDER}` } },
+    left:   { style: 'thin' as const, color: { argb: `FF${C_TBL_BORDER}` } },
+    right:  { style: 'thin' as const, color: { argb: `FF${C_TBL_BORDER}` } },
   };
   const colLabels = ['Валюта', 'Нетто за период', 'Курс к USD', '≈ USD', 'Источник'];
   colLabels.forEach((lbl, i) => {
     const c = ws.getCell(r, i + 1);
     c.value = lbl;
-    c.font  = { bold: true, size: 8, name: 'Calibri', color: { argb: 'FF444444' } };
-    c.fill  = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEAD8A0' } };
+    c.font  = { bold: true, size: 8, name: 'Calibri', color: { argb: 'FF2D6A9F' } };
+    c.fill  = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_TOTAL_HDR}` } };
     c.alignment = { horizontal: 'center', vertical: 'middle' };
     c.border = thinBorder;
   });
@@ -653,20 +669,18 @@ function buildSheet0Summary(
     r++;
   }
 
-  // ── Grand total row (yellow, prominent) ──────────────────────────────────
-  const gtFill   = { type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb: 'FFFFF0CC' } };
-  const gtClr    = usdTotal >= 0 ? `FF${C_INCOME}` : `FF${C_EXPENSE}`;
+  // ── Grand total row — NAVY bookend (mirrors sheet title) ────────────────
+  const gtFill   = { type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb: `FF${C_GRAND_BG}` } };
   const gtBorder = {
-    top:    { style: 'medium' as const, color: { argb: 'FFCCAA00' } },
-    bottom: { style: 'medium' as const, color: { argb: 'FFCCAA00' } },
-    left:   { style: 'thin'   as const, color: { argb: 'FFCCCCCC' } },
-    right:  { style: 'thin'   as const, color: { argb: 'FFCCCCCC' } },
+    top:    { style: 'medium' as const, color: { argb: 'FF0D2840' } },
+    bottom: { style: 'medium' as const, color: { argb: 'FF0D2840' } },
+    left:   { style: 'thin'   as const, color: { argb: `FF${C_TBL_BORDER}` } },
+    right:  { style: 'thin'   as const, color: { argb: `FF${C_TBL_BORDER}` } },
   };
 
-  // Label in col 1 (+ optional uncovered note in col 2)
   const gt1 = ws.getCell(r, 1);
   gt1.value = '≈ ИТОГО в USD';
-  gt1.font  = { bold: true, size: 10, name: 'Calibri', color: { argb: 'FF555555' } };
+  gt1.font  = { bold: true, size: 10, name: 'Calibri', color: { argb: `FF${C_GRAND_FG}` } };
   gt1.fill  = gtFill;
   gt1.border = gtBorder;
   gt1.alignment = { horizontal: 'left', vertical: 'middle' };
@@ -682,10 +696,11 @@ function buildSheet0Summary(
   gt3.fill   = gtFill;
   gt3.border = gtBorder;
 
-  // USD total in col 4 — largest, most prominent number
+  // ≈ USD number — white, large, right-aligned
+  const usdTotalClr = usdTotal >= 0 ? 'FF7DCEA0' : 'FFE57373'; // soft green/red on dark bg
   const gt4 = ws.getCell(r, 4);
   gt4.value = `≈ ${fmtAmtSigned(usdTotal)} USD`;
-  gt4.font  = { bold: true, size: 12, name: 'Calibri', color: { argb: gtClr } };
+  gt4.font  = { bold: true, size: 13, name: 'Calibri', color: { argb: usdTotalClr } };
   gt4.fill  = gtFill;
   gt4.border = gtBorder;
   gt4.alignment = { horizontal: 'right', vertical: 'middle' };
@@ -694,7 +709,7 @@ function buildSheet0Summary(
   gt5.fill   = gtFill;
   gt5.border = gtBorder;
 
-  ws.getRow(r).height = 20;
+  ws.getRow(r).height = 22;
   r++;
 
   // Footnote (merged, small grey)
@@ -727,11 +742,13 @@ function buildSheet0Summary(
     c.value = h;
     c.font = { bold: true, size: 8, name: 'Calibri' };
     c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_GREY_BG}` } };
-    c.alignment = { horizontal: i >= 2 ? 'right' : 'left' };
+    // Баланс и Движение — centre-aligned (financial table standard)
+    c.alignment = { horizontal: i >= 2 ? 'center' : 'left', vertical: 'middle' };
+    c.border = { bottom: { style: 'thin', color: { argb: `FF${C_TBL_BORDER}` } } };
   });
+  ws.getRow(r).height = 16;
   r++;
 
-  // Per-account: rows are DESC sorted — first occurrence = most recent = current balance
   type AccSumm = { currency: string; endBal: number; netChange: number };
   const accMap = new Map<string, AccSumm>();
   for (const row of rows) {
@@ -747,29 +764,35 @@ function buildSheet0Summary(
   for (const [name, acc] of accMap) {
     cell(r, 1, name);
     cell(r, 2, acc.currency);
-    // Current balance — always truthful
     const balC = cell(r, 3, fmtAmtSigned(acc.endBal), false,
       acc.endBal >= 0 ? `FF${C_INCOME}` : `FF${C_EXPENSE}`);
-    balC.alignment = { horizontal: 'right' };
-    // Movement during period — net signed, with arrow and currency code
+    balC.alignment = { horizontal: 'right', vertical: 'middle' };
     const mv    = acc.netChange;
     const arrow = mv > 0 ? '▲ ' : mv < 0 ? '▼ ' : '';
     const mvClr = mv > 0 ? `FF${C_INCOME}` : mv < 0 ? `FF${C_EXPENSE}` : 'FF888888';
     const mvStr = mv === 0 ? '— нет операций' : `${arrow}${fmtAmtSigned(mv)} ${acc.currency}`;
     const mvC   = cell(r, 4, mvStr, false, mvClr);
-    mvC.alignment = { horizontal: 'left' };
+    mvC.alignment = { horizontal: 'center', vertical: 'middle' }; // centred in wide column
+    // thin bottom border on every account row
+    for (let ci = 1; ci <= 5; ci++) {
+      ws.getCell(r, ci).border = { bottom: { style: 'thin', color: { argb: `FF${C_TBL_BORDER}` } } };
+    }
+    ws.getRow(r).height = 18;
     r++;
   }
   r++; // spacer
 
   // ── СВОДКА ПО ВАЛЮТАМ ─────────────────────────────────────
   sectionHdr('СВОДКА ПО ВАЛЮТАМ');
-  ['Валюта', 'Операций', 'Доходы', 'Расходы', 'Итог'].forEach((h, i) => {
+  ['Валюта', 'Операций', 'Доходы', 'Расходы', 'Итог*'].forEach((h, i) => {
     const c = ws.getCell(r, i + 1);
     c.value = h;
     c.font = { bold: true, size: 8, name: 'Calibri' };
     c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_GREY_BG}` } };
+    c.alignment = { horizontal: i >= 2 ? 'right' : 'left', vertical: 'middle' };
+    c.border = { bottom: { style: 'thin', color: { argb: `FF${C_TBL_BORDER}` } } };
   });
+  ws.getRow(r).height = 16;
   r++;
 
   type CurTotals2 = { count: number; income: number; expense: number };
@@ -785,10 +808,25 @@ function buildSheet0Summary(
   for (const [cur, t] of byCur) {
     const net = t.income - t.expense;
     cell(r, 1, cur); cell(r, 2, String(t.count));
-    cell(r, 3, fmtAmtSigned(t.income)); cell(r, 4, fmtAmtSigned(-t.expense));
-    cell(r, 5, fmtAmtSigned(net), false, net >= 0 ? `FF${C_INCOME}` : `FF${C_EXPENSE}`);
+    const inc = cell(r, 3, fmtAmtSigned(t.income));
+    inc.alignment = { horizontal: 'right', vertical: 'middle' };
+    const exp = cell(r, 4, fmtAmtSigned(-t.expense));
+    exp.alignment = { horizontal: 'right', vertical: 'middle' };
+    const netC = cell(r, 5, fmtAmtSigned(net), true, net >= 0 ? `FF${C_INCOME}` : `FF${C_EXPENSE}`);
+    netC.alignment = { horizontal: 'right', vertical: 'middle' };
+    for (let ci = 1; ci <= 5; ci++) {
+      ws.getCell(r, ci).border = { bottom: { style: 'thin', color: { argb: `FF${C_TBL_BORDER}` } } };
+    }
+    ws.getRow(r).height = 18;
     r++;
   }
+  // Footnote: explain * in header
+  ws.mergeCells(r, 1, r, 5);
+  const byCurFn = ws.getCell(r, 1);
+  byCurFn.value = '* Итог = Доходы − Расходы. Переводы между счетами не учитываются.';
+  byCurFn.font  = { size: 7, italic: true, name: 'Calibri', color: { argb: 'FFAAAAAA' } };
+  byCurFn.fill  = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_GREY_BG}` } };
+  r++;
   r++; // spacer
 
   // ── ТОП КАТЕГОРИЙ РАСХОДОВ (по валюте) ──────────────────
@@ -817,8 +855,14 @@ function buildSheet0Summary(
       const pct = Math.round((c.total / totalExpCur) * 100);
       cell(r, 1, `${String(i + 1)}.  ${name}`);
       cell(r, 2, countStr(c.count));
-      cell(r, 3, `${fmtAmtSigned(-c.total)} ${cur}`);
-      cell(r, 4, `${String(pct)}%`);
+      const amtC = cell(r, 3, `${fmtAmtSigned(-c.total)} ${cur}`);
+      amtC.font = { size: 9, name: 'Calibri', color: { argb: `FF${C_EXPENSE}` } };
+      const pctC = cell(r, 4, `${String(pct)}%`);
+      pctC.alignment = { horizontal: 'right', vertical: 'middle' };
+      for (let ci = 1; ci <= 5; ci++) {
+        ws.getCell(r, ci).border = { bottom: { style: 'thin', color: { argb: `FF${C_TBL_BORDER}` } } };
+      }
+      ws.getRow(r).height = 18;
       r++;
     }
   }
@@ -840,7 +884,10 @@ function buildSheet0Summary(
   footerStyle(r).value = '─────────────────────────────────────────────────────────'; r++;
   footerStyle(r).value = 'Документ является информационным. Для официального подтверждения операций обратитесь в банк или платёжную систему.'; r++;
 
-  ws.views = [{ state: 'normal', activeCell: 'A1' }];
+  // Freeze row 1 (title always visible when scrolling)
+  ws.views = [{ state: 'frozen', ySplit: 1, activeCell: 'A2' }];
+  // Navy tab to match sheet identity
+  ws.properties.tabColor = { argb: `FF${C_HEADER_BG}` };
 }
 
 // ─────────────────────────────────────────────────────────────
