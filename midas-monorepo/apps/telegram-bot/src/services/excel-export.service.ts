@@ -1170,38 +1170,70 @@ function buildSheet1(wb: ExcelJS.Workbook, rows: TxRow[], from: Date, to: Date, 
     byCur.set(cur, t);
   }
 
-  // Header row 2 — summary mini-block sits in cols I-K (9-11)
-  const summHdrCell = ws.getCell(2, 9);
+  // ── Summary block (rows 2–9, cols I–K): «Сводка по валютам» dashboard card ──
+  // Styled as embedded summary card: navy header + #F2F7FB background + steel-blue border
+  // (Mirrors QuickBooks/Xero export design pattern)
+  const SUMM_COL_START = 9;   // I
+  const SUMM_COL_END   = 11;  // K
+  const SUMM_ROW_START = 2;
+
+  // Row 2: Navy merged header
+  ws.mergeCells(SUMM_ROW_START, SUMM_COL_START, SUMM_ROW_START, SUMM_COL_END);
+  const summHdrCell = ws.getCell(SUMM_ROW_START, SUMM_COL_START);
   summHdrCell.value = `Сводка по валютам · ${rows.length} операций`;
   summHdrCell.font = { bold: true, size: 9, name: 'Calibri', color: { argb: `FF${C_COL_HDR_FG}` } };
   summHdrCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_HEADER_BG}` } };
-  summHdrCell.alignment = { horizontal: 'center' };
-  ws.mergeCells(2, 9, 2, 11);
+  summHdrCell.alignment = { horizontal: 'center', vertical: 'middle' };
+  // Apply outer border to header row cells
+  const summBorder = { style: 'thin' as const, color: { argb: `FF${C_TBL_BORDER}` } };
+  summHdrCell.border = { top: summBorder, left: summBorder, right: summBorder, bottom: summBorder };
 
-  // Rows 3–9: fill per currency (max 7 rows)
+  // Rows 3–9: fill per currency (max 7 rows), #F2F7FB background + full border frame
   let summRow = 3;
   for (const [cur, t] of byCur) {
     if (summRow > 9) break;
     const net = t.income + t.debtRecv - t.expense - t.transfer - t.debtGive;
-    const lc = ws.getCell(summRow, 9);
+    const summDataFill = { type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb: 'FFF2F7FB' } };
+    const summDataBorder = {
+      top:    summBorder,
+      bottom: summBorder,
+      left:   summBorder,
+      right:  summBorder,
+    };
+
+    const lc = ws.getCell(summRow, SUMM_COL_START);
     lc.value = `${cur}  💰${t.income.toFixed(0)}  💸${t.expense.toFixed(0)}  🔄${t.transfer.toFixed(0)}`;
-    lc.font  = { size: 8, name: 'Calibri' };
-    lc.fill  = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_GREY_BG}` } };
-    lc.alignment = { horizontal: 'left' };
+    lc.font  = { size: 8, name: 'Calibri', color: { argb: 'FF333333' } };
+    lc.fill  = summDataFill;
+    lc.border = summDataBorder;
+    lc.alignment = { horizontal: 'left', vertical: 'middle' };
 
     const vc = ws.getCell(summRow, 10);
     vc.value  = parseFloat(net.toFixed(2));
     vc.numFmt = '+#,##0.00;-#,##0.00';
     vc.font   = { bold: true, size: 8, name: 'Calibri',
       color: { argb: net >= 0 ? `FF${C_INCOME}` : `FF${C_EXPENSE}` } };
-    vc.fill   = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_GREY_BG}` } };
-    vc.alignment = { horizontal: 'right' };
+    vc.fill   = summDataFill;
+    vc.border = summDataBorder;
+    vc.alignment = { horizontal: 'right', vertical: 'middle' };
 
-    const cc = ws.getCell(summRow, 11);
+    const cc = ws.getCell(summRow, SUMM_COL_END);
     cc.value = cur;
-    cc.font  = { italic: true, size: 8, name: 'Calibri', color: { argb: 'FF888888' } };
-    cc.fill  = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_GREY_BG}` } };
+    cc.font  = { italic: true, size: 8, name: 'Calibri', color: { argb: '55555555' } };
+    cc.fill  = { type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb: 'FFF2F7FB' } };
+    cc.border = summDataBorder;
+    cc.alignment = { horizontal: 'left', vertical: 'middle' };
     summRow++;
+  }
+
+  // Pad remaining rows in the dashboard block (rows after last currency, up to row 9)
+  // This ensures the card has a clean rectangular appearance even with few currencies
+  for (let padRow = summRow; padRow <= 9; padRow++) {
+    for (let padCol = SUMM_COL_START; padCol <= SUMM_COL_END; padCol++) {
+      const pc = ws.getCell(padRow, padCol);
+      pc.fill   = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF2F7FB' } };
+      pc.border = { top: summBorder, bottom: summBorder, left: summBorder, right: summBorder };
+    }
   }
 
   // ── Row 9: Empty spacer ──────────────────────────────────────
@@ -1216,30 +1248,36 @@ function buildSheet1(wb: ExcelJS.Workbook, rows: TxRow[], from: Date, to: Date, 
   ws.getRow(HDR_ROW).height = 40; // extra height for 3-line headers
 
   const cols: Array<[string, number]> = [
-    ['№',                   20],  // A=1  — wider for account names in ОСТАТКИ section
-    ['Дата',               12],  // B=2
-    ['Время',               8],  // C=3
-    ['Операция',           18],  // D=4
-    ['Исполнитель',        16],  // E=5
-    ['Счёт',               18],  // F=6
-    ['Вал.\nсчёта',         8],  // G=7
-    ['Сумма',              18],  // H=8
-    ['Выплачено',          18],  // I=9
-    ['Курс',               30],  // J=10 — wider for summary block + long rate strings
-    ['Категория',          20],  // K=11
-    ['Группа',             12],  // L=12
-    ['Комментарий',        32],  // M=13
-    ['Остаток\nна счету',  22],  // N=14 — wider for 3 122 213 PLN
-    ['Часов\nработы\n(Q)', 13],  // O=15
-    ['Ставка/час\n= H÷O\n(авто)', 15],  // P=16
+    ['№',                            5],  // A=1
+    ['Дата',                        12],  // B=2
+    ['Время',                        8],  // C=3
+    ['Операция',                    18],  // D=4
+    ['Исполнитель',                 16],  // E=5
+    ['Счёт',                        18],  // F=6
+    ['Вал.\nсчёта',                  8],  // G=7
+    ['Сумма',                       18],  // H=8
+    ['Курс к USD',                  22],  // I=9 — rate description text (was mislabeled «Выплачено»)
+    ['≈ USD',                       14],  // J=10 — numeric USD equivalent (narrowed + center)
+    ['Категория',                   20],  // K=11
+    ['Группа',                      12],  // L=12
+    ['Комментарий',                 32],  // M=13
+    ['Остаток\nна счету',           22],  // N=14 — wider for 3 122 213 PLN
+    ['Часов работы\n(введите вручную)', 18],  // O=15 — user-input column, explicit label
+    ['Ставка/час\n(авторасчёт)',    16],  // P=16 — formula column, explicit label
   ];
+  // Header row needs extra height for 2-line labels in O and P
+  ws.getRow(HDR_ROW).height = 42;
   cols.forEach(([text, width], i) => hdr(ws, i + 1, HDR_ROW, text, width));
 
-  // Col 14 «Остаток» header: distinct dark-blue background
+  // Col N=14 «Остаток» header: distinct dark-blue background (stands out as computed column)
   ws.getCell(HDR_ROW, 14).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1A5276' } };
-  // Col 15 «Часов» header: amber tint — user-input column
+  // Col O=15 «Часов работы» header: amber tint — explicit user-input column
   ws.getCell(HDR_ROW, 15).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF7D6608' } };
-  // Col 15 note: explain what to enter and how col P is derived
+  ws.getCell(HDR_ROW, 15).alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+  // Col P=16 «Ставка/час» header: slightly lighter amber — formula (auto-calculated)
+  ws.getCell(HDR_ROW, 16).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF9E7D09' } };
+  ws.getCell(HDR_ROW, 16).alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+  // Tooltip note on col O: explain user workflow
   ws.getCell(HDR_ROW, 15).note = {
     texts: [{ font: { bold: true, size: 9 }, text: 'Часов работы (O)\n' },
             { font: { size: 8 }, text: 'Введите вручную кол-во часов, потраченных на транзакцию.\n\n' },
@@ -1357,15 +1395,22 @@ function buildSheet1(wb: ExcelJS.Workbook, rows: TxRow[], from: Date, to: Date, 
       }
     });
 
-    // Col I=9: Курс к USD
+    // Col I=9: «Курс к USD» — descriptive rate text (shown only for cross-currency ops)
+    // Rule: if currency === account_currency → same-currency op → show '—' (no conversion)
+    //       if currency !== account_currency → cross-currency → show '1 UAH = 0.024 USD'
     const cur = row.currency.toUpperCase();
     const usdRate = usdRates.get(cur) ?? null;
+    const isCrossCurrency = row.currency.toUpperCase() !== row.account_currency.toUpperCase();
     const kursCel = ws.getCell(rNum, 9);
-    kursCel.fill   = { type: 'pattern', pattern: 'solid', fgColor: { argb: bgColor } };
-    kursCel.border = dataBorder;
+    kursCel.fill      = { type: 'pattern', pattern: 'solid', fgColor: { argb: bgColor } };
+    kursCel.border    = dataBorder;
     kursCel.alignment = { vertical: 'middle', horizontal: 'left' };
-    if (cur === 'USD') {
-      kursCel.value = '1:1 (стейлбкоин)';
+    if (!isCrossCurrency) {
+      // Same currency op: exchange rate not applicable
+      kursCel.value = '';
+      kursCel.font  = { size: 8, name: 'Calibri', color: { argb: 'FFCCCCCC' } };
+    } else if (['USD', 'USDT', 'USDC', 'BUSD', 'DAI'].includes(cur)) {
+      kursCel.value = '1 : 1  (стейблкоин)';
       kursCel.font  = { size: 8, name: 'Calibri', italic: true, color: { argb: 'FF888888' } };
     } else if (usdRate !== null) {
       kursCel.value = `1 ${row.currency} = ${usdRate.toFixed(4).replace(/\.?0+$/, '')} USD`;
@@ -1375,7 +1420,7 @@ function buildSheet1(wb: ExcelJS.Workbook, rows: TxRow[], from: Date, to: Date, 
       kursCel.font  = { size: 8, name: 'Calibri', italic: true, color: { argb: 'FFE67E22' } };
     }
 
-    // Col J=10: ≈ USD (numeric equivalent of this transaction)
+    // Col J=10: «≈ USD» — numeric USD equivalent of this transaction (narrow, center-aligned)
     const usdVal = usdRate !== null ? debitSigned * usdRate : null;
     if (usdVal !== null) usdGrandTotal += usdVal; else hasUncoveredUsd = true;
     const usdCel = ws.getCell(rNum, 10);
@@ -1390,7 +1435,7 @@ function buildSheet1(wb: ExcelJS.Workbook, rows: TxRow[], from: Date, to: Date, 
     }
     usdCel.fill      = { type: 'pattern', pattern: 'solid', fgColor: { argb: bgColor } };
     usdCel.border    = dataBorder;
-    usdCel.alignment = { vertical: 'middle', horizontal: 'right' };
+    usdCel.alignment = { vertical: 'middle', horizontal: 'center' };
 
     // Col O=15: «Часов» — yellow, user input
     const hoursCell = ws.getCell(rNum, 15);
@@ -1480,8 +1525,16 @@ function buildSheet1(wb: ExcelJS.Workbook, rows: TxRow[], from: Date, to: Date, 
   // ── Auto-filter on header row ────────────────────────────────
   ws.autoFilter = { from: { row: HDR_ROW, column: 1 }, to: { row: HDR_ROW, column: 16 } };
 
-  // ── Freeze pane below header ──────────────────────────────────
-  ws.views = [{ state: 'frozen', ySplit: HDR_ROW, xSplit: 0, activeCell: `A${DATA_START}` }];
+  // ── Freeze pane + hide gridlines (enterprise export standard) ──────────────
+  // showGridLines: false → document looks like a printed report, not a spreadsheet
+  // ySplit: HDR_ROW (=10) → title + summary block + headers always visible on scroll
+  ws.views = [{
+    state: 'frozen',
+    ySplit: HDR_ROW,
+    xSplit: 0,
+    activeCell: `A${DATA_START}`,
+    showGridLines: false,
+  }];
 }
 
 
