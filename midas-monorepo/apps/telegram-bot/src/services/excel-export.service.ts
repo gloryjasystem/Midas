@@ -967,7 +967,7 @@ function buildSheet0Summary(
       rc3.value = `${fmtAmtSigned(-c.total)} ${cur}`;
       rc3.font = { size: 9, name: 'Calibri', color: { argb: `FF${C_EXPENSE}` } };
       rc3.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_GREY_BG}` } };
-      rc3.alignment = { horizontal: 'right', vertical: 'middle' };
+      rc3.alignment = { horizontal: 'left', vertical: 'middle' };
 
       // Col 4 — percentage (small, muted)
       const rc4 = ws.getCell(r, 4);
