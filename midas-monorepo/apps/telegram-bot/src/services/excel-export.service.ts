@@ -303,16 +303,11 @@ function hdr(ws: ExcelJS.Worksheet, col: number, row: number, text: string, widt
 function buildSheet0Summary(wb: ExcelJS.Workbook, rows: TxRow[], from: Date, to: Date): void {
   const ws = wb.addWorksheet('Сводка');
 
-  // Actual data range: use MIN/MAX of real transactions, not the user-selected filter.
-  // Showing "balance on 01.05" when the account didn't exist then is misleading.
-  const txTimes    = rows.map(row => new Date(row.transaction_time).getTime());
-  const actualFrom = txTimes.length > 0 ? new Date(Math.min(...txTimes)) : from;
-  const actualTo   = txTimes.length > 0 ? new Date(Math.max(...txTimes)) : to;
-  const actualDays = Math.max(1,
-    Math.round((actualTo.getTime() - actualFrom.getTime()) / (1000 * 60 * 60 * 24)) + 1);
-  const actualStr     = `${fmtDate(actualFrom)} — ${fmtDate(actualTo)}`;
-  const filterStr     = `${fmtDate(from)} — ${fmtDate(to)}`;
-  const filterDiffers = actualStr !== filterStr;
+  // Show the user-requested period — industry standard (QuickBooks, Xero, SAP, banks):
+  // the report covers the period the user asked for; the fact that data starts mid-period
+  // is fine — absence of data IS valid data (zero activity for those days).
+  const periodStr = `${fmtDate(from)} \u2014 ${fmtDate(to)}`;
+  const days      = Math.max(1, Math.round((to.getTime() - from.getTime()) / (1000 * 60 * 60 * 24)));
 
   ws.getColumn(1).width = 30;
   ws.getColumn(2).width = 22;
@@ -356,15 +351,9 @@ function buildSheet0Summary(wb: ExcelJS.Workbook, rows: TxRow[], from: Date, to:
   ws.getRow(r).height = 30;
   r++;
 
-  cell(r, 1, 'Период данных:', true);
-  cell(r, 2, `${actualStr} (${String(actualDays)} дн.)`);
+  cell(r, 1, 'Период:', true);
+  cell(r, 2, `${periodStr} (${String(days)} дн.)`);
   r++;
-  if (filterDiffers) {
-    // User chose a wider filter — show it transparently
-    cell(r, 1, 'Запрошен (фильтр):', false, 'FF999999');
-    cell(r, 2, filterStr, false, 'FF999999');
-    r++;
-  }
   cell(r, 1, 'Сформирован:', true);
   cell(r, 2, `${fmtDate(new Date())} ${fmtTime(new Date())}`);
   r++;
@@ -589,8 +578,7 @@ function buildSheet0Summary(wb: ExcelJS.Workbook, rows: TxRow[], from: Date, to:
   footerStyle(r).value = '─────────────────────────────────────────────────────────'; r++;
   footerStyle(r).value = 'Документ сформирован системой MIDAS v2.0'; r++;
   footerStyle(r).value = `Дата экспорта: ${fmtDate(new Date())} ${fmtTime(new Date())}`; r++;
-  footerStyle(r).value = `Период данных: ${actualStr}`; r++;
-  if (filterDiffers) { footerStyle(r).value = `Фильтр запроса: ${filterStr}`; r++; }
+  footerStyle(r).value = `Период: ${periodStr}`; r++;
   footerStyle(r).value = `Количество записей: ${String(rows.length)}`; r++;
   footerStyle(r).value = '─────────────────────────────────────────────────────────'; r++;
   footerStyle(r).value = 'Документ является информационным. Для официального подтверждения операций обратитесь в банк или платёжную систему.'; r++;
