@@ -94,31 +94,58 @@ const CRYPTO_SET = new Set([
  * Returns Map<CURRENCY, USD_PER_1_UNIT>.
  * Sources:
  *   • Stablecoins (USDT/USDC/BUSD/DAI) — hardcoded 1
- *   • Fiat + most crypto — open.er-api.com (free, no API key, 1 500 req/mo)
- *   • Timeout 4 s; silently falls back to stablecoins-only on error
+ *   • Fiat — open.er-api.com (free, no API key)
+ *   • Crypto — api.mexc.com (free, no API key, no strict geo-block)
+ *   • Timeout 4s, Graceful Degradation via Promise.allSettled
  */
 async function fetchUsdRates(): Promise<Map<string, number>> {
   const rates = new Map<string, number>([
     ['USD',  1], ['USDT', 1], ['USDC', 1],
     ['BUSD', 1], ['DAI',  1], ['TUSD', 1], ['USDP', 1],
   ]);
-  try {
-    const res  = await fetch(
-      'https://open.er-api.com/v6/latest/USD',
-      { signal: AbortSignal.timeout(4000) },
-    );
+
+  const fetchFiat = async () => {
+    const res = await fetch('https://open.er-api.com/v6/latest/USD', {
+      signal: AbortSignal.timeout(4000),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json() as { result: string; rates: Record<string, number> };
     if (data.result === 'success' && data.rates) {
       for (const [cur, fxRate] of Object.entries(data.rates)) {
         const key = cur.toUpperCase();
         if (!rates.has(key) && fxRate > 0) {
-          rates.set(key, 1 / fxRate); // 1 USD = fxRate units  →  1 unit = 1/fxRate USD
+          rates.set(key, 1 / fxRate); // 1 USD = fxRate units → 1 unit = 1/fxRate USD
         }
       }
     }
-  } catch {
-    // Network error / timeout — stablecoins still work, others will be marked uncovered
-  }
+  };
+
+  const fetchCrypto = async () => {
+    const res = await fetch('https://api.mexc.com/api/v3/ticker/price', {
+      signal: AbortSignal.timeout(4000),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json() as Array<{ symbol: string; price: string }>;
+    for (const item of data) {
+      if (item.symbol.endsWith('USDT')) {
+        const coin = item.symbol.slice(0, -4); // remove USDT
+        const price = parseFloat(item.price);
+        if (!rates.has(coin) && price > 0) {
+          rates.set(coin, price); // 1 coin = price USD
+        }
+      }
+    }
+  };
+
+  const results = await Promise.allSettled([fetchFiat(), fetchCrypto()]);
+  
+  results.forEach((r, idx) => {
+    if (r.status === 'rejected') {
+      const apiName = idx === 0 ? 'Fiat (er-api)' : 'Crypto (mexc)';
+      console.warn(`[ExcelExport] ${apiName} fetch failed:`, r.reason instanceof Error ? r.reason.message : r.reason);
+    }
+  });
+
   return rates;
 }
 
