@@ -302,14 +302,23 @@ function hdr(ws: ExcelJS.Worksheet, col: number, row: number, text: string, widt
 
 function buildSheet0Summary(wb: ExcelJS.Workbook, rows: TxRow[], from: Date, to: Date): void {
   const ws = wb.addWorksheet('Сводка');
-  const periodStr = `${fmtDate(from)} — ${fmtDate(to)}`;
-  const days = Math.max(1, Math.round((to.getTime() - from.getTime()) / (1000 * 60 * 60 * 24)));
 
-  ws.getColumn(1).width = 26;
-  ws.getColumn(2).width = 12;
-  ws.getColumn(3).width = 18;
-  ws.getColumn(4).width = 18;
-  ws.getColumn(5).width = 18;
+  // Actual data range: use MIN/MAX of real transactions, not the user-selected filter.
+  // Showing "balance on 01.05" when the account didn't exist then is misleading.
+  const txTimes    = rows.map(row => new Date(row.transaction_time).getTime());
+  const actualFrom = txTimes.length > 0 ? new Date(Math.min(...txTimes)) : from;
+  const actualTo   = txTimes.length > 0 ? new Date(Math.max(...txTimes)) : to;
+  const actualDays = Math.max(1,
+    Math.round((actualTo.getTime() - actualFrom.getTime()) / (1000 * 60 * 60 * 24)) + 1);
+  const actualStr     = `${fmtDate(actualFrom)} — ${fmtDate(actualTo)}`;
+  const filterStr     = `${fmtDate(from)} — ${fmtDate(to)}`;
+  const filterDiffers = actualStr !== filterStr;
+
+  ws.getColumn(1).width = 30;
+  ws.getColumn(2).width = 22;
+  ws.getColumn(3).width = 22;
+  ws.getColumn(4).width = 22;
+  ws.getColumn(5).width = 22;
 
   let r = 1;
 
@@ -347,8 +356,18 @@ function buildSheet0Summary(wb: ExcelJS.Workbook, rows: TxRow[], from: Date, to:
   ws.getRow(r).height = 30;
   r++;
 
-  cell(r, 1, 'Период:', true); cell(r, 2, `${periodStr} (${String(days)} дн.)`); r++;
-  cell(r, 1, 'Сформирован:', true); cell(r, 2, `${fmtDate(new Date())} ${fmtTime(new Date())}`); r++;
+  cell(r, 1, 'Период данных:', true);
+  cell(r, 2, `${actualStr} (${String(actualDays)} дн.)`);
+  r++;
+  if (filterDiffers) {
+    // User chose a wider filter — show it transparently
+    cell(r, 1, 'Запрошен (фильтр):', false, 'FF999999');
+    cell(r, 2, filterStr, false, 'FF999999');
+    r++;
+  }
+  cell(r, 1, 'Сформирован:', true);
+  cell(r, 2, `${fmtDate(new Date())} ${fmtTime(new Date())}`);
+  r++;
   r++; // spacer
 
   // ── СВОДКА ЗА ПЕРИОД ──────────────────────────────────────
@@ -398,6 +417,7 @@ function buildSheet0Summary(wb: ExcelJS.Workbook, rows: TxRow[], from: Date, to:
   ];
   for (const [label, key, sign] of intentDefs) {
     const d = im[key];
+    if (d.count === 0) continue; // skip types with zero activity
     cell(r, 1, label);
     cell(r, 2, countStr(d.count));
     // Render each currency on the same row, cols 3+
@@ -449,19 +469,23 @@ function buildSheet0Summary(wb: ExcelJS.Workbook, rows: TxRow[], from: Date, to:
   }
   r++; r++; // spacer
 
-  // ── ОСТАТКИ ПО СЧЕТАМ ────────────────────────────────────
-  sectionHdr('ОСТАТКИ ПО СЧЕТАМ');
-  // Column sub-headers
-  ['Счёт', 'Валюта', 'Нач. периода', 'Кон. периода', 'Изменение'].forEach((h, i) => {
+  // ── СОСТОЯНИЕ СЧЕТОВ ──────────────────────────────────────
+  // We only show what we actually know:
+  //   «Баланс сейчас»  = balance_after of the most recent transaction (true current balance)
+  //   «Движение»       = net inflow/outflow during the selected period
+  // We intentionally omit "balance at start of period" — the account may not have existed
+  // at `from` date, so computing initial_balance and labelling it "balance on 01.05" is dishonest.
+  sectionHdr('СОСТОЯНИЕ СЧЕТОВ');
+  ['Счёт', 'Валюта', 'Баланс сейчас', 'Движение за период', ''].forEach((h, i) => {
     const c = ws.getCell(r, i + 1);
     c.value = h;
     c.font = { bold: true, size: 8, name: 'Calibri' };
     c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_GREY_BG}` } };
-    c.alignment = { horizontal: i > 1 ? 'right' : 'left' };
+    c.alignment = { horizontal: i >= 2 ? 'right' : 'left' };
   });
   r++;
 
-  // Per-account: rows are DESC sorted, first occurrence = most recent = end balance
+  // Per-account: rows are DESC sorted — first occurrence = most recent = current balance
   type AccSumm = { currency: string; endBal: number; netChange: number };
   const accMap = new Map<string, AccSumm>();
   for (const row of rows) {
@@ -475,11 +499,19 @@ function buildSheet0Summary(wb: ExcelJS.Workbook, rows: TxRow[], from: Date, to:
     acc.netChange += isInflow ? debitAbs : -debitAbs;
   }
   for (const [name, acc] of accMap) {
-    const startBal = acc.endBal - acc.netChange;
-    cell(r, 1, name); cell(r, 2, acc.currency);
-    cell(r, 3, fmtAmtSigned(startBal)); cell(r, 4, fmtAmtSigned(acc.endBal));
-    const chg = acc.endBal - startBal;
-    cell(r, 5, fmtAmtSigned(chg), false, chg >= 0 ? `FF${C_INCOME}` : `FF${C_EXPENSE}`);
+    cell(r, 1, name);
+    cell(r, 2, acc.currency);
+    // Current balance — always truthful
+    const balC = cell(r, 3, fmtAmtSigned(acc.endBal), false,
+      acc.endBal >= 0 ? `FF${C_INCOME}` : `FF${C_EXPENSE}`);
+    balC.alignment = { horizontal: 'right' };
+    // Movement during period — net signed, with arrow and currency code
+    const mv    = acc.netChange;
+    const arrow = mv > 0 ? '▲ ' : mv < 0 ? '▼ ' : '';
+    const mvClr = mv > 0 ? `FF${C_INCOME}` : mv < 0 ? `FF${C_EXPENSE}` : 'FF888888';
+    const mvStr = mv === 0 ? '— нет операций' : `${arrow}${fmtAmtSigned(mv)} ${acc.currency}`;
+    const mvC   = cell(r, 4, mvStr, false, mvClr);
+    mvC.alignment = { horizontal: 'left' };
     r++;
   }
   r++; // spacer
@@ -513,26 +545,36 @@ function buildSheet0Summary(wb: ExcelJS.Workbook, rows: TxRow[], from: Date, to:
   }
   r++; // spacer
 
-  // ── ТОП КАТЕГОРИЙ РАСХОДОВ ────────────────────────────────
-  sectionHdr('ТОП КАТЕГОРИЙ РАСХОДОВ');
-  const catMap = new Map<string, { total: number; count: number }>();
+  // ── ТОП КАТЕГОРИЙ РАСХОДОВ (по валюте) ──────────────────
+  // Each currency gets its own block — mixing currencies and computing % on a
+  // combined total (e.g. UAH + USD) is mathematically meaningless.
+  const catByCur = new Map<string, Map<string, { total: number; count: number }>>();
   for (const row of rows) {
     if (row.transaction_intent !== 'expense') continue;
-    const k = row.category_name;
-    const c = catMap.get(k) ?? { total: 0, count: 0 };
-    c.total += parseFloat(row.original_amount); c.count++;
-    catMap.set(k, c);
+    const cur = row.currency;
+    if (!catByCur.has(cur)) catByCur.set(cur, new Map());
+    const cm  = catByCur.get(cur)!;
+    const k   = row.category_name;
+    const cv  = cm.get(k) ?? { total: 0, count: 0 };
+    cv.total += parseFloat(row.original_amount); cv.count++;
+    cm.set(k, cv);
   }
-  const totalExpense = [...im.expense.byCur.values()].reduce((s, v) => s + v, 0) || 1;
-  const topCats = [...catMap.entries()].sort((a, b) => b[1].total - a[1].total).slice(0, 5);
-  if (topCats.length === 0) { cell(r, 1, '—'); r++; }
-  for (const [i, [name, c]] of topCats.entries()) {
-    const pct = Math.round((c.total / totalExpense) * 100);
-    cell(r, 1, `${String(i + 1)}.  ${name}`);
-    cell(r, 2, countStr(c.count));
-    cell(r, 3, fmtAmtSigned(-c.total));
-    cell(r, 4, `${String(pct)}%`);
-    r++;
+  if (catByCur.size === 0) {
+    sectionHdr('ТОП КАТЕГОРИЙ РАСХОДОВ');
+    cell(r, 1, '— нет расходов за период'); r++;
+  }
+  for (const [cur, cm] of catByCur) {
+    sectionHdr(`ТОП РАСХОДОВ — ${cur}`);
+    const totalExpCur = im.expense.byCur.get(cur) ?? 1;
+    const topCats = [...cm.entries()].sort((a, b) => b[1].total - a[1].total).slice(0, 5);
+    for (const [i, [name, c]] of topCats.entries()) {
+      const pct = Math.round((c.total / totalExpCur) * 100);
+      cell(r, 1, `${String(i + 1)}.  ${name}`);
+      cell(r, 2, countStr(c.count));
+      cell(r, 3, `${fmtAmtSigned(-c.total)} ${cur}`);
+      cell(r, 4, `${String(pct)}%`);
+      r++;
+    }
   }
   r++; r++; // spacer before footer
 
@@ -547,7 +589,8 @@ function buildSheet0Summary(wb: ExcelJS.Workbook, rows: TxRow[], from: Date, to:
   footerStyle(r).value = '─────────────────────────────────────────────────────────'; r++;
   footerStyle(r).value = 'Документ сформирован системой MIDAS v2.0'; r++;
   footerStyle(r).value = `Дата экспорта: ${fmtDate(new Date())} ${fmtTime(new Date())}`; r++;
-  footerStyle(r).value = `Период: ${periodStr}`; r++;
+  footerStyle(r).value = `Период данных: ${actualStr}`; r++;
+  if (filterDiffers) { footerStyle(r).value = `Фильтр запроса: ${filterStr}`; r++; }
   footerStyle(r).value = `Количество записей: ${String(rows.length)}`; r++;
   footerStyle(r).value = '─────────────────────────────────────────────────────────'; r++;
   footerStyle(r).value = 'Документ является информационным. Для официального подтверждения операций обратитесь в банк или платёжную систему.'; r++;
