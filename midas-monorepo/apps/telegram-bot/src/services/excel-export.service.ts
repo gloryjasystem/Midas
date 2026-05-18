@@ -378,7 +378,7 @@ export async function exportTransactionsExcel(
 
   buildSheet0Summary(wb, rows, from, to, usdRates, rateSources);
   buildSheet1(wb, rows, from, to, usdRates);
-  buildSheet2(wb, rows);
+  buildSheet2(wb, rows, usdRates);
   buildSheet3(wb, rows);
   buildSheet4(wb, rows);
 
@@ -1542,50 +1542,317 @@ function buildSheet1(wb: ExcelJS.Workbook, rows: TxRow[], from: Date, to: Date, 
 // Sheet 2: Счета
 // ─────────────────────────────────────────────────────────────
 
-function buildSheet2(wb: ExcelJS.Workbook, rows: TxRow[]): void {
+function humaniseAccountType(type: string): string {
+  const map: Record<string, string> = {
+    manual:   'Наличные',
+    cash:     'Наличные',
+    bank:     'Банк',
+    crypto:   'Крипто',
+    exchange: 'Биржа',
+    credit:   'Кредитная карта',
+    savings:  'Накопления',
+    card:     'Карта',
+    wallet:   'Кошелёк',
+  };
+  return map[(type ?? '').toLowerCase()] ?? type;
+}
+
+/**
+ * Sheet 2 — Asset & Liquidity Dashboard (Wealth Management view)
+ *
+ * Columns:
+ *   A  Счёт              — account name
+ *   B  Тип актива        — human-readable type
+ *   C  Валюта            — currency code
+ *   D  Нач. остаток      — opening balance (CB − net_flow)
+ *   E  Оборот (+)        — total inflow this period
+ *   F  Оборот (−)        — total outflow this period (displayed positive)
+ *   G  Итог. остаток     — closing balance from SQL window function
+ *   H  ≈ USD             — closing balance × live rate
+ *   I  Доля %            — % of total USD portfolio + native data bar
+ *   J  Последняя операция — date of most recent transaction
+ *
+ * Reconciliation identity: D + E − F = G  (always true by construction)
+ */
+function buildSheet2(wb: ExcelJS.Workbook, rows: TxRow[], usdRates: Map<string, number>): void {
   const ws = wb.addWorksheet('Счета');
+  const TOTAL_COLS = 10;
 
-  ws.mergeCells('A1:G1');
-  const t = ws.getCell('A1');
-  t.value = 'MIDAS · Сводка по счетам';
-  t.font  = { bold: true, color: { argb: `FF${C_COL_HDR_FG}` }, size: 12, name: 'Calibri' };
-  t.fill  = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_HEADER_BG}` } };
-  t.alignment = { horizontal: 'center', vertical: 'middle' };
-  ws.getRow(1).height = 30;
+  // ── Row 1: Title ────────────────────────────────────────────
+  ws.mergeCells(1, 1, 1, TOTAL_COLS);
+  const titleCell = ws.getCell(1, 1);
+  titleCell.value = 'MIDAS · Asset & Liquidity Dashboard';
+  titleCell.font  = { bold: true, size: 13, name: 'Calibri', color: { argb: `FF${C_COL_HDR_FG}` } };
+  titleCell.fill  = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_HEADER_BG}` } };
+  titleCell.alignment = { horizontal: 'center', vertical: 'middle' };
+  ws.getRow(1).height = 32;
 
-  const headers = ['Счёт', 'Валюта', 'Тип', 'Доходы', 'Расходы', 'Долги', 'Чистый баланс'];
-  const widths  = [20, 10, 14, 14, 14, 14, 16];
-  headers.forEach((h, i) => hdr(ws, i + 1, 2, h, widths[i] ?? 14));
-  ws.getRow(2).height = 24;
+  // ── Row 2: Column headers ────────────────────────────────────
+  const HDR_ROW = 2;
+  const colDefs: Array<[string, number]> = [
+    ['Счёт',                   24],  // A=1
+    ['Тип актива',             16],  // B=2
+    ['Вал.',                    8],  // C=3
+    ['Нач. остаток',           18],  // D=4
+    ['Оборот (+)',             16],  // E=5
+    ['Оборот (−)',             16],  // F=6
+    ['Итог. остаток',          18],  // G=7
+    ['≈ USD',                  15],  // H=8
+    ['Доля %',                 14],  // I=9
+    ['Последняя\nоперация',    16],  // J=10
+  ];
+  colDefs.forEach(([text, width], i) => hdr(ws, i + 1, HDR_ROW, text, width));
+  ws.getRow(HDR_ROW).height = 30;
 
-  // Group by account
-  const accMap = new Map<string, { currency: string; type: string; income: number; expense: number; debt: number }>();
+  // ── Aggregate per account ────────────────────────────────────
+  type AccData = {
+    currency:     string;
+    accountType:  string;
+    inflow:       number;   // income + debt_received
+    outflow:      number;   // expense + transfer + debt_given  (stored positive)
+    closingBal:   number;   // balance_after of most recent tx (rows sorted DESC)
+    lastDate:     Date;
+  };
+  const accMap = new Map<string, AccData>();
+
   for (const r of rows) {
-    const key = r.account_name;
-    const acc = accMap.get(key) ?? { currency: r.account_currency, type: r.account_type, income: 0, expense: 0, debt: 0 };
-    const amt = parseFloat(r.original_amount);
-    if (r.transaction_intent === 'income')    acc.income  += amt;
-    if (r.transaction_intent === 'expense')   acc.expense += amt;
-    if (r.transaction_intent === 'debt_given' || r.transaction_intent === 'debt_received') acc.debt += amt;
-    accMap.set(key, acc);
+    const key    = r.account_name;
+    const amt    = parseFloat(r.account_debit_amount ?? r.original_amount);
+    const txDate = new Date(r.transaction_time);
+    const isIn   = r.transaction_intent === 'income' || r.transaction_intent === 'debt_received';
+
+    if (!accMap.has(key)) {
+      // First encounter = most recent tx (rows DESC) → take balance_after as closing balance
+      accMap.set(key, {
+        currency:    r.account_currency,
+        accountType: r.account_type,
+        inflow:      0,
+        outflow:     0,
+        closingBal:  parseFloat(r.balance_after),
+        lastDate:    txDate,
+      });
+    }
+    const acc = accMap.get(key)!;
+    if (isIn) acc.inflow  += amt;
+    else      acc.outflow += amt;
+    // lastDate: keep the most recent (rows are DESC so first encountered = most recent)
+    if (txDate > acc.lastDate) acc.lastDate = txDate;
   }
 
-  let rowNum = 3;
+  // ── Compute USD equivalents & portfolio total ─────────────────
+  type AccRow = AccData & {
+    name:         string;
+    openingBal:   number;
+    usdEquiv:     number | null;
+    portfolioPct: number;   // filled after total known
+  };
+
+  const accRows: AccRow[] = [];
+  let totalUsd = 0;
+
   for (const [name, acc] of accMap) {
-    const net = acc.income - acc.expense;
-    const data = [name, acc.currency, acc.type, acc.income, acc.expense, acc.debt, net];
-    data.forEach((val, ci) => {
-      const cell = ws.getCell(rowNum, ci + 1);
-      cell.value = val;
-      if (ci >= 3) cell.numFmt = smartNumFmt(acc.currency);
-      cell.font = { size: 9, name: 'Calibri', bold: ci === 6,
-        color: ci === 6 ? { argb: net >= 0 ? `FF${C_INCOME}` : `FF${C_EXPENSE}` } : undefined };
-      cell.fill = { type: 'pattern', pattern: 'solid',
-        fgColor: { argb: rowNum % 2 === 0 ? `FF${C_ROW_ODD}` : 'FFFFFFFF' } };
-    });
-    rowNum++;
+    const openingBal  = acc.closingBal - acc.inflow + acc.outflow;
+    const rate        = usdRates.get(acc.currency.toUpperCase()) ?? null;
+    const usdEquiv    = rate !== null ? acc.closingBal * rate : null;
+    if (usdEquiv !== null) totalUsd += usdEquiv;
+    accRows.push({ ...acc, name, openingBal, usdEquiv, portfolioPct: 0 });
   }
-  ws.views = [{ state: 'frozen', ySplit: 2 }];
+
+  // Fill portfolio %
+  for (const ar of accRows) {
+    ar.portfolioPct = totalUsd > 0 && ar.usdEquiv !== null
+      ? (ar.usdEquiv / totalUsd) * 100
+      : 0;
+  }
+
+  // Sort descending by USD equivalent (largest holding first)
+  accRows.sort((a, b) => (b.usdEquiv ?? -Infinity) - (a.usdEquiv ?? -Infinity));
+
+  // ── Data rows ────────────────────────────────────────────────
+  const DATA_START = 3;
+  const thinBorder = {
+    top:    { style: 'thin' as const, color: { argb: `FF${C_TBL_BORDER}` } },
+    bottom: { style: 'thin' as const, color: { argb: `FF${C_TBL_BORDER}` } },
+    left:   { style: 'thin' as const, color: { argb: `FF${C_TBL_BORDER}` } },
+    right:  { style: 'thin' as const, color: { argb: `FF${C_TBL_BORDER}` } },
+  };
+
+  let rn = DATA_START;
+  for (const ar of accRows) {
+    const bgColor = rn % 2 === 0 ? `FF${C_ROW_ODD}` : 'FFFFFFFF';
+    const fillBg  = { type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb: bgColor } };
+    const nf      = smartNumFmt(ar.currency);
+
+    ws.getRow(rn).height = 20;
+
+    // A — Account name
+    const ca = ws.getCell(rn, 1);
+    ca.value = ar.name;
+    ca.font  = { bold: true, size: 9, name: 'Calibri', color: { argb: 'FF1A3C5E' } };
+    ca.fill  = fillBg; ca.border = thinBorder;
+    ca.alignment = { vertical: 'middle', horizontal: 'left' };
+
+    // B — Asset type (human-readable)
+    const cb = ws.getCell(rn, 2);
+    cb.value = humaniseAccountType(ar.accountType);
+    cb.font  = { size: 8, name: 'Calibri', italic: true, color: { argb: 'FF555555' } };
+    cb.fill  = fillBg; cb.border = thinBorder;
+    cb.alignment = { vertical: 'middle', horizontal: 'left' };
+
+    // C — Currency
+    const cc = ws.getCell(rn, 3);
+    cc.value = ar.currency;
+    cc.font  = { size: 9, name: 'Calibri', color: { argb: 'FF444444' } };
+    cc.fill  = fillBg; cc.border = thinBorder;
+    cc.alignment = { vertical: 'middle', horizontal: 'center' };
+
+    // D — Opening balance
+    const cd = ws.getCell(rn, 4);
+    cd.value  = ar.openingBal;
+    cd.numFmt = nf;
+    cd.font   = { size: 9, name: 'Calibri',
+      color: { argb: ar.openingBal >= 0 ? `FF${C_INCOME}` : `FF${C_EXPENSE}` } };
+    cd.fill  = fillBg; cd.border = thinBorder;
+    cd.alignment = { vertical: 'middle', horizontal: 'right' };
+
+    // E — Inflow (+)
+    const ce = ws.getCell(rn, 5);
+    ce.value  = ar.inflow;
+    ce.numFmt = nf;
+    ce.font   = { size: 9, name: 'Calibri', color: { argb: `FF${C_INCOME}` } };
+    ce.fill  = fillBg; ce.border = thinBorder;
+    ce.alignment = { vertical: 'middle', horizontal: 'right' };
+
+    // F — Outflow (−), stored positive, displayed with minus color
+    const cf = ws.getCell(rn, 6);
+    cf.value  = ar.outflow;
+    cf.numFmt = nf;
+    cf.font   = { size: 9, name: 'Calibri', color: { argb: `FF${C_EXPENSE}` } };
+    cf.fill  = fillBg; cf.border = thinBorder;
+    cf.alignment = { vertical: 'middle', horizontal: 'right' };
+
+    // G — Closing balance (from SQL window fn — ground truth)
+    const cg = ws.getCell(rn, 7);
+    cg.value  = ar.closingBal;
+    cg.numFmt = nf;
+    cg.font   = { bold: true, size: 9, name: 'Calibri',
+      color: { argb: ar.closingBal >= 0 ? `FF${C_INCOME}` : `FF${C_EXPENSE}` } };
+    cg.fill   = { type: 'pattern', pattern: 'solid',
+      fgColor: { argb: ar.closingBal >= 0 ? 'FFE8F8F5' : 'FFFDEDEC' } };
+    cg.border = thinBorder;
+    cg.alignment = { vertical: 'middle', horizontal: 'right' };
+
+    // H — ≈ USD equivalent
+    const ch = ws.getCell(rn, 8);
+    if (ar.usdEquiv !== null) {
+      ch.value  = ar.usdEquiv;
+      ch.numFmt = '#,##0.00';
+      ch.font   = { bold: true, size: 9, name: 'Calibri',
+        color: { argb: ar.usdEquiv >= 0 ? `FF${C_INCOME}` : `FF${C_EXPENSE}` } };
+    } else {
+      ch.value = '— н/д';
+      ch.font  = { size: 8, name: 'Calibri', italic: true, color: { argb: 'FFAAAAAA' } };
+    }
+    ch.fill  = fillBg; ch.border = thinBorder;
+    ch.alignment = { vertical: 'middle', horizontal: 'right' };
+
+    // I — Portfolio % (numeric for data bar)
+    const ci = ws.getCell(rn, 9);
+    ci.value  = parseFloat(ar.portfolioPct.toFixed(2));
+    ci.numFmt = '0.00"%"';
+    ci.font   = { size: 9, name: 'Calibri', color: { argb: 'FF2D6A9F' } };
+    ci.fill  = fillBg; ci.border = thinBorder;
+    ci.alignment = { vertical: 'middle', horizontal: 'right' };
+
+    // J — Last activity date
+    const cj = ws.getCell(rn, 10);
+    cj.value = fmtDate(ar.lastDate);
+    cj.font  = { size: 8, name: 'Calibri', color: { argb: 'FF666666' } };
+    cj.fill  = fillBg; cj.border = thinBorder;
+    cj.alignment = { vertical: 'middle', horizontal: 'center' };
+
+    rn++;
+  }
+
+  // ── Native Data Bar (conditional formatting) on Portfolio % col ─
+  // Renders visual bar inside cell I — like Bloomberg/Xero KPI column
+  if (accRows.length > 0) {
+    const pctRef = `I${DATA_START}:I${rn - 1}`;
+    ws.addConditionalFormatting({
+      ref: pctRef,
+      rules: [{
+        type:      'dataBar',
+        priority:  1,
+        minLength: 0,
+        maxLength: 100,
+        showValue: true,
+        gradient:  false,
+        cfvo: [
+          { type: 'num', value: 0 },
+          { type: 'num', value: 100 },
+        ],
+      }],
+    });
+  }
+
+  // ── Net Worth footer row ─────────────────────────────────────
+  // Navy bookend: mirrors Grand Total row on Sheet0/Sheet1
+  const footerRow = rn;
+  ws.getRow(footerRow).height = 24;
+  const gtFill   = { type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb: `FF${C_GRAND_BG}` } };
+  const gtBorder = {
+    top:    { style: 'medium' as const, color: { argb: 'FF0D2840' } },
+    bottom: { style: 'medium' as const, color: { argb: 'FF0D2840' } },
+    left:   { style: 'thin'   as const, color: { argb: `FF${C_TBL_BORDER}` } },
+    right:  { style: 'thin'   as const, color: { argb: `FF${C_TBL_BORDER}` } },
+  };
+  for (let ci = 1; ci <= TOTAL_COLS; ci++) {
+    ws.getCell(footerRow, ci).fill   = gtFill;
+    ws.getCell(footerRow, ci).border = gtBorder;
+  }
+  // Label: cols A–G merged
+  ws.mergeCells(footerRow, 1, footerRow, 7);
+  const gtLabel = ws.getCell(footerRow, 1);
+  gtLabel.value = 'ИТОГО · Net Worth';
+  gtLabel.font  = { bold: true, size: 10, name: 'Calibri', color: { argb: 'FFB0C8E0' } };
+  gtLabel.fill  = gtFill;
+  gtLabel.alignment = { horizontal: 'right', vertical: 'middle' };
+
+  // Col H — Total USD
+  const totalClr = totalUsd >= 0 ? 'FF7DCEA0' : 'FFE57373';
+  const gtH = ws.getCell(footerRow, 8);
+  gtH.value  = totalUsd;
+  gtH.numFmt = '#,##0.00';
+  gtH.font   = { bold: true, size: 11, name: 'Calibri', color: { argb: totalClr } };
+  gtH.fill   = gtFill;
+  gtH.alignment = { horizontal: 'right', vertical: 'middle' };
+
+  // Col I — always 100%
+  const gtI = ws.getCell(footerRow, 9);
+  gtI.value  = '100%';
+  gtI.font   = { bold: true, size: 9, name: 'Calibri', color: { argb: 'FFB0C8E0' } };
+  gtI.fill   = gtFill;
+  gtI.alignment = { horizontal: 'right', vertical: 'middle' };
+
+  // ── Footnote ─────────────────────────────────────────────────
+  const fnRow = footerRow + 1;
+  ws.mergeCells(fnRow, 1, fnRow, TOTAL_COLS);
+  const fn = ws.getCell(fnRow, 1);
+  fn.value = 'Курс на дату экспорта · open.er-api.com (fiat) · mexc.com (crypto) · Reconciliation: Нач. остаток + Оборот(+) − Оборот(−) = Итог. остаток';
+  fn.font  = { size: 7, italic: true, name: 'Calibri', color: { argb: 'FFAAAAAA' } };
+  fn.fill  = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_GREY_BG}` } };
+  fn.border = { top: { style: 'thin', color: { argb: `FF${C_TBL_BORDER}` } } };
+  ws.getRow(fnRow).height = 14;
+
+  // ── Freeze + hide gridlines ───────────────────────────────────
+  ws.views = [{
+    state: 'frozen',
+    ySplit: HDR_ROW,
+    xSplit: 0,
+    activeCell: `A${DATA_START}`,
+    showGridLines: false,
+  }];
+  ws.properties.tabColor = { argb: `FF${C_COL_HDR_BG}` };
 }
 
 // ─────────────────────────────────────────────────────────────
