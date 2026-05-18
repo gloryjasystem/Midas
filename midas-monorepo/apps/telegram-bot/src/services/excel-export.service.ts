@@ -379,7 +379,7 @@ export async function exportTransactionsExcel(
   buildSheet0Summary(wb, rows, from, to, usdRates, rateSources);
   buildSheet1(wb, rows, from, to, usdRates);
   buildSheet2(wb, rows, usdRates);
-  buildSheet3(wb, rows);
+  buildSheet3(wb, rows, usdRates);
   buildSheet4(wb, rows);
 
   const arrayBuffer = await wb.xlsx.writeBuffer();
@@ -1859,51 +1859,254 @@ function buildSheet2(wb: ExcelJS.Workbook, rows: TxRow[], usdRates: Map<string, 
 // Sheet 3: Категории
 // ─────────────────────────────────────────────────────────────
 
-function buildSheet3(wb: ExcelJS.Workbook, rows: TxRow[]): void {
+function buildSheet3(wb: ExcelJS.Workbook, rows: TxRow[], usdRates: Map<string, number>): void {
   const ws = wb.addWorksheet('Категории');
+  const TOTAL_COLS = 8;
 
-  ws.mergeCells('A1:F1');
-  const t = ws.getCell('A1');
-  t.value = 'MIDAS · Сводка по категориям';
-  t.font  = { bold: true, color: { argb: `FF${C_COL_HDR_FG}` }, size: 12, name: 'Calibri' };
-  t.fill  = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_HEADER_BG}` } };
-  t.alignment = { horizontal: 'center', vertical: 'middle' };
-  ws.getRow(1).height = 30;
+  // ─ Row 1: Title
+  ws.mergeCells(1, 1, 1, TOTAL_COLS);
+  const titleCell = ws.getCell(1, 1);
+  titleCell.value = 'MIDAS · P&L по категориям (≈ USD)';
+  titleCell.font  = { bold: true, size: 13, name: 'Calibri', color: { argb: `FF${C_COL_HDR_FG}` } };
+  titleCell.fill  = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_HEADER_BG}` } };
+  titleCell.alignment = { horizontal: 'center', vertical: 'middle' };
+  ws.getRow(1).height = 32;
 
-  const headers = ['Группа', 'Категория', 'Транзакций', 'Расходы', 'Доходы', 'Долги'];
-  const widths  = [14, 20, 12, 14, 14, 14];
-  headers.forEach((h, i) => hdr(ws, i + 1, 2, h, widths[i] ?? 14));
-  ws.getRow(2).height = 24;
+  // ─ Row 2: Column headers
+  const HDR_ROW = 2;
+  const colDefs: Array<[string, number]> = [
+    ['Группа',          16],
+    ['Категория',       24],
+    ['Операций',      10],
+    ['Расходы ≈ USD',    18],
+    ['Доля %',          13],
+    ['Доходы ≈ USD',     18],
+    ['Чистый итог ≈ USD', 18],
+    ['Примечание',      22],
+  ];
+  colDefs.forEach(([text, width], i) => hdr(ws, i + 1, HDR_ROW, text, width));
+  ws.getRow(HDR_ROW).height = 28;
 
-  const catMap = new Map<string, { group: string; count: number; expense: number; income: number; debt: number }>();
+  // ─ Aggregate: P&L intents (income + expense) vs capital movements (debt + transfer)
+  type CatEntry = {
+    group:          string;
+    count:          number;
+    expenseUsd:     number;
+    incomeUsd:      number;
+    uncovered:      string[];   // "50 TRX" for missing rates
+  };
+  type CapEntry = {
+    count:    number;
+    totalUsd: number;
+    uncov:    string[];
+  };
+
+  const PL_INTENTS    = new Set(['income', 'expense']);
+  const CAP_INTENTS   = new Set(['debt_given', 'debt_received', 'transfer']);
+
+  const catMap  = new Map<string, CatEntry>();
+  const capMap  = new Map<string, CapEntry>();   // key = intent
+
   for (const r of rows) {
-    const key = r.category_name;
-    const cat = catMap.get(key) ?? { group: r.category_group, count: 0, expense: 0, income: 0, debt: 0 };
-    const amt = parseFloat(r.original_amount);
-    cat.count++;
-    if (r.transaction_intent === 'expense')   cat.expense += amt;
-    if (r.transaction_intent === 'income')    cat.income  += amt;
-    if (r.transaction_intent.startsWith('debt')) cat.debt += amt;
-    catMap.set(key, cat);
+    const amt  = parseFloat(r.original_amount);
+    const cur  = r.currency.toUpperCase();
+    const rate = usdRates.get(cur) ?? null;
+    const usd  = rate !== null ? amt * rate : null;
+    const unc  = rate === null ? `${amt.toFixed(2)} ${r.currency}` : null;
+
+    if (PL_INTENTS.has(r.transaction_intent)) {
+      const key = r.category_name;
+      const cat = catMap.get(key) ?? { group: r.category_group, count: 0, expenseUsd: 0, incomeUsd: 0, uncovered: [] };
+      cat.count++;
+      if (r.transaction_intent === 'expense') {
+        cat.expenseUsd += usd ?? 0;
+        if (unc) cat.uncovered.push(unc);
+      } else {
+        cat.incomeUsd  += usd ?? 0;
+        if (unc) cat.uncovered.push(unc);
+      }
+      catMap.set(key, cat);
+    } else if (CAP_INTENTS.has(r.transaction_intent)) {
+      const cap = capMap.get(r.transaction_intent) ?? { count: 0, totalUsd: 0, uncov: [] };
+      cap.count++;
+      cap.totalUsd += usd ?? 0;
+      if (unc) cap.uncov.push(unc);
+      capMap.set(r.transaction_intent, cap);
+    }
   }
 
-  // Sort by expense desc
-  const sorted = [...catMap.entries()].sort((a, b) => b[1].expense - a[1].expense);
-  let rowNum = 3;
+  // Sort by expenseUsd DESC (biggest burn rate first)
+  const sorted = [...catMap.entries()].sort((a, b) => b[1].expenseUsd - a[1].expenseUsd);
+  const grandExpUsd = sorted.reduce((s, [, c]) => s + c.expenseUsd, 0);
+  const grandIncUsd = sorted.reduce((s, [, c]) => s + c.incomeUsd, 0);
+  const grandOps    = sorted.reduce((s, [, c]) => s + c.count, 0);
+
+  const thinB = {
+    top:    { style: 'thin' as const, color: { argb: `FF${C_TBL_BORDER}` } },
+    bottom: { style: 'thin' as const, color: { argb: `FF${C_TBL_BORDER}` } },
+    left:   { style: 'thin' as const, color: { argb: `FF${C_TBL_BORDER}` } },
+    right:  { style: 'thin' as const, color: { argb: `FF${C_TBL_BORDER}` } },
+  };
+
+  const DATA_START = 3;
+  let rn = DATA_START;
+
   for (const [name, cat] of sorted) {
-    const data = [cat.group, name, cat.count, cat.expense, cat.income, cat.debt];
-    data.forEach((val, ci) => {
-      const cell = ws.getCell(rowNum, ci + 1);
-      cell.value = val;
-      // Categories are mixed-currency — use generic fiat format (2dp, no trailing zeros)
-      if (ci >= 3) cell.numFmt = '#,##0.##';
-      cell.font = { size: 9, name: 'Calibri' };
-      cell.fill = { type: 'pattern', pattern: 'solid',
-        fgColor: { argb: rowNum % 2 === 0 ? `FF${C_ROW_ODD}` : 'FFFFFFFF' } };
-    });
-    rowNum++;
+    const net    = cat.incomeUsd - cat.expenseUsd;
+    const pct    = grandExpUsd > 0 ? (cat.expenseUsd / grandExpUsd) * 100 : 0;
+    const bgArgb = rn % 2 === 0 ? `FF${C_ROW_ODD}` : 'FFFFFFFF';
+    const fillBg = { type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb: bgArgb } };
+    ws.getRow(rn).height = 18;
+
+    const setCell = (col: number, val: ExcelJS.CellValue, opts: {
+      bold?: boolean; numFmt?: string; color?: string;
+      align?: 'left'|'center'|'right'; fill?: ExcelJS.Fill;
+    } = {}) => {
+      const c = ws.getCell(rn, col);
+      c.value  = val;
+      c.font   = { size: 9, name: 'Calibri', bold: opts.bold,
+        color: opts.color ? { argb: opts.color } : undefined };
+      c.fill   = opts.fill ?? fillBg;
+      c.border = thinB;
+      c.alignment = { vertical: 'middle', horizontal: opts.align ?? 'left' };
+      if (opts.numFmt) c.numFmt = opts.numFmt;
+    };
+
+    setCell(1, cat.group,       { align: 'left',   color: 'FF555555' });
+    setCell(2, name,            { bold: true, color: 'FF1A3C5E' });
+    setCell(3, cat.count,       { align: 'center' });
+    setCell(4, cat.expenseUsd,  { align: 'right',  numFmt: '#,##0.00',
+      color: cat.expenseUsd > 0 ? `FF${C_EXPENSE}` : 'FF888888' });
+    setCell(5, parseFloat(pct.toFixed(2)), { align: 'right', numFmt: '0.00"%"',
+      color: 'FF2D6A9F' });
+    setCell(6, cat.incomeUsd,   { align: 'right',  numFmt: '#,##0.00',
+      color: cat.incomeUsd > 0 ? `FF${C_INCOME}` : 'FF888888' });
+    setCell(7, net, { align: 'right', numFmt: '#,##0.00', bold: true,
+      color: net >= 0 ? `FF${C_INCOME}` : `FF${C_EXPENSE}`,
+      fill: { type: 'pattern', pattern: 'solid',
+        fgColor: { argb: net >= 0 ? 'FFE8F8F5' : 'FFFDEDEC' } } });
+    setCell(8, cat.uncovered.length > 0 ? `+ ${cat.uncovered.slice(0, 3).join(', ')} (н/д)` : '',
+      { align: 'left', color: 'FFAAAAAA' });
+    ws.getCell(rn, 8).font = { size: 7, italic: true, name: 'Calibri', color: { argb: 'FFAAAAAA' } };
+
+    rn++;
   }
-  ws.views = [{ state: 'frozen', ySplit: 2 }];
+
+  // ─ Data Bar on Доля % column
+  if (rn > DATA_START) {
+    ws.addConditionalFormatting({
+      ref: `E${DATA_START}:E${rn - 1}`,
+      rules: [{
+        type: 'dataBar', priority: 1,
+        minLength: 0, maxLength: 100,
+        showValue: true, gradient: false,
+        cfvo: [{ type: 'num', value: 0 }, { type: 'num', value: 100 }],
+      }],
+    });
+  }
+
+  // ─ Grand Total row (navy footer)
+  const gtFill   = { type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb: `FF${C_GRAND_BG}` } };
+  const gtBorder = {
+    top: { style: 'medium' as const, color: { argb: 'FF0D2840' } },
+    bottom: { style: 'medium' as const, color: { argb: 'FF0D2840' } },
+    left:   { style: 'thin'   as const, color: { argb: `FF${C_TBL_BORDER}` } },
+    right:  { style: 'thin'   as const, color: { argb: `FF${C_TBL_BORDER}` } },
+  };
+  const gtRow = rn;
+  ws.getRow(gtRow).height = 24;
+  for (let ci = 1; ci <= TOTAL_COLS; ci++) {
+    ws.getCell(gtRow, ci).fill   = gtFill;
+    ws.getCell(gtRow, ci).border = gtBorder;
+  }
+  ws.mergeCells(gtRow, 1, gtRow, 2);
+  const gt1 = ws.getCell(gtRow, 1);
+  gt1.value = 'ИТОГО P&L';
+  gt1.font  = { bold: true, size: 10, name: 'Calibri', color: { argb: 'FFB0C8E0' } };
+  gt1.fill  = gtFill;
+  gt1.alignment = { horizontal: 'right', vertical: 'middle' };
+
+  const gt3 = ws.getCell(gtRow, 3);
+  gt3.value = grandOps; gt3.font = { bold: true, size: 9, name: 'Calibri', color: { argb: 'FFB0C8E0' } };
+  gt3.fill = gtFill; gt3.alignment = { horizontal: 'center', vertical: 'middle' };
+
+  const expClr = grandExpUsd > 0 ? 'FFE57373' : 'FF7DCEA0';
+  const gt4 = ws.getCell(gtRow, 4);
+  gt4.value = grandExpUsd; gt4.numFmt = '#,##0.00';
+  gt4.font  = { bold: true, size: 10, name: 'Calibri', color: { argb: expClr } };
+  gt4.fill  = gtFill; gt4.alignment = { horizontal: 'right', vertical: 'middle' };
+
+  const gt5 = ws.getCell(gtRow, 5);
+  gt5.value = '100%'; gt5.font = { bold: true, size: 9, name: 'Calibri', color: { argb: 'FFB0C8E0' } };
+  gt5.fill = gtFill; gt5.alignment = { horizontal: 'right', vertical: 'middle' };
+
+  const incClr = grandIncUsd > 0 ? 'FF7DCEA0' : 'FFE57373';
+  const gt6 = ws.getCell(gtRow, 6);
+  gt6.value = grandIncUsd; gt6.numFmt = '#,##0.00';
+  gt6.font  = { bold: true, size: 10, name: 'Calibri', color: { argb: incClr } };
+  gt6.fill  = gtFill; gt6.alignment = { horizontal: 'right', vertical: 'middle' };
+
+  const grandNet = grandIncUsd - grandExpUsd;
+  const netClr   = grandNet >= 0 ? 'FF7DCEA0' : 'FFE57373';
+  const gt7 = ws.getCell(gtRow, 7);
+  gt7.value = grandNet; gt7.numFmt = '#,##0.00';
+  gt7.font  = { bold: true, size: 10, name: 'Calibri', color: { argb: netClr } };
+  gt7.fill  = gtFill; gt7.alignment = { horizontal: 'right', vertical: 'middle' };
+  rn = gtRow + 1;
+
+  // ─ Capital Movements section (GAAP: not included in P&L)
+  if (capMap.size > 0) {
+    rn++; // spacer
+    ws.mergeCells(rn, 1, rn, TOTAL_COLS);
+    const capHdr = ws.getCell(rn, 1);
+    capHdr.value = 'ДВИЖЕНИЕ КАПИТАЛА (НЕ включено в P&L)';
+    capHdr.font  = { bold: true, size: 9, name: 'Calibri', color: { argb: `FF${C_COL_HDR_FG}` } };
+    capHdr.fill  = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_COL_HDR_BG}` } };
+    capHdr.alignment = { horizontal: 'center', vertical: 'middle' };
+    ws.getRow(rn).height = 20;
+    rn++;
+
+    const capLabels: Record<string, string> = {
+      debt_given:     'Долг (дал) — актив',
+      debt_received:  'Долг (взял) — обязательство',
+      transfer:       'Внутренние переводы',
+    };
+    for (const [intent, cap] of capMap) {
+      const bgArgb = rn % 2 === 0 ? 'FFFFF9F0' : 'FFFFFFFA';
+      const fillWarm = { type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb: bgArgb } };
+      ws.getRow(rn).height = 18;
+
+      const setC = (col: number, val: ExcelJS.CellValue, align: 'left'|'center'|'right' = 'left', bold = false, numFmt?: string) => {
+        const c = ws.getCell(rn, col);
+        c.value = val; c.fill = fillWarm; c.border = thinB;
+        c.font  = { size: 9, name: 'Calibri', bold, italic: true, color: { argb: 'FF666666' } };
+        c.alignment = { vertical: 'middle', horizontal: align };
+        if (numFmt) c.numFmt = numFmt;
+      };
+
+      ws.mergeCells(rn, 1, rn, 2);
+      setC(1, capLabels[intent] ?? intent, 'left', true);
+      setC(3, cap.count, 'center');
+      setC(4, cap.totalUsd, 'right', false, '#,##0.00');
+      if (cap.uncov.length > 0) setC(8, `+ ${cap.uncov.slice(0, 2).join(', ')} (н/д)`);
+      rn++;
+    }
+
+    // Footnote
+    ws.mergeCells(rn, 1, rn, TOTAL_COLS);
+    const fn = ws.getCell(rn, 1);
+    fn.value = 'Курс на дату экспорта · open.er-api.com (fiat) · mexc.com (crypto) · Долги и переводы исключены из P&L в соответствии с GAAP';
+    fn.font  = { size: 7, italic: true, name: 'Calibri', color: { argb: 'FFAAAAAA' } };
+    fn.fill  = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_GREY_BG}` } };
+    fn.border = { top: { style: 'thin', color: { argb: `FF${C_TBL_BORDER}` } } };
+    ws.getRow(rn).height = 14;
+  }
+
+  ws.views = [{
+    state: 'frozen', ySplit: HDR_ROW, xSplit: 0,
+    activeCell: `A${DATA_START}`, showGridLines: false,
+  }];
+  ws.properties.tabColor = { argb: `FF${C_EXPENSE}` }; // red tab — expense analytics
 }
 
 // ─────────────────────────────────────────────────────────────
