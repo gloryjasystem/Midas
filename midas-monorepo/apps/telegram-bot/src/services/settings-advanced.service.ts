@@ -294,7 +294,7 @@ export async function exportTransactionsCSV(
   const to   = dateTo   ?? new Date();
 
   return await withTenantTransaction(workspaceId, userId, async (client) => {
-    const accFilter = accountId ? `AND t.account_source_id = $4` : '';
+    const accFilter = accountId ? `AND t.account_id = $4` : '';
     const params: (string | Date)[] = [workspaceId, from.toISOString(), to.toISOString()];
     if (accountId) params.push(accountId);
 
@@ -302,14 +302,14 @@ export async function exportTransactionsCSV(
       `SELECT
          t.transaction_time::date::text AS tx_date,
          t.transaction_intent AS tx_type,
-         ROUND(t.base_amount, 2)::text AS base_amount,
-         t.base_currency,
+         ROUND(t.original_amount, 2)::text AS base_amount,
+         t.currency AS base_currency,
          COALESCE(c.name, '') AS category_name,
          COALESCE(a.name, '') AS account_name,
          COALESCE(t.item_name, '') AS item_name
        FROM transactions t
        LEFT JOIN categories c ON c.id = t.category_id
-       LEFT JOIN account_sources a ON a.id = t.account_source_id
+       LEFT JOIN account_sources a ON a.id = t.account_id
        WHERE t.workspace_id = $1
          AND t.deleted_at IS NULL
          AND t.transaction_time >= $2

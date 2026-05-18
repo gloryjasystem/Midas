@@ -4,7 +4,8 @@
  * Generates a professional .xlsx file with all workspace transactions.
  * Uses exceljs for full styling support (colors, fonts, freeze panes, formulas).
  *
- * Sheet 1 — «Транзакции»   : full transaction log, 16 columns
+ * Sheet 0 — «Сводка»       : KPI summary, account balances, top categories, audit trail
+ * Sheet 1 — «Транзакции»   : full transaction log, 18 columns (incl. hours + rate formula)
  * Sheet 2 — «Счета»        : per-account summary
  * Sheet 3 — «Категории»    : per-category summary
  * Sheet 4 — «По месяцам»   : monthly dynamics
