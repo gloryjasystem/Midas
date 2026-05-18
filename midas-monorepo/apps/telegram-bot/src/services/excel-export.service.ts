@@ -70,11 +70,6 @@ function fmtTime(d: Date): string {
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
 
-function fmtMon(d: Date): string {
-  const months = ['Январь','Февраль','Март','Апрель','Май','Июнь',
-                  'Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
-  return `${months[d.getMonth()] ?? ''} ${String(d.getFullYear())}`;
-}
 
 // ─────────────────────────────────────────────────────────────
 // Smart number formatting
@@ -380,7 +375,7 @@ export async function exportTransactionsExcel(
   buildSheet1(wb, rows, from, to, usdRates);
   buildSheet2(wb, rows, usdRates);
   buildSheet3(wb, rows, usdRates);
-  buildSheet4(wb, rows);
+  buildSheet4(wb, rows, from, to, usdRates);
 
   const arrayBuffer = await wb.xlsx.writeBuffer();
   return Buffer.from(arrayBuffer);
@@ -2113,60 +2108,255 @@ function buildSheet3(wb: ExcelJS.Workbook, rows: TxRow[], usdRates: Map<string, 
 // Sheet 4: По месяцам
 // ─────────────────────────────────────────────────────────────
 
-function buildSheet4(wb: ExcelJS.Workbook, rows: TxRow[]): void {
-  const ws = wb.addWorksheet('По месяцам');
+function buildSheet4(
+  wb: ExcelJS.Workbook, rows: TxRow[],
+  _from: Date, _to: Date, usdRates: Map<string, number>,
+): void {
+  // ── Adaptive granularity: month vs week ──────────────────────
+  const uniqueMonths = new Set(rows.map(r => {
+    const d = new Date(r.transaction_time);
+    return `${d.getFullYear()}-${d.getMonth()}`;
+  }));
+  const useWeeks = uniqueMonths.size <= 1;
 
-  ws.mergeCells('A1:F1');
-  const t = ws.getCell('A1');
-  t.value = 'MIDAS · Динамика по месяцам';
-  t.font  = { bold: true, color: { argb: `FF${C_COL_HDR_FG}` }, size: 12, name: 'Calibri' };
-  t.fill  = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_HEADER_BG}` } };
-  t.alignment = { horizontal: 'center', vertical: 'middle' };
-  ws.getRow(1).height = 30;
-
-  const headers = ['Месяц', 'Доходы', 'Расходы', 'Долги выданы', 'Долги получены', 'Чистый'];
-  const widths  = [18, 14, 14, 14, 14, 14];
-  headers.forEach((h, i) => hdr(ws, i + 1, 2, h, widths[i] ?? 14));
-  ws.getRow(2).height = 24;
-
-  const monMap = new Map<string, { income: number; expense: number; debtGive: number; debtRecv: number }>();
-  for (const r of rows) {
-    const mon = fmtMon(new Date(r.transaction_time));
-    const m   = monMap.get(mon) ?? { income: 0, expense: 0, debtGive: 0, debtRecv: 0 };
-    const amt = parseFloat(r.original_amount);
-    if (r.transaction_intent === 'income')         m.income    += amt;
-    if (r.transaction_intent === 'expense')        m.expense   += amt;
-    if (r.transaction_intent === 'debt_given')     m.debtGive  += amt;
-    if (r.transaction_intent === 'debt_received')  m.debtRecv  += amt;
-    monMap.set(mon, m);
-  }
-
-  // Sort months chronologically (key = "Январь 2026" — sort by year then month index)
   const RU_MONTHS = ['Январь','Февраль','Март','Апрель','Май','Июнь',
                      'Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
-  const sortedMons = [...monMap.entries()].sort(([a], [b]) => {
-    const parseMonKey = (k: string) => {
-      const [mon, yr] = k.split(' ');
-      return parseInt(yr ?? '0') * 12 + (RU_MONTHS.indexOf(mon ?? '') ?? 0);
-    };
-    return parseMonKey(a) - parseMonKey(b);
-  });
 
-  let rowNum = 3;
-  for (const [mon, m] of sortedMons) {
-    const net = m.income - m.expense;
-    const data = [mon, m.income, m.expense, m.debtGive, m.debtRecv, net];
-    data.forEach((val, ci) => {
-      const cell = ws.getCell(rowNum, ci + 1);
-      cell.value = val;
-      // Monthly sheet is mixed-currency: use generic fiat format (2dp, no trailing zeros)
-      if (ci >= 1) cell.numFmt = '#,##0.##';
-      cell.font = { size: 9, name: 'Calibri', bold: ci === 5,
-        color: ci === 5 ? { argb: (net as number) >= 0 ? `FF${C_INCOME}` : `FF${C_EXPENSE}` } : undefined };
-      cell.fill = { type: 'pattern', pattern: 'solid',
-        fgColor: { argb: rowNum % 2 === 0 ? `FF${C_ROW_ODD}` : 'FFFFFFFF' } };
-    });
-    rowNum++;
+  /** Returns a sortable key + display label for the period bucket */
+  const bucketKey = (d: Date): { key: string; label: string } => {
+    if (!useWeeks) {
+      const idx = d.getMonth();
+      return {
+        key:   `${d.getFullYear()}-${String(idx).padStart(2, '0')}`,
+        label: `${RU_MONTHS[idx]} ${d.getFullYear()}`,
+      };
+    }
+    // Week-level: ISO week start (Monday)
+    const day = new Date(d); day.setHours(0, 0, 0, 0);
+    const dow = (day.getDay() + 6) % 7; // Mon=0
+    const weekStart = new Date(day); weekStart.setDate(day.getDate() - dow);
+    const weekEnd   = new Date(weekStart); weekEnd.setDate(weekStart.getDate() + 6);
+    return {
+      key:   weekStart.toISOString().slice(0, 10),
+      label: `Нед. ${fmtDate(weekStart)}–${fmtDate(weekEnd)}`,
+    };
+  };
+
+  // ── Aggregate with USD conversion ───────────────────────────
+  type Bucket = {
+    label:      string;
+    count:      number;
+    incomeUsd:  number;
+    expenseUsd: number;
+    transferUsd: number;
+    debtUsd:    number;   // net: debt_received - debt_given
+  };
+  const bucketMap = new Map<string, Bucket>();
+
+  for (const r of rows) {
+    const d    = new Date(r.transaction_time);
+    const { key, label } = bucketKey(d);
+    const b    = bucketMap.get(key) ?? { label, count: 0, incomeUsd: 0, expenseUsd: 0, transferUsd: 0, debtUsd: 0 };
+    const amt  = parseFloat(r.original_amount);
+    const cur  = r.currency.toUpperCase();
+    const rate = usdRates.get(cur) ?? null;
+    const usd  = rate !== null ? amt * rate : 0;
+
+    b.count++;
+    if (r.transaction_intent === 'income')         b.incomeUsd   += usd;
+    else if (r.transaction_intent === 'expense')   b.expenseUsd  += usd;
+    else if (r.transaction_intent === 'transfer')  b.transferUsd += usd;
+    else if (r.transaction_intent === 'debt_received') b.debtUsd += usd;
+    else if (r.transaction_intent === 'debt_given')    b.debtUsd -= usd;
+    bucketMap.set(key, b);
   }
-  ws.views = [{ state: 'frozen', ySplit: 2 }];
+
+  const sorted = [...bucketMap.entries()].sort(([a], [b]) => a.localeCompare(b));
+
+  // ── Build worksheet ─────────────────────────────────────────
+  const granLabel = useWeeks ? 'по неделям' : 'по месяцам';
+  const ws = wb.addWorksheet('По месяцам');
+  const TOTAL_COLS = 9;
+
+  // Row 1: Title
+  ws.mergeCells(1, 1, 1, TOTAL_COLS);
+  const titleCell = ws.getCell(1, 1);
+  titleCell.value = `MIDAS · Динамика ${granLabel} (≈ USD)`;
+  titleCell.font  = { bold: true, size: 13, name: 'Calibri', color: { argb: `FF${C_COL_HDR_FG}` } };
+  titleCell.fill  = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_HEADER_BG}` } };
+  titleCell.alignment = { horizontal: 'center', vertical: 'middle' };
+  ws.getRow(1).height = 32;
+
+  // Row 2: Headers
+  const HDR_ROW = 2;
+  const periodLabel = useWeeks ? 'Неделя' : 'Месяц';
+  const colDefs: Array<[string, number]> = [
+    [periodLabel,            22],
+    ['Операций',           10],
+    ['Доходы ≈ USD',        16],
+    ['Расходы ≈ USD',       16],
+    ['Чистый ≈ USD',        16],
+    ['Savings\nRate %',     13],
+    ['Δ Расходов',         13],
+    ['Переводы\n≈ USD',    14],
+    ['Долги нетто\n≈ USD', 14],
+  ];
+  colDefs.forEach(([text, width], i) => hdr(ws, i + 1, HDR_ROW, text, width));
+  ws.getRow(HDR_ROW).height = 30;
+
+  const thinB = {
+    top:    { style: 'thin' as const, color: { argb: `FF${C_TBL_BORDER}` } },
+    bottom: { style: 'thin' as const, color: { argb: `FF${C_TBL_BORDER}` } },
+    left:   { style: 'thin' as const, color: { argb: `FF${C_TBL_BORDER}` } },
+    right:  { style: 'thin' as const, color: { argb: `FF${C_TBL_BORDER}` } },
+  };
+
+  // ── Data rows ───────────────────────────────────────────────
+  const DATA_START = 3;
+  let rn = DATA_START;
+  let prevExpUsd = 0;
+  let grandInc = 0, grandExp = 0, grandOps = 0, grandTfr = 0, grandDebt = 0;
+
+  for (let si = 0; si < sorted.length; si++) {
+    const [, b] = sorted[si]!;
+    const net = b.incomeUsd - b.expenseUsd;
+    const sr  = b.incomeUsd > 0 ? ((b.incomeUsd - b.expenseUsd) / b.incomeUsd) * 100 : 0;
+    const deltaExp = si > 0 && prevExpUsd > 0
+      ? ((b.expenseUsd - prevExpUsd) / prevExpUsd) * 100
+      : null;
+
+    grandInc  += b.incomeUsd;
+    grandExp  += b.expenseUsd;
+    grandOps  += b.count;
+    grandTfr  += b.transferUsd;
+    grandDebt += b.debtUsd;
+
+    const bgArgb = rn % 2 === 0 ? `FF${C_ROW_ODD}` : 'FFFFFFFF';
+    const fillBg = { type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb: bgArgb } };
+    ws.getRow(rn).height = 20;
+
+    const sc = (col: number, val: ExcelJS.CellValue, opts: {
+      bold?: boolean; numFmt?: string; color?: string; italic?: boolean;
+      align?: 'left'|'center'|'right'; fill?: ExcelJS.Fill;
+    } = {}) => {
+      const c = ws.getCell(rn, col);
+      c.value  = val;
+      c.font   = { size: 9, name: 'Calibri', bold: opts.bold, italic: opts.italic,
+        color: opts.color ? { argb: opts.color } : undefined };
+      c.fill   = opts.fill ?? fillBg;
+      c.border = thinB;
+      c.alignment = { vertical: 'middle', horizontal: opts.align ?? 'left' };
+      if (opts.numFmt) c.numFmt = opts.numFmt;
+    };
+
+    // A — Period
+    sc(1, b.label, { bold: true, color: 'FF1A3C5E' });
+    // B — Ops count
+    sc(2, b.count, { align: 'center' });
+    // C — Income USD
+    sc(3, b.incomeUsd, { align: 'right', numFmt: '#,##0.00',
+      color: b.incomeUsd > 0 ? `FF${C_INCOME}` : 'FF888888' });
+    // D — Expense USD
+    sc(4, b.expenseUsd, { align: 'right', numFmt: '#,##0.00',
+      color: b.expenseUsd > 0 ? `FF${C_EXPENSE}` : 'FF888888' });
+    // E — Net USD
+    sc(5, net, { align: 'right', numFmt: '#,##0.00', bold: true,
+      color: net >= 0 ? `FF${C_INCOME}` : `FF${C_EXPENSE}`,
+      fill: { type: 'pattern', pattern: 'solid',
+        fgColor: { argb: net >= 0 ? 'FFE8F8F5' : 'FFFDEDEC' } } });
+    // F — Savings Rate %
+    if (b.incomeUsd > 0) {
+      const srClr = sr >= 20 ? `FF${C_INCOME}` : sr >= 0 ? 'FFD4AC0D' : `FF${C_EXPENSE}`;
+      sc(6, parseFloat(sr.toFixed(1)), { align: 'right', numFmt: '0.0"%"', color: srClr, bold: sr >= 20 });
+    } else {
+      sc(6, '—', { align: 'center', color: 'FFCCCCCC', italic: true });
+    }
+    // G — Δ Expenses
+    if (deltaExp !== null) {
+      const arrow = deltaExp > 0 ? '↑' : '↓';
+      const dClr  = deltaExp > 0 ? `FF${C_EXPENSE}` : `FF${C_INCOME}`;
+      sc(7, `${arrow} ${deltaExp > 0 ? '+' : ''}${deltaExp.toFixed(1)}%`, { align: 'center', color: dClr, bold: true });
+    } else {
+      sc(7, '—', { align: 'center', color: 'FFCCCCCC', italic: true });
+    }
+    // H — Transfers USD (secondary)
+    sc(8, b.transferUsd, { align: 'right', numFmt: '#,##0.00', italic: true, color: 'FF888888' });
+    // I — Debts net USD (secondary)
+    sc(9, b.debtUsd, { align: 'right', numFmt: '+#,##0.00;-#,##0.00', italic: true,
+      color: b.debtUsd >= 0 ? 'FF888888' : `FF${C_EXPENSE}` });
+
+    prevExpUsd = b.expenseUsd;
+    rn++;
+  }
+
+  // ── Grand Total footer row ──────────────────────────────────
+  const gtFill   = { type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb: `FF${C_GRAND_BG}` } };
+  const gtBorder = {
+    top: { style: 'medium' as const, color: { argb: 'FF0D2840' } },
+    bottom: { style: 'medium' as const, color: { argb: 'FF0D2840' } },
+    left:   { style: 'thin'   as const, color: { argb: `FF${C_TBL_BORDER}` } },
+    right:  { style: 'thin'   as const, color: { argb: `FF${C_TBL_BORDER}` } },
+  };
+  const gtRow = rn;
+  ws.getRow(gtRow).height = 24;
+  for (let ci = 1; ci <= TOTAL_COLS; ci++) {
+    ws.getCell(gtRow, ci).fill   = gtFill;
+    ws.getCell(gtRow, ci).border = gtBorder;
+  }
+
+  const gtFont = (color: string, size = 9) => ({ bold: true, size, name: 'Calibri', color: { argb: color } } as const);
+  const gtAlign = (h: 'left'|'center'|'right' = 'right') =>
+    ({ horizontal: h, vertical: 'middle' } as const);
+
+  const g1 = ws.getCell(gtRow, 1);
+  g1.value = 'ИТОГО'; g1.font = gtFont('FFB0C8E0', 10); g1.fill = gtFill;
+  g1.alignment = gtAlign('right');
+
+  const g2 = ws.getCell(gtRow, 2);
+  g2.value = grandOps; g2.font = gtFont('FFB0C8E0'); g2.fill = gtFill; g2.alignment = gtAlign('center');
+
+  const g3 = ws.getCell(gtRow, 3);
+  g3.value = grandInc; g3.numFmt = '#,##0.00';
+  g3.font  = gtFont(grandInc > 0 ? 'FF7DCEA0' : 'FFB0C8E0', 10); g3.fill = gtFill; g3.alignment = gtAlign();
+
+  const g4 = ws.getCell(gtRow, 4);
+  g4.value = grandExp; g4.numFmt = '#,##0.00';
+  g4.font  = gtFont(grandExp > 0 ? 'FFE57373' : 'FFB0C8E0', 10); g4.fill = gtFill; g4.alignment = gtAlign();
+
+  const grandNet = grandInc - grandExp;
+  const g5 = ws.getCell(gtRow, 5);
+  g5.value = grandNet; g5.numFmt = '#,##0.00';
+  g5.font  = gtFont(grandNet >= 0 ? 'FF7DCEA0' : 'FFE57373', 10); g5.fill = gtFill; g5.alignment = gtAlign();
+
+  // Avg savings rate
+  const avgSr = grandInc > 0 ? ((grandInc - grandExp) / grandInc) * 100 : 0;
+  const g6 = ws.getCell(gtRow, 6);
+  g6.value = `avg ${avgSr.toFixed(1)}%`;
+  g6.font  = gtFont(avgSr >= 20 ? 'FF7DCEA0' : avgSr >= 0 ? 'FFD4AC0D' : 'FFE57373');
+  g6.fill  = gtFill; g6.alignment = gtAlign();
+
+  const g8 = ws.getCell(gtRow, 8);
+  g8.value = grandTfr; g8.numFmt = '#,##0.00';
+  g8.font = gtFont('FFB0C8E0'); g8.fill = gtFill; g8.alignment = gtAlign();
+
+  const g9 = ws.getCell(gtRow, 9);
+  g9.value = grandDebt; g9.numFmt = '+#,##0.00;-#,##0.00';
+  g9.font = gtFont('FFB0C8E0'); g9.fill = gtFill; g9.alignment = gtAlign();
+
+  // ── Footnote ────────────────────────────────────────────────
+  const fnRow = gtRow + 1;
+  ws.mergeCells(fnRow, 1, fnRow, TOTAL_COLS);
+  const fn = ws.getCell(fnRow, 1);
+  fn.value = `Гранулярность: ${granLabel} (авто) · Все суммы конвертированы в USD на дату экспорта · Savings Rate = (Incomes − Expenses) / Incomes × 100`;
+  fn.font  = { size: 7, italic: true, name: 'Calibri', color: { argb: 'FFAAAAAA' } };
+  fn.fill  = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_GREY_BG}` } };
+  fn.border = { top: { style: 'thin', color: { argb: `FF${C_TBL_BORDER}` } } };
+  ws.getRow(fnRow).height = 14;
+
+  // ── Freeze + gridlines ──────────────────────────────────────
+  ws.views = [{
+    state: 'frozen', ySplit: HDR_ROW, xSplit: 0,
+    activeCell: `A${DATA_START}`, showGridLines: false,
+  }];
+  ws.properties.tabColor = { argb: 'FF2D6A9F' }; // blue tab — FP&A analytics
 }
