@@ -424,7 +424,7 @@ function buildSheet0Summary(
   ws.getColumn(2).width = 38; // Нетто / Период
   ws.getColumn(3).width = 28; // Курс к USD
   ws.getColumn(4).width = 14; // %
-  ws.getColumn(5).width = 22; // Все расходы
+  ws.getColumn(5).width = 34; // Все расходы
 
   let r = 1;
 
@@ -462,11 +462,15 @@ function buildSheet0Summary(
   ws.getRow(r).height = 30;
   r++;
 
-  cell(r, 1, 'Период:', true);
-  cell(r, 2, `${periodStr} (${String(days)} дн.)`);
+  // #2 — Meta rows: steel-blue background (matches ИТОГ ЗА ПЕРИОД data rows)
+  const metaBg = { type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb: `FF${C_TOTAL_BG}` } };
+  [1, 2, 3, 4, 5].forEach(ci => { ws.getCell(r, ci).fill = metaBg; });
+  cell(r, 1, 'Период:', true); ws.getCell(r, 1).fill = metaBg;
+  cell(r, 2, `${periodStr} (${String(days)} дн.)`); ws.getCell(r, 2).fill = metaBg;
   r++;
-  cell(r, 1, 'Сформирован:', true);
-  cell(r, 2, `${fmtDate(new Date())} ${fmtTime(new Date())}`);
+  [1, 2, 3, 4, 5].forEach(ci => { ws.getCell(r, ci).fill = metaBg; });
+  cell(r, 1, 'Сформирован:', true); ws.getCell(r, 1).fill = metaBg;
+  cell(r, 2, `${fmtDate(new Date())} ${fmtTime(new Date())}`); ws.getCell(r, 2).fill = metaBg;
   r++;
   r++; // spacer
 
@@ -649,10 +653,11 @@ function buildSheet0Summary(
 
     // Col 5 — Source tag (small, grey, centred)
     const c5 = ws.getCell(r, 5);
+    // #7 — Human-readable rate source labels
     const srcLabel: Record<string, string> = {
       hardcoded:    '—',
-      'fiat-api':   'er-api',
-      'crypto-api': 'mexc',
+      'fiat-api':   'Fiat',
+      'crypto-api': 'Crypto',
       uncovered:    '?',
     };
     c5.value = srcLabel[row.source] ?? row.source;
@@ -921,8 +926,10 @@ function buildSheet0Summary(
   };
   const catMap = new Map<string, CatSummary>();
 
+  // #5 — Include expense + transfer + debt in category aggregation
+  const OUT_INTENTS = new Set(['expense', 'transfer', 'debt', 'debt_given']);
   for (const row of rows) {
-    if (row.transaction_intent !== 'expense') continue;
+    if (!OUT_INTENTS.has(row.transaction_intent)) continue;
     const name = row.category_name;
     const cur  = row.currency.toUpperCase();
     const amt  = parseFloat(row.original_amount);
@@ -949,27 +956,60 @@ function buildSheet0Summary(
   const uncoveredOnlyList = [...catMap.entries()]
     .filter(([, cs]) => cs.totalUsd === 0 && cs.uncovered.size > 0);
 
-  sectionHdr('ТОП РАСХОДОВ (USD)');
+  // #1 — Section title
+  sectionHdr('ТОП РАСХОДОВ ПО КАТЕГОРИЯМ (USD)');
 
   if (catMap.size === 0) {
     cell(r, 1, '— нет расходов за период'); r++;
   } else {
-    // Sub-header row
-    const topHdrs = ['', 'Категория', 'USD', '%', 'Все расходы'];
+    // #9 — Subtitle: explains how USD total is derived
+    ws.mergeCells(r, 1, r, 5);
+    const subNote = ws.getCell(r, 1);
+    subNote.value = 'суммы конвертированы в USD по курсам на дату отчёта';
+    subNote.font  = { size: 7, italic: true, name: 'Calibri', color: { argb: 'FFAAAAAA' } };
+    subNote.fill  = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_GREY_BG}` } };
+    subNote.alignment = { horizontal: 'left', vertical: 'middle' };
+    ws.getRow(r).height = 12;
+    r++;
+
+    // #3 — Sub-header: grey bg, col A = '#'
+    const topHdrs = ['#', 'Категория', 'USD', '%', 'Все расходы'];
     topHdrs.forEach((h, i) => {
       const c = ws.getCell(r, i + 1);
       c.value = h;
       c.font = { bold: true, size: 9, name: 'Calibri', color: { argb: 'FF2D6A9F' } };
-      c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_TOTAL_HDR}` } };
+      c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_GREY_BG}` } };
       c.alignment = { horizontal: i === 3 ? 'right' : i === 0 ? 'right' : 'left', vertical: 'middle' };
       c.border = { bottom: { style: 'thin', color: { argb: `FF${C_TBL_BORDER}` } } };
     });
     ws.getRow(r).height = 16;
     r++;
 
+    // #8 — Largest Remainder Method for % (ensures sum = 100%)
+    const lrFloors = mainTopList.map(([, cs]) =>
+      grandTotalUsd > 0 ? Math.floor((cs.totalUsd / grandTotalUsd) * 100) : 0
+    );
+    const lrRemainder = 100 - lrFloors.reduce((a, b) => a + b, 0);
+    const lrOrder = mainTopList
+      .map((_, i) => ({
+        i,
+        frac: grandTotalUsd > 0 ? (mainTopList[i][1].totalUsd / grandTotalUsd) * 100 % 1 : 0,
+      }))
+      .sort((a, b) => b.frac - a.frac);
+    const lrPcts = [...lrFloors];
+    lrOrder.slice(0, lrRemainder).forEach(({ i }) => { lrPcts[i]++; });
+
+    // #10 — Compact K-format for col E (amounts > 9999)
+    const fmtK = (amt: number, cur: string): string => {
+      const abs = Math.abs(amt);
+      const sign = amt < 0 ? '− ' : '+ ';
+      if (abs >= 10000) return `${sign}${(abs / 1000).toFixed(1).replace(/\.0$/, '')}K ${cur}`;
+      return `${fmtAmtSigned(-amt)} ${cur}`;
+    };
+
     // Data rows — top-8
     for (const [idx, [name, cs]] of mainTopList.entries()) {
-      const pct  = grandTotalUsd > 0 ? Math.round((cs.totalUsd / grandTotalUsd) * 100) : 0;
+      const pct  = lrPcts[idx];
       const icon = categoryIcon(name);
 
       // Col 1 — rank
@@ -993,21 +1033,22 @@ function buildSheet0Summary(
       rc3.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_GREY_BG}` } };
       rc3.alignment = { horizontal: 'left', vertical: 'middle' };
 
-      // Col 4 — percentage (right-aligned, muted)
+      // Col 4 — percentage (right-aligned, muted, Largest Remainder)
       const rc4 = ws.getCell(r, 4);
       rc4.value = `${String(pct)}%`;
       rc4.font = { size: 9, name: 'Calibri', color: { argb: 'FF888888' } };
       rc4.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_GREY_BG}` } };
       rc4.alignment = { horizontal: 'right', vertical: 'middle' };
 
-      // Col 5 — original currencies breakdown ("Все расходы")
+      // #6 — Col 5: suppress duplicate if only USD; otherwise compact K-format
       const origParts: string[] = [];
-      for (const [cur, amt] of cs.originals) origParts.push(`${fmtAmtSigned(-amt)} ${cur}`);
+      for (const [cur, amt] of cs.originals) origParts.push(fmtK(amt, cur));
       if (cs.uncovered.size > 0) {
         for (const [cur, amt] of cs.uncovered) origParts.push(`${fmtAmtSigned(-amt)} ${cur} (?)`);
       }
+      const isUsdOnly = cs.originals.size === 1 && cs.originals.has('USD') && cs.uncovered.size === 0;
       const rc5 = ws.getCell(r, 5);
-      rc5.value = origParts.join(' · ');
+      rc5.value = isUsdOnly ? '—' : origParts.join('  |  ');
       rc5.font = { size: 8, italic: true, name: 'Calibri', color: { argb: 'FFAAAAAA' } };
       rc5.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_GREY_BG}` } };
       rc5.alignment = { horizontal: 'left', vertical: 'middle' };
