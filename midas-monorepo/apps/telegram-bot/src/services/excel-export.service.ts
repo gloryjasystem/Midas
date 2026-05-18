@@ -377,7 +377,7 @@ export async function exportTransactionsExcel(
   const { rates: usdRates, sources: rateSources } = await fetchUsdRates();
 
   buildSheet0Summary(wb, rows, from, to, usdRates, rateSources);
-  buildSheet1(wb, rows, from, to, usdRates);
+  buildSheet1(wb, rows, from, to);
   buildSheet2(wb, rows);
   buildSheet3(wb, rows);
   buildSheet4(wb, rows);
@@ -1141,7 +1141,7 @@ function buildSheet0Summary(
 // Sheet 1: Транзакции
 // ─────────────────────────────────────────────────────────────
 
-function buildSheet1(wb: ExcelJS.Workbook, rows: TxRow[], from: Date, to: Date, usdRates: Map<string, number>): void {
+function buildSheet1(wb: ExcelJS.Workbook, rows: TxRow[], from: Date, to: Date): void {
   const ws = wb.addWorksheet('Транзакции');
 
   // ── Row 1: Title banner ──────────────────────────────────────
