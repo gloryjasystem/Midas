@@ -9,13 +9,13 @@
 
 | Параметр | Значение |
 |---|---|
-| **PHASE** | Phase 2, Этап 1 — Excel Export Suite 2.0 — Smart Formatting |
-| **STEP** | Commit 6e597e0. Smart numFmt: fiat #,##0.## / crypto #,##0.######## / months sorted. Commit c1f3cd5: fix CSV SQL columns. |
-| **AGENT STATUS** | tsc 0 errors. 5-листовый Excel полностью рабочий. CRYPTO_SET 18 монет. smartNumFmt(currency). fmtAmtSigned без trailing zeros. Месяцы в Sheet4 отсортированы хронологически. |
+| **PHASE** | Phase 2, Этап 2 — Excel Export Suite 2.0 — Audit-Grade Logic & Visual Polish |
+| **STEP** | Commit de84a69 (HEAD). Visual polish 5/5 fixes. Cash Flow 3-level FinTech model утверждён архитектурно — ожидает реализации. |
+| **AGENT STATUS** | tsc 0 errors. Sheet0 Сводка: navy/steel-blue palette, unified grid, freeze pane, merged grand total, clean column headers. Cash Flow методология задокументирована. |
 | **DEPLOYMENT** | Railway (spirited-happiness) — Midas Online, background-workers Online. Health: https://midas-production-f4f1.up.railway.app/health > ok |
-| **LAST COMPLETED** | feat(excel): smart number format + chronological months sort. fix(csv): account_id/original_amount/currency column names. fix(excel): JSDoc 5 sheets. |
+| **LAST COMPLETED** | feat(excel): Visual polish 5-fix batch (de84a69) — navy theme, unified thin-border grid, freeze pane ySplit:1, merged grand total label, СВОДКА clean column headers, footnote border. |
 | **BLOCKER** | None. |
-| **NEXT ACTION** | Excel Phase 2 доработки: (1) netTotal на Сводке -> разбивка по валютам. (2) Цветные строки (тинт). (3) Empty state graceful. |
+| **NEXT ACTION** | Реализовать Cash Flow 3-level model: (I) Operational: income/expense; (II) Capital: переводы/долги (отдельная строка, tinted steel); (III) Итого позиции ≡ ИТОГ ЗА ПЕРИОД. + Unified USD top-expenses ranking + stripEmoji(). Архитектура утверждена пользователем. |
 
 
 ---
@@ -504,6 +504,10 @@ Phase B-1 (commit 75156b9, применено на live Railway Postgres):
 | 2026-05-18 11:30 | **docs: workflow_state.md восстановлен и актуализирован.** Файл был в CP1251, перезаписан с U+FFFD вместо кириллицы в коммите 588e038 (xAI Grok STT сессия). Восстановлен из git 83289493 (чистый CP1251 -> UTF-8). Добавлено 42 пропущенных changelog-записи за 2026-05-15..2026-05-18 (74 незадокументированных коммита). Секция 1 ТЕКУЩЕЕ СОСТОЯНИЕ обновлена. Orphan-секция перемещена в основную таблицу. Commits 58d9dc2, f96b13a, a1def96. |
 | 2026-05-18 12:00 | **fix(csv): Critical SQL column name bugs (c1f3cd5). DEPLOYED.** settings-advanced.service.ts: (1) account_source_id -> account_id; (2) base_amount -> original_amount; (3) base_currency -> currency. Баги не ловились tsc (SQL = string). Найдены ручным аудитом. excel-export.service.ts: JSDoc обновлён до 5 листов. |
 | 2026-05-18 12:30 | **feat(excel): Smart number formatting + chronological months (6e597e0). DEPLOYED.** CRYPTO_SET: 18 монет (BTC/ETH/USDT/USDC/BNB/SOL/TON/TRX/XRP/DOGE/LTC/MATIC/DOT/ADA/AVAX/ATOM/LINK). smartNumFmt(currency): fiat=#,##0.## (max 2dp без trailing zeros), crypto=#,##0.######## (max 8dp). Логика: 100.00->100, 15.50->15.5, 0.00012345->0.00012345. fmtAmtSigned() тоже без trailing zeros + NBSP разделитель тысяч. Sheet4 По месяцам: хронологическая сортировка через parseMonKey(). Курс: #,##0.#### (4dp). |
+| 2026-05-18 13:30 | **feat(excel): Sheet0 Visual Polish — 10-point audit-grade redesign (3 commits). DEPLOYED.** excel-export.service.ts: (1) Navy/steel-blue цветовая палитра — C_NAVY_DARK (#1A3C5E), C_TOTAL_HDR (#BDD5E8), C_TOTAL_BG (#EBF5FB); (2) Единая thin-border сетка таблиц (FFBDD5E8) на всех блоках Сводки; (3) Стандартная высота строк 18px; (4) Выравнивание финансовых колонок по правому краю; (5) Знак переводов исправлен — transfer теперь вычитается (−transfer) из Movement; (6) Заморозка шапки листа (ySplit: 1 freeze pane); (7) Navy цвет вкладки «Сводка» (tabColor: 1A3C5E). tsc 0 ошибок. |
+| 2026-05-18 14:00 | **fix(excel): Grand total UX + balance sign + movement dedup. DEPLOYED.** (1) Grand total: label ячейки объединён через cols 1–3, right-aligned «прижат» к значению в col 4 — стандарт SAP/Oracle. (2) Balance sign: убран «+» префикс у положительных балансов (стандарт банковской выписки). (3) Movement column: убрано дублирование кода валюты — валюта объявляется в отдельной колонке, не повторяется в движении. |
+| 2026-05-18 14:30 | **fix(excel): СВОДКА ПО ВАЛЮТАМ — clean column headers + footnote border (de84a69). DEPLOYED.** (1) Убран merged sub-header «Доходы / Расходы / Итог» из блока СВОДКА ПО ВАЛЮТАМ; заменён на 5 отдельных column headers (Валюта, Операций, Доходы, Расходы, Итог*) — визуальная консистентность со всеми другими таблицами. (2) Footnote: добавлен top border для чёткого визуального разделения между grand total данными и сноской. tsc 0 ошибок. |
+| 2026-05-18 17:30 | **arch: Cash Flow 3-level FinTech model утверждён архитектурно. Реализация отложена (revert 37a8d80).** Методология: (I) Операционный поток — только income/expense → Опер. нетто; (II) Движение капитала — переводы и долги ОТДЕЛЬНО, styled italic + tinted steel #E8EEF4 (не смешиваются с операциями); (III) Итого позиции = income − expense + debt_received − debt_given − transfer ≡ ИТОГ ЗА ПЕРИОД (расхождений нет). ТОП расходов: только expense (debt_given = актив, не трата), конвертация в USD через live rates, единый USD-рейтинг, stripEmoji() очищает названия категорий. Коммит 47e6d4e реализовал модель, но был reverted пользователем (37a8d80). Архитектура задокументирована, ожидает повторной реализации. |
 
 
 ---
