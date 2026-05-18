@@ -951,7 +951,7 @@ function buildSheet0Summary(
       // Col 1 — rank
       const rc1 = ws.getCell(r, 1);
       rc1.value = rankNum;
-      rc1.font = { size: 8, name: 'Calibri', color: { argb: 'FF888888' } };
+      rc1.font = { size: 11, bold: true, name: 'Calibri', color: { argb: 'FF444444' } };
       rc1.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_GREY_BG}` } };
       rc1.alignment = { horizontal: 'right', vertical: 'middle' };
 
