@@ -4250,15 +4250,32 @@ Midas создан, чтобы сделать учет денег максима
             const draftIdTgt      = tpParts[3];
             if (!targetAccountId || !draftIdTgt) throw new Error('tp:tgt missing parts');
 
+            request.log.info({
+              msg: '[midas:tp:tgt] starting',
+              targetAccountId, draftIdTgt,
+              workspaceId: tpResolved.workspaceId,
+            });
+
             const setResult = await setDraftTargetAccount(
               draftIdTgt, tpResolved.workspaceId, tpResolved.userId, targetAccountId,
             );
 
+            request.log.info({ msg: '[midas:tp:tgt] setDraftTargetAccount result', setResult });
+
             if (setResult !== 'ok') {
-              if (tpMsgId) void editMessageText(chatId, tpMsgId, '⚠️ Счёт не найден или черновик устарел.');
+              if (tpMsgId) void editMessageText(chatId, tpMsgId, `⚠️ Счёт не найден или черновик устарел. (${setResult})`);
             } else {
               // Show transfer preview card (or cross-currency input)
               const state = await getDraftTransferState(draftIdTgt, tpResolved.workspaceId, tpResolved.userId);
+
+              request.log.info({
+                msg: '[midas:tp:tgt] getDraftTransferState result',
+                hasState: !!state,
+                targetAccountName: state?.targetAccountName,
+                sourceAccountCurrency: state?.sourceAccountCurrency,
+                targetAccountCurrency: state?.targetAccountCurrency,
+              });
+
               if (!state?.targetAccountName) {
                 if (tpMsgId) void editMessageText(chatId, tpMsgId, '⚠️ Не удалось загрузить данные перевода.');
               } else {
@@ -4268,7 +4285,7 @@ Midas создан, чтобы сделать учет денег максима
                   // Cross-currency: show input screen for credited amount
                   const xfxText = buildCrossCurrencyTransferScreen(
                     state.sourceAccountName, state.amount, state.currency,
-                    state.targetAccountName, state.targetAccountCurrency!,
+                    state.targetAccountName, state.targetAccountCurrency ?? '?',
                   );
                   if (tpMsgId) void editMessageText(chatId, tpMsgId, xfxText, buildCrossCurrencyTransferKeyboard(draftIdTgt));
                   // Set Redis key for text intercept
@@ -4284,7 +4301,7 @@ Midas создан, чтобы сделать учет денег максима
                   // Same currency: show preview directly
                   const previewText = buildTransferPreviewScreen(
                     state.sourceAccountName, state.amount, state.currency,
-                    state.targetAccountName, state.amount, state.targetAccountCurrency!,
+                    state.targetAccountName, state.amount, state.targetAccountCurrency ?? state.currency,
                     null,
                   );
                   if (tpMsgId) void editMessageText(chatId, tpMsgId, previewText, buildTransferConfirmKeyboard(draftIdTgt));
@@ -4358,7 +4375,9 @@ Midas создан, чтобы сделать учет денег максима
         } catch (tpErr) {
           request.log.error({
             msg: '[midas:bot:webhook] tp: callback error',
+            tpCmd,
             error: tpErr instanceof Error ? tpErr.message : String(tpErr),
+            stack: tpErr instanceof Error ? tpErr.stack : undefined,
             workspaceId: tpResolved.workspaceId,
           });
           if (tpMsgId) void editMessageText(chatId, tpMsgId, '⚠️ Произошла ошибка. Попробуйте ещё раз.');
