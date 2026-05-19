@@ -718,3 +718,224 @@ export async function fetchApprovedTransactionCard(
     };
   });
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// approvePairedTransfer — Phase 3.0 Internal Transfer
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Result type for a successful paired transfer approval.
+ */
+export type PairedTransferResult =
+  | {
+      outcome: 'approved';
+      outboundTxId: string;
+      inboundTxId:  string;
+      transferGroupId: string;
+      outAmount:      string;
+      outCurrency:    string;
+      sourceAccount:  string;
+      balanceAfterSource: string | null;
+      inAmount:       string;
+      inCurrency:     string;
+      targetAccount:  string;
+      balanceAfterTarget: string | null;
+      transactionTime: string;
+    }
+  | { outcome: 'not_found' }
+  | { outcome: 'already_processed'; existingStatus: string }
+  | { outcome: 'expired' }
+  | { outcome: 'target_missing' }
+  | { outcome: 'target_not_found' }
+  | { outcome: 'intent_mismatch' }
+;
+
+/**
+ * Atomically create two paired transactions for an internal transfer.
+ * Outbound (source loses money) + Inbound (target gains money).
+ * Both share transfer_group_id. Only outbound holds draft_id (UNIQUE FK).
+ *
+ * SEC-03: withTenantTransaction. SEC-02: NUMERIC strings. ADR-004: ULID.
+ */
+export async function approvePairedTransfer(
+  draftId: string,
+  workspaceId: string,
+  userId: string,
+): Promise<PairedTransferResult> {
+  return withTenantTransaction(workspaceId, userId, async (client) => {
+
+    // Step 1: Lock draft
+    const lockResult = await client.query<{
+      id: string;
+      status: string;
+      parsed_amount: string | null;
+      parsed_currency: string | null;
+      parsed_intent: string | null;
+      parsed_category_hint: string | null;
+      item_name: string | null;
+      account_id: string | null;
+      transfer_target_account_id: string | null;
+      expires_at: string;
+    }>(
+      `SELECT id, status, parsed_amount, parsed_currency, parsed_intent,
+              parsed_category_hint, item_name, account_id,
+              transfer_target_account_id, expires_at
+       FROM transaction_drafts
+       WHERE id = $1 AND workspace_id = $2
+       FOR UPDATE SKIP LOCKED`,
+      [draftId, workspaceId],
+    );
+
+    // Step 2: Lock check
+    if (lockResult.rows.length === 0) {
+      const check = await client.query<{ status: string }>(
+        `SELECT status FROM transaction_drafts WHERE id = $1`,
+        [draftId],
+      );
+      if (check.rows.length === 0) return { outcome: 'not_found' };
+      return { outcome: 'already_processed', existingStatus: check.rows[0]?.status ?? 'unknown' };
+    }
+
+    const draft = lockResult.rows[0]!;
+
+    // Step 3: Status check
+    if (draft.status !== 'pending_user') {
+      return { outcome: 'already_processed', existingStatus: draft.status };
+    }
+
+    // Step 4: Expiry check
+    if (new Date(draft.expires_at) <= new Date()) {
+      await client.query(
+        `UPDATE transaction_drafts SET status = 'expired', updated_at = NOW() WHERE id = $1`,
+        [draftId],
+      );
+      return { outcome: 'expired' };
+    }
+
+    // Step 5: Intent guard
+    if (draft.parsed_intent !== 'transfer') {
+      return { outcome: 'intent_mismatch' };
+    }
+
+    // Step 6: Target account guard
+    if (!draft.transfer_target_account_id) {
+      return { outcome: 'target_missing' };
+    }
+
+    // Step 7: IDOR — validate target belongs to workspace
+    const tgtCheck = await client.query<{ id: string; name: string; currency: string }>(
+      `SELECT id, name, currency FROM account_sources
+       WHERE id = $1 AND workspace_id = $2 AND deleted_at IS NULL`,
+      [draft.transfer_target_account_id, workspaceId],
+    );
+    if (tgtCheck.rows.length === 0) return { outcome: 'target_not_found' };
+    const targetAcct = tgtCheck.rows[0]!;
+
+    // Step 8: Resolve source account name
+    const srcCheck = await client.query<{ name: string; currency: string }>(
+      `SELECT name, currency FROM account_sources WHERE id = $1 AND workspace_id = $2`,
+      [draft.account_id, workspaceId],
+    );
+    const srcName     = srcCheck.rows[0]?.name     ?? 'Счёт';
+    const srcCurrency = srcCheck.rows[0]?.currency ?? (draft.parsed_currency ?? 'USDT');
+
+    // Step 9: Prepare IDs and amounts
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-conversion -- runtime Decimal
+    const amountStr       = String(draft.parsed_amount ?? '0');
+    const currency        = draft.parsed_currency ?? srcCurrency;
+    const transferGroupId = ulid();
+    const outboundTxId    = ulid();
+    const inboundTxId     = ulid();
+    const categoryId      = await resolveCategory(client, workspaceId, 'Перевод');
+    const itemName        = draft.item_name ?? 'Перевод';
+
+    // Step 10: Mark draft approved
+    await client.query(
+      `UPDATE transaction_drafts SET status = 'approved', updated_at = NOW() WHERE id = $1`,
+      [draftId],
+    );
+
+    // Step 11: INSERT outbound (money leaves source account)
+    await client.query(
+      `INSERT INTO transactions (
+         id, workspace_id,
+         original_amount, currency, exchange_rate, base_currency, base_amount,
+         category_id, account_id, draft_id, item_name,
+         transaction_time, transaction_intent, rate_source,
+         transfer_group_id, transfer_direction, created_at
+       ) VALUES (
+         $1, $2,
+         $3::NUMERIC, $4, 1::NUMERIC, $4, $3::NUMERIC,
+         $5, $6, $7, $8,
+         NOW(), 'transfer', 'none',
+         $9::UUID, 'outbound', NOW()
+       )`,
+      [outboundTxId, workspaceId, amountStr, currency,
+       categoryId, draft.account_id, draftId, itemName, transferGroupId],
+    );
+
+    // Step 12: INSERT inbound (money arrives at target account)
+    await client.query(
+      `INSERT INTO transactions (
+         id, workspace_id,
+         original_amount, currency, exchange_rate, base_currency, base_amount,
+         category_id, account_id, item_name,
+         transaction_time, transaction_intent, rate_source,
+         transfer_group_id, transfer_direction, created_at
+       ) VALUES (
+         $1, $2,
+         $3::NUMERIC, $4, 1::NUMERIC, $4, $3::NUMERIC,
+         $5, $6, $7,
+         NOW(), 'transfer', 'none',
+         $8::UUID, 'inbound', NOW()
+       )`,
+      [inboundTxId, workspaceId, amountStr, targetAcct.currency,
+       categoryId, draft.transfer_target_account_id, itemName, transferGroupId],
+    );
+
+    console.log('[midas:draft-confirmation] Paired transfer created', {
+      draftId, workspaceId, transferGroupId, outboundTxId, inboundTxId,
+    });
+
+    // Step 13: Balance snapshots (post-INSERT, direction-aware — Phase 3.0)
+    const BALANCE_SQL = `
+      SELECT (
+        COALESCE(a.initial_balance, 0)
+        + COALESCE(SUM(CASE WHEN t.transaction_intent = 'income'        AND t.base_currency = a.currency THEN t.base_amount END), 0)
+        + COALESCE(SUM(CASE WHEN t.transaction_intent = 'debt_received' AND t.base_currency = a.currency THEN t.base_amount END), 0)
+        + COALESCE(SUM(CASE WHEN t.transaction_intent = 'transfer' AND t.transfer_direction = 'inbound'
+                            AND t.base_currency = a.currency THEN t.base_amount END), 0)
+        - COALESCE(SUM(CASE WHEN t.transaction_intent = 'expense'       AND t.base_currency = a.currency THEN t.base_amount END), 0)
+        - COALESCE(SUM(CASE WHEN t.transaction_intent = 'debt_given'    AND t.base_currency = a.currency THEN t.base_amount END), 0)
+        - COALESCE(SUM(CASE WHEN t.transaction_intent = 'transfer'
+                            AND (t.transfer_direction = 'outbound' OR t.transfer_direction IS NULL)
+                            AND t.base_currency = a.currency THEN t.base_amount END), 0)
+      )::TEXT AS balance
+      FROM account_sources a
+      LEFT JOIN transactions t
+        ON t.account_id = a.id AND t.workspace_id = $1 AND t.deleted_at IS NULL
+      WHERE a.id = $2 AND a.workspace_id = $1
+      GROUP BY a.id, a.initial_balance`;
+
+    const [srcSnap, tgtSnap] = await Promise.all([
+      client.query<{ balance: string }>(BALANCE_SQL, [workspaceId, draft.account_id]),
+      client.query<{ balance: string }>(BALANCE_SQL, [workspaceId, draft.transfer_target_account_id]),
+    ]);
+
+    return {
+      outcome:            'approved',
+      outboundTxId,
+      inboundTxId,
+      transferGroupId,
+      outAmount:          amountStr,
+      outCurrency:        currency,
+      sourceAccount:      srcName,
+      balanceAfterSource: srcSnap.rows[0]?.balance ?? null,
+      inAmount:           amountStr,
+      inCurrency:         targetAcct.currency,
+      targetAccount:      targetAcct.name,
+      balanceAfterTarget: tgtSnap.rows[0]?.balance ?? null,
+      transactionTime:    new Date().toISOString(),
+    };
+  });
+}

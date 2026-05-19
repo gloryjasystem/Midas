@@ -1,0 +1,362 @@
+/**
+ * Transfer Pairing Service — Phase 3.0
+ *
+ * Provides:
+ *   1. Pure UI builders (screen text + inline keyboards) — no DB dependency.
+ *   2. DB helper functions for the transfer flow:
+ *       - getAvailableTargetAccounts() — accounts the user can transfer TO
+ *       - setDraftTargetAccount()      — persist chosen target on draft
+ *       - getDraftTransferState()      — read current draft state for rendering
+ *
+ * FSM flow for internal transfers:
+ *   User sends "перевод 500 USDT"
+ *     → AI sets parsed_intent = 'transfer'
+ *     → Bot shows type picker:  🔄 На мой счёт | 👤 Другому
+ *       → internal: show target account picker → preview → confirm
+ *       → external: treated as regular expense (existing flow)
+ *
+ * callback_data conventions (all ≤ 64 bytes):
+ *   tp:type:internal   — user chose internal transfer
+ *   tp:type:external   — user chose external transfer (→ existing confirm flow)
+ *   tp:tgt:{acctId}    — user chose target account (acctId = 26-char ULID)
+ *   tp:confirm         — user confirmed paired transfer
+ *   tp:cancel          — user cancelled (→ reject draft)
+ *
+ * SEC-03: all DB queries inside withTenantTransaction.
+ * SEC-02: amounts stay as NUMERIC strings — no parseFloat().
+ * SEC-12: no user amounts/names in logs.
+ * D3: all DB-sourced strings through escapeHtml before rendering.
+ */
+
+import { withTenantTransaction } from '@midas/database';
+import { escapeHtml } from '../utils/html-escape.js';
+
+// ─────────────────────────────────────────────────────────────
+// Types
+// ─────────────────────────────────────────────────────────────
+
+/** Slim account row for transfer target picker. */
+export interface TransferTargetAccount {
+  id: string;
+  name: string;
+  currency: string;
+  balance: string; // NUMERIC string (SEC-02)
+}
+
+/** Full draft state needed to render the transfer preview card. */
+export interface TransferDraftState {
+  draftId: string;
+  amount: string;            // NUMERIC string — outbound amount
+  currency: string;          // tx currency (outbound)
+  sourceAccountId: string;
+  sourceAccountName: string;
+  sourceAccountCurrency: string;
+  targetAccountId: string | null;
+  targetAccountName: string | null;
+  targetAccountCurrency: string | null;
+}
+
+/** Result of setDraftTargetAccount. */
+export type SetTargetResult = 'ok' | 'draft_not_found' | 'account_not_found';
+
+// ─────────────────────────────────────────────────────────────
+// Pure UI builders
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Screen shown after AI detected intent = 'transfer'.
+ * Asks the user to clarify direction.
+ */
+export function buildTransferTypeScreen(
+  amount: string,
+  currency: string,
+  fromAccountName: string,
+): string {
+  return [
+    `🔄 <b>Перевод ${escapeHtml(amount)} ${escapeHtml(currency)}</b>`,
+    `со счёта <b>${escapeHtml(fromAccountName)}</b>`,
+    '',
+    'Куда уходят деньги?',
+  ].join('\n');
+}
+
+/** Inline keyboard for the type selection screen. */
+export function buildTransferTypeKeyboard(draftId: string): object {
+  return {
+    inline_keyboard: [
+      [{ text: '🔄 На мой другой счёт', callback_data: `tp:type:internal:${draftId}` }],
+      [{ text: '👤 Другому человеку',   callback_data: `tp:type:external:${draftId}` }],
+      [{ text: '✖ Отмена',              callback_data: `tp:cancel:${draftId}` }],
+    ],
+  };
+}
+
+/**
+ * Screen asking user to pick the target account.
+ * Shown after user chose "🔄 На мой другой счёт".
+ */
+export function buildTargetPickerScreen(
+  amount: string,
+  currency: string,
+  fromAccountName: string,
+): string {
+  return [
+    `🔄 <b>Внутренний перевод</b>`,
+    `${escapeHtml(amount)} ${escapeHtml(currency)} с <b>${escapeHtml(fromAccountName)}</b>`,
+    '',
+    '📥 Выберите счёт-получатель:',
+  ].join('\n');
+}
+
+/**
+ * Inline keyboard listing target accounts.
+ * Each button: "Название (CURRENCY)  balance"
+ * callback_data: tp:tgt:{acctId}:{draftId}  — always ≤ 64 bytes (26+26+8 chars)
+ */
+export function buildTargetAccountKeyboard(
+  accounts: TransferTargetAccount[],
+  draftId: string,
+): object {
+  const buttons = accounts.map((acc) => {
+    const label = `${acc.name} (${acc.currency})  ${parseFloat(acc.balance).toFixed(2)}`;
+    return [{ text: label, callback_data: `tp:tgt:${acc.id}:${draftId}` }];
+  });
+
+  buttons.push([{ text: '✖ Отмена', callback_data: `tp:cancel:${draftId}` }]);
+
+  return { inline_keyboard: buttons };
+}
+
+/**
+ * Preview card shown before final confirmation.
+ * Displayed when both source and target accounts are selected.
+ *
+ * @param outAmount   — amount leaving source account
+ * @param outCurrency — source account currency
+ * @param inAmount    — amount arriving at target (same if same currency)
+ * @param inCurrency  — target account currency
+ * @param rate        — exchange rate description (null if same currency)
+ */
+export function buildTransferPreviewScreen(
+  sourceAccount: string, outAmount: string, outCurrency: string,
+  targetAccount: string, inAmount: string,  inCurrency: string,
+  rate: string | null,
+): string {
+  const lines = [
+    '🔄 <b>Внутренний перевод — подтверждение</b>',
+    '━━━━━━━━━━━━━━━━━━━━━━━',
+    `📤 <b>${escapeHtml(sourceAccount)}</b>`,
+    `    − <code>${escapeHtml(outAmount)} ${escapeHtml(outCurrency)}</code>`,
+    '',
+    `📥 <b>${escapeHtml(targetAccount)}</b>`,
+    `    + <code>${escapeHtml(inAmount)} ${escapeHtml(inCurrency)}</code>`,
+  ];
+
+  if (rate) {
+    lines.push('', `💱 Курс: <code>${escapeHtml(rate)}</code>`);
+  }
+
+  lines.push('', 'Подтверждаете перевод?');
+  return lines.join('\n');
+}
+
+/** Keyboard for the preview/confirmation screen. */
+export function buildTransferConfirmKeyboard(draftId: string): object {
+  return {
+    inline_keyboard: [
+      [
+        { text: '✅ Подтвердить', callback_data: `tp:confirm:${draftId}` },
+        { text: '✖ Отмена',      callback_data: `tp:cancel:${draftId}` },
+      ],
+    ],
+  };
+}
+
+/**
+ * Post-approval card shown after successful paired transfer.
+ * Displays both legs with updated balances.
+ */
+export function buildTransferConfirmedCard(
+  sourceAccount: string, outAmount: string, outCurrency: string, balanceAfterSource: string,
+  targetAccount: string, inAmount: string,  inCurrency: string,  balanceAfterTarget: string,
+  timestamp: string,
+): string {
+  return [
+    '✅ <b>Перевод записан</b>',
+    '',
+    '🔄 Внутренний перевод',
+    '━━━━━━━━━━━━━━━━━━━━━━━',
+    `📤 <b>${escapeHtml(sourceAccount)}</b>`,
+    `    − <code>${escapeHtml(outAmount)} ${escapeHtml(outCurrency)}</code>`,
+    `    Остаток: <code>${escapeHtml(balanceAfterSource)} ${escapeHtml(outCurrency)}</code>`,
+    '',
+    `📥 <b>${escapeHtml(targetAccount)}</b>`,
+    `    + <code>${escapeHtml(inAmount)} ${escapeHtml(inCurrency)}</code>`,
+    `    Остаток: <code>${escapeHtml(balanceAfterTarget)} ${escapeHtml(inCurrency)}</code>`,
+    '━━━━━━━━━━━━━━━━━━━━━━━',
+    `🕐 ${escapeHtml(timestamp)}`,
+  ].join('\n');
+}
+
+// ─────────────────────────────────────────────────────────────
+// DB helpers
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Fetch all active accounts the user can transfer TO.
+ * Excludes the source account (can't transfer to yourself).
+ *
+ * SEC-03: withTenantTransaction (RLS enforced).
+ * SEC-02: balance returned as NUMERIC string.
+ */
+export async function getAvailableTargetAccounts(
+  workspaceId: string,
+  userId: string,
+  excludeAccountId: string,
+): Promise<TransferTargetAccount[]> {
+  return withTenantTransaction(workspaceId, userId, async (client) => {
+    const res = await client.query<{
+      id: string;
+      name: string;
+      currency: string;
+      balance: { toFixed: (dp: number) => string };
+    }>(
+      `SELECT
+         a.id,
+         a.name,
+         a.currency,
+         -- Phase 3.0 direction-aware balance formula
+         a.initial_balance
+           + COALESCE(SUM(CASE WHEN t.transaction_intent = 'income'        AND t.base_currency = a.currency THEN t.base_amount END), 0)
+           + COALESCE(SUM(CASE WHEN t.transaction_intent = 'debt_received' AND t.base_currency = a.currency THEN t.base_amount END), 0)
+           + COALESCE(SUM(CASE WHEN t.transaction_intent = 'transfer' AND t.transfer_direction = 'inbound'
+                               AND t.base_currency = a.currency THEN t.base_amount END), 0)
+           - COALESCE(SUM(CASE WHEN t.transaction_intent = 'expense'       AND t.base_currency = a.currency THEN t.base_amount END), 0)
+           - COALESCE(SUM(CASE WHEN t.transaction_intent = 'debt_given'    AND t.base_currency = a.currency THEN t.base_amount END), 0)
+           - COALESCE(SUM(CASE WHEN t.transaction_intent = 'transfer'
+                               AND (t.transfer_direction = 'outbound' OR t.transfer_direction IS NULL)
+                               AND t.base_currency = a.currency THEN t.base_amount END), 0)
+           AS balance
+       FROM account_sources a
+       LEFT JOIN transactions t
+         ON t.account_id = a.id
+        AND t.workspace_id = $1
+        AND t.deleted_at IS NULL
+       WHERE a.workspace_id = $1
+         AND a.deleted_at IS NULL
+         AND a.id != $2
+         AND a.parent_account_id IS NULL  -- top-level accounts only
+       GROUP BY a.id, a.name, a.currency, a.initial_balance
+       ORDER BY a.name ASC`,
+      [workspaceId, excludeAccountId],
+    );
+
+    return res.rows.map((r) => ({
+      id: r.id,
+      name: r.name,
+      currency: r.currency,
+      balance: r.balance.toFixed(2),
+    }));
+  });
+}
+
+/**
+ * Persist the chosen target account on the draft.
+ * Also updates draft.status = 'pending_user' (keeps it alive) and touches updated_at.
+ *
+ * SEC-03: withTenantTransaction (RLS enforced).
+ * IDOR guard: validates target account belongs to same workspace.
+ */
+export async function setDraftTargetAccount(
+  draftId: string,
+  workspaceId: string,
+  userId: string,
+  targetAccountId: string,
+): Promise<SetTargetResult> {
+  return withTenantTransaction(workspaceId, userId, async (client) => {
+    // IDOR guard: ensure target account belongs to this workspace
+    const acctCheck = await client.query<{ id: string }>(
+      `SELECT id FROM account_sources
+       WHERE id = $1 AND workspace_id = $2 AND deleted_at IS NULL`,
+      [targetAccountId, workspaceId],
+    );
+    if (acctCheck.rows.length === 0) return 'account_not_found';
+
+    // Update draft
+    const result = await client.query<{ id: string }>(
+      `UPDATE transaction_drafts
+       SET transfer_target_account_id = $1,
+           updated_at = NOW()
+       WHERE id = $2
+         AND workspace_id = $3
+         AND status = 'pending_user'
+         AND deleted_at IS NULL
+       RETURNING id`,
+      [targetAccountId, draftId, workspaceId],
+    );
+
+    return result.rowCount === 0 ? 'draft_not_found' : 'ok';
+  });
+}
+
+/**
+ * Read the current draft transfer state for building the preview card.
+ * Returns null if draft not found, expired, or not a transfer draft.
+ *
+ * SEC-03: withTenantTransaction (RLS enforced).
+ * SEC-12: no amounts or names logged.
+ */
+export async function getDraftTransferState(
+  draftId: string,
+  workspaceId: string,
+  userId: string,
+): Promise<TransferDraftState | null> {
+  return withTenantTransaction(workspaceId, userId, async (client) => {
+    const res = await client.query<{
+      id: string;
+      parsed_amount: string | null;
+      parsed_currency: string | null;
+      account_id: string | null;
+      transfer_target_account_id: string | null;
+      src_name: string | null;
+      src_currency: string | null;
+      tgt_name: string | null;
+      tgt_currency: string | null;
+    }>(
+      `SELECT
+         d.id,
+         d.parsed_amount::TEXT AS parsed_amount,
+         d.parsed_currency,
+         d.account_id,
+         d.transfer_target_account_id,
+         src.name       AS src_name,
+         src.currency   AS src_currency,
+         tgt.name       AS tgt_name,
+         tgt.currency   AS tgt_currency
+       FROM transaction_drafts d
+       LEFT JOIN account_sources src ON src.id = d.account_id
+       LEFT JOIN account_sources tgt ON tgt.id = d.transfer_target_account_id
+       WHERE d.id = $1
+         AND d.workspace_id = $2
+         AND d.status = 'pending_user'
+         AND d.parsed_intent = 'transfer'
+         AND d.expires_at > NOW()`,
+      [draftId, workspaceId],
+    );
+
+    const row = res.rows[0];
+    if (!row || !row.account_id) return null;
+
+    return {
+      draftId: row.id,
+      amount:   String(row.parsed_amount ?? '0'),
+      currency: row.parsed_currency ?? 'USDT',
+      sourceAccountId:       row.account_id,
+      sourceAccountName:     row.src_name    ?? 'Счёт',
+      sourceAccountCurrency: row.src_currency ?? 'USDT',
+      targetAccountId:       row.transfer_target_account_id ?? null,
+      targetAccountName:     row.tgt_name    ?? null,
+      targetAccountCurrency: row.tgt_currency ?? null,
+    };
+  });
+}
