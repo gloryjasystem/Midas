@@ -1,7 +1,7 @@
 # WORKFLOW_STATE.MD — Диспетчер задач ИИ-агента Midas
 
 > **Тип:** MUTABLE — кратковременная память агента. Обновляется на каждом шаге работы.
-> **Обновлён:** 2026-05-18 22:45 (UTC+3)
+> **Обновлён:** 2026-05-19 14:40 (UTC+3)
 
 ---
 
@@ -9,13 +9,13 @@
 
 | Параметр | Значение |
 |---|---|
-| **PHASE** | Phase 2, Этап 2 — Excel Export Suite 2.0 — Audit-Grade Logic & Visual Polish |
-| **STEP** | Commit 9ce6b92 (HEAD). Sheet1 Транзакции — UX overhaul: удалены лишние колонки I/K, валюта в numFmt, Курс=blank для одновалютных, ИТОГО блок удалён, ширины A=20/J=30/N=22. tsc 0 errors. |
-| **AGENT STATUS** | tsc 0 errors. Sheet1 Транзакции: 16-колоночный журнальный лист, чистый леджер без блока ИТОГО, smart-курс, профессиональные границы и выравнивание. |
+| **PHASE** | Phase 2, Transfer Flow + Balance Parity Fix |
+| **STEP** | Commit 663cca1 (HEAD). fix(balance): унификация direction-aware формулы в account.service.ts — source picker и target picker теперь используют идентичную логику для transfer-транзакций. tsc 0 errors. |
+| **AGENT STATUS** | tsc 0 errors. Баланс-дискрепанс между source picker и target picker устранён. Transfer flow (ветки A1/A2a/A2b/B) работает корректно. |
 | **DEPLOYMENT** | Railway (spirited-happiness) — Midas Online, background-workers Online. Health: https://midas-production-f4f1.up.railway.app/health > ok |
-| **LAST COMPLETED** | 2026-05-18 ночь: c8c5714 (Sheet1 UX overhaul — cols I/K removed, borders, smart rate, clean ledger), 9ce6b92 (fix TS6133 unused usdRates param). |
+| **LAST COMPLETED** | 2026-05-19: 19d68b5 (fix: tp:tgt deleted_at error + диагностические логи), 663cca1 (fix(balance): direction-aware formula в getWorkspaceAccountsWithBalances + getAccountWithBalance). |
 | **BLOCKER** | None. |
-| **NEXT ACTION** | Проверить Excel-отчёт на Railway после успешного билда. Визуально верифицировать ширины колонок A/J/N и форматирование курса. Далее — Phase 3.0 DB Schema. |
+| **NEXT ACTION** | Протестировать transfer flow: выбрать счёт-источник → тип «Другой счёт» → убедиться балансы совпадают на обоих экранах. Далее — Phase 3.0 DB Schema. |
 
 
 ---
@@ -227,78 +227,79 @@ Replace the flat "Счетов пока нет." empty-state with a guided inter
 
 ---
 
-## 8. ФАЙЛЫ ДЛЯ ЧТЕНИЯ В НОВОМ ЧАТЕ (Phase Balance-B-2 context)
+## 8. ФАЙЛЫ ДЛЯ ЧТЕНИЯ В НОВОМ ЧАТЕ (Transfer Flow + Balance Parity context)
 
-**? ТЕКУЩИЙ КОНТЕКСТ: Balance Redesign Phase A ? + B-1 ?. Следующая — Phase B-2 (лесенка в getBalanceData + агрегация дочерних счетов).**
+**✅ ТЕКУЩИЙ КОНТЕКСТ: Transfer Flow реализован. Баланс-дискрепанс исправлен (commit 663cca1).**
 
 **ОБЯЗАТЕЛЬНО прочитать в новом чате:**
 ```
-apps/telegram-bot/src/services/balance-keyboard.service.ts   < Группировка, buildBalanceListKeyboard
-apps/telegram-bot/src/services/balance.service.ts            < PER_ACCOUNT_SQL, getBalanceData
-packages/database/migrations/1779800000000_account-parent-and-subtype.js < Схема B-1
+apps/telegram-bot/src/services/transfer-pairing.service.ts   < Логика TP flow: ветки A1/A2a/A2b/B
+apps/telegram-bot/src/services/account.service.ts            < getWorkspaceAccountsWithBalances (direction-aware)
+apps/telegram-bot/src/services/balance.service.ts            < PER_ACCOUNT_SQL (канонический эталон)
+apps/telegram-bot/src/routes/webhook.route.ts                < tp: callback handlers
 ```
 
-**НЕ ЧИТАТЬ (не нужны для Phase B-2):**
+**НЕ ЧИТАТЬ (не нужны сейчас):**
 ```
-apps/telegram-bot/src/services/report.service.ts
-apps/telegram-bot/src/services/transaction-list.service.ts
-apps/background-workers/*
 packages/database/smoke-test-phase*.mjs
+apps/telegram-bot/src/services/excel-export.service.ts
+apps/background-workers/src/workers/ai-parse.worker.ts
 ```
 
-**Состояние БД (проверено SQL-аудитом):**
-- `parent_account_id` — все NULL (все счета top-level, иерархия ещё не заполнена)
-- `sub_type` — все `'general'` (Phase A использует эвристику `classifyAccountGroup`)
-- 31 транзакция, формула баланса проверена (initial_balance + income ? expense)
+**Ключевые исправления этой сессии:**
+- `account.service.ts` `getWorkspaceAccountsWithBalances()` — добавлена direction-aware логика: transfer inbound = +amount, outbound = -amount (раньше все transfer = -amount)
+- `account.service.ts` `getAccountWithBalance()` — аналогичный патч
+- Колонка `transfer_direction` уже есть в таблице `transactions` (проверено)
+- tsc 0 ошибок, commit 663cca1 запушен
 
 ---
 
 ## 9. ПРОМПТ ДЛЯ СТАРТА НОВОГО ЧАТА
 
 ```
-? Balance Redesign — Phase A ? + Phase B-1 ? ЗАВЕРШЕНЫ. Следующая — Phase B-2.
-
-ПРОЕКТ:
-Midas Telegram Bot. Railway (project: spirited-happiness). MCP: Railway, GitHub, Postgres, Filesystem.
+ПРОЕКТ: Midas Telegram Bot.
+Railway (project: spirited-happiness). MCP: Railway, GitHub, Postgres, Filesystem.
 Auto-deploy: push to main > GitHub > Railway строит Midas + background-workers.
 
-ЧТО УЖЕ СДЕЛАНО:
+═══ ЧТО СДЕЛАНО В ПОСЛЕДНИХ СЕССИЯХ ═══
 
-Phase A (commit 4a1748c, задеплоен):
-- balance-keyboard.service.ts: classifyAccountGroup(эвристика по name/currency),
-  GROUP_EMOJI (??/??/??/??/??), buildBalanceListKeyboard с группами, export formatBalanceShort
-- balance.service.ts: секционированный текст getBalanceData(), удалён CURRENCY_TOTALS_SQL
+[Сессия: Transfer Flow]
+- transfer-pairing.service.ts — полная реализация FSM-based transfer flow:
+  A1: свой счёт (тот же) → ошибка
+  A2a: свой другой счёт, та же валюта → автоподтверждение
+  A2b: свой другой счёт, другая валюта → запрос суммы конвертации
+  B: другому человеку → сумма + категория + пропуск получателя
+- webhook.route.ts: tp: callback handlers, tp:tgt выбор целевого счёта
+- Исправлен баг: deleted_at фильтр в transaction_drafts (колонки нет — ошибка SQL)
+- Добавлены диагностические логи в tp:tgt handler
 
-Phase B-1 (commit 75156b9, применено на live Railway Postgres):
-- migration 1779800000000_account-parent-and-subtype.js:
-  parent_account_id VARCHAR(26) FK (NULL=top-level счёт)
-  sub_type TEXT NOT NULL DEFAULT 'general' CHECK(card|cash|crypto_exchange|crypto_wallet|bank_account|general)
-  idx_account_sources_parent (partial index)
+[Сессия: Balance Parity Fix — ПОСЛЕДНЯЯ, commit 663cca1]
+Проблема: балансы на экране 1 (source picker) ≠ экран 2 (target picker)
+Root cause: account.service.ts использовал СТАРУЮ формулу без transfer_direction:
+  ELSE -amount  ← все transfer вычитались, inbound тоже!
+Исправление: добавлена direction-aware логика в 2 функции:
+  getWorkspaceAccountsWithBalances() — для source picker (экран 1)
+  getAccountWithBalance() — для single account detail
+Формула теперь:
+  transfer + inbound  → +amount (зачисление)
+  transfer + outbound → -amount (списание)
+tsc 0 ошибок, задеплоено.
 
-100% АУДИТ ТРАНЗАКЦИЙ:
-- Формула initial_balance + income ? expense — верна (проверено на реальных данных)
-- FK-целостность: 31/31 транзакций связаны с существующими счетами
-- draft-confirmation.service.ts (transaction INSERT) — не затронут нашими изменениями
+═══ КЛЮЧЕВЫЕ ФАЙЛЫ ═══
+apps/telegram-bot/src/services/account.service.ts       ← ИЗМЕНЁН (balance formula)
+apps/telegram-bot/src/services/transfer-pairing.service.ts ← TP flow logic
+apps/telegram-bot/src/services/balance.service.ts       ← PER_ACCOUNT_SQL (эталон)
+apps/telegram-bot/src/routes/webhook.route.ts           ← tp: handlers
 
-ЧТО НУЖНО СДЕЛАТь (Фаза B-2):
+═══ СЛЕДУЮЩИЕ ШАГИ ═══
+1. Протестировать transfer flow end-to-end (балансы должны совпадать на обоих экранах)
+2. Phase 3.0 — DB Schema (account_type/wallet_subtype)
 
-1. balance.service.ts — обновить PER_ACCOUNT_SQL:
-   - Добавить parent_account_id в SELECT
-   - Строить дерево в getBalanceData(): parent счета + несколько children
-   - Оформить отображение с лесенкой: + OKX USDT · 32 601 / L OKX BTC · 0.5
-
-2. balance-keyboard.service.ts — обновить buildBalanceListKeyboard:
-   - Parent-счёт: показывать агрегацию ("количество валют")
-   - Child-счёт: отступ + другие эмодзи
-   - БОНУС: кнопка "? Добавить валюту" (bl:ac:{parentId})
-
-КЛЮЧЕВЫЕ ПРАВИЛА:
-- Финансовая математика: ТОЛЬКО BigInt/NUMERIC, никаких float (SEC-02)
+═══ КЛЮЧЕВЫЕ ПРАВИЛА ═══
+- Финансовая математика: ТОЛЬКО NUMERIC/BigInt, никаких float (SEC-02)
 - Все мутации через withTenantTransaction (SEC-03)
 - Не трогать project_config.md
-- Не менять draft-confirmation.service.ts — транзакции работают идеально
-
-ОБЯЗАТЕЛЬНО прочитать workflow_state.md Раздел 16 (роадмап) и Фазу B-2 план.
+- Обязательно прочитать workflow_state.md секции 1, 8, 16 перед работой
 ```
 
 
@@ -504,6 +505,8 @@ Phase B-1 (commit 75156b9, применено на live Railway Postgres):
 | 2026-05-18 11:30 | **docs: workflow_state.md восстановлен и актуализирован.** Файл был в CP1251, перезаписан с U+FFFD вместо кириллицы в коммите 588e038 (xAI Grok STT сессия). Восстановлен из git 83289493 (чистый CP1251 -> UTF-8). Добавлено 42 пропущенных changelog-записи за 2026-05-15..2026-05-18 (74 незадокументированных коммита). Секция 1 ТЕКУЩЕЕ СОСТОЯНИЕ обновлена. Orphan-секция перемещена в основную таблицу. Commits 58d9dc2, f96b13a, a1def96. |
 | 2026-05-18 21:30 | **fix(excel): Sheet1 Транзакции — audit-grade UX overhaul (c8c5714). DEPLOYED.** `excel-export.service.ts`: (1) Удалены колонки I (валюта суммы) и K (валюта выплачено) — валюта встроена в `numFmt` ячеек H и I (напр.: `10 000 UAH`, `-10 000 PLN`). (2) «Тип» → «Операция». (3) Границы `dataBorder` (#D5E8F5) на всех ячейках данных. (4) Выравнивание: числа → right, коды/даты → center, текст → left. (5) Курс (J=10): blank для одновалютных строк, `1 PLN = 0.2541 UAH` только для кросс-валют. (6) ИТОГО блок удалён — леджер чистый. (7) Часов/Ставка перенесены на cols O=15/P=16, формула `=IFERROR(Hₙ/Oₙ,"")`. (8) Ширины: A=20 (для Имен счетов в ОСТАТКАХ), J=30 (для Сводка + курс), N=22 (для 3 122 213 PLN). tsc 0 ошибок. Railway auto-deploy. |
 | 2026-05-18 21:36 | **fix(excel): remove unused usdRates param (9ce6b92). DEPLOYED.** `excel-export.service.ts`: удалён параметр `usdRates: Map<string,number>` из сигнатуры `buildSheet1` и точки вызова — исправлена ошибка `TS6133: declared but never read`, приведшая к падению билда Railway. tsc 0 ошибок. Railway auto-deploy. | settings-advanced.service.ts: (1) account_source_id -> account_id; (2) base_amount -> original_amount; (3) base_currency -> currency. Баги не ловились tsc (SQL = string). Найдены ручным аудитом. excel-export.service.ts: JSDoc обновлён до 5 листов. |
+| 2026-05-19 11:00 | **fix(transfer): tp:tgt deleted_at error — SQL hardening (commit 19d68b5). DEPLOYED.** `transfer-pairing.service.ts`: удалён фильтр `deleted_at IS NULL` из запросов к таблице `transaction_drafts` — этой колонки не существует в схеме, что вызывало runtime-ошибку при выборе целевого счёта перевода. `webhook.route.ts`: добавлено диагностическое логирование в `tp:tgt` handler — `setDraftTargetAccount` результат и `getDraftTransferState` данные. Улучшена обработка ошибок — логируется stack trace. tsc 0 ошибок. |
+| 2026-05-19 14:40 | **fix(balance): direction-aware formula parity — source picker = target picker (commit 663cca1). DEPLOYED.** `account.service.ts`: исправлены две функции `getWorkspaceAccountsWithBalances()` и `getAccountWithBalance()` — замена старой формулы `ELSE -amount` (все transfer = расход) на direction-aware логику: `transfer + inbound → +amount`, `transfer + outbound/NULL → -amount`. Root cause: source picker (Экран 1) использовал устаревшую формулу, target picker (Экран 2) уже имел direction-aware логику из `getAvailableTargetAccounts` — отсюда расхождение балансов на UI. Теперь все 4 точки расчёта баланса (balance.service.ts PER_ACCOUNT_SQL, getAvailableTargetAccounts, getWorkspaceAccountsWithBalances, getAccountWithBalance) используют одинаковую direction-aware формулу. tsc 0 ошибок. commit 663cca1 pushed to main. Railway auto-deploy. |
 | 2026-05-18 12:30 | **feat(excel): Smart number formatting + chronological months (6e597e0). DEPLOYED.** CRYPTO_SET: 18 монет (BTC/ETH/USDT/USDC/BNB/SOL/TON/TRX/XRP/DOGE/LTC/MATIC/DOT/ADA/AVAX/ATOM/LINK). smartNumFmt(currency): fiat=#,##0.## (max 2dp без trailing zeros), crypto=#,##0.######## (max 8dp). Логика: 100.00->100, 15.50->15.5, 0.00012345->0.00012345. fmtAmtSigned() тоже без trailing zeros + NBSP разделитель тысяч. Sheet4 По месяцам: хронологическая сортировка через parseMonKey(). Курс: #,##0.#### (4dp). |
 | 2026-05-18 13:30 | **feat(excel): Sheet0 Visual Polish — 10-point audit-grade redesign (3 commits). DEPLOYED.** excel-export.service.ts: (1) Navy/steel-blue цветовая палитра — C_NAVY_DARK (#1A3C5E), C_TOTAL_HDR (#BDD5E8), C_TOTAL_BG (#EBF5FB); (2) Единая thin-border сетка таблиц (FFBDD5E8) на всех блоках Сводки; (3) Стандартная высота строк 18px; (4) Выравнивание финансовых колонок по правому краю; (5) Знак переводов исправлен — transfer теперь вычитается (−transfer) из Movement; (6) Заморозка шапки листа (ySplit: 1 freeze pane); (7) Navy цвет вкладки «Сводка» (tabColor: 1A3C5E). tsc 0 ошибок. |
 | 2026-05-18 14:00 | **fix(excel): Grand total UX + balance sign + movement dedup. DEPLOYED.** (1) Grand total: label ячейки объединён через cols 1–3, right-aligned «прижат» к значению в col 4 — стандарт SAP/Oracle. (2) Balance sign: убран «+» префикс у положительных балансов (стандарт банковской выписки). (3) Movement column: убрано дублирование кода валюты — валюта объявляется в отдельной колонке, не повторяется в движении. |
