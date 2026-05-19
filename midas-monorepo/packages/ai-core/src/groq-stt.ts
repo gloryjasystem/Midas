@@ -22,6 +22,38 @@ const XAI_STT_ENDPOINT = 'https://api.x.ai/v1/stt';
 const REQUEST_TIMEOUT_MS = 15_000;
 
 // ─────────────────────────────────────────────────────────────
+// STT Context Prompt — Whisper-compatible "initial_prompt"
+// ─────────────────────────────────────────────────────────────
+//
+// CRITICAL: Whisper/Grok `prompt` is NOT an instruction field.
+// It acts as a "previous transcription context" — the model treats
+// it as text that came BEFORE the current audio and uses it to:
+//   1. Bias vocabulary (words in prompt are much more likely to appear)
+//   2. Set formatting conventions (punctuation, capitalization)
+//   3. Prime number/scale recognition
+//
+// Therefore we provide EXAMPLE SENTENCES that look like real
+// transcriptions a user would say, containing all critical vocabulary:
+//   - scale words: тысяч, тысячи, тысяча, миллион
+//   - transfer verbs: перевёл, скинул, отправил
+//   - currency names: долларов, гривен, рублей
+//   - number words: десять, двадцать, пятьдесят, сто, двести, пятьсот
+// ─────────────────────────────────────────────────────────────
+
+const STT_FINANCE_PROMPT = [
+  'Перевёл десять тысяч долларов на Сбербанк.',
+  'Скинул пятьдесят тысяч гривен.',
+  'Потратил три тысячи рублей на продукты.',
+  'Получил двадцать тысяч от Миши.',
+  'Отправил пять тысяч долларов.',
+  'Купил за двести пятьдесят тысяч гривен.',
+  'Заработал сто тысяч рублей.',
+  'Перевёл пятнадцать тысяч на Монобанк.',
+  'Снял два миллиона тенге.',
+  'Расход десять тысяч пятьсот долларов.',
+].join(' ');
+
+// ─────────────────────────────────────────────────────────────
 // Return types
 // ─────────────────────────────────────────────────────────────
 
@@ -64,22 +96,18 @@ export async function transcribeVoice(
   // xAI REQUIREMENT: `file` field MUST be the last field in the form.
   const formData = new FormData();
 
-  // Append language hint FIRST (before file — xAI requirement)
-  if (languageHint) {
-    formData.append('language', languageHint);
-  }
+  // Language — always 'ru' for Russian financial speech.
+  // Hardcoding prevents Grok from auto-detecting Ukrainian or English
+  // fragments and switching language models mid-sentence.
+  formData.append('language', languageHint ?? 'ru');
 
-  // ── STT Context Prompt ────────────────────────────────────
-  // Biases the model towards financial/numeric speech vocabulary.
-  // Critical for correctly transcribing: "10 тысяч" (not "10"), scale words,
-  // transfer verbs ("перевёл", "скинул"), and currency names.
-  // Equivalent to Whisper's initial_prompt parameter.
-  const STT_FINANCE_PROMPT =
-    'Финансовый трекер. Суммы: 10 тысяч, 500 тысяч, 2 миллиона, 50 тыс, 1.5 млн. ' +
-    'Действия: перевёл, перевел, скинул, отправил, потратил, купил, получил, заработал, снял. ' +
-    'Валюты: рублей, гривен, долларов, евро, юань, USDT, BTC, ETH, тенге. ' +
-    'Числа словами: тысяча, тысяч, тысячи, пятьсот, двести, миллион, сотня.';
+  // Context prompt — biases vocabulary toward financial speech
+  // (see STT_FINANCE_PROMPT block above for rationale).
   formData.append('prompt', STT_FINANCE_PROMPT);
+
+  // Temperature = 0 → deterministic decoding.
+  // Eliminates random hallucinations where "тысяч" is dropped.
+  formData.append('temperature', '0');
 
   // Append file LAST — xAI strict ordering requirement
   const ab = audioBuffer.buffer.slice(
