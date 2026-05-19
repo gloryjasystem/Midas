@@ -1173,6 +1173,12 @@ export async function getAccountWithBalance(
                    CASE
                      WHEN t.transaction_intent IN ('income', 'debt_received')
                        THEN t.base_amount
+                     WHEN t.transaction_intent = 'transfer'
+                      AND t.transfer_direction = 'inbound'
+                       THEN t.base_amount
+                     WHEN t.transaction_intent = 'transfer'
+                      AND (t.transfer_direction = 'outbound' OR t.transfer_direction IS NULL)
+                       THEN -t.base_amount
                      ELSE -t.base_amount
                    END
                  ),
@@ -1285,31 +1291,37 @@ export async function getWorkspaceAccountsWithBalances(
                    CASE
                      WHEN t.transaction_intent IN ('income', 'debt_received')
                        THEN t.base_amount
-                     ELSE -t.base_amount
-                   END
-                 ),
-                 0
-               )
+                     WHEN t.transaction_intent = 'transfer'
+                   AND t.transfer_direction = 'inbound'
+                 THEN t.base_amount
+                 WHEN t.transaction_intent = 'transfer'
+               AND (t.transfer_direction = 'outbound' OR t.transfer_direction IS NULL)
+           THEN -t.base_amount
+           ELSE -t.base_amount
+           END
+           ),
+           0
+           )
            )::TEXT AS balance,
            (a.id = w.default_expense_account_id) AS is_expense_default,
            (a.id = w.default_income_account_id)  AS is_income_default
-         FROM account_sources a
-         LEFT JOIN transactions t
+           FROM account_sources a
+           LEFT JOIN transactions t
            ON t.account_id = a.id
-          AND t.base_currency = a.currency
-          AND t.deleted_at IS NULL
-         LEFT JOIN workspaces w
+           AND t.base_currency = a.currency
+           AND t.deleted_at IS NULL
+           LEFT JOIN workspaces w
            ON w.id = a.workspace_id
-         WHERE a.workspace_id = $1
+           WHERE a.workspace_id = $1
            AND a.deleted_at IS NULL
            AND a.is_onboarding_placeholder = FALSE
-         GROUP BY a.id, a.name, a.currency, a.type, a.initial_balance,
-                  w.default_expense_account_id, w.default_income_account_id
-         ORDER BY
+           GROUP BY a.id, a.name, a.currency, a.type, a.initial_balance,
+           w.default_expense_account_id, w.default_income_account_id
+           ORDER BY
            CASE
-             WHEN $2 AND (a.id = w.default_income_account_id)  THEN 0
-             WHEN NOT $2 AND (a.id = w.default_expense_account_id) THEN 0
-             ELSE 1
+           WHEN $2 AND (a.id = w.default_income_account_id)  THEN 0
+           WHEN NOT $2 AND (a.id = w.default_expense_account_id) THEN 0
+           ELSE 1
            END ASC,
            a.name ASC`,
         [workspaceId, sortByIncome],
