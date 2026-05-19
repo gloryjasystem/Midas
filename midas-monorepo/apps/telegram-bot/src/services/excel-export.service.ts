@@ -419,7 +419,7 @@ function buildSheet0Summary(
   ws.getColumn(2).width = 38; // Нетто / Период
   ws.getColumn(3).width = 28; // Курс к USD
   ws.getColumn(4).width = 14; // %
-  ws.getColumn(5).width = 34; // Все расходы
+  ws.getColumn(5).width = 44; // Все расходы — widened to prevent truncation
 
   let r = 1;
 
@@ -451,8 +451,8 @@ function buildSheet0Summary(
 
   // ── Title ──────────────────────────────────────────────────
   const title = mergeFill(r, 1, r, 5, C_HEADER_BG);
-  title.value = 'MIDAS — Финансовый отчёт';
-  title.font = { bold: true, size: 14, color: { argb: `FF${C_COL_HDR_FG}` }, name: 'Calibri' };
+  title.value = `MIDAS — Финансовый отчёт  ·  ${periodStr}`;
+  title.font = { bold: true, size: 13, color: { argb: `FF${C_COL_HDR_FG}` }, name: 'Calibri' };
   title.alignment = { horizontal: 'center', vertical: 'middle' };
   ws.getRow(r).height = 30;
   r++;
@@ -467,7 +467,7 @@ function buildSheet0Summary(
   cell(r, 1, 'Сформирован:', true); ws.getCell(r, 1).fill = metaBg;
   cell(r, 2, `${fmtDate(new Date())} ${fmtTime(new Date())}`); ws.getCell(r, 2).fill = metaBg;
   r++;
-  r++; // spacer
+  // (no extra spacer — meta rows flow directly into first section)
 
   // ── СВОДКА ЗА ПЕРИОД ──────────────────────────────────────
   sectionHdr('СВОДКА ЗА ПЕРИОД');
@@ -1110,25 +1110,36 @@ function buildSheet0Summary(
   }
   r++; r++; // spacer before footer
 
-  // ── Audit Trail Footer (Task 0.6) ─────────────────────────
-  const footerStyle = (row: number) => {
+  // ── Audit Trail Footer ────────────────────────────────────
+  // Styled block with top border — not a floating text dump
+  r++; // spacer
+  const ftBorder = {
+    top:   { style: 'thin' as const, color: { argb: `FF${C_TBL_BORDER}` } },
+    left:  { style: 'thin' as const, color: { argb: `FF${C_TBL_BORDER}` } },
+    right: { style: 'thin' as const, color: { argb: `FF${C_TBL_BORDER}` } },
+  };
+  const ftBorderBot = {
+    ...ftBorder,
+    bottom: { style: 'thin' as const, color: { argb: `FF${C_TBL_BORDER}` } },
+  };
+  const ftFill = { type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb: `FF${C_TOTAL_BG}` } };
+  const footerLine = (row: number, val: string, isLast = false) => {
     ws.mergeCells(row, 1, row, 5);
     const c = ws.getCell(row, 1);
-    c.font = { size: 8, italic: true, color: { argb: 'FF888888' }, name: 'Calibri' };
-    c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF9F9F9' } };
+    c.value = val;
+    c.font  = { size: 8, italic: true, color: { argb: 'FF666666' }, name: 'Calibri' };
+    c.fill  = ftFill;
+    c.border = isLast ? ftBorderBot : ftBorder;
+    c.alignment = { vertical: 'middle', horizontal: 'left', indent: 1 };
+    ws.getRow(row).height = 16;
     return c;
   };
-  footerStyle(r).value = '─────────────────────────────────────────────────────────'; r++;
-  footerStyle(r).value = 'Документ сформирован системой MIDAS v2.0'; r++;
-  footerStyle(r).value = `Дата экспорта: ${fmtDate(new Date())} ${fmtTime(new Date())}`; r++;
-  footerStyle(r).value = `Период: ${periodStr}`; r++;
-  footerStyle(r).value = `Количество записей: ${String(rows.length)}`; r++;
-  footerStyle(r).value = '─────────────────────────────────────────────────────────'; r++;
-  footerStyle(r).value = 'Документ является информационным. Для официального подтверждения операций обратитесь в банк или платёжную систему.'; r++;
+  footerLine(r, `📋 Документ сформирован системой MIDAS v2.0  ·  ${fmtDate(new Date())} ${fmtTime(new Date())}`); r++;
+  footerLine(r, `📅 Период: ${periodStr}  ·  Количество записей: ${String(rows.length)}`); r++;
+  footerLine(r, 'ℹ️ Документ является информационным. Для официального подтверждения операций обратитесь в банк или платёжную систему.', true); r++;
 
-  // Freeze row 1 (title always visible when scrolling)
-  ws.views = [{ state: 'frozen', ySplit: 1, activeCell: 'A2' }];
-  // Navy tab to match sheet identity
+  // Freeze row 1 + hide gridlines (matches enterprise standard of all other sheets)
+  ws.views = [{ state: 'frozen', ySplit: 1, activeCell: 'A2', showGridLines: false }];
   ws.properties.tabColor = { argb: `FF${C_HEADER_BG}` };
 }
 
