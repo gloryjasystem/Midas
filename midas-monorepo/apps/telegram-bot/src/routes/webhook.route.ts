@@ -298,11 +298,14 @@ import {
   buildRecipientKeyboard,
   buildExternalCategoryScreen,
   buildExternalCategoryKeyboard,
+  buildCrossCurrencyTransferScreen,
+  buildCrossCurrencyTransferKeyboard,
   getAvailableTargetAccounts,
   setDraftTargetAccount,
   getDraftTransferState,
   patchDraftItemName,
   patchDraftCategoryForExternal,
+  patchDraftCreditedAmount,
 } from '../services/transfer-pairing.service.js';
 
 // ─────────────────────────────────────────────────────────────
@@ -4133,10 +4136,11 @@ Midas создан, чтобы сделать учет денег максима
       //   tp:skip_rcpt:{draftId}          — Branch B: skip recipient entry
       //   tp:cat:{categoryId}:{draftId}   — Branch B: category selected
       //   tp:cat:none:{draftId}           — Branch B: no category
+      //   tp:xfx_back:{draftId}           — Branch A: back from cross-currency input
       if (callbackData.startsWith('tp:')) {
         const tpMsgId = cq.message ? String(cq.message.message_id) : null;
         const tpParts = callbackData.split(':');
-        const tpCmd   = tpParts[1]; // 'type' | 'tgt' | 'confirm' | 'cancel' | 'skip_rcpt' | 'cat'
+        const tpCmd   = tpParts[1]; // 'type' | 'tgt' | 'confirm' | 'cancel' | 'skip_rcpt' | 'cat' | 'xfx_back'
 
         let tpResolved: { workspaceId: string; userId: string };
         try {
@@ -4253,21 +4257,62 @@ Midas создан, чтобы сделать учет денег максима
             if (setResult !== 'ok') {
               if (tpMsgId) void editMessageText(chatId, tpMsgId, '⚠️ Счёт не найден или черновик устарел.');
             } else {
-              // Show transfer preview card
+              // Show transfer preview card (or cross-currency input)
               const state = await getDraftTransferState(draftIdTgt, tpResolved.workspaceId, tpResolved.userId);
               if (!state?.targetAccountName) {
                 if (tpMsgId) void editMessageText(chatId, tpMsgId, '⚠️ Не удалось загрузить данные перевода.');
               } else {
                 const sameCurrency = state.sourceAccountCurrency === state.targetAccountCurrency;
-                const crossRate = sameCurrency ? null : `1 ${state.currency} → ? ${state.targetAccountCurrency}`;
-                const previewText = buildTransferPreviewScreen(
-                  state.sourceAccountName, state.amount, state.currency,
-                  state.targetAccountName, state.amount, state.targetAccountCurrency!,
-                  crossRate,
-                );
-                if (tpMsgId) void editMessageText(chatId, tpMsgId, previewText, buildTransferConfirmKeyboard(draftIdTgt));
+
+                if (!sameCurrency) {
+                  // Cross-currency: show input screen for credited amount
+                  const xfxText = buildCrossCurrencyTransferScreen(
+                    state.sourceAccountName, state.amount, state.currency,
+                    state.targetAccountName, state.targetAccountCurrency!,
+                  );
+                  if (tpMsgId) void editMessageText(chatId, tpMsgId, xfxText, buildCrossCurrencyTransferKeyboard(draftIdTgt));
+                  // Set Redis key for text intercept
+                  const tpXfxKey = `midas:tp_xfx:${chatId}`;
+                  try {
+                    await redisConnection.set(
+                      tpXfxKey,
+                      `${draftIdTgt}:${tpResolved.workspaceId}:${tpResolved.userId}:${state.targetAccountCurrency}`,
+                      'EX', 3600,
+                    );
+                  } catch { /* non-fatal */ }
+                } else {
+                  // Same currency: show preview directly
+                  const previewText = buildTransferPreviewScreen(
+                    state.sourceAccountName, state.amount, state.currency,
+                    state.targetAccountName, state.amount, state.targetAccountCurrency!,
+                    null,
+                  );
+                  if (tpMsgId) void editMessageText(chatId, tpMsgId, previewText, buildTransferConfirmKeyboard(draftIdTgt));
+                }
                 try { await redisConnection.set(`midas:preview:${draftIdTgt}`, tpMsgId ?? '', 'EX', 3600); } catch { /* non-fatal */ }
               }
+            }
+
+          // ── tp:xfx_back:{draftId} — back from cross-currency input ────
+          } else if (tpCmd === 'xfx_back') {
+            const draftIdXfxBack = tpParts[2];
+            if (!draftIdXfxBack) throw new Error('tp:xfx_back missing draftId');
+
+            // Clear cross-currency text intercept key
+            try { await redisConnection.del(`midas:tp_xfx:${chatId}`); } catch { /* non-fatal */ }
+
+            // Return to target account picker
+            const state = await getDraftTransferState(draftIdXfxBack, tpResolved.workspaceId, tpResolved.userId);
+            if (!state || !state.sourceAccountId) {
+              if (tpMsgId) void editMessageText(chatId, tpMsgId, '⚠️ Черновик не найден или истёк.');
+            } else {
+              const targets = await getAvailableTargetAccounts(
+                tpResolved.workspaceId, tpResolved.userId, state.sourceAccountId,
+              );
+              const pickerText = buildTargetPickerScreen(
+                state.amount, state.currency, state.sourceAccountName,
+              );
+              if (tpMsgId) void editMessageText(chatId, tpMsgId, pickerText, buildTargetAccountKeyboard(targets, draftIdXfxBack));
             }
 
           // ── tp:confirm:{draftId} ──────────────────────────────────
@@ -4306,6 +4351,8 @@ Midas создан, чтобы сделать учет денег максима
             await callbackConfirmQueue.add('reject', cancelPayload, { removeOnComplete: true, removeOnFail: 100 });
             // Clean up recipient-await key if it was set (Branch B)
             try { await redisConnection.del(`midas:tp_ext_rcpt:${chatId}`); } catch { /* non-fatal */ }
+            // Clean up cross-currency await key if it was set (Branch A xfx)
+            try { await redisConnection.del(`midas:tp_xfx:${chatId}`); } catch { /* non-fatal */ }
             if (tpMsgId) void editMessageText(chatId, tpMsgId, '🚫 Перевод отменён.');
           }
         } catch (tpErr) {
@@ -6638,6 +6685,65 @@ Midas создан, чтобы сделать учет денег максима
               catText,
               buildExternalCategoryKeyboard(categories, rcptDraftId),
             );
+          }
+
+          await reply.status(200).send({ ok: true });
+          return;
+        }
+      }
+    }
+
+    // ── Step 5h-tp-xfx: Phase 3.0 Branch A — Cross-currency credited amount intercept ──
+    // If user is entering the credited amount for a cross-currency internal transfer,
+    // intercept text before AI parse. Redis key set by tp:tgt handler.
+    if (!commandToken && message.text) {
+      const tpXfxKey = `midas:tp_xfx:${chatId}`;
+      const tpXfxRaw = await redisConnection.get(tpXfxKey);
+      if (tpXfxRaw) {
+        // Format: "{draftId}:{workspaceId}:{userId}:{targetCurrency}"
+        const xParts = tpXfxRaw.split(':');
+        if (xParts.length >= 4) {
+          const xDraftId   = xParts[0]!;
+          const xWsId      = xParts[1]!;
+          const xUserId    = xParts[2]!;
+          const xTargetCur = xParts.slice(3).join(':'); // currency may not have colons, but safe
+
+          // Parse amount — accept "450", "450.50", "1 234", etc.
+          const rawAmt = message.text.trim().replace(/\s/g, '').replace(',', '.');
+          const amtMatch = rawAmt.match(/^(\d+(?:\.\d+)?)$/);
+
+          if (!amtMatch) {
+            void upsertBotMessage(
+              telegramUserId, chatId,
+              `⚠️ Некорректная сумма. Введите число (например: <code>450</code> или <code>450.50</code>).`,
+            );
+          } else {
+            const creditedAmount = amtMatch[1]!;
+
+            // Clean up Redis key
+            await redisConnection.del(tpXfxKey);
+
+            // Store credited amount on draft
+            const patchRes = await patchDraftCreditedAmount(xDraftId, xWsId, xUserId, creditedAmount, xTargetCur);
+            if (patchRes === 'not_found') {
+              void upsertBotMessage(telegramUserId, chatId, '⏰ Черновик уже обработан или истёк.');
+            } else {
+              // Show transfer preview with both amounts
+              const state = await getDraftTransferState(xDraftId, xWsId, xUserId);
+              if (state?.targetAccountName) {
+                const rate = `${state.amount} ${state.currency} → ${creditedAmount} ${xTargetCur}`;
+                const previewText = buildTransferPreviewScreen(
+                  state.sourceAccountName, state.amount, state.currency,
+                  state.targetAccountName, creditedAmount, xTargetCur,
+                  rate,
+                );
+                void upsertBotMessage(
+                  telegramUserId, chatId,
+                  previewText,
+                  buildTransferConfirmKeyboard(xDraftId),
+                );
+              }
+            }
           }
 
           await reply.status(200).send({ ok: true });

@@ -517,3 +517,68 @@ export async function patchDraftCategoryForExternal(
     return result.rowCount === 0 ? 'not_found' : 'ok';
   });
 }
+
+// ─────────────────────────────────────────────────────────────
+// Branch A — Cross-currency internal transfer UI + DB helpers
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Screen asking user to enter the credited amount in the target currency.
+ * Shown when source and target accounts have different currencies.
+ */
+export function buildCrossCurrencyTransferScreen(
+  sourceAccount: string, outAmount: string, outCurrency: string,
+  targetAccount: string, targetCurrency: string,
+): string {
+  return [
+    '🔄 <b>Конвертация</b>',
+    `${escapeHtml(sourceAccount)} (${escapeHtml(outCurrency)}) → ${escapeHtml(targetAccount)} (${escapeHtml(targetCurrency)})`,
+    '',
+    '━━━━━━━━━━━━━━━━━━━━━━━',
+    `📤 Списываю: <code>${escapeHtml(outAmount)} ${escapeHtml(outCurrency)}</code>`,
+    `📥 Зачисляю: <b>_____ ${escapeHtml(targetCurrency)}</b>`,
+    '',
+    `<i>Введите сумму зачисления в ${escapeHtml(targetCurrency)}:</i>`,
+  ].join('\n');
+}
+
+/** Keyboard for the cross-currency transfer input screen. */
+export function buildCrossCurrencyTransferKeyboard(draftId: string): InlineKeyboardMarkup {
+  return {
+    inline_keyboard: [
+      [{ text: '◀️ Назад', callback_data: `tp:xfx_back:${draftId}` }],
+      [{ text: '✖ Отмена', callback_data: `tp:cancel:${draftId}` }],
+    ],
+  };
+}
+
+/**
+ * Patch the credited amount for cross-currency internal transfers.
+ * Stores the user-entered amount + currency of the target account
+ * in account_debit_amount and account_debit_currency on the draft.
+ *
+ * SEC-02: amount stays as NUMERIC string. SEC-03: withTenantTransaction.
+ */
+export async function patchDraftCreditedAmount(
+  draftId: string,
+  workspaceId: string,
+  userId: string,
+  creditedAmount: string,
+  creditedCurrency: string,
+): Promise<'ok' | 'not_found'> {
+  return withTenantTransaction(workspaceId, userId, async (client) => {
+    const result = await client.query<{ id: string }>(
+      `UPDATE transaction_drafts
+       SET account_debit_amount = $1::NUMERIC,
+           account_debit_currency = $2,
+           updated_at = NOW()
+       WHERE id = $3
+         AND workspace_id = $4
+         AND status = 'pending_user'
+         AND expires_at > NOW()
+       RETURNING id`,
+      [creditedAmount, creditedCurrency, draftId, workspaceId],
+    );
+    return result.rowCount === 0 ? 'not_found' : 'ok';
+  });
+}
