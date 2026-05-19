@@ -379,7 +379,6 @@ export async function setDraftTargetAccount(
        WHERE id = $2
          AND workspace_id = $3
          AND status = 'pending_user'
-         AND deleted_at IS NULL
        RETURNING id`,
       [targetAccountId, draftId, workspaceId],
     );
@@ -430,8 +429,8 @@ export async function getDraftTransferState(
          AND d.status = 'pending_user'
          AND d.parsed_intent = 'transfer'
          AND d.expires_at > NOW()`,
-      [draftId, workspaceId],
-    );
+         [draftId, workspaceId],
+         );
 
     const row = res.rows[0];
     if (!row || !row.account_id) return null;
