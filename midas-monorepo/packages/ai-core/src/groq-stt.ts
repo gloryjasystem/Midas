@@ -143,16 +143,17 @@ async function transcribeWithGroq(
 // Provider: xAI Grok STT (FALLBACK)
 // ─────────────────────────────────────────────────────────────
 //
-// CRITICAL: Send ONLY `language` + `file` to xAI.
-// Adding any extra FormData fields (prompt, temperature, format, etc.)
-// causes xAI to switch its number rendering from words to digits,
-// which breaks scale word recognition:
-//   Clean (language + file only): "десять тысяч долларов"  ← correct
-//   With extra fields:            "10 долларов"            ← BROKEN
+// Uses format=false to disable Inverse Text Normalization (ITN).
+// Without this, xAI auto-applies ITN when it detects currency words
+// like "долларов", converting "десять тысяч" → "10" and DROPPING
+// the scale word "тысяч" in the process.
+//
+// With format=false, numbers stay as spoken words ("десять тысяч"),
+// which our normalizeSpokenNumbers() converts to digits correctly.
 //
 // Evidence from production DB:
-//   May 17-18 (clean):   "десять тысяч долларов" → 10000 ✅
-//   May 19 (with prompt): "10 долларов"          → 10    ❌
+//   format=false:  "десять тысяч долларов"  → 10000 ✅
+//   ITN active:    "10 долларов"            → 10    ❌
 // ─────────────────────────────────────────────────────────────
 
 async function transcribeWithXai(
@@ -163,12 +164,20 @@ async function transcribeWithXai(
 ): Promise<TranscribeResult> {
   const formData = new FormData();
 
-  // Language ONLY — no other params!
-  // xAI requires language to be before file.
+  // ── format=false — DISABLE Inverse Text Normalization (ITN) ───
+  // When ITN is ON (or auto-triggered by currency words like "долларов"),
+  // xAI converts spoken numbers to digits AND drops scale words:
+  //   "десять тысяч долларов" → "10 долларов" (BROKEN — тысяч lost!)
+  // With format=false, numbers stay as raw spoken words:
+  //   "десять тысяч долларов" → "десять тысяч долларов" (correct)
+  // Our normalizeSpokenNumbers() then handles word→digit conversion
+  // with full scale-word awareness.
+  formData.append('format', 'false');
+
+  // Language — helps transcription accuracy
   formData.append('language', language);
 
-  // File LAST — xAI strict ordering requirement.
-  // NO other fields between language and file!
+  // File LAST — xAI strict ordering requirement
   const ab = audioBuffer.buffer.slice(
     audioBuffer.byteOffset,
     audioBuffer.byteOffset + audioBuffer.byteLength,
