@@ -288,6 +288,7 @@ import {
   formatTxListHeader,
 } from '../services/transaction-keyboard.service.js';
 import {
+  buildTransferTypeScreen,
   buildTransferTypeKeyboard,
   buildTargetPickerScreen,
   buildTargetAccountKeyboard,
@@ -1569,14 +1570,33 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
               await setDraftAccountId(iaResolved.workspaceId, iaResolved.userId, iaCmd.draftId, pickedAcct.id);
               // Phase 2.10+: Clear gate_sent — user resolved the picker, normal text flow resumes.
               void redisConnection.del(`midas:gate_sent:${telegramUserId}:${chatId}`).catch(() => {});
-              if (iaMsgId) {
-                const previewRes = await confirmPreviewFull(iaResolved.workspaceId, iaResolved.userId, iaCmd.draftId);
-                void editMessageText(chatId, iaMsgId, previewRes.text, confirmKbForDraft(iaCmd.draftId, previewRes));
-                try { await redisConnection.set(`midas:preview:${iaCmd.draftId}`, iaMsgId, 'EX', 3600); } catch { /* non-fatal */ }
-                // Phase 2.6: track current_screen for reminder mirroring
-                // screen1b = cross-currency with no debit amount yet; screen2 = ready to confirm
-                const newScreen = previewRes.isCrossCurrency && !previewRes.hasCrossAmount ? 'screen1b' : 'screen2';
-                void updateDraftCurrentScreen(iaResolved.workspaceId, iaResolved.userId, iaCmd.draftId, newScreen).catch(() => {});
+
+              // ── Phase 3.0: Transfer intent → show transfer type picker ─────
+              // If the draft intent is 'transfer', route to the transfer pairing
+              // flow instead of the standard confirm preview.
+              const pickDraft = await getDraftFields(iaResolved.workspaceId, iaResolved.userId, iaCmd.draftId);
+              if (pickDraft?.parsed_intent === 'transfer') {
+                if (iaMsgId) {
+                  const tpText = buildTransferTypeScreen(
+                    pickDraft.parsed_amount ?? '0',
+                    pickDraft.parsed_currency ?? 'USDT',
+                    escapeHtml(pickedAcct.name),
+                  );
+                  void editMessageText(chatId, iaMsgId, tpText, buildTransferTypeKeyboard(iaCmd.draftId));
+                  try { await redisConnection.set(`midas:preview:${iaCmd.draftId}`, iaMsgId, 'EX', 3600); } catch { /* non-fatal */ }
+                }
+                request.log.info({ msg: '[midas:bot:webhook] ia:pk: transfer intent → type picker shown', workspaceId: iaResolved.workspaceId });
+              } else {
+                // Standard flow: show confirm preview
+                if (iaMsgId) {
+                  const previewRes = await confirmPreviewFull(iaResolved.workspaceId, iaResolved.userId, iaCmd.draftId);
+                  void editMessageText(chatId, iaMsgId, previewRes.text, confirmKbForDraft(iaCmd.draftId, previewRes));
+                  try { await redisConnection.set(`midas:preview:${iaCmd.draftId}`, iaMsgId, 'EX', 3600); } catch { /* non-fatal */ }
+                  // Phase 2.6: track current_screen for reminder mirroring
+                  // screen1b = cross-currency with no debit amount yet; screen2 = ready to confirm
+                  const newScreen = previewRes.isCrossCurrency && !previewRes.hasCrossAmount ? 'screen1b' : 'screen2';
+                  void updateDraftCurrentScreen(iaResolved.workspaceId, iaResolved.userId, iaCmd.draftId, newScreen).catch(() => {});
+                }
               }
               request.log.info({ msg: '[midas:bot:webhook] ia:pk: account picked', workspaceId: iaResolved.workspaceId });
             }
@@ -1641,8 +1661,20 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
             } catch { /* non-fatal */ }
 
             if (iaMsgId) {
-              const previewRes = await confirmPreviewFull(iaResolved.workspaceId, iaResolved.userId, iaCmd.draftId);
-              void editMessageText(chatId, iaMsgId, previewRes.text, confirmKbForDraft(iaCmd.draftId, previewRes));
+              // Phase 3.0: If transfer intent, go back to type picker (not confirm preview)
+              const backDraft = await getDraftFields(iaResolved.workspaceId, iaResolved.userId, iaCmd.draftId);
+              if (backDraft?.parsed_intent === 'transfer' && backDraft.account_id) {
+                const backAcct = await getAccountById(iaResolved.workspaceId, iaResolved.userId, backDraft.account_id);
+                const tpText = buildTransferTypeScreen(
+                  backDraft.parsed_amount ?? '0',
+                  backDraft.parsed_currency ?? 'USDT',
+                  escapeHtml(backAcct?.name ?? '?'),
+                );
+                void editMessageText(chatId, iaMsgId, tpText, buildTransferTypeKeyboard(iaCmd.draftId));
+              } else {
+                const previewRes = await confirmPreviewFull(iaResolved.workspaceId, iaResolved.userId, iaCmd.draftId);
+                void editMessageText(chatId, iaMsgId, previewRes.text, confirmKbForDraft(iaCmd.draftId, previewRes));
+              }
               try { await redisConnection.set(`midas:preview:${iaCmd.draftId}`, iaMsgId, 'EX', 3600); } catch { /* non-fatal */ }
             }
             request.log.info({ msg: '[midas:bot:webhook] ia:back: account restored, returning to preview card', workspaceId: iaResolved.workspaceId });
