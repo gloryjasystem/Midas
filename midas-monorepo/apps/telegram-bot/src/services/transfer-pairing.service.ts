@@ -206,6 +206,89 @@ export function buildTransferConfirmKeyboard(draftId: string): InlineKeyboardMar
 }
 
 // ─────────────────────────────────────────────────────────────
+// Branch B — External transfer UI builders
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Screen asking "Who are you sending to?" with skip option.
+ * Shown after user chose "👤 Другому человеку".
+ */
+export function buildRecipientScreen(
+  amount: string,
+  currency: string,
+  fromAccountName: string,
+): string {
+  return [
+    `👤 <b>Перевод ${escapeHtml(amount)} ${escapeHtml(currency)}</b>`,
+    `со счёта <b>${escapeHtml(fromAccountName)}</b>`,
+    '',
+    '━━━━━━━━━━━━━━━━━━━━━━━',
+    '<b>Кому переводишь?</b>',
+    '',
+    '<i>Напиши имя получателя или нажми «Пропустить»</i>',
+  ].join('\n');
+}
+
+/** Keyboard for recipient screen — skip + cancel. */
+export function buildRecipientKeyboard(draftId: string): InlineKeyboardMarkup {
+  return {
+    inline_keyboard: [
+      [{ text: '⏩ Пропустить', callback_data: `tp:skip_rcpt:${draftId}` }],
+      [{ text: '✖ Отмена',     callback_data: `tp:cancel:${draftId}` }],
+    ],
+  };
+}
+
+/**
+ * Category picker screen for external transfers.
+ * Shown after recipient name entered/skipped.
+ */
+export function buildExternalCategoryScreen(
+  amount: string,
+  currency: string,
+  recipientName: string | null,
+): string {
+  const recipientLine = recipientName
+    ? `👤 Получатель: <b>${escapeHtml(recipientName)}</b>`
+    : '👤 Получатель: <i>не указан</i>';
+  return [
+    `💸 <b>Перевод ${escapeHtml(amount)} ${escapeHtml(currency)}</b>`,
+    recipientLine,
+    '',
+    '━━━━━━━━━━━━━━━━━━━━━━━',
+    '<b>Категория расхода:</b>',
+  ].join('\n');
+}
+
+/**
+ * Inline keyboard for category picker.
+ * Uses tp:cat:{categoryId}:{draftId} callbacks.
+ * Categories come from the workspace (getWorkspaceCategories).
+ */
+export function buildExternalCategoryKeyboard(
+  categories: Array<{ id: string; name: string }>,
+  draftId: string,
+): InlineKeyboardMarkup {
+  // Arrange in 2-column grid
+  const rows: InlineKeyboardButton[][] = [];
+  for (let i = 0; i < categories.length; i += 2) {
+    const row: InlineKeyboardButton[] = [];
+    const c1 = categories[i];
+    if (c1) row.push({ text: c1.name, callback_data: `tp:cat:${c1.id}:${draftId}` });
+    if (i + 1 < categories.length) {
+      const c2 = categories[i + 1];
+      if (c2) row.push({ text: c2.name, callback_data: `tp:cat:${c2.id}:${draftId}` });
+    }
+    rows.push(row);
+  }
+  // "Без категории" + cancel
+  rows.push([{ text: '📦 Без категории', callback_data: `tp:cat:none:${draftId}` }]);
+  rows.push([{ text: '✖ Отмена', callback_data: `tp:cancel:${draftId}` }]);
+  return { inline_keyboard: rows };
+}
+
+
+// ─────────────────────────────────────────────────────────────
 // DB helpers
 // ─────────────────────────────────────────────────────────────
 
@@ -364,5 +447,73 @@ export async function getDraftTransferState(
       targetAccountName:    row.tgt_name    ? escapeHtml(row.tgt_name)    : null,
       targetAccountCurrency: row.tgt_currency ?? null,
     };
+  });
+}
+
+// ─────────────────────────────────────────────────────────────
+// Branch B — External transfer DB helpers
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Patch item_name on a draft with the recipient name.
+ * Used by Branch B external transfer flow.
+ *
+ * SEC-12: name not logged. SEC-03: withTenantTransaction.
+ */
+export async function patchDraftItemName(
+  draftId: string,
+  workspaceId: string,
+  userId: string,
+  recipientName: string,
+): Promise<'ok' | 'not_found'> {
+  return withTenantTransaction(workspaceId, userId, async (client) => {
+    const result = await client.query<{ id: string }>(
+      `UPDATE transaction_drafts
+       SET item_name = $1, updated_at = NOW()
+       WHERE id = $2
+         AND workspace_id = $3
+         AND status = 'pending_user'
+         AND expires_at > NOW()
+       RETURNING id`,
+      [recipientName, draftId, workspaceId],
+    );
+    return result.rowCount === 0 ? 'not_found' : 'ok';
+  });
+}
+
+/**
+ * Patch category_id on a draft for external transfers.
+ * SEC-01: categoryId validated via IDOR guard. SEC-03: withTenantTransaction.
+ */
+export async function patchDraftCategoryForExternal(
+  draftId: string,
+  workspaceId: string,
+  userId: string,
+  categoryId: string | null,
+): Promise<'ok' | 'not_found'> {
+  return withTenantTransaction(workspaceId, userId, async (client) => {
+    // IDOR guard for non-null category
+    if (categoryId !== null) {
+      const catCheck = await client.query<{ id: string }>(
+        `SELECT id FROM categories WHERE id = $1 AND workspace_id = $2`,
+        [categoryId, workspaceId],
+      );
+      if (catCheck.rows.length === 0) return 'not_found';
+    }
+
+    // Also change parsed_intent to 'expense' — external transfers are expenses
+    const result = await client.query<{ id: string }>(
+      `UPDATE transaction_drafts
+       SET category_id = $1,
+           parsed_intent = 'expense',
+           updated_at = NOW()
+       WHERE id = $2
+         AND workspace_id = $3
+         AND status = 'pending_user'
+         AND expires_at > NOW()
+       RETURNING id`,
+      [categoryId, draftId, workspaceId],
+    );
+    return result.rowCount === 0 ? 'not_found' : 'ok';
   });
 }

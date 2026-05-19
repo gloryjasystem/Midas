@@ -293,9 +293,15 @@ import {
   buildTargetAccountKeyboard,
   buildTransferPreviewScreen,
   buildTransferConfirmKeyboard,
+  buildRecipientScreen,
+  buildRecipientKeyboard,
+  buildExternalCategoryScreen,
+  buildExternalCategoryKeyboard,
   getAvailableTargetAccounts,
   setDraftTargetAccount,
   getDraftTransferState,
+  patchDraftItemName,
+  patchDraftCategoryForExternal,
 } from '../services/transfer-pairing.service.js';
 
 // ─────────────────────────────────────────────────────────────
@@ -4087,15 +4093,18 @@ Midas создан, чтобы сделать учет денег максима
 
       // ── Phase 3.0: transfer pairing callbacks (prefix "tp:") ───
       // Callback data formats:
-      //   tp:type:internal:{draftId}  — user chose internal transfer
-      //   tp:type:external:{draftId}  — user chose external (treat as expense)
-      //   tp:tgt:{accountId}:{draftId} — user chose target account
-      //   tp:confirm:{draftId}        — user confirmed paired transfer
-      //   tp:cancel:{draftId}         — user cancelled transfer
+      //   tp:type:internal:{draftId}      — user chose internal transfer
+      //   tp:type:external:{draftId}      — user chose external (Branch B)
+      //   tp:tgt:{accountId}:{draftId}    — user chose target account
+      //   tp:confirm:{draftId}            — user confirmed paired transfer
+      //   tp:cancel:{draftId}             — user cancelled transfer
+      //   tp:skip_rcpt:{draftId}          — Branch B: skip recipient entry
+      //   tp:cat:{categoryId}:{draftId}   — Branch B: category selected
+      //   tp:cat:none:{draftId}           — Branch B: no category
       if (callbackData.startsWith('tp:')) {
         const tpMsgId = cq.message ? String(cq.message.message_id) : null;
         const tpParts = callbackData.split(':');
-        const tpCmd   = tpParts[1]; // 'type' | 'tgt' | 'confirm' | 'cancel'
+        const tpCmd   = tpParts[1]; // 'type' | 'tgt' | 'confirm' | 'cancel' | 'skip_rcpt' | 'cat'
 
         let tpResolved: { workspaceId: string; userId: string };
         try {
@@ -4116,11 +4125,24 @@ Midas создан, чтобы сделать учет денег максима
             if (!draftIdTp) throw new Error('tp:type missing draftId');
 
             if (direction === 'external') {
-              // External transfer = treated as regular expense — show standard confirm preview
-              const previewRes = await confirmPreviewFull(tpResolved.workspaceId, tpResolved.userId, draftIdTp);
-              if (tpMsgId) {
-                void editMessageText(chatId, tpMsgId, previewRes.text, confirmKbForDraft(draftIdTp, previewRes));
-                try { await redisConnection.set(`midas:preview:${draftIdTp}`, tpMsgId, 'EX', 3600); } catch { /* non-fatal */ }
+              // Branch B: External transfer — show recipient name entry screen
+              const state = await getDraftTransferState(draftIdTp, tpResolved.workspaceId, tpResolved.userId);
+              if (!state) {
+                if (tpMsgId) void editMessageText(chatId, tpMsgId, '⚠️ Черновик не найден или истёк.');
+              } else {
+                const recipientText = buildRecipientScreen(
+                  state.amount, state.currency, state.sourceAccountName,
+                );
+                if (tpMsgId) void editMessageText(chatId, tpMsgId, recipientText, buildRecipientKeyboard(draftIdTp));
+                // Set Redis FSM state: awaiting recipient name text input
+                const rcptKey = `midas:tp_ext_rcpt:${chatId}`;
+                try {
+                  await redisConnection.set(
+                    rcptKey,
+                    `${draftIdTp}:${tpResolved.workspaceId}:${tpResolved.userId}`,
+                    'EX', 3600,
+                  );
+                } catch { /* non-fatal */ }
               }
             } else {
               // Internal transfer — show target account picker
@@ -4143,6 +4165,44 @@ Midas создан, чтобы сделать учет денег максима
                   );
                   if (tpMsgId) void editMessageText(chatId, tpMsgId, pickerText, buildTargetAccountKeyboard(targets, draftIdTp));
                 }
+              }
+            }
+
+          // ── tp:skip_rcpt:{draftId} — skip recipient, go to category picker ──
+          } else if (tpCmd === 'skip_rcpt') {
+            const draftIdSkip = tpParts[2];
+            if (!draftIdSkip) throw new Error('tp:skip_rcpt missing draftId');
+
+            // Clear recipient await key
+            try { await redisConnection.del(`midas:tp_ext_rcpt:${chatId}`); } catch { /* non-fatal */ }
+
+            // Show category picker
+            const state = await getDraftTransferState(draftIdSkip, tpResolved.workspaceId, tpResolved.userId);
+            const categories = await getWorkspaceCategories(tpResolved.workspaceId, tpResolved.userId);
+            const catText = buildExternalCategoryScreen(
+              state?.amount ?? '0', state?.currency ?? 'USDT', null,
+            );
+            if (tpMsgId) void editMessageText(chatId, tpMsgId, catText, buildExternalCategoryKeyboard(categories, draftIdSkip));
+
+          // ── tp:cat:{categoryId|none}:{draftId} — category selected ────────
+          } else if (tpCmd === 'cat') {
+            const categoryIdRaw = tpParts[2]; // ULID or 'none'
+            const draftIdCat    = tpParts[3];
+            if (!categoryIdRaw || !draftIdCat) throw new Error('tp:cat missing parts');
+
+            const catId = categoryIdRaw === 'none' ? null : categoryIdRaw;
+            const patchRes = await patchDraftCategoryForExternal(
+              draftIdCat, tpResolved.workspaceId, tpResolved.userId, catId,
+            );
+
+            if (patchRes === 'not_found') {
+              if (tpMsgId) void editMessageText(chatId, tpMsgId, '⚠️ Черновик не найден или истёк.');
+            } else {
+              // Show standard confirm preview (intent is now 'expense')
+              const previewRes = await confirmPreviewFull(tpResolved.workspaceId, tpResolved.userId, draftIdCat);
+              if (tpMsgId) {
+                void editMessageText(chatId, tpMsgId, previewRes.text, confirmKbForDraft(draftIdCat, previewRes));
+                try { await redisConnection.set(`midas:preview:${draftIdCat}`, tpMsgId, 'EX', 3600); } catch { /* non-fatal */ }
               }
             }
 
@@ -4212,6 +4272,8 @@ Midas создан, чтобы сделать учет денег максима
               workspaceId: tpResolved.workspaceId,
             };
             await callbackConfirmQueue.add('reject', cancelPayload, { removeOnComplete: true, removeOnFail: 100 });
+            // Clean up recipient-await key if it was set (Branch B)
+            try { await redisConnection.del(`midas:tp_ext_rcpt:${chatId}`); } catch { /* non-fatal */ }
             if (tpMsgId) void editMessageText(chatId, tpMsgId, '🚫 Перевод отменён.');
           }
         } catch (tpErr) {
@@ -6506,6 +6568,49 @@ Midas создан, чтобы сделать учет денег максима
         });
         await reply.status(200).send({ ok: true });
         return;
+      }
+    }
+
+    // ── Step 5h-tp: Phase 3.0 Branch B — Recipient name text intercept ──
+    // If user is answering "Кому переводишь?" during external transfer flow,
+    // intercept text before AI parse. Redis key set by tp:type:external handler.
+    if (!commandToken && message.text) {
+      const rcptKey = `midas:tp_ext_rcpt:${chatId}`;
+      const rcptRaw = await redisConnection.get(rcptKey);
+      if (rcptRaw) {
+        // Format: "{draftId}:{workspaceId}:{userId}"
+        const sepIdx1 = rcptRaw.indexOf(':');
+        const sepIdx2 = rcptRaw.indexOf(':', sepIdx1 + 1);
+        if (sepIdx1 > 0 && sepIdx2 > sepIdx1) {
+          const rcptDraftId = rcptRaw.slice(0, sepIdx1);
+          const rcptWsId    = rcptRaw.slice(sepIdx1 + 1, sepIdx2);
+          const rcptUserId  = rcptRaw.slice(sepIdx2 + 1);
+          const recipientName = message.text.trim().slice(0, 100); // Max 100 chars
+
+          // Clean up Redis key
+          await redisConnection.del(rcptKey);
+
+          // Patch item_name on draft
+          const patchRes = await patchDraftItemName(rcptDraftId, rcptWsId, rcptUserId, recipientName);
+          if (patchRes === 'not_found') {
+            void upsertBotMessage(telegramUserId, chatId, '⏰ Черновик уже обработан или истёк.');
+          } else {
+            // Show category picker
+            const categories = await getWorkspaceCategories(rcptWsId, rcptUserId);
+            const state = await getDraftTransferState(rcptDraftId, rcptWsId, rcptUserId);
+            const catText = buildExternalCategoryScreen(
+              state?.amount ?? '0', state?.currency ?? 'USDT', recipientName,
+            );
+            void upsertBotMessage(
+              telegramUserId, chatId,
+              catText,
+              buildExternalCategoryKeyboard(categories, rcptDraftId),
+            );
+          }
+
+          await reply.status(200).send({ ok: true });
+          return;
+        }
       }
     }
 
