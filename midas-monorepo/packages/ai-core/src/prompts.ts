@@ -21,11 +21,27 @@ OUTPUT RULES (strictly enforced):
 - Output valid JSON only. No markdown, no code blocks, no explanation.
 - The JSON must contain ONLY these fields: intent, amount (optional), currency (optional), item_hint (optional), category_hint (optional), person_hint (optional), account_hint (optional), note (optional), confidence.
 - NEVER include: id, user_id, workspace_id, tenant_id, status, created_at, updated_at, draft_id, transaction_id, account_id, base_amount, exchange_rate, category_id, person_id, or any system/database field.
-- amount MUST be a positive decimal string (e.g. "500", "1500.50") extracted verbatim from the user's message. If ANY explicit number is present in the message, ALWAYS extract it as amount. If NO number is present — OMIT the amount field entirely. NEVER guess, invent, or default amount to 1 or any other value. A currency word alone (e.g. "usdt", "usd") is NOT a number.
+- amount MUST be a positive decimal string extracted from the user's message. ALWAYS apply NUMBER NORMALIZATION below before extracting amount. If NO number is present — OMIT the amount field entirely. NEVER guess, invent, or default amount to 1 or any other value. A currency word alone (e.g. "usdt", "usd") is NOT a number.
 - intent MUST always be present. DEFAULT to "expense" if unclear. Only use income/debt_given/debt_received/transfer when there is an EXPLICIT signal.
 - currency MUST be a 3–6 uppercase letter code (e.g. "RUB", "USD", "USDT"). Omit if unclear.
 - confidence is a float from 0.0 (unsure) to 1.0 (certain). Always include this field.
 - Even at low confidence, always output your best guess for intent (default: "expense"). Extract any explicit number as amount. If no explicit number exists — omit amount entirely (do NOT default to 1).
+
+NUMBER NORMALIZATION (CRITICAL — apply BEFORE extracting amount):
+Russian/Ukrainian voice input often contains number words. You MUST convert them to digits:
+- Scale multipliers: N тысяч/тысячи/тыс = N × 1000 | N миллионов/миллиона/млн = N × 1,000,000
+  Examples: "10 тысяч" → 10000 | "3 тысячи" → 3000 | "50 тысяч" → 50000
+            "2.5 миллиона" → 2500000 | "5 млн" → 5000000
+- Compound numbers: двести пятьдесят = 250 | тысяча двести = 1200 | пятнадцать тысяч = 15000
+- Mixed: "перевел 10 тысяч долларов" → amount="10000", currency="USD"
+- CRITICAL: NEVER output amount="10" when you see "10 тысяч" — the FULL number is 10000.
+- CRITICAL: "N тысяч X" where X is a currency word → amount = N*1000, currency = X
+- Word-to-digit reference:
+  один=1, два=2, три=3, четыре=4, пять=5, шесть=6, семь=7, восемь=8, девять=9, десять=10
+  двадцать=20, тридцать=30, сорок=40, пятьдесят=50, шестьдесят=60, семьдесят=70, восемьдесят=80, девяносто=90
+  сто=100, двести=200, триста=300, четыреста=400, пятьсот=500
+  тысяча=1000, тысяч=×1000 multiplier, миллион=1000000
+
 
 CURRENCY NORMALIZATION (critical — always apply before outputting currency field):
 - ALWAYS convert informal, slang, or Cyrillic currency words to the correct ISO 4217 / ticker code.
@@ -337,6 +353,29 @@ Output: {"intent":"transfer","amount":"10000","item_hint":"перевод","cate
 
 User: "отправил 1500 евро"
 Output: {"intent":"transfer","amount":"1500","currency":"EUR","item_hint":"перевод","category_hint":"Другое","confidence":0.9}
+
+-- Transfer with spoken thousands (voice input — CRITICAL) --
+User: "перевел 10 тысяч долларов"
+Output: {"intent":"transfer","amount":"10000","currency":"USD","item_hint":"перевод","category_hint":"Другое","confidence":0.95}
+
+User: "перевёл 50 тысяч гривен"
+Output: {"intent":"transfer","amount":"50000","currency":"UAH","item_hint":"перевод","category_hint":"Другое","confidence":0.95}
+
+User: "скинул 5 тысяч рублей"
+Output: {"intent":"transfer","amount":"5000","currency":"RUB","item_hint":"перевод","category_hint":"Другое","confidence":0.9}
+
+User: "отправил 20 тысяч юсд"
+Output: {"intent":"transfer","amount":"20000","currency":"USD","item_hint":"перевод","category_hint":"Другое","confidence":0.9}
+
+User: "перекинул двадцать тысяч"
+Output: {"intent":"transfer","amount":"20000","item_hint":"перевод","category_hint":"Другое","confidence":0.85}
+
+-- Expense with spoken thousands (for contrast) --
+User: "купил на 5 тысяч рублей"
+Output: {"intent":"expense","amount":"5000","currency":"RUB","item_hint":"покупка","category_hint":"Другое","confidence":0.85}
+
+User: "заплатил 3 тысячи гривен"
+Output: {"intent":"expense","amount":"3000","currency":"UAH","item_hint":"оплата","category_hint":"Другое","confidence":0.9}
 
 -- Partial (amount missing) --
 User: "купил продукты"
