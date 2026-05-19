@@ -312,6 +312,13 @@ const WORD_MULTIPLICATIVE_PATTERNS: Array<{ wordPattern: RegExp; multiplier: num
 function normalizeSpokenNumbers(text: string): string {
   let result = text;
 
+  // ── Pass 0: collapse Russian space-formatted numbers ──────────────────
+  // xAI STT ITN outputs "10 000 долларов" (space as thousands separator).
+  // Without this pass, Pass 4 aggregation treats "10 000" as [10, 0] → sum=10.
+  // Pattern: 1–3 leading digits followed by one or more exact 3-digit groups.
+  // "10 000" → "10000", "100 000" → "100000", "1 000 000" → "1000000"
+  result = result.replace(/\b(\d{1,3})(\s\d{3})+\b/g, (match) => match.replace(/\s/g, ''));
+
   // ── Pass 1: word-multiplicative pre-pass ───────────────────────────────
   // Handle "двадцать тысяч", "пятьдесят тысяч" BEFORE converting words to digits.
   // The regex captures the multiplied word(s) and multiplies by the scale.
