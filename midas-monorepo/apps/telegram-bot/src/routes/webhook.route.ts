@@ -287,6 +287,16 @@ import {
   buildTxListKeyboard,
   formatTxListHeader,
 } from '../services/transaction-keyboard.service.js';
+import {
+  buildTransferTypeKeyboard,
+  buildTargetPickerScreen,
+  buildTargetAccountKeyboard,
+  buildTransferPreviewScreen,
+  buildTransferConfirmKeyboard,
+  getAvailableTargetAccounts,
+  setDraftTargetAccount,
+  getDraftTransferState,
+} from '../services/transfer-pairing.service.js';
 
 // ─────────────────────────────────────────────────────────────
 // Zod schema — validates raw incoming Telegram Update shape
@@ -856,7 +866,8 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
           callbackData.startsWith('reject:') ||
           callbackData.startsWith('ia:') ||
           callbackData.startsWith('clar:') ||
-          callbackData.startsWith('ed:');
+          callbackData.startsWith('ed:') ||
+          callbackData.startsWith('tp:');
 
         if (!isFloatingCard) {
           void setActiveMessageId(telegramUserId, chatId, String(cq.message.message_id));
@@ -4070,6 +4081,148 @@ Midas создан, чтобы сделать учет денег максима
         }
 
         await answerCallbackQuery(cq.id);
+        await reply.status(200).send({ ok: true });
+        return;
+      }
+
+      // ── Phase 3.0: transfer pairing callbacks (prefix "tp:") ───
+      // Callback data formats:
+      //   tp:type:internal:{draftId}  — user chose internal transfer
+      //   tp:type:external:{draftId}  — user chose external (treat as expense)
+      //   tp:tgt:{accountId}:{draftId} — user chose target account
+      //   tp:confirm:{draftId}        — user confirmed paired transfer
+      //   tp:cancel:{draftId}         — user cancelled transfer
+      if (callbackData.startsWith('tp:')) {
+        const tpMsgId = cq.message ? String(cq.message.message_id) : null;
+        const tpParts = callbackData.split(':');
+        const tpCmd   = tpParts[1]; // 'type' | 'tgt' | 'confirm' | 'cancel'
+
+        let tpResolved: { workspaceId: string; userId: string };
+        try {
+          tpResolved = await resolveWorkspace(telegramUserId, chatId);
+        } catch {
+          await answerCallbackQuery(cq.id, '⚠️ Сессия не найдена');
+          await reply.status(200).send({ ok: true });
+          return;
+        }
+
+        await answerCallbackQuery(cq.id);
+
+        try {
+          // ── tp:type:{internal|external}:{draftId} ────────────────
+          if (tpCmd === 'type') {
+            const direction = tpParts[2]; // 'internal' | 'external'
+            const draftIdTp = tpParts[3];
+            if (!draftIdTp) throw new Error('tp:type missing draftId');
+
+            if (direction === 'external') {
+              // External transfer = treated as regular expense — show standard confirm preview
+              const previewRes = await confirmPreviewFull(tpResolved.workspaceId, tpResolved.userId, draftIdTp);
+              if (tpMsgId) {
+                void editMessageText(chatId, tpMsgId, previewRes.text, confirmKbForDraft(draftIdTp, previewRes));
+                try { await redisConnection.set(`midas:preview:${draftIdTp}`, tpMsgId, 'EX', 3600); } catch { /* non-fatal */ }
+              }
+            } else {
+              // Internal transfer — show target account picker
+              const state = await getDraftTransferState(draftIdTp, tpResolved.workspaceId, tpResolved.userId);
+              if (!state || !state.sourceAccountId) {
+                if (tpMsgId) void editMessageText(chatId, tpMsgId, '⚠️ Черновик не найден или истёк.');
+              } else {
+                const targets = await getAvailableTargetAccounts(
+                  tpResolved.workspaceId, tpResolved.userId, state.sourceAccountId,
+                );
+                if (targets.length === 0) {
+                  if (tpMsgId) void editMessageText(
+                    chatId, tpMsgId,
+                    '⚠️ Нет других счётов для перевода. Сначала добавьте счёт.',
+                    buildTransferTypeKeyboard(draftIdTp),
+                  );
+                } else {
+                  const pickerText = buildTargetPickerScreen(
+                    state.amount, state.currency, state.sourceAccountName,
+                  );
+                  if (tpMsgId) void editMessageText(chatId, tpMsgId, pickerText, buildTargetAccountKeyboard(targets, draftIdTp));
+                }
+              }
+            }
+
+          // ── tp:tgt:{accountId}:{draftId} ─────────────────────────
+          } else if (tpCmd === 'tgt') {
+            // tpParts = ['tp','tgt','{accountId}','{draftId}']
+            // accountId is a 26-char ULID — no colon in it
+            const targetAccountId = tpParts[2];
+            const draftIdTgt      = tpParts[3];
+            if (!targetAccountId || !draftIdTgt) throw new Error('tp:tgt missing parts');
+
+            const setResult = await setDraftTargetAccount(
+              draftIdTgt, tpResolved.workspaceId, tpResolved.userId, targetAccountId,
+            );
+
+            if (setResult !== 'ok') {
+              if (tpMsgId) void editMessageText(chatId, tpMsgId, '⚠️ Счёт не найден или черновик устарел.');
+            } else {
+              // Show transfer preview card
+              const state = await getDraftTransferState(draftIdTgt, tpResolved.workspaceId, tpResolved.userId);
+              if (!state?.targetAccountName) {
+                if (tpMsgId) void editMessageText(chatId, tpMsgId, '⚠️ Не удалось загрузить данные перевода.');
+              } else {
+                const sameCurrency = state.sourceAccountCurrency === state.targetAccountCurrency;
+                const crossRate = sameCurrency ? null : `1 ${state.currency} → ? ${state.targetAccountCurrency}`;
+                const previewText = buildTransferPreviewScreen(
+                  state.sourceAccountName, state.amount, state.currency,
+                  state.targetAccountName, state.amount, state.targetAccountCurrency!,
+                  crossRate,
+                );
+                if (tpMsgId) void editMessageText(chatId, tpMsgId, previewText, buildTransferConfirmKeyboard(draftIdTgt));
+                try { await redisConnection.set(`midas:preview:${draftIdTgt}`, tpMsgId ?? '', 'EX', 3600); } catch { /* non-fatal */ }
+              }
+            }
+
+          // ── tp:confirm:{draftId} ──────────────────────────────────
+          } else if (tpCmd === 'confirm') {
+            const draftIdCon = tpParts[2];
+            if (!draftIdCon) throw new Error('tp:confirm missing draftId');
+
+            // Enqueue as 'approve' — the worker detects paired transfer via
+            // transfer_target_account_id and routes to approvePairedTransfer().
+            const payload: CallbackConfirmJobPayload = {
+              callbackQueryId: cq.id,
+              action: 'approve',
+              draftId: draftIdCon,
+              chatId,
+              telegramUserId,
+              workspaceId: tpResolved.workspaceId,
+            };
+            await callbackConfirmQueue.add('approve_paired', payload, { removeOnComplete: true, removeOnFail: 100 });
+            // Optimistic UI: show spinner while worker processes
+            if (tpMsgId) void editMessageText(chatId, tpMsgId, '⏳ Записываю перевод...');
+
+          // ── tp:cancel:{draftId} ───────────────────────────────────
+          } else if (tpCmd === 'cancel') {
+            const draftIdCan = tpParts[2];
+            if (!draftIdCan) throw new Error('tp:cancel missing draftId');
+
+            // Enqueue reject — reuses existing reject flow.
+            const cancelPayload: CallbackConfirmJobPayload = {
+              callbackQueryId: cq.id,
+              action: 'reject',
+              draftId: draftIdCan,
+              chatId,
+              telegramUserId,
+              workspaceId: tpResolved.workspaceId,
+            };
+            await callbackConfirmQueue.add('reject', cancelPayload, { removeOnComplete: true, removeOnFail: 100 });
+            if (tpMsgId) void editMessageText(chatId, tpMsgId, '🚫 Перевод отменён.');
+          }
+        } catch (tpErr) {
+          request.log.error({
+            msg: '[midas:bot:webhook] tp: callback error',
+            error: tpErr instanceof Error ? tpErr.message : String(tpErr),
+            workspaceId: tpResolved.workspaceId,
+          });
+          if (tpMsgId) void editMessageText(chatId, tpMsgId, '⚠️ Произошла ошибка. Попробуйте ещё раз.');
+        }
+
         await reply.status(200).send({ ok: true });
         return;
       }

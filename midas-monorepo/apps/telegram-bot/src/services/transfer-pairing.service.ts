@@ -16,11 +16,11 @@
  *       → external: treated as regular expense (existing flow)
  *
  * callback_data conventions (all ≤ 64 bytes):
- *   tp:type:internal   — user chose internal transfer
- *   tp:type:external   — user chose external transfer (→ existing confirm flow)
- *   tp:tgt:{acctId}    — user chose target account (acctId = 26-char ULID)
- *   tp:confirm         — user confirmed paired transfer
- *   tp:cancel          — user cancelled (→ reject draft)
+ *   tp:type:internal:{draftId}  — user chose internal transfer
+ *   tp:type:external:{draftId}  — user chose external transfer (→ existing confirm flow)
+ *   tp:tgt:{acctId}:{draftId}   — user chose target account (acctId = 26-char ULID)
+ *   tp:confirm:{draftId}        — user confirmed paired transfer
+ *   tp:cancel:{draftId}         — user cancelled (→ reject draft)
  *
  * SEC-03: all DB queries inside withTenantTransaction.
  * SEC-02: amounts stay as NUMERIC strings — no parseFloat().
@@ -32,7 +32,7 @@ import { withTenantTransaction } from '@midas/database';
 import { escapeHtml } from '../utils/html-escape.js';
 
 // ─────────────────────────────────────────────────────────────
-// Types
+// Domain types
 // ─────────────────────────────────────────────────────────────
 
 /** Slim account row for transfer target picker. */
@@ -46,8 +46,8 @@ export interface TransferTargetAccount {
 /** Full draft state needed to render the transfer preview card. */
 export interface TransferDraftState {
   draftId: string;
-  amount: string;            // NUMERIC string — outbound amount
-  currency: string;          // tx currency (outbound)
+  amount: string;               // NUMERIC string — outbound amount
+  currency: string;             // tx currency (outbound)
   sourceAccountId: string;
   sourceAccountName: string;
   sourceAccountCurrency: string;
@@ -60,7 +60,16 @@ export interface TransferDraftState {
 export type SetTargetResult = 'ok' | 'draft_not_found' | 'account_not_found';
 
 // ─────────────────────────────────────────────────────────────
-// Pure UI builders
+// Inline keyboard type — local interface matching
+// InlineKeyboardMarkup from telegram-api.ts (same structural shape,
+// avoids a circular import while satisfying editMessageText's signature).
+// ─────────────────────────────────────────────────────────────
+
+interface InlineKeyboardButton { text: string; callback_data?: string; url?: string; }
+interface InlineKeyboardMarkup  { inline_keyboard: InlineKeyboardButton[][]; }
+
+// ─────────────────────────────────────────────────────────────
+// Pure UI builders — text screens
 // ─────────────────────────────────────────────────────────────
 
 /**
@@ -80,17 +89,6 @@ export function buildTransferTypeScreen(
   ].join('\n');
 }
 
-/** Inline keyboard for the type selection screen. */
-export function buildTransferTypeKeyboard(draftId: string): object {
-  return {
-    inline_keyboard: [
-      [{ text: '🔄 На мой другой счёт', callback_data: `tp:type:internal:${draftId}` }],
-      [{ text: '👤 Другому человеку',   callback_data: `tp:type:external:${draftId}` }],
-      [{ text: '✖ Отмена',              callback_data: `tp:cancel:${draftId}` }],
-    ],
-  };
-}
-
 /**
  * Screen asking user to pick the target account.
  * Shown after user chose "🔄 На мой другой счёт".
@@ -101,7 +99,7 @@ export function buildTargetPickerScreen(
   fromAccountName: string,
 ): string {
   return [
-    `🔄 <b>Внутренний перевод</b>`,
+    '🔄 <b>Внутренний перевод</b>',
     `${escapeHtml(amount)} ${escapeHtml(currency)} с <b>${escapeHtml(fromAccountName)}</b>`,
     '',
     '📥 Выберите счёт-получатель:',
@@ -109,37 +107,13 @@ export function buildTargetPickerScreen(
 }
 
 /**
- * Inline keyboard listing target accounts.
- * Each button: "Название (CURRENCY)  balance"
- * callback_data: tp:tgt:{acctId}:{draftId}  — always ≤ 64 bytes (26+26+8 chars)
- */
-export function buildTargetAccountKeyboard(
-  accounts: TransferTargetAccount[],
-  draftId: string,
-): object {
-  const buttons = accounts.map((acc) => {
-    const label = `${acc.name} (${acc.currency})  ${parseFloat(acc.balance).toFixed(2)}`;
-    return [{ text: label, callback_data: `tp:tgt:${acc.id}:${draftId}` }];
-  });
-
-  buttons.push([{ text: '✖ Отмена', callback_data: `tp:cancel:${draftId}` }]);
-
-  return { inline_keyboard: buttons };
-}
-
-/**
  * Preview card shown before final confirmation.
- * Displayed when both source and target accounts are selected.
  *
- * @param outAmount   — amount leaving source account
- * @param outCurrency — source account currency
- * @param inAmount    — amount arriving at target (same if same currency)
- * @param inCurrency  — target account currency
- * @param rate        — exchange rate description (null if same currency)
+ * @param rate — exchange rate description (null if same currency)
  */
 export function buildTransferPreviewScreen(
   sourceAccount: string, outAmount: string, outCurrency: string,
-  targetAccount: string, inAmount: string,  inCurrency: string,
+  targetAccount: string, inAmount:  string, inCurrency:  string,
   rate: string | null,
 ): string {
   const lines = [
@@ -160,25 +134,13 @@ export function buildTransferPreviewScreen(
   return lines.join('\n');
 }
 
-/** Keyboard for the preview/confirmation screen. */
-export function buildTransferConfirmKeyboard(draftId: string): object {
-  return {
-    inline_keyboard: [
-      [
-        { text: '✅ Подтвердить', callback_data: `tp:confirm:${draftId}` },
-        { text: '✖ Отмена',      callback_data: `tp:cancel:${draftId}` },
-      ],
-    ],
-  };
-}
-
 /**
  * Post-approval card shown after successful paired transfer.
  * Displays both legs with updated balances.
  */
 export function buildTransferConfirmedCard(
   sourceAccount: string, outAmount: string, outCurrency: string, balanceAfterSource: string,
-  targetAccount: string, inAmount: string,  inCurrency: string,  balanceAfterTarget: string,
+  targetAccount: string, inAmount:  string, inCurrency:  string, balanceAfterTarget: string,
   timestamp: string,
 ): string {
   return [
@@ -196,6 +158,51 @@ export function buildTransferConfirmedCard(
     '━━━━━━━━━━━━━━━━━━━━━━━',
     `🕐 ${escapeHtml(timestamp)}`,
   ].join('\n');
+}
+
+// ─────────────────────────────────────────────────────────────
+// Pure UI builders — inline keyboards
+// ─────────────────────────────────────────────────────────────
+
+/** Inline keyboard for the transfer type selection screen. */
+export function buildTransferTypeKeyboard(draftId: string): InlineKeyboardMarkup {
+  return {
+    inline_keyboard: [
+      [{ text: '🔄 На мой другой счёт', callback_data: `tp:type:internal:${draftId}` }],
+      [{ text: '👤 Другому человеку',   callback_data: `tp:type:external:${draftId}` }],
+      [{ text: '✖ Отмена',              callback_data: `tp:cancel:${draftId}` }],
+    ],
+  };
+}
+
+/**
+ * Inline keyboard listing target accounts.
+ * callback_data: tp:tgt:{acctId}:{draftId} — always ≤ 64 bytes (26+26+8 chars)
+ */
+export function buildTargetAccountKeyboard(
+  accounts: TransferTargetAccount[],
+  draftId: string,
+): InlineKeyboardMarkup {
+  const buttons = accounts.map((acc) => {
+    const label = `${acc.name} (${acc.currency})  ${parseFloat(acc.balance).toFixed(2)}`;
+    return [{ text: label, callback_data: `tp:tgt:${acc.id}:${draftId}` }];
+  });
+
+  buttons.push([{ text: '✖ Отмена', callback_data: `tp:cancel:${draftId}` }]);
+
+  return { inline_keyboard: buttons };
+}
+
+/** Keyboard for the preview/confirmation screen. */
+export function buildTransferConfirmKeyboard(draftId: string): InlineKeyboardMarkup {
+  return {
+    inline_keyboard: [
+      [
+        { text: '✅ Подтвердить', callback_data: `tp:confirm:${draftId}` },
+        { text: '✖ Отмена',      callback_data: `tp:cancel:${draftId}` },
+      ],
+    ],
+  };
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -219,14 +226,15 @@ export async function getAvailableTargetAccounts(
       id: string;
       name: string;
       currency: string;
-      balance: { toFixed: (dp: number) => string };
+      balance: string;
     }>(
       `SELECT
          a.id,
          a.name,
          a.currency,
          -- Phase 3.0 direction-aware balance formula
-         a.initial_balance
+         (
+           COALESCE(a.initial_balance, 0)
            + COALESCE(SUM(CASE WHEN t.transaction_intent = 'income'        AND t.base_currency = a.currency THEN t.base_amount END), 0)
            + COALESCE(SUM(CASE WHEN t.transaction_intent = 'debt_received' AND t.base_currency = a.currency THEN t.base_amount END), 0)
            + COALESCE(SUM(CASE WHEN t.transaction_intent = 'transfer' AND t.transfer_direction = 'inbound'
@@ -236,7 +244,7 @@ export async function getAvailableTargetAccounts(
            - COALESCE(SUM(CASE WHEN t.transaction_intent = 'transfer'
                                AND (t.transfer_direction = 'outbound' OR t.transfer_direction IS NULL)
                                AND t.base_currency = a.currency THEN t.base_amount END), 0)
-           AS balance
+         )::TEXT AS balance
        FROM account_sources a
        LEFT JOIN transactions t
          ON t.account_id = a.id
@@ -245,24 +253,23 @@ export async function getAvailableTargetAccounts(
        WHERE a.workspace_id = $1
          AND a.deleted_at IS NULL
          AND a.id != $2
-         AND a.parent_account_id IS NULL  -- top-level accounts only
+         AND a.parent_account_id IS NULL
        GROUP BY a.id, a.name, a.currency, a.initial_balance
        ORDER BY a.name ASC`,
       [workspaceId, excludeAccountId],
     );
 
     return res.rows.map((r) => ({
-      id: r.id,
-      name: r.name,
+      id:       r.id,
+      name:     r.name,
       currency: r.currency,
-      balance: r.balance.toFixed(2),
+      balance:  r.balance ?? '0',
     }));
   });
 }
 
 /**
  * Persist the chosen target account on the draft.
- * Also updates draft.status = 'pending_user' (keeps it alive) and touches updated_at.
  *
  * SEC-03: withTenantTransaction (RLS enforced).
  * IDOR guard: validates target account belongs to same workspace.
@@ -282,7 +289,6 @@ export async function setDraftTargetAccount(
     );
     if (acctCheck.rows.length === 0) return 'account_not_found';
 
-    // Update draft
     const result = await client.query<{ id: string }>(
       `UPDATE transaction_drafts
        SET transfer_target_account_id = $1,
@@ -348,14 +354,14 @@ export async function getDraftTransferState(
     if (!row || !row.account_id) return null;
 
     return {
-      draftId: row.id,
-      amount:   String(row.parsed_amount ?? '0'),
-      currency: row.parsed_currency ?? 'USDT',
-      sourceAccountId:       row.account_id,
-      sourceAccountName:     row.src_name    ?? 'Счёт',
+      draftId:              row.id,
+      amount:               String(row.parsed_amount ?? '0'),
+      currency:             row.parsed_currency ?? 'USDT',
+      sourceAccountId:      row.account_id,
+      sourceAccountName:    escapeHtml(row.src_name    ?? 'Счёт'),
       sourceAccountCurrency: row.src_currency ?? 'USDT',
-      targetAccountId:       row.transfer_target_account_id ?? null,
-      targetAccountName:     row.tgt_name    ?? null,
+      targetAccountId:      row.transfer_target_account_id ?? null,
+      targetAccountName:    row.tgt_name    ? escapeHtml(row.tgt_name)    : null,
       targetAccountCurrency: row.tgt_currency ?? null,
     };
   });
