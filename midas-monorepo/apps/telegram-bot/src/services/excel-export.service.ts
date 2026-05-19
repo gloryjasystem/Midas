@@ -51,6 +51,13 @@ function localiseIntent(intent: string): string {
   }
 }
 
+/** Extended: shows transfer direction if paired */
+function localiseIntentWithDir(intent: string, direction: string | null): string {
+  if (intent === 'transfer' && direction === 'outbound') return '🔄 Перевод (исход)';
+  if (intent === 'transfer' && direction === 'inbound')  return '🔄 Перевод (приход)';
+  return localiseIntent(intent);
+}
+
 function intentColour(intent: string): string {
   switch (intent) {
     case 'expense':       return C_EXPENSE;
@@ -241,6 +248,9 @@ interface TxRow {
   item_name: string | null;
   person_name: string | null;
   balance_after: string; // running balance on the account after this transaction
+  transfer_direction: string | null;  // 'inbound' | 'outbound' | null
+  transfer_group_id: string | null;   // UUID linking paired transfer legs
+  paired_account_name: string | null; // name of the other account in internal transfer
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -289,8 +299,12 @@ export async function exportTransactionsExcel(
            t.item_name,
            t.person_id,
            t.deleted_at,
+           t.transfer_direction,
+           t.transfer_group_id,
            CASE
              WHEN t.transaction_intent IN ('income', 'debt_received')
+               THEN  COALESCE(t.account_debit_amount, t.original_amount)
+             WHEN t.transaction_intent = 'transfer' AND t.transfer_direction = 'inbound'
                THEN  COALESCE(t.account_debit_amount, t.original_amount)
              ELSE   -COALESCE(t.account_debit_amount, t.original_amount)
            END AS signed_debit
@@ -323,7 +337,18 @@ export async function exportTransactionsExcel(
          COALESCE(a.type::text, '—')  AS account_type,
          wb.item_name,
          p.canonical_name             AS person_name,
-         ROUND(wb.balance_after, 2)::text AS balance_after
+         ROUND(wb.balance_after, 2)::text AS balance_after,
+         wb.transfer_direction,
+         wb.transfer_group_id::text,
+         -- Paired account name: find the OTHER leg of the same transfer_group_id
+         (SELECT a2.name
+          FROM transactions t2
+          JOIN account_sources a2 ON a2.id = t2.account_id AND a2.deleted_at IS NULL
+          WHERE t2.transfer_group_id = wb.transfer_group_id
+            AND t2.id != wb.id
+            AND t2.workspace_id = wb.workspace_id
+            AND t2.deleted_at IS NULL
+          LIMIT 1) AS paired_account_name
        FROM with_balance wb
         LEFT JOIN categories    c ON c.id = wb.category_id
         LEFT JOIN account_sources a ON a.id = wb.account_id AND a.deleted_at IS NULL
@@ -498,12 +523,24 @@ function buildSheet0Summary(
     debt_given:    { count: 0, byCur: new Map() },
     debt_received: { count: 0, byCur: new Map() },
   };
+  // Separate signed transfer accumulator: outbound=negative, inbound=positive
+  // This ensures paired internal transfers net to 0
+  const transferSigned = new Map<string, number>(); // by currency, signed
   for (const row of rows) {
     const key = row.transaction_intent as IntentKey;
     if (!(key in im)) continue;
     im[key].count++;
     const amt = parseFloat(row.original_amount);
-    im[key].byCur.set(row.currency, (im[key].byCur.get(row.currency) ?? 0) + amt);
+
+    if (key === 'transfer') {
+      // For the display row, we still accumulate absolute amounts
+      im[key].byCur.set(row.currency, (im[key].byCur.get(row.currency) ?? 0) + amt);
+      // For the NET calc, accumulate signed (outbound=−, inbound=+, unpaired=−)
+      const sign = row.transfer_direction === 'inbound' ? 1 : -1;
+      transferSigned.set(row.currency, (transferSigned.get(row.currency) ?? 0) + sign * amt);
+    } else {
+      im[key].byCur.set(row.currency, (im[key].byCur.get(row.currency) ?? 0) + amt);
+    }
   }
 
 
@@ -548,7 +585,7 @@ function buildSheet0Summary(
     r++;
   }
 
-  // ── Net per currency (income + debtRecv − expense − transfer − debtGiven) ──
+  // ── Net per currency (income + debtRecv − expense − transfer(signed) − debtGiven) ──
   const allCurs = new Set<string>();
   for (const key of Object.keys(im) as IntentKey[]) {
     for (const cur of im[key].byCur.keys()) allCurs.add(cur);
@@ -563,11 +600,13 @@ function buildSheet0Summary(
   }
   const convRows: ConvRow[] = [];
   for (const cur of allCurs) {
+    // Use signed transfer amounts: paired internal transfers net to 0,
+    // unpaired external transfers remain negative
     const net =
       (im.income.byCur.get(cur) ?? 0) +
       (im.debt_received.byCur.get(cur) ?? 0) -
-      (im.expense.byCur.get(cur) ?? 0) -
-      (im.transfer.byCur.get(cur) ?? 0) -
+      (im.expense.byCur.get(cur) ?? 0) +
+      (transferSigned.get(cur) ?? 0) -   // already signed (negative for outbound, positive for inbound)
       (im.debt_given.byCur.get(cur) ?? 0);
     const rate   = usdRates.get(cur.toUpperCase()) ?? null;
     const source = (rateSources.get(cur.toUpperCase()) ?? 'uncovered') as RateSource | 'uncovered';
@@ -1108,6 +1147,108 @@ function buildSheet0Summary(
       }
     }
   }
+  r++; r++; // spacer
+
+  // ── Section: Движение капитала ─────────────────────────────
+  {
+    // Calculate internal vs external transfer totals
+    const internalOutbound: Map<string, number> = new Map(); // by currency
+    const internalInbound:  Map<string, number> = new Map();
+    let externalTotal = 0;      // USD total for external transfers (unpaired)
+    let externalCount = 0;
+
+    for (const row of rows) {
+      if (row.transaction_intent !== 'transfer') continue;
+      const amt = parseFloat(row.account_debit_amount ?? row.original_amount);
+      const cur = row.currency;
+
+      if (row.transfer_direction === 'outbound') {
+        internalOutbound.set(cur, (internalOutbound.get(cur) ?? 0) + amt);
+      } else if (row.transfer_direction === 'inbound') {
+        internalInbound.set(cur, (internalInbound.get(cur) ?? 0) + amt);
+      } else {
+        // Unpaired transfer = external (no direction)
+        const rate = usdRates.get(cur.toUpperCase()) ?? 0;
+        externalTotal += amt * rate;
+        externalCount++;
+      }
+    }
+
+    const hasInternalTransfers = internalOutbound.size > 0 || internalInbound.size > 0;
+    const hasExternalTransfers = externalCount > 0;
+
+    if (hasInternalTransfers || hasExternalTransfers) {
+      // Section header
+      ws.mergeCells(r, 1, r, 5);
+      const cmHdr = ws.getCell(r, 1);
+      cmHdr.value = '🔄  ДВИЖЕНИЕ КАПИТАЛА';
+      cmHdr.font  = { bold: true, size: 11, color: { argb: `FF${C_COL_HDR_FG}` }, name: 'Calibri' };
+      cmHdr.fill  = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF7B1FA2' } }; // purple
+      cmHdr.alignment = { horizontal: 'center', vertical: 'middle' };
+      ws.getRow(r).height = 24;
+      r++;
+
+      // Sub-header
+      const cmSubBorder = {
+        bottom: { style: 'thin' as const, color: { argb: 'FFD1C4E9' } },
+      };
+      const cmSubFill = { type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb: 'FFF3E5F5' } };
+
+      if (hasInternalTransfers) {
+        ws.mergeCells(r, 1, r, 3);
+        const intHdr = ws.getCell(r, 1);
+        intHdr.value = '🏦  Внутренние переводы (между своими счетами)';
+        intHdr.font  = { bold: true, size: 9, name: 'Calibri', color: { argb: 'FF4A148C' } };
+        intHdr.fill  = cmSubFill;
+        intHdr.border = cmSubBorder;
+        ws.mergeCells(r, 4, r, 5);
+        const intNet = ws.getCell(r, 4);
+        intNet.value = 'Нетто: 0 (не влияет на P&L)';
+        intNet.font  = { size: 9, name: 'Calibri', italic: true, color: { argb: 'FF888888' } };
+        intNet.fill  = cmSubFill;
+        intNet.border = cmSubBorder;
+        intNet.alignment = { horizontal: 'right', vertical: 'middle' };
+        ws.getRow(r).height = 20;
+        r++;
+
+        // Detail rows per currency
+        for (const [cur, outAmt] of internalOutbound) {
+          const inAmt = internalInbound.get(cur) ?? 0;
+          ws.getCell(r, 1).value = '    ';
+          ws.getCell(r, 2).value = cur;
+          ws.getCell(r, 2).font = { size: 9, name: 'Calibri', bold: true };
+          ws.mergeCells(r, 3, r, 4);
+          ws.getCell(r, 3).value = `📤 −${outAmt.toFixed(2)}  ⟷  📥 +${inAmt.toFixed(2)}`;
+          ws.getCell(r, 3).font = { size: 9, name: 'Calibri', color: { argb: 'FF555555' } };
+          ws.getCell(r, 3).alignment = { horizontal: 'center', vertical: 'middle' };
+          ws.getRow(r).height = 17;
+          r++;
+        }
+        r++; // spacer
+      }
+
+      if (hasExternalTransfers) {
+        ws.mergeCells(r, 1, r, 3);
+        const extHdr = ws.getCell(r, 1);
+        extHdr.value = '👤  Переводы другим (расход)';
+        extHdr.font  = { bold: true, size: 9, name: 'Calibri', color: { argb: `FF${C_EXPENSE}` } };
+        extHdr.fill  = cmSubFill;
+        extHdr.border = cmSubBorder;
+        ws.mergeCells(r, 4, r, 5);
+        const extVal = ws.getCell(r, 4);
+        extVal.value = `≈ −${externalTotal.toFixed(2)} USD  (${externalCount} оп.)`;
+        extVal.font  = { size: 9, name: 'Calibri', color: { argb: `FF${C_EXPENSE}` } };
+        extVal.fill  = cmSubFill;
+        extVal.border = cmSubBorder;
+        extVal.alignment = { horizontal: 'right', vertical: 'middle' };
+        ws.getRow(r).height = 20;
+        r++;
+      }
+
+      r++; // spacer after section
+    }
+  }
+
   r++; r++; // spacer before footer
 
   // ── Audit Trail Footer ────────────────────────────────────
@@ -1241,10 +1382,12 @@ function buildSheet1(wb: ExcelJS.Workbook, rows: TxRow[], from: Date, to: Date, 
     const colour   = intentColour(row.transaction_intent);
 
     // «Сумма» = фактическое движение по счёту (signed):
-    //   income / debt_received → положительное (зачисление)
-    //   expense / transfer / debt_given → отрицательное (списание)
+    //   income / debt_received / transfer inbound → положительное (зачисление)
+    //   expense / transfer outbound / debt_given → отрицательное (списание)
     const debitAbs    = parseFloat(row.account_debit_amount ?? row.original_amount);
-    const isInflow    = row.transaction_intent === 'income' || row.transaction_intent === 'debt_received';
+    const isInflow    = row.transaction_intent === 'income'
+                     || row.transaction_intent === 'debt_received'
+                     || (row.transaction_intent === 'transfer' && row.transfer_direction === 'inbound');
     const debitSigned = isInflow ? debitAbs : -debitAbs;
 
     // «Исполнитель»: person_name из БД, иначе эвристика из item_name
@@ -1262,11 +1405,19 @@ function buildSheet1(wb: ExcelJS.Workbook, rows: TxRow[], from: Date, to: Date, 
       return signed ? `${p};-#,##0.${prec} "${cur}"` : p;
     };
 
+    // «Комментарий»: for paired transfers, show "→ TargetAccount" / "← SourceAccount"
+    let comment = row.item_name ?? '';
+    if (row.transaction_intent === 'transfer' && row.paired_account_name) {
+      const arrow = row.transfer_direction === 'outbound' ? '→' : '←';
+      const pairedLabel = `${arrow} ${row.paired_account_name}`;
+      comment = comment ? `${pairedLabel}  |  ${comment}` : pairedLabel;
+    }
+
     const cellValues: (string | number | null)[] = [
       idx + 1,                              // ci=0  A=1  №
       fmtDate(txDate),                      // ci=1  B=2  Дата
       fmtTime(txDate),                      // ci=2  C=3  Время
-      localiseIntent(row.transaction_intent), // ci=3  D=4  Операция
+      localiseIntentWithDir(row.transaction_intent, row.transfer_direction), // ci=3  D=4  Операция
       executor || '—',                      // ci=4  E=5  Исполнитель
       row.account_name,                     // ci=5  F=6  Счёт
       row.account_currency,                 // ci=6  G=7  Вал.
@@ -1275,7 +1426,7 @@ function buildSheet1(wb: ExcelJS.Workbook, rows: TxRow[], from: Date, to: Date, 
       null,                                 // ci=9  J=10 ≈ USD — rendered separately
       row.category_name,                    // ci=10 K=11 Категория
       row.category_group,                   // ci=11 L=12 Группа
-      row.item_name ?? '',                  // ci=12 M=13 Комментарий
+      comment,                              // ci=12 M=13 Комментарий
       parseFloat(row.balance_after),        // ci=13 N=14 Остаток
     ];
 
@@ -1945,11 +2096,31 @@ function buildSheet3(wb: ExcelJS.Workbook, rows: TxRow[], usdRates: Map<string, 
       }
       catMap.set(key, cat);
     } else if (CAP_INTENTS.has(r.transaction_intent)) {
-      const cap = capMap.get(r.transaction_intent) ?? { count: 0, totalUsd: 0, uncov: [] };
-      cap.count++;
-      cap.totalUsd += usd ?? 0;
-      if (unc) cap.uncov.push(unc);
-      capMap.set(r.transaction_intent, cap);
+      if (r.transaction_intent === 'transfer') {
+        // Split: internal (paired, has direction) vs external (unpaired, no direction)
+        if (r.transfer_direction === 'inbound' || r.transfer_direction === 'outbound') {
+          const cap = capMap.get('transfer_internal') ?? { count: 0, totalUsd: 0, uncov: [] };
+          cap.count++;
+          // For internal, outbound is negative, inbound is positive → nets to 0
+          const sign = r.transfer_direction === 'inbound' ? 1 : -1;
+          cap.totalUsd += sign * (usd ?? 0);
+          if (unc) cap.uncov.push(unc);
+          capMap.set('transfer_internal', cap);
+        } else {
+          // External (unpaired) transfer — treated as expense
+          const cap = capMap.get('transfer_external') ?? { count: 0, totalUsd: 0, uncov: [] };
+          cap.count++;
+          cap.totalUsd += usd ?? 0;
+          if (unc) cap.uncov.push(unc);
+          capMap.set('transfer_external', cap);
+        }
+      } else {
+        const cap = capMap.get(r.transaction_intent) ?? { count: 0, totalUsd: 0, uncov: [] };
+        cap.count++;
+        cap.totalUsd += usd ?? 0;
+        if (unc) cap.uncov.push(unc);
+        capMap.set(r.transaction_intent, cap);
+      }
     }
   }
 
@@ -2085,9 +2256,11 @@ function buildSheet3(wb: ExcelJS.Workbook, rows: TxRow[], usdRates: Map<string, 
     rn++;
 
     const capLabels: Record<string, string> = {
-      debt_given:     'Долг (дал) — актив',
-      debt_received:  'Долг (взял) — обязательство',
-      transfer:       'Внутренние переводы',
+      debt_given:         'Долг (дал) — актив',
+      debt_received:      'Долг (взял) — обязательство',
+      transfer_internal:  'Внутренние переводы (нетто ≈ 0)',
+      transfer_external:  'Переводы другим (расход)',
+      transfer:           'Переводы',  // fallback for legacy
     };
     for (const [intent, cap] of capMap) {
       const bgArgb = rn % 2 === 0 ? 'FFFFF9F0' : 'FFFFFFFA';
@@ -2188,7 +2361,11 @@ function buildSheet4(
     b.count++;
     if (r.transaction_intent === 'income')         b.incomeUsd   += usd;
     else if (r.transaction_intent === 'expense')   b.expenseUsd  += usd;
-    else if (r.transaction_intent === 'transfer')  b.transferUsd += usd;
+    else if (r.transaction_intent === 'transfer') {
+      // Direction-aware: internal outbound=−, inbound=+, unpaired=+
+      const sign = r.transfer_direction === 'inbound' ? 1 : (r.transfer_direction === 'outbound' ? -1 : 1);
+      b.transferUsd += sign * usd;
+    }
     else if (r.transaction_intent === 'debt_received') b.debtUsd += usd;
     else if (r.transaction_intent === 'debt_given')    b.debtUsd -= usd;
     bucketMap.set(key, b);
