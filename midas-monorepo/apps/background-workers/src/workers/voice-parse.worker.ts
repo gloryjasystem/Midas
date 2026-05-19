@@ -208,11 +208,7 @@ const STT_CRYPTO_NORMALIZATIONS: Array<{ pattern: RegExp; replacement: string }>
  * Ordered longest-first inside each tier to avoid partial matches.
  */
 const SPOKEN_NUMBERS: Array<{ pattern: RegExp; value: number }> = [
-  // Thousands (must be before hundreds)
-  { pattern: /\bтысяч(?:а|и|у|ей|ам|ами|ах)?\b/gi, value: 1000 },
-  { pattern: /\bтисяч(?:а|і|у|ею|ами|ах)?\b/gi,     value: 1000 }, // UA Grok variant
-
-  // Hundreds
+  // Hundreds (compound: двести, triста etc. — must stay as single words, NOT split)
   { pattern: /\bдевятьсот\b/gi,      value: 900 },
   { pattern: /\bвосемьсот\b/gi,      value: 800 },
   { pattern: /\bвісімсот\b/gi,       value: 800 }, // UA
@@ -248,7 +244,7 @@ const SPOKEN_NUMBERS: Array<{ pattern: RegExp; value: number }> = [
   { pattern: /\bтринадцать\b|\bтринадцять\b/gi,        value: 13 },
   { pattern: /\bдвенадцать\b|\bдванадцять\b/gi,        value: 12 },
   { pattern: /\bодиннадцать\b|\bодинадцять\b/gi,       value: 11 },
-  { pattern: /\bдесять\b|\bдесять\b/gi,                value: 10 },
+  { pattern: /\bдесять\b/gi,                           value: 10 },
 
   // Singles (last — most likely to false-positive)
   { pattern: /\bдевять\b|\bдев'?ять\b/gi,              value: 9 },
@@ -260,6 +256,43 @@ const SPOKEN_NUMBERS: Array<{ pattern: RegExp; value: number }> = [
   { pattern: /\bтри\b/gi,                              value: 3 },
   { pattern: /\bдва\b|\bдві\b|\bдвух\b/gi,             value: 2 },
   { pattern: /\bодин\b|\bодна\b|\bодно\b/gi,           value: 1 },
+];
+
+/**
+ * Multiplicative scale words: N тысяч / N миллионов / N миллиардов.
+ * These are replaced BEFORE SPOKEN_NUMBERS so "тысяч" doesn't become 1000
+ * and then fail the descending-magnitude check in the aggregation pass.
+ *
+ * Examples:
+ *   "10 тысяч"         → "10000"
+ *   "полтора миллиона" → "1500000"  (handled separately below)
+ *   "двадцать тысяч"   → after SPOKEN_NUMBERS pass: "20 тысяч" → "20000"
+ *                        (the multiplicative pre-pass runs first as raw text)
+ */
+const MULTIPLICATIVE_PATTERNS: Array<{ pattern: RegExp; multiplier: number }> = [
+  // миллиардов / млрд
+  { pattern: /\b(\d+(?:[.,]\d+)?)\s*(?:миллиард(?:а|ов|ам|ами|ах)?|млрд\.?|мільярд(?:а|ів|ам|ами|ах)?)\b/gi, multiplier: 1_000_000_000 },
+  // миллионов / млн
+  { pattern: /\b(\d+(?:[.,]\d+)?)\s*(?:миллион(?:а|ов|ам|ами|ах)?|млн\.?|мільйон(?:а|ів|ам|ами|ах)?)\b/gi,  multiplier: 1_000_000 },
+  // тысяч / тысячи / тыс
+  { pattern: /\b(\d+(?:[.,]\d+)?)\s*(?:тысяч(?:а|и|у|ей|ам|ами|ах)?|тыс\.?|тисяч(?:а|і|у|ею|ами|ах)?|тис\.?)\b/gi, multiplier: 1_000 },
+];
+
+/**
+ * Word-form multiplicative patterns (spoken digit word + scale word).
+ * These run BEFORE SPOKEN_NUMBERS so the scale word isn't converted to a raw digit.
+ * E.g. "двадцать тысяч" → "20000" (not "20 1000" which fails aggregation).
+ */
+const WORD_MULTIPLICATIVE_PATTERNS: Array<{ wordPattern: RegExp; multiplier: number }> = [
+  // N тысяч(и) — word form, e.g. "двадцать тысяч", "пятьдесят тысяч"
+  {
+    wordPattern: /\b((?:девяносто?|восемьдесят|вісімдесят|семьдесят|шестьдесят|пятьдесят|п'?ятдесят|сорок|тридцать|тридцять|двадцать|двадцять|девятнадцать|дев'?ятнадцять|восемнадцать|вісімнадцять|семнадцать|сімнадцять|шестнадцать|шістнадцять|пятнадцать|п'?ятнадцять|четырнадцать|чотирнадцять|тринадцать|тринадцять|двенадцать|дванадцять|одиннадцать|одинадцять|десять|девять|дев'?ять|восемь|вісім|семь|сім|шесть|шість|пять|п'?ять|четыре|чотири|три|два|дві|двух|один|одна|одно)(?:\s+(?:девяносто?|восемьдесят|вісімдесят|семьдесят|шестьдесят|пятьдесят|п'?ятдесят|сорок|тридцать|тридцять|двадцать|двадцять))?)\s+тысяч(?:а|и|у|ей|ам|ами|ах)?\b/gi,
+    multiplier: 1_000,
+  },
+  {
+    wordPattern: /\b((?:девяносто?|восемьдесят|вісімдесят|семьдесят|шестьдесят|пятьдесят|п'?ятдесят|сорок|тридцать|тридцять|двадцать|двадцять|девятнадцать|дев'?ятнадцять|восемнадцать|вісімнадцять|семнадцать|сімнадцять|шестнадцать|шістнадцять|пятнадцать|п'?ятнадцять|четырнадцать|чотирнадцять|тринадцать|тринадцять|двенадцать|дванадцять|одиннадцать|одинадцять|десять|девять|дев'?ять|восемь|вісім|семь|сім|шесть|шість|пять|п'?ять|четыре|чотири|три|два|дві|двух|один|одна|одно)(?:\s+(?:девяносто?|восемьдесят|вісімдесят|семьдесят|шестьдесят|пятьдесят|п'?ятдесят|сорок|тридцать|тридцять|двадцать|двадцять))?)\s+тисяч(?:а|і|у|ею|ами|ах)?\b/gi,
+    multiplier: 1_000,
+  },
 ];
 
 /**
@@ -277,21 +310,57 @@ const SPOKEN_NUMBERS: Array<{ pattern: RegExp; value: number }> = [
  * SEC-12: text never logged here.
  */
 function normalizeSpokenNumbers(text: string): string {
-  // Step 1: replace each spoken-number word with its digit value.
   let result = text;
+
+  // ── Pass 1: word-multiplicative pre-pass ───────────────────────────────
+  // Handle "двадцать тысяч", "пятьдесят тысяч" BEFORE converting words to digits.
+  // The regex captures the multiplied word(s) and multiplies by the scale.
+  // Must run BEFORE SPOKEN_NUMBERS so scale words aren't converted to bare digits first.
+  for (const { wordPattern, multiplier } of WORD_MULTIPLICATIVE_PATTERNS) {
+    result = result.replace(wordPattern, (match, numWords: string) => {
+      // Temporarily apply SPOKEN_NUMBERS to the captured word group to get its value
+      let numStr = numWords;
+      for (const { pattern, value } of SPOKEN_NUMBERS) {
+        numStr = numStr.replace(pattern, String(value));
+      }
+      // Collapse any additive compound (e.g. "20 5" from "двадцать пять")
+      const digits = numStr.trim().split(/\s+/).map(Number).filter(n => !isNaN(n));
+      if (digits.length === 0) return match;
+      // Additive sum (must be descending)
+      let sum = 0; let prev = Infinity; let ok = true;
+      for (const d of digits) {
+        if (d >= prev) { ok = false; break; }
+        prev = d; sum += d;
+      }
+      if (!ok || sum <= 0) return match;
+      return String(sum * multiplier);
+    });
+  }
+
+  // ── Pass 2: digit-multiplicative pass ─────────────────────────────────
+  // Handle "10 тысяч", "5 миллионов", "3.5 млн" — digit followed by scale word.
+  // Must run BEFORE SPOKEN_NUMBERS (which would wrongly convert "тысяч" → 1000).
+  for (const { pattern, multiplier } of MULTIPLICATIVE_PATTERNS) {
+    result = result.replace(pattern, (_, numStr: string) => {
+      const n = parseFloat(numStr.replace(',', '.'));
+      if (isNaN(n) || n <= 0) return _;
+      const product = Math.round(n * multiplier);
+      if (product > 10_000_000_000) return _; // sanity cap
+      return String(product);
+    });
+  }
+
+  // ── Pass 3: spoken-word → digit replacement ────────────────────────────
+  // Replace individual number words with their digit values.
   for (const { pattern, value } of SPOKEN_NUMBERS) {
     result = result.replace(pattern, String(value));
   }
 
-  // Step 2: sum adjacent digit sequences separated only by spaces.
-  // E.g. "200 50" → "250", "1000 200 30 5" → "1235"
-  // Only collapses groups that are plausibly a compound number:
-  //   - each token is a pure integer
-  //   - adjacent tokens together form a reasonable financial number (≤ 10M)
+  // ── Pass 4: additive aggregation ──────────────────────────────────────
+  // Sum adjacent digit sequences for compound numbers: "200 50" → "250".
+  // Only collapses descending-magnitude sequences (standard Russian compound numbers).
   result = result.replace(/\b(\d+)(\s+\d+)+\b/g, (match) => {
     const parts = match.split(/\s+/).map(Number);
-    // Validate: must be a descending-magnitude sequence (thousands > hundreds > tens > ones)
-    // e.g. [1000, 200, 50] is valid; [100, 200] is not (ascending → keep as-is)
     let sum = 0;
     let prevMagnitude = Infinity;
     let valid = true;
@@ -300,9 +369,8 @@ function normalizeSpokenNumbers(text: string): string {
       prevMagnitude = p;
       sum += p;
     }
-    // Cap at 10M to avoid bizarre concatenations
     if (valid && sum > 0 && sum <= 10_000_000) return String(sum);
-    return match; // leave unchanged if not a valid compound
+    return match;
   });
 
   return result;
