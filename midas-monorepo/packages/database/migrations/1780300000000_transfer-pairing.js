@@ -67,7 +67,7 @@ export const up = (pgm) => {
     -- (user will be prompted to re-select).
 
     ALTER TABLE transaction_drafts
-      ADD COLUMN transfer_target_account_id UUID NULL
+      ADD COLUMN transfer_target_account_id TEXT NULL
       REFERENCES account_sources(id) ON DELETE SET NULL;
 
     -- ── Step 4: Backfill direction for existing transfer records ─────────────
