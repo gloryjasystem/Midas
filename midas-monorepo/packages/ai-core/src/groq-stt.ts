@@ -69,6 +69,18 @@ export async function transcribeVoice(
     formData.append('language', languageHint);
   }
 
+  // ── STT Context Prompt ────────────────────────────────────
+  // Biases the model towards financial/numeric speech vocabulary.
+  // Critical for correctly transcribing: "10 тысяч" (not "10"), scale words,
+  // transfer verbs ("перевёл", "скинул"), and currency names.
+  // Equivalent to Whisper's initial_prompt parameter.
+  const STT_FINANCE_PROMPT =
+    'Финансовый трекер. Суммы: 10 тысяч, 500 тысяч, 2 миллиона, 50 тыс, 1.5 млн. ' +
+    'Действия: перевёл, перевел, скинул, отправил, потратил, купил, получил, заработал, снял. ' +
+    'Валюты: рублей, гривен, долларов, евро, юань, USDT, BTC, ETH, тенге. ' +
+    'Числа словами: тысяча, тысяч, тысячи, пятьсот, двести, миллион, сотня.';
+  formData.append('prompt', STT_FINANCE_PROMPT);
+
   // Append file LAST — xAI strict ordering requirement
   const ab = audioBuffer.buffer.slice(
     audioBuffer.byteOffset,
