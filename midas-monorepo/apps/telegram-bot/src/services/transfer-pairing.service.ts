@@ -30,6 +30,7 @@
 
 import { withTenantTransaction } from '@midas/database';
 import { escapeHtml } from '../utils/html-escape.js';
+import { classifyCurrency } from './account-currency-validator.service.js';
 
 // ─────────────────────────────────────────────────────────────
 // Domain types
@@ -184,13 +185,25 @@ export function buildTargetAccountKeyboard(
   draftId: string,
 ): InlineKeyboardMarkup {
   const buttons = accounts.map((acc) => {
-    const label = `${acc.name} (${acc.currency})  ${parseFloat(acc.balance).toFixed(2)}`;
-    return [{ text: label, callback_data: `tp:tgt:${acc.id}:${draftId}` }];
+    // SEC-02: no parseFloat — strip trailing zeros from NUMERIC string
+    const bal = stripTrailingZeros(acc.balance);
+    // Currency-aware icon (matches source picker design)
+    const isCrypto = classifyCurrency(acc.currency) !== 'fiat';
+    const icon = isCrypto ? '💎' : '🏦';
+    return [{ text: `${icon} ${acc.name} · ${bal} ${acc.currency}`, callback_data: `tp:tgt:${acc.id}:${draftId}` }];
   });
 
+  // "Создать счёт" — matches source picker's ia:newac flow
+  buttons.push([{ text: '➕ Создать счёт', callback_data: `tp:newac:${draftId}` }]);
   buttons.push([{ text: '✖ Отмена', callback_data: `tp:cancel:${draftId}` }]);
 
   return { inline_keyboard: buttons };
+}
+
+/** Strip trailing decimal zeros: "15400.0000" → "15400", "100.50" → "100.5" */
+function stripTrailingZeros(s: string): string {
+  if (!s.includes('.')) return s;
+  return s.replace(/\.?0+$/, '');
 }
 
 /** Keyboard for the preview/confirmation screen. */
@@ -315,29 +328,35 @@ export async function getAvailableTargetAccounts(
          a.id,
          a.name,
          a.currency,
-         -- Phase 3.0 direction-aware balance formula
+         -- Canonical direction-aware balance (matches getWorkspaceAccountsWithBalances)
          (
-           COALESCE(a.initial_balance, 0)
-           + COALESCE(SUM(CASE WHEN t.transaction_intent = 'income'        AND t.base_currency = a.currency THEN t.base_amount END), 0)
-           + COALESCE(SUM(CASE WHEN t.transaction_intent = 'debt_received' AND t.base_currency = a.currency THEN t.base_amount END), 0)
-           + COALESCE(SUM(CASE WHEN t.transaction_intent = 'transfer' AND t.transfer_direction = 'inbound'
-                               AND t.base_currency = a.currency THEN t.base_amount END), 0)
-           - COALESCE(SUM(CASE WHEN t.transaction_intent = 'expense'       AND t.base_currency = a.currency THEN t.base_amount END), 0)
-           - COALESCE(SUM(CASE WHEN t.transaction_intent = 'debt_given'    AND t.base_currency = a.currency THEN t.base_amount END), 0)
-           - COALESCE(SUM(CASE WHEN t.transaction_intent = 'transfer'
-                               AND (t.transfer_direction = 'outbound' OR t.transfer_direction IS NULL)
-                               AND t.base_currency = a.currency THEN t.base_amount END), 0)
+           a.initial_balance
+           + COALESCE(
+               SUM(
+                 CASE
+                   WHEN t.transaction_intent IN ('income', 'debt_received')
+                     THEN t.base_amount
+                   WHEN t.transaction_intent = 'transfer'
+                    AND t.transfer_direction = 'inbound'
+                     THEN t.base_amount
+                   WHEN t.transaction_intent = 'transfer'
+                    AND (t.transfer_direction = 'outbound' OR t.transfer_direction IS NULL)
+                     THEN -t.base_amount
+                   ELSE -t.base_amount
+                 END
+               ),
+               0
+             )
          )::TEXT AS balance
        FROM account_sources a
        LEFT JOIN transactions t
          ON t.account_id = a.id
-        AND t.workspace_id = $1
         AND t.base_currency = a.currency
         AND t.deleted_at IS NULL
        WHERE a.workspace_id = $1
          AND a.deleted_at IS NULL
          AND a.id != $2
-         AND a.parent_account_id IS NULL
+         AND a.is_onboarding_placeholder = FALSE
        GROUP BY a.id, a.name, a.currency, a.initial_balance
        ORDER BY a.name ASC`,
       [workspaceId, excludeAccountId],

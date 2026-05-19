@@ -105,8 +105,17 @@ DEFAULT INTENT PRIORITY (CRITICAL — always output intent, never omit it):
 - Unknown word + number (e.g. "Августи 200", "xyz 500") → intent="expense", item_hint=the unknown word.
 - Loan/debt: ONLY use debt_received/debt_given when "долг", "займ", "одолжил", "взял в долг" is EXPLICIT.
 - Income: ONLY when EXPLICIT signal: зарплата, получил, заработал, продал, фриланс, пришло, начислили.
-- Transfer: ONLY when EXPLICIT signal: перевёл, вывел, перекинул, конвертнул.
+- Transfer: When EXPLICIT transfer verb is present. See TRANSFER PRIORITY RULE below.
 - If you see item + number with NO other context → expense.
+
+TRANSFER PRIORITY RULE (CRITICAL — overrides default "expense"):
+  If the message contains ANY of the verbs listed in TRANSFER signals above, intent MUST be "transfer"
+  — even if no destination account is mentioned. Voice transcription often strips the destination
+  (e.g. "перевел 3000 долларов" without saying where). This is STILL a transfer — the bot will ask
+  for the target account separately. Do NOT downgrade to "expense" just because no destination
+  or account_hint is present.
+  Example: "перевел 3000 долларов" → intent="transfer", amount="3000", currency="USD"
+  Example: "скинул 500 юздт" → intent="transfer", amount="500", currency="USDT"
 
 
 
@@ -201,7 +210,12 @@ INCOME signals — if ANY of these appear, intent is "income":
 
 DEBT_GIVEN signals: "дал в долг", "одолжил [кому]", "дал взаймы", "дал денег [имя]"
 DEBT_RECEIVED signals: "взял в долг", "занял у [кого]", "одолжил у [кого]", "взял взаймы"
-TRANSFER signals: перевёл/перевел, перекинул, перебросил, вывел (с биржи), завёл (на биржу), обменял, конвертнул
+TRANSFER signals (MUST set intent="transfer" — even without destination account):
+  перевёл/перевел/перевела/перевели, перевод, переводил, переведи, перевести,
+  перекинул/перекинула, перебросил/перебросила, скинул/скинула/скинь,
+  кинул/кинула/кинь, закинул/закинула, отправил/отправила/отправь,
+  вывел/вывела (с биржи), завёл/завел/завела (на биржу), обменял/обменяла, конвертнул/конвертнула
+  Ukrainian: перевів, переказав, перекинув, скинув, кинув, відправив, вивів
 
 CATEGORY \u2192 INTENT defaults (when no verb is present, category implies intent):
   EXPENSE categories: кофе, обед, ужин, завтрак, еда, продукты, ресторан, кафе, доставка,
@@ -307,6 +321,22 @@ Output: {"intent":"transfer","amount":"10000","account_hint":"Binance","item_hin
 
 User: "вывел 500 USDT с Bybit"
 Output: {"intent":"transfer","amount":"500","currency":"USDT","account_hint":"Bybit","item_hint":"вывод с Bybit","category_hint":"Другое","confidence":0.9}
+
+-- Transfer WITHOUT destination (critical for voice input) --
+User: "перевел 3000 долларов"
+Output: {"intent":"transfer","amount":"3000","currency":"USD","item_hint":"перевод","category_hint":"Другое","confidence":0.9}
+
+User: "перевёл 2000 юсд"
+Output: {"intent":"transfer","amount":"2000","currency":"USD","item_hint":"перевод","category_hint":"Другое","confidence":0.9}
+
+User: "скинул 500 usdt"
+Output: {"intent":"transfer","amount":"500","currency":"USDT","item_hint":"перевод","category_hint":"Другое","confidence":0.9}
+
+User: "кинул 10000 на карту"
+Output: {"intent":"transfer","amount":"10000","item_hint":"перевод","category_hint":"Другое","confidence":0.85}
+
+User: "отправил 1500 евро"
+Output: {"intent":"transfer","amount":"1500","currency":"EUR","item_hint":"перевод","category_hint":"Другое","confidence":0.9}
 
 -- Partial (amount missing) --
 User: "купил продукты"

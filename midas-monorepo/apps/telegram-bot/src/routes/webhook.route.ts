@@ -4137,6 +4137,7 @@ Midas создан, чтобы сделать учет денег максима
       //   tp:cat:{categoryId}:{draftId}   — Branch B: category selected
       //   tp:cat:none:{draftId}           — Branch B: no category
       //   tp:xfx_back:{draftId}           — Branch A: back from cross-currency input
+      //   tp:newac:{draftId}              — create new account from target picker
       if (callbackData.startsWith('tp:')) {
         const tpMsgId = cq.message ? String(cq.message.message_id) : null;
         const tpParts = callbackData.split(':');
@@ -4350,6 +4351,39 @@ Midas создан, чтобы сделать учет денег максима
             await callbackConfirmQueue.add('approve_paired', payload, { removeOnComplete: true, removeOnFail: 100 });
             // Optimistic UI: show spinner while worker processes
             if (tpMsgId) void editMessageText(chatId, tpMsgId, '⏳ Записываю перевод...');
+
+          // ── tp:newac:{draftId} — «➕ Создать счёт» on target picker ──
+          } else if (tpCmd === 'newac') {
+            const draftIdNewac = tpParts[2];
+            if (!draftIdNewac) throw new Error('tp:newac missing draftId');
+
+            // Reuse the standard onboarding flow, same as ia:newac
+            const acKeyNewTp = onboardStateKey(telegramUserId, chatId);
+            const initStateNewTp: AccountOnboardState = {
+              step: 'type_pick',
+              linkedDraftId: draftIdNewac,
+            };
+            await redisConnection.set(acKeyNewTp, JSON.stringify(initStateNewTp), 'EX', ONBOARD_STATE_TTL_SEC);
+
+            // Mark that this is a transfer flow — so after account creation
+            // the bot can return to the target picker instead of the source picker.
+            try {
+              await redisConnection.set(
+                `midas:tp_newac:${draftIdNewac}`,
+                '1',
+                'EX', 3600,
+              );
+            } catch { /* non-fatal */ }
+
+            if (tpMsgId) {
+              void editMessageText(
+                chatId, tpMsgId,
+                NEW_ACCOUNT_TEXT,
+                buildStartOnboardKeyboardWithBack(draftIdNewac),
+              );
+              await setActiveMessageId(telegramUserId, chatId, tpMsgId);
+            }
+            request.log.info({ msg: '[midas:bot:webhook] tp:newac: onboarding started from transfer target picker', workspaceId: tpResolved.workspaceId });
 
           // ── tp:cancel:{draftId} ───────────────────────────────────
           } else if (tpCmd === 'cancel') {

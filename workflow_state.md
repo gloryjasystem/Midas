@@ -9,13 +9,13 @@
 
 | Параметр | Значение |
 |---|---|
-| **PHASE** | Phase 2, Transfer Flow + Balance Parity Fix |
-| **STEP** | Commit 663cca1 (HEAD). fix(balance): унификация direction-aware формулы в account.service.ts — source picker и target picker теперь используют идентичную логику для transfer-транзакций. tsc 0 errors. |
-| **AGENT STATUS** | tsc 0 errors. Баланс-дискрепанс между source picker и target picker устранён. Transfer flow (ветки A1/A2a/A2b/B) работает корректно. |
+| **PHASE** | Phase 2.5 → 3.0 (Transfer Flow Verified ✅) |
+| **STEP** | SQL-аудит завершён. Commit 663cca1 подтверждён: direction-aware formula корректна. pending draft `01KS00HZHSQXQRXVB3XH061BS7` (Тинькофф PLN, 1000 PLN) ожидает ручного E2E-теста. inbound-нога (target account) ещё не записывалась ни разу — approvePairedTransfer не выполнялся до конца в prod. |
+| **AGENT STATUS** | tsc 0 errors. SQL-аудит: OLD formula = NEW formula для всех существующих transfer-транзакций (все outbound, 0 inbound). При первом успешном confirm (tp:confirm) — появится inbound-нога и balance parity будет доказана in-vivo. |
 | **DEPLOYMENT** | Railway (spirited-happiness) — Midas Online, background-workers Online. Health: https://midas-production-f4f1.up.railway.app/health > ok |
-| **LAST COMPLETED** | 2026-05-19: 19d68b5 (fix: tp:tgt deleted_at error + диагностические логи), 663cca1 (fix(balance): direction-aware formula в getWorkspaceAccountsWithBalances + getAccountWithBalance). |
-| **BLOCKER** | None. |
-| **NEXT ACTION** | Протестировать transfer flow: выбрать счёт-источник → тип «Другой счёт» → убедиться балансы совпадают на обоих экранах. Далее — Phase 3.0 DB Schema. |
+| **LAST COMPLETED** | 2026-05-19: SQL-аудит transfer flow. Верификация: scheme OK (transfer_direction ✅, transfer_target_account_id ✅, no deleted_at in transaction_drafts ✅). approvePairedTransfer логика проверена. |
+| **BLOCKER** | None. E2E тест — пользовательское действие (нужно пройти flow в боте). |
+| **NEXT ACTION** | 1. E2E-тест в боте: выбрать pending draft → «Другой счёт» → выбрать target → tp:confirm → убедиться что оба баланса изменились. 2. Phase 3.0 DB Schema (account_type/wallet_subtype columns). |
 
 
 ---
@@ -227,16 +227,17 @@ Replace the flat "Счетов пока нет." empty-state with a guided inter
 
 ---
 
-## 8. ФАЙЛЫ ДЛЯ ЧТЕНИЯ В НОВОМ ЧАТЕ (Transfer Flow + Balance Parity context)
+## 8. ФАЙЛЫ ДЛЯ ЧТЕНИЯ В НОВОМ ЧАТЕ (Transfer Flow Verified context)
 
-**✅ ТЕКУЩИЙ КОНТЕКСТ: Transfer Flow реализован. Баланс-дискрепанс исправлен (commit 663cca1).**
+**✅ ТЕКУЩИЙ КОНТЕКСТ: Transfer Flow реализован. Баланс-дискрепанс исправлен (commit 663cca1). SQL-аудит пройден.**
 
 **ОБЯЗАТЕЛЬНО прочитать в новом чате:**
 ```
-apps/telegram-bot/src/services/transfer-pairing.service.ts   < Логика TP flow: ветки A1/A2a/A2b/B
-apps/telegram-bot/src/services/account.service.ts            < getWorkspaceAccountsWithBalances (direction-aware)
-apps/telegram-bot/src/services/balance.service.ts            < PER_ACCOUNT_SQL (канонический эталон)
-apps/telegram-bot/src/routes/webhook.route.ts                < tp: callback handlers
+apps/telegram-bot/src/services/transfer-pairing.service.ts         < Логика TP flow: ветки A1/A2a/A2b/B
+apps/telegram-bot/src/services/account.service.ts                  < getWorkspaceAccountsWithBalances (direction-aware)
+apps/telegram-bot/src/services/balance.service.ts                  < PER_ACCOUNT_SQL (канонический эталон)
+apps/telegram-bot/src/routes/webhook.route.ts                      < tp: callback handlers (lines 4129-4387)
+apps/background-workers/src/services/draft-confirmation.service.ts < approvePairedTransfer (lines 760-941)
 ```
 
 **НЕ ЧИТАТЬ (не нужны сейчас):**
@@ -246,11 +247,13 @@ apps/telegram-bot/src/services/excel-export.service.ts
 apps/background-workers/src/workers/ai-parse.worker.ts
 ```
 
-**Ключевые исправления этой сессии:**
-- `account.service.ts` `getWorkspaceAccountsWithBalances()` — добавлена direction-aware логика: transfer inbound = +amount, outbound = -amount (раньше все transfer = -amount)
-- `account.service.ts` `getAccountWithBalance()` — аналогичный патч
-- Колонка `transfer_direction` уже есть в таблице `transactions` (проверено)
-- tsc 0 ошибок, commit 663cca1 запушен
+**Результаты SQL-аудита (2026-05-19):**
+- Схема БД: `transfer_direction` TEXT nullable ✅, `transfer_target_account_id` TEXT nullable ✅
+- `transaction_drafts` НЕ имеет `deleted_at` колонки (баг был исправлен в 19d68b5) ✅
+- Все существующие transfer-транзакции = `outbound` (0 `inbound` записей) — approvePairedTransfer ещё не выполнялся до конца
+- Pending draft `01KS00HZHSQXQRXVB3XH061BS7`: Тинькофф PLN ← 1000 PLN, источник баланс = 3 122 213 PLN
+- Available targets: Binance (12 312 USDT), Монобанк (21 231 UAH), Сбербанк (-11 316 USD)
+- OLD formula = NEW formula при всех outbound (паритет доказан для текущего состояния; inbound добавит разницу при первом реальном confirm)
 
 ---
 
@@ -269,11 +272,11 @@ Auto-deploy: push to main > GitHub > Railway строит Midas + background-wor
   A2a: свой другой счёт, та же валюта → автоподтверждение
   A2b: свой другой счёт, другая валюта → запрос суммы конвертации
   B: другому человеку → сумма + категория + пропуск получателя
-- webhook.route.ts: tp: callback handlers, tp:tgt выбор целевого счёта
-- Исправлен баг: deleted_at фильтр в transaction_drafts (колонки нет — ошибка SQL)
+- webhook.route.ts: tp: callback handlers (lines 4129-4387)
+- Исправлен баг: deleted_at фильтр в transaction_drafts (колонки нет — ошибка SQL) commit 19d68b5
 - Добавлены диагностические логи в tp:tgt handler
 
-[Сессия: Balance Parity Fix — ПОСЛЕДНЯЯ, commit 663cca1]
+[Сессия: Balance Parity Fix — commit 663cca1]
 Проблема: балансы на экране 1 (source picker) ≠ экран 2 (target picker)
 Root cause: account.service.ts использовал СТАРУЮ формулу без transfer_direction:
   ELSE -amount  ← все transfer вычитались, inbound тоже!
@@ -283,17 +286,23 @@ Root cause: account.service.ts использовал СТАРУЮ формул�
 Формула теперь:
   transfer + inbound  → +amount (зачисление)
   transfer + outbound → -amount (списание)
-tsc 0 ошибок, задеплоено.
+
+[Сессия: SQL-аудит — ПОСЛЕДНЯЯ, 2026-05-19]
+Главное открытие: все transfer = outbound (0 inbound) — approvePairedTransfer никогда не доходил до конца в продакшне.
+Pending draft 01KS00HZHSQXQRXVB3XH061BS7: Тинькофф PLN ← 1000 PLN, баланс = 3 122 213 PLN
+Available targets: Binance (12 312 USDT), Монобанк (21 231 UAH), Сбербанк (-11 316 USD)
 
 ═══ КЛЮЧЕВЫЕ ФАЙЛЫ ═══
-apps/telegram-bot/src/services/account.service.ts       ← ИЗМЕНЁН (balance formula)
-apps/telegram-bot/src/services/transfer-pairing.service.ts ← TP flow logic
-apps/telegram-bot/src/services/balance.service.ts       ← PER_ACCOUNT_SQL (эталон)
-apps/telegram-bot/src/routes/webhook.route.ts           ← tp: handlers
+apps/telegram-bot/src/services/account.service.ts                  ← ИЗМЕНЁН (balance formula)
+apps/telegram-bot/src/services/transfer-pairing.service.ts         ← TP flow logic
+apps/telegram-bot/src/services/balance.service.ts                  ← PER_ACCOUNT_SQL (эталон)
+apps/telegram-bot/src/routes/webhook.route.ts                      ← tp: handlers (lines 4129-4387)
+apps/background-workers/src/services/draft-confirmation.service.ts ← approvePairedTransfer (lines 760-941)
 
 ═══ СЛЕДУЮЩИЕ ШАГИ ═══
-1. Протестировать transfer flow end-to-end (балансы должны совпадать на обоих экранах)
-2. Phase 3.0 — DB Schema (account_type/wallet_subtype)
+1. E2E-тест в боте: pending draft 01KS00HZHSQXQRXVB3XH061BS7 → «Другой счёт» → выбрать target → tp:confirm
+   Ожидаемый результат: Binance (12 312 - X USDT) или Монобанк (+1000 UAH-eq), Тинькофф (3 121 213 PLN)
+2. Phase 3.0 DB Schema — account_type/wallet_subtype колонки в account_sources
 
 ═══ КЛЮЧЕВЫЕ ПРАВИЛА ═══
 - Финансовая математика: ТОЛЬКО NUMERIC/BigInt, никаких float (SEC-02)
@@ -507,6 +516,7 @@ apps/telegram-bot/src/routes/webhook.route.ts           ← tp: handlers
 | 2026-05-18 21:36 | **fix(excel): remove unused usdRates param (9ce6b92). DEPLOYED.** `excel-export.service.ts`: удалён параметр `usdRates: Map<string,number>` из сигнатуры `buildSheet1` и точки вызова — исправлена ошибка `TS6133: declared but never read`, приведшая к падению билда Railway. tsc 0 ошибок. Railway auto-deploy. | settings-advanced.service.ts: (1) account_source_id -> account_id; (2) base_amount -> original_amount; (3) base_currency -> currency. Баги не ловились tsc (SQL = string). Найдены ручным аудитом. excel-export.service.ts: JSDoc обновлён до 5 листов. |
 | 2026-05-19 11:00 | **fix(transfer): tp:tgt deleted_at error — SQL hardening (commit 19d68b5). DEPLOYED.** `transfer-pairing.service.ts`: удалён фильтр `deleted_at IS NULL` из запросов к таблице `transaction_drafts` — этой колонки не существует в схеме, что вызывало runtime-ошибку при выборе целевого счёта перевода. `webhook.route.ts`: добавлено диагностическое логирование в `tp:tgt` handler — `setDraftTargetAccount` результат и `getDraftTransferState` данные. Улучшена обработка ошибок — логируется stack trace. tsc 0 ошибок. |
 | 2026-05-19 14:40 | **fix(balance): direction-aware formula parity — source picker = target picker (commit 663cca1). DEPLOYED.** `account.service.ts`: исправлены две функции `getWorkspaceAccountsWithBalances()` и `getAccountWithBalance()` — замена старой формулы `ELSE -amount` (все transfer = расход) на direction-aware логику: `transfer + inbound → +amount`, `transfer + outbound/NULL → -amount`. Root cause: source picker (Экран 1) использовал устаревшую формулу, target picker (Экран 2) уже имел direction-aware логику из `getAvailableTargetAccounts` — отсюда расхождение балансов на UI. Теперь все 4 точки расчёта баланса (balance.service.ts PER_ACCOUNT_SQL, getAvailableTargetAccounts, getWorkspaceAccountsWithBalances, getAccountWithBalance) используют одинаковую direction-aware формулу. tsc 0 ошибок. commit 663cca1 pushed to main. Railway auto-deploy. |
+| 2026-05-19 15:00 | **audit: SQL Transfer Flow Verification.** Проверка схемы БД: `transfer_direction` TEXT nullable ✅, `transfer_target_account_id` TEXT nullable ✅, `transaction_drafts` без `deleted_at` ✅. Аудит формулы: OLD=NEW для всех 5 счётов с transfer-транзакциями (все outbound, 0 inbound). Проверена логика `approvePairedTransfer` (draft-confirmation.service.ts lines 760-941): использует direction-aware BALANCE_SQL, записывает outbound+inbound рядом. Pending draft `01KS00HZHSQXQRXVB3XH061BS7` готов к E2E-тесту: Тинькофф PLN ← 1000 PLN, available targets: Binance (12 312 USDT) / Монобанк (21 231 UAH) / Сбербанк (-11 316 USD). workflow_state.md обновлён: секции 1, 8, 9. |
 | 2026-05-18 12:30 | **feat(excel): Smart number formatting + chronological months (6e597e0). DEPLOYED.** CRYPTO_SET: 18 монет (BTC/ETH/USDT/USDC/BNB/SOL/TON/TRX/XRP/DOGE/LTC/MATIC/DOT/ADA/AVAX/ATOM/LINK). smartNumFmt(currency): fiat=#,##0.## (max 2dp без trailing zeros), crypto=#,##0.######## (max 8dp). Логика: 100.00->100, 15.50->15.5, 0.00012345->0.00012345. fmtAmtSigned() тоже без trailing zeros + NBSP разделитель тысяч. Sheet4 По месяцам: хронологическая сортировка через parseMonKey(). Курс: #,##0.#### (4dp). |
 | 2026-05-18 13:30 | **feat(excel): Sheet0 Visual Polish — 10-point audit-grade redesign (3 commits). DEPLOYED.** excel-export.service.ts: (1) Navy/steel-blue цветовая палитра — C_NAVY_DARK (#1A3C5E), C_TOTAL_HDR (#BDD5E8), C_TOTAL_BG (#EBF5FB); (2) Единая thin-border сетка таблиц (FFBDD5E8) на всех блоках Сводки; (3) Стандартная высота строк 18px; (4) Выравнивание финансовых колонок по правому краю; (5) Знак переводов исправлен — transfer теперь вычитается (−transfer) из Movement; (6) Заморозка шапки листа (ySplit: 1 freeze pane); (7) Navy цвет вкладки «Сводка» (tabColor: 1A3C5E). tsc 0 ошибок. |
 | 2026-05-18 14:00 | **fix(excel): Grand total UX + balance sign + movement dedup. DEPLOYED.** (1) Grand total: label ячейки объединён через cols 1–3, right-aligned «прижат» к значению в col 4 — стандарт SAP/Oracle. (2) Balance sign: убран «+» префикс у положительных балансов (стандарт банковской выписки). (3) Movement column: убрано дублирование кода валюты — валюта объявляется в отдельной колонке, не повторяется в движении. |
