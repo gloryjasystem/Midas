@@ -11,8 +11,11 @@
  *      - Endpoint: POST https://api.groq.com/openai/v1/audio/transcriptions
  *
  *   2. xAI Grok STT — FALLBACK (if GROQ_API_KEY is not set)
- *      - Does NOT support `prompt` parameter (silently ignores it)
- *      - Known to drop scale words ("тысяч") from Russian speech
+ *      - Does NOT support `prompt` or `temperature` (silently ignores)
+ *      - CRITICAL: do NOT add ANY extra fields to FormData besides
+ *        `language` and `file` — unknown fields break number transcription
+ *      - When clean (only language+file), outputs numbers as WORDS
+ *        ("десять тысяч") which our normalizer handles correctly
  *      - Endpoint: POST https://api.x.ai/v1/stt
  *
  * SEC-12: Transcript text is NEVER logged inside this module.
@@ -24,7 +27,7 @@ const XAI_STT_ENDPOINT = 'https://api.x.ai/v1/stt';
 const REQUEST_TIMEOUT_MS = 15_000;
 
 // ─────────────────────────────────────────────────────────────
-// STT Context Prompt — Whisper "initial_prompt"
+// STT Context Prompt — Whisper "initial_prompt" (Groq only)
 // ─────────────────────────────────────────────────────────────
 //
 // Whisper `prompt` is NOT an instruction — it's "previous context".
@@ -33,9 +36,9 @@ const REQUEST_TIMEOUT_MS = 15_000;
 //   - scale words: тысяч, тысячи, тысяча, миллион
 //   - transfer verbs: перевёл, скинул, отправил
 //   - currency names: долларов, гривен, рублей
-//   - number words: десять, двадцать, пятьдесят, сто, двести, пятьсот
 //
-// ONLY effective with Groq Whisper. xAI ignores this parameter.
+// ONLY used with Groq Whisper. xAI does NOT support this parameter,
+// and adding it to xAI FormData may break transcription quality.
 // ─────────────────────────────────────────────────────────────
 
 const STT_FINANCE_PROMPT = [
@@ -61,7 +64,7 @@ export type TranscribeResult =
   | { status: 'error'; reason: string };
 
 // ─────────────────────────────────────────────────────────────
-// Provider: Groq Whisper (PRIMARY)
+// Provider: Groq Whisper (PRIMARY — if GROQ_API_KEY is set)
 // ─────────────────────────────────────────────────────────────
 
 async function transcribeWithGroq(
@@ -79,16 +82,15 @@ async function transcribeWithGroq(
   formData.append('language', language);
 
   // Prompt — THIS ACTUALLY WORKS on Groq (unlike xAI)
-  // Biases the vocabulary toward financial speech with scale words
   formData.append('prompt', STT_FINANCE_PROMPT);
 
   // Temperature = 0 → deterministic decoding, no random word drops
   formData.append('temperature', '0');
 
-  // Response format — plain text (lighter than JSON)
+  // Response format — plain text
   formData.append('response_format', 'text');
 
-  // File — must be a Blob with proper MIME type
+  // File
   const ab = audioBuffer.buffer.slice(
     audioBuffer.byteOffset,
     audioBuffer.byteOffset + audioBuffer.byteLength,
@@ -126,8 +128,6 @@ async function transcribeWithGroq(
     const trimmed = text.trim();
 
     if (!trimmed) return { status: 'empty' };
-
-    // Whisper non-speech placeholder tags
     if (/^\[.{1,30}\]$/.test(trimmed)) return { status: 'empty' };
 
     return { status: 'ok', text: trimmed };
@@ -142,6 +142,18 @@ async function transcribeWithGroq(
 // ─────────────────────────────────────────────────────────────
 // Provider: xAI Grok STT (FALLBACK)
 // ─────────────────────────────────────────────────────────────
+//
+// CRITICAL: Send ONLY `language` + `file` to xAI.
+// Adding any extra FormData fields (prompt, temperature, format, etc.)
+// causes xAI to switch its number rendering from words to digits,
+// which breaks scale word recognition:
+//   Clean (language + file only): "десять тысяч долларов"  ← correct
+//   With extra fields:            "10 долларов"            ← BROKEN
+//
+// Evidence from production DB:
+//   May 17-18 (clean):   "десять тысяч долларов" → 10000 ✅
+//   May 19 (with prompt): "10 долларов"          → 10    ❌
+// ─────────────────────────────────────────────────────────────
 
 async function transcribeWithXai(
   audioBuffer: Buffer,
@@ -151,14 +163,12 @@ async function transcribeWithXai(
 ): Promise<TranscribeResult> {
   const formData = new FormData();
 
-  // Language hint
+  // Language ONLY — no other params!
+  // xAI requires language to be before file.
   formData.append('language', language);
 
-  // NOTE: xAI does NOT support `prompt` or `temperature`.
-  // These parameters are silently ignored by xAI's STT API.
-  // This is why "тысяч" is frequently dropped in transcriptions.
-
-  // File LAST — xAI strict ordering requirement
+  // File LAST — xAI strict ordering requirement.
+  // NO other fields between language and file!
   const ab = audioBuffer.buffer.slice(
     audioBuffer.byteOffset,
     audioBuffer.byteOffset + audioBuffer.byteLength,
@@ -215,7 +225,7 @@ async function transcribeWithXai(
  *
  * Provider selection:
  *   - GROQ_API_KEY set → Groq Whisper (supports prompt/temperature)
- *   - Only XAI_API_KEY → xAI Grok STT (no prompt support, less reliable for numbers)
+ *   - Only XAI_API_KEY → xAI Grok STT (clean: language+file only)
  *
  * @param audioBuffer  - Raw audio bytes downloaded from Telegram
  * @param filename     - Filename with extension (e.g. "voice.ogg")
@@ -249,16 +259,15 @@ export async function transcribeVoice(
     return result;
   }
 
-  // ── Priority 2: xAI Grok STT ────────────────────────────
+  // ── Priority 2: xAI Grok STT (clean — language + file only) ──
   const xaiKey = process.env.XAI_API_KEY;
   if (xaiKey) {
-    console.log('[stt] Using xAI Grok STT (no prompt support — numbers may be unreliable)');
     return transcribeWithXai(audioBuffer, filename, xaiKey, language);
   }
 
   // ── No provider available ─────────────────────────────────
   return {
     status: 'error',
-    reason: '[stt] Neither GROQ_API_KEY nor XAI_API_KEY is set. Add one to Railway environment variables.',
+    reason: '[stt] Neither GROQ_API_KEY nor XAI_API_KEY is set.',
   };
 }
