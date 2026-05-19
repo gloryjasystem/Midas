@@ -63,9 +63,9 @@ export type TranscribeResult =
 // SEC-12: transcript passed as user message — not logged here.
 // ─────────────────────────────────────────────────────────────
 
-const CURRENCY_WORDS_RE = /\b(рублей|рубля|рублей|гривен|гривни|гривень|долларов|доллара|евро|юаней|юаня|тенге|USDT|BTC|ETH|TON|SOL)\b/i;
+const CURRENCY_WORDS_RE = /\b(рублей|рубля|гривен|гривни|гривень|долларов|доллара|евро|юаней|юаня|тенге|USD|EUR|PLN|UAH|RUB|GBP|CHF|USDT|USDC|BTC|ETH|TON|SOL|TRX|XRP|MATIC)\b/i;
 const SCALE_WORDS_RE    = /\b(тысяч|тысячи|тысяча|тыс|миллион|миллиона|миллионов|млн|миллиард|млрд)\b/i;
-const SMALL_DIGIT_RE    = /\b(\d{1,4})\s+(?:рублей|рубля|гривен|гривні|долларов|доллара|евро|юаней|тенге|USDT|BTC|ETH|TON|SOL)\b/i;
+const SMALL_DIGIT_RE    = /\b(\d{1,4})\s+(?:рублей|рубля|гривен|гривні|долларов|доллара|евро|юаней|тенге|USD|EUR|PLN|UAH|RUB|GBP|CHF|USDT|USDC|BTC|ETH|TON|SOL|TRX|XRP|MATIC)\b/i;
 
 function looksLikeDroppedScaleWord(text: string): boolean {
   // Trigger correction if: small number (≤9999) + currency, no scale word present
