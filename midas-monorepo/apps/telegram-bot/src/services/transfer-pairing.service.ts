@@ -332,6 +332,7 @@ export async function getAvailableTargetAccounts(
        LEFT JOIN transactions t
          ON t.account_id = a.id
         AND t.workspace_id = $1
+        AND t.base_currency = a.currency
         AND t.deleted_at IS NULL
        WHERE a.workspace_id = $1
          AND a.deleted_at IS NULL
