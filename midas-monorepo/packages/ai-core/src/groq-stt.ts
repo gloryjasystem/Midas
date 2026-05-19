@@ -25,6 +25,21 @@ const REQUEST_TIMEOUT_MS = 15_000;
 const LLM_TIMEOUT_MS     = 8_000;
 
 // ─────────────────────────────────────────────────────────────
+// xAI STT prompt — biases decoder toward crypto tickers
+//
+// Injected as `prompt` field in the xAI STT request (same mechanism
+// as Groq/OpenAI Whisper). Seeds the decoder with "USDT" so the model
+// prefers USDT over USD when the user says "USDT" or "юсдт" etc.
+// SEC-12: this is a static system string — no user data.
+// ─────────────────────────────────────────────────────────────
+
+const XAI_STT_CRYPTO_PROMPT =
+  'USDT USDC BTC ETH TON SOL TRX XRP MATIC. ' +
+  'Tether USDT. Купил USDT. Перевёл USDT. Продал USDT. ' +
+  'Десять тысяч USDT. Сто USDT. Тысяча USDT. ' +
+  'юсдт юздт тезер тезеры.';
+
+// ─────────────────────────────────────────────────────────────
 // Groq Whisper prompt (used only when GROQ_API_KEY is set)
 // ─────────────────────────────────────────────────────────────
 
@@ -141,6 +156,10 @@ async function transcribeWithXai(
 
   // language first — xAI ordering requirement
   formData.append('language', language);
+
+  // prompt: seeds the decoder context to prefer USDT over USD and other
+  // crypto tickers over phonetically similar words. Must come before `file`.
+  formData.append('prompt', XAI_STT_CRYPTO_PROMPT);
 
   // File LAST — xAI strict ordering requirement
   const ab = audioBuffer.buffer.slice(

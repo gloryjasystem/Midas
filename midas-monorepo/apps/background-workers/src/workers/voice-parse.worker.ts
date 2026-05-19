@@ -159,16 +159,25 @@ function detectVoiceCommand(text: string): VoiceCommand {
 // ─────────────────────────────────────────────────────────────
 
 const STT_CRYPTO_NORMALIZATIONS: Array<{ pattern: RegExp; replacement: string }> = [
-  // USDT — most common mismatch. Must run BEFORE USD rules.
-  // Covers: "юздт", "юсдт", "юзд т", "usdt", "usd t", "USD T", "us dt"
+  // ── USDT — must run BEFORE any USD rules ─────────────────────────────────
+  // Standard phonetic variants: юздт, юсдт, юзд т, usdt, usd t, USD T
   { pattern: /\bюзд\s*т\b|\bюсд\s*т\b|\bюздт\b|\bюсдт\b/gi, replacement: 'USDT' },
   { pattern: /\busd\s*t\b|\bus\s*dt\b/gi,                       replacement: 'USDT' },
   { pattern: /\bтезер\b|\btether\b/gi,                           replacement: 'USDT' },
 
+  // Letter-by-letter Russian pronunciation: у-эс-дэ-тэ / ю-эс-ди-ти
+  { pattern: /\bу[\s\-]?эс[\s\-]?д[эe]?[\s\-]?т[эe]?\b/gi,   replacement: 'USDT' },
+  { pattern: /\bю[\s\-]?эс[\s\-]?ди[\s\-]?ти\b/gi,             replacement: 'USDT' },
+
+  // Partial drop: STT swallows final "т" → outputs "юсд" / "юзд" alone
+  // Word-boundary lookAhead ensures we don't match inside longer Cyrillic words
+  { pattern: /\bюсд(?=[^а-яёa-z]|$)/gi,                         replacement: 'USDT' },
+  { pattern: /\bюзд(?=[^а-яёa-z]|$)/gi,                         replacement: 'USDT' },
+
   // USDC — similar phonetics
   { pattern: /\bюздс\b|\bюсдс\b|\busd\s*c\b/gi,                 replacement: 'USDC' },
 
-  // BTC — "биток" already in prompt but add STT variants
+  // BTC — "биток" already in prompt but add STT split variants
   { pattern: /\bbt\s*c\b|\bb\s*t\s*c\b/gi,                      replacement: 'BTC' },
 
   // ETH — "эфир" already in prompt; add STT split variants
@@ -189,6 +198,34 @@ const STT_CRYPTO_NORMALIZATIONS: Array<{ pattern: RegExp; replacement: string }>
   // TRX — Tron
   { pattern: /\bтрон\b(?!\s*(?:ов|ах|у|е|ом|ями))/gi,            replacement: 'TRX' },
 ];
+
+// ── Context-aware USD → USDT upgrade ─────────────────────────────────────────
+//
+// Last-resort: if STT fully drops the final "T" and emits bare "USD",
+// we can't distinguish it from a genuine USD transaction using text alone.
+// Exception: if the phrase contains a known crypto exchange / wallet keyword
+// (Bybit, Binance, кошелёк etc.), the intent is almost certainly USDT.
+//
+// Applied after STT_CRYPTO_NORMALIZATIONS, before Claude sees the text.
+// SEC-12: no user text logged.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const CRYPTO_PLATFORM_RE =
+  /\b(bybit|byte?bit|binance|okx|kraken|huobi|kucoin|gate\.?io|mexc|bitget|trust\s*wallet|metamask|exodus|ledger|trezor|кошел[её]к|wallet|крипт[аоуе]|staking|стейкинг)\b/i;
+
+/**
+ * If the transcript already contains "USD" (not "USDT") and mentions a crypto
+ * platform / wallet, upgrade all "USD" occurrences to "USDT".
+ *
+ * Example: "Перевёл 500 USD на Bybit" → "Перевёл 500 USDT на Bybit"
+ * Safe: only fires when a clear crypto-context keyword is present.
+ */
+function upgradeCryptoContext(text: string): string {
+  if (!CRYPTO_PLATFORM_RE.test(text)) return text;       // fast-path: no crypto context
+  if (/\bUSDT\b/i.test(text)) return text;               // already USDT — skip
+  return text.replace(/\bUSD\b/g, 'USDT');
+}
+
 
 // ─────────────────────────────────────────────────────────────
 // Phase 2.7: STT spoken-number normalizer
@@ -393,14 +430,19 @@ function normalizeSpokenNumbers(text: string): string {
  */
 function normalizeSttTranscript(transcript: string): string {
   let result = transcript;
-  // Pass 1: crypto tickers
+  // Pass 1: crypto tickers (юсдт → USDT, юзд → USDT, etc.)
   for (const { pattern, replacement } of STT_CRYPTO_NORMALIZATIONS) {
     result = result.replace(pattern, replacement);
   }
+  // Pass 1.5: context-aware USD → USDT upgrade
+  // If transcript still contains plain "USD" but mentions a crypto platform,
+  // STT likely dropped the final "T" entirely — upgrade to USDT.
+  result = upgradeCryptoContext(result);
   // Pass 2: spoken numbers → digits
   result = normalizeSpokenNumbers(result);
   return result;
 }
+
 
 
 // ─────────────────────────────────────────────────────────────
