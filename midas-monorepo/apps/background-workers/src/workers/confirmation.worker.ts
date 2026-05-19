@@ -23,7 +23,13 @@ import { Worker, type Job } from 'bullmq';
 import { QUEUE_NAMES, type CallbackConfirmJobPayload, IdempotencyKeyBuilder } from '@midas/shared';
 import { redisConnection } from '../queues/redis.js';
 import { callbackConfirmQueue, notificationsQueue } from '../queues/queue-definitions.js';
-import { approveDraft, rejectDraft, fetchApprovedTransactionCard } from '../services/draft-confirmation.service.js';
+import {
+  approveDraft,
+  rejectDraft,
+  fetchApprovedTransactionCard,
+  approvePairedTransfer,
+  type PairedTransferResult,
+} from '../services/draft-confirmation.service.js';
 import { resolveUserId, getPreviewMessageInfo } from '../services/draft.service.js';
 import { ulid } from 'ulid';
 import {
@@ -99,9 +105,28 @@ async function processConfirmation(job: Job<CallbackConfirmJobPayload>): Promise
   }
 
   // ── Step 2: Execute approve or reject ────────────────────────
+  // Phase 3.0: For 'approve', check if draft is a paired internal transfer
+  // (has transfer_target_account_id set). If so, route to approvePairedTransfer().
+  // This keeps CallbackConfirmJobPayload unchanged — routing is DB-driven.
   let result;
   if (action === 'approve') {
-    result = await approveDraft(draftId, workspaceId, userId);
+    // Peek at draft to decide routing — lightweight query, no lock
+    const { pool } = await import('@midas/database');
+    const peekResult = await pool.query<{ transfer_target_account_id: string | null }>(
+      `SELECT transfer_target_account_id FROM transaction_drafts
+       WHERE id = $1 AND workspace_id = $2 AND status = 'pending_user'`,
+      [draftId, workspaceId],
+    );
+    const hasPairedTarget = !!peekResult.rows[0]?.transfer_target_account_id;
+
+    if (hasPairedTarget) {
+      console.log('[midas:confirmation-worker] Routing to approvePairedTransfer', {
+        jobId: job.id, draftId, workspaceId,
+      });
+      result = await approvePairedTransfer(draftId, workspaceId, userId);
+    } else {
+      result = await approveDraft(draftId, workspaceId, userId);
+    }
   } else {
     result = await rejectDraft(draftId, workspaceId, userId);
   }
@@ -138,26 +163,56 @@ async function processConfirmation(job: Job<CallbackConfirmJobPayload>): Promise
   // Workers no longer re-send it, preserving the user's collapse preference.
 
   switch (result.outcome) {
-    case 'approved':
-      notificationMessage = buildConfirmedScreen({
-        intent: result.intent,
-        amount: result.amount,
-        currency: result.currency,
-        categoryName: result.categoryName,
-        accountName: result.accountName,
-        itemName: result.itemName,
-        transactionTime: result.transactionTime, // Phase 1.36-UX: timestamp on card
-        // Phase 2.4 PR13: balance snapshot — powers the "Итог" block
-        accountCurrency: result.accountCurrency,
-        balanceBefore:   result.balanceBefore,
-        balanceAfter:    result.balanceAfter,
-        debitAmount:     result.debitAmount,
-        debitCurrency:   result.debitCurrency,
-      });
-      inlineKeyboardJson = JSON.stringify(
-        buildPostConfirmKeyboard(result.transactionId),
-      );
+    case 'approved': {
+      // Phase 3.0: Distinguish paired transfer result from standard approve result.
+      // PairedTransferResult (paired) has `outboundTxId`; standard has `transactionId`.
+      // Use explicit type assertion after the discriminant check so TS narrows correctly.
+      if (('outboundTxId' in result) && result.outcome === 'approved') {
+        const paired = result as Extract<PairedTransferResult, { outcome: 'approved' }>;
+        // Build paired transfer success card
+        notificationMessage = [
+          '✅ <b>Перевод записан</b>',
+          '',
+          '🔄 Внутренний перевод',
+          '━━━━━━━━━━━━━━━━━━━━━━━',
+          `📤 <b>${paired.sourceAccount}</b>`,
+          `    − <code>${paired.outAmount} ${paired.outCurrency}</code>`,
+          paired.balanceAfterSource
+            ? `    Остаток: <code>${paired.balanceAfterSource} ${paired.outCurrency}</code>`
+            : '',
+          '',
+          `📥 <b>${paired.targetAccount}</b>`,
+          `    + <code>${paired.inAmount} ${paired.inCurrency}</code>`,
+          paired.balanceAfterTarget
+            ? `    Остаток: <code>${paired.balanceAfterTarget} ${paired.inCurrency}</code>`
+            : '',
+          '━━━━━━━━━━━━━━━━━━━━━━━',
+          `🕐 ${new Date(paired.transactionTime).toLocaleString('ru-RU', { timeZone: 'UTC' })}`,
+        ].filter(Boolean).join('\n');
+        inlineKeyboardJson = undefined; // No post-confirm action for paired transfers
+      } else {
+        // Standard single-leg approve
+        const std = result as Exclude<typeof result, { outboundTxId: string }>;
+        notificationMessage = buildConfirmedScreen({
+          intent: (std as any).intent,
+          amount: (std as any).amount,
+          currency: (std as any).currency,
+          categoryName: (std as any).categoryName,
+          accountName: (std as any).accountName,
+          itemName: (std as any).itemName,
+          transactionTime: (std as any).transactionTime,
+          accountCurrency: (std as any).accountCurrency,
+          balanceBefore:   (std as any).balanceBefore,
+          balanceAfter:    (std as any).balanceAfter,
+          debitAmount:     (std as any).debitAmount,
+          debitCurrency:   (std as any).debitCurrency,
+        });
+        inlineKeyboardJson = JSON.stringify(
+          buildPostConfirmKeyboard((std as any).transactionId),
+        );
+      }
       break;
+    }
     case 'rejected':
       notificationMessage = buildRejectedScreen();
       // Phase 1.38: ReplyKeyboard lives in chat from /start — not re-sent here.
@@ -170,7 +225,8 @@ async function processConfirmation(job: Job<CallbackConfirmJobPayload>): Promise
     case 'already_processed':
       if (result.existingStatus === 'approved') {
         // Phase 1.35: fetch and show the confirmed transaction card
-        let approvedCard = result.approvedCard ?? null;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- approvedCard only on approveDraft result
+        let approvedCard = (result as any).approvedCard ?? null;
         if (!approvedCard) {
           // Fetch by draftId if not already populated (e.g. SKIP LOCKED path)
           try {
