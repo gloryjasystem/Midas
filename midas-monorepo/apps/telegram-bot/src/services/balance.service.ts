@@ -10,7 +10,8 @@
  *         income        → +1  (money enters account)
  *         debt_given    → −1  (cash lent, leaves account; D2 = integrated)
  *         debt_received → +1  (cash received, enters account; D2 = integrated)
- *         transfer      → −1  (D3: treated as expense — money leaves account)
+ *         transfer (outbound) → −1  (money leaves account; default for legacy data)
+ *         transfer (inbound)  → +1  (money arrives; only for paired internal transfers)
  *
  *   D2  Debt integrated into balance (not shown as separate section).
  *   D3  Transfer deducted from balance (same sign as expense).
@@ -110,8 +111,17 @@ const PER_ACCOUNT_SQL = `
       - COALESCE(SUM(CASE
           WHEN t.transaction_intent = 'debt_given'    AND t.base_currency = a.currency
           THEN t.base_amount END), 0)
+      -- Phase 3.0 transfer_direction: inbound transfers ADD to balance,
+      -- outbound transfers SUBTRACT. NULL direction = legacy data → treated as outbound.
+      + COALESCE(SUM(CASE
+          WHEN t.transaction_intent = 'transfer'
+           AND t.transfer_direction = 'inbound'
+           AND t.base_currency = a.currency
+          THEN t.base_amount END), 0)
       - COALESCE(SUM(CASE
-          WHEN t.transaction_intent = 'transfer'      AND t.base_currency = a.currency
+          WHEN t.transaction_intent = 'transfer'
+           AND (t.transfer_direction = 'outbound' OR t.transfer_direction IS NULL)
+           AND t.base_currency = a.currency
           THEN t.base_amount END), 0)
       AS balance,
     -- Phase 1.27: count transactions excluded due to base_currency ≠ account.currency.
@@ -374,8 +384,16 @@ const ACCOUNT_DETAIL_SQL = `
       - COALESCE(SUM(CASE
           WHEN t.transaction_intent = 'debt_given'    AND t.base_currency = a.currency
           THEN t.base_amount END), 0)
+      -- Phase 3.0: inbound transfers add to balance, outbound subtract.
+      + COALESCE(SUM(CASE
+          WHEN t.transaction_intent = 'transfer'
+           AND t.transfer_direction = 'inbound'
+           AND t.base_currency = a.currency
+          THEN t.base_amount END), 0)
       - COALESCE(SUM(CASE
-          WHEN t.transaction_intent = 'transfer'      AND t.base_currency = a.currency
+          WHEN t.transaction_intent = 'transfer'
+           AND (t.transfer_direction = 'outbound' OR t.transfer_direction IS NULL)
+           AND t.base_currency = a.currency
           THEN t.base_amount END), 0)
       AS balance,
     COUNT(t.id) AS tx_count,
@@ -497,8 +515,12 @@ export async function setAccountBalanceById(
                WHEN t.transaction_intent = 'debt_received' THEN  t.base_amount
                WHEN t.transaction_intent = 'expense'       THEN -t.base_amount
                WHEN t.transaction_intent = 'debt_given'    THEN -t.base_amount
-               WHEN t.transaction_intent = 'transfer'      THEN -t.base_amount
-               ELSE 0 END)
+               -- Phase 3.0: inbound transfers add, outbound subtract.
+               WHEN t.transaction_intent = 'transfer'
+                 AND t.transfer_direction = 'inbound'                                    THEN  t.base_amount
+                WHEN t.transaction_intent = 'transfer'
+                 AND (t.transfer_direction = 'outbound' OR t.transfer_direction IS NULL) THEN -t.base_amount
+                ELSE 0 END)
                FROM transactions t
                WHERE t.account_id  = $2
                AND t.workspace_id = $1
@@ -607,7 +629,11 @@ export async function getChildAccountDetails(
                   + COALESCE(SUM(CASE WHEN t.transaction_intent = 'debt_received' THEN  t.base_amount END), 0)
                   - COALESCE(SUM(CASE WHEN t.transaction_intent = 'expense'       THEN  t.base_amount END), 0)
                   - COALESCE(SUM(CASE WHEN t.transaction_intent = 'debt_given'    THEN  t.base_amount END), 0)
-                  - COALESCE(SUM(CASE WHEN t.transaction_intent = 'transfer'      THEN  t.base_amount END), 0)
+                  -- Phase 3.0: inbound transfers add, outbound subtract.
+                  + COALESCE(SUM(CASE WHEN t.transaction_intent = 'transfer'
+                    AND t.transfer_direction = 'inbound'                           THEN  t.base_amount END), 0)
+                  - COALESCE(SUM(CASE WHEN t.transaction_intent = 'transfer'
+                    AND (t.transfer_direction = 'outbound' OR t.transfer_direction IS NULL) THEN t.base_amount END), 0)
                   AS balance
          FROM account_sources a
          LEFT JOIN transactions t

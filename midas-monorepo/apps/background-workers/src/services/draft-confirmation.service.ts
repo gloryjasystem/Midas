@@ -411,7 +411,13 @@ export async function approveDraft(
          + COALESCE(SUM(CASE WHEN t.transaction_intent = 'debt_received' AND t.base_currency = a.currency THEN t.base_amount END), 0)
          - COALESCE(SUM(CASE WHEN t.transaction_intent = 'expense'       AND t.base_currency = a.currency THEN t.base_amount END), 0)
          - COALESCE(SUM(CASE WHEN t.transaction_intent = 'debt_given'    AND t.base_currency = a.currency THEN t.base_amount END), 0)
-         - COALESCE(SUM(CASE WHEN t.transaction_intent = 'transfer'      AND t.base_currency = a.currency THEN t.base_amount END), 0)
+         -- Phase 3.0: inbound transfers add to balance, outbound subtract.
+         + COALESCE(SUM(CASE WHEN t.transaction_intent = 'transfer'
+              AND t.transfer_direction = 'inbound'
+              AND t.base_currency = a.currency THEN t.base_amount END), 0)
+         - COALESCE(SUM(CASE WHEN t.transaction_intent = 'transfer'
+              AND (t.transfer_direction = 'outbound' OR t.transfer_direction IS NULL)
+              AND t.base_currency = a.currency THEN t.base_amount END), 0)
        )::TEXT AS balance
        FROM account_sources a
        LEFT JOIN transactions t
