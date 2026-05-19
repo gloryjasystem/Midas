@@ -1,43 +1,41 @@
 /**
- * @midas/ai-core — xAI Grok STT Client — Phase 2.1
+ * @midas/ai-core — Voice STT Client — Phase 2.4
  *
- * Transcribes audio buffers (OGG/OPUS from Telegram) to text
- * using xAI's Grok Speech-to-Text API.
+ * Transcribes audio buffers (OGG/OPUS from Telegram) to text.
  *
- * Endpoint: POST https://api.x.ai/v1/stt (Batch/REST)
- * Pricing:  $0.10/hour of audio (~$0.0002 per 8-second voice message)
- * Formats:  12 audio formats supported including OGG (Telegram native)
- * Languages: 25+ including RU/UK/EN
+ * Provider priority:
+ *   1. Groq Whisper (whisper-large-v3-turbo) — PREFERRED
+ *      - Supports `prompt` parameter → vocabulary bias for "тысяч", "миллион"
+ *      - Supports `temperature=0` → deterministic decoding
+ *      - Excellent Russian number recognition
+ *      - Endpoint: POST https://api.groq.com/openai/v1/audio/transcriptions
+ *
+ *   2. xAI Grok STT — FALLBACK (if GROQ_API_KEY is not set)
+ *      - Does NOT support `prompt` parameter (silently ignores it)
+ *      - Known to drop scale words ("тысяч") from Russian speech
+ *      - Endpoint: POST https://api.x.ai/v1/stt
  *
  * SEC-12: Transcript text is NEVER logged inside this module.
  * SEC-03: No workspace/user context — pure audio → text conversion.
- *
- * Returns a discriminated union:
- *   { status: 'ok'; text: string }       — transcription succeeded
- *   { status: 'empty' }                  — audio had no speech (silence/noise)
- *   { status: 'error'; reason: string }  — API error (rate limit, outage)
  */
 
+const GROQ_STT_ENDPOINT = 'https://api.groq.com/openai/v1/audio/transcriptions';
 const XAI_STT_ENDPOINT = 'https://api.x.ai/v1/stt';
 const REQUEST_TIMEOUT_MS = 15_000;
 
 // ─────────────────────────────────────────────────────────────
-// STT Context Prompt — Whisper-compatible "initial_prompt"
+// STT Context Prompt — Whisper "initial_prompt"
 // ─────────────────────────────────────────────────────────────
 //
-// CRITICAL: Whisper/Grok `prompt` is NOT an instruction field.
-// It acts as a "previous transcription context" — the model treats
-// it as text that came BEFORE the current audio and uses it to:
-//   1. Bias vocabulary (words in prompt are much more likely to appear)
-//   2. Set formatting conventions (punctuation, capitalization)
-//   3. Prime number/scale recognition
-//
-// Therefore we provide EXAMPLE SENTENCES that look like real
-// transcriptions a user would say, containing all critical vocabulary:
+// Whisper `prompt` is NOT an instruction — it's "previous context".
+// The model treats it as text that came BEFORE the current audio.
+// This biases vocabulary toward financial speech:
 //   - scale words: тысяч, тысячи, тысяча, миллион
 //   - transfer verbs: перевёл, скинул, отправил
 //   - currency names: долларов, гривен, рублей
 //   - number words: десять, двадцать, пятьдесят, сто, двести, пятьсот
+//
+// ONLY effective with Groq Whisper. xAI ignores this parameter.
 // ─────────────────────────────────────────────────────────────
 
 const STT_FINANCE_PROMPT = [
@@ -63,53 +61,34 @@ export type TranscribeResult =
   | { status: 'error'; reason: string };
 
 // ─────────────────────────────────────────────────────────────
-// transcribeVoice
+// Provider: Groq Whisper (PRIMARY)
 // ─────────────────────────────────────────────────────────────
 
-/**
- * Transcribe an OGG/OPUS audio buffer to text using xAI Grok STT.
- *
- * IMPORTANT: xAI requires the `file` field to be the LAST field
- * in the multipart form data. Other params (language) must be appended first.
- *
- * @param audioBuffer  - Raw audio bytes downloaded from Telegram
- * @param filename     - Filename with extension (e.g. "voice.ogg")
- * @param languageHint - Optional ISO-639-1 language hint (e.g. "ru")
- * @returns TranscribeResult discriminated union.
- *
- * SEC-12: Transcribed text is returned to caller — NEVER logged here.
- */
-export async function transcribeVoice(
+async function transcribeWithGroq(
   audioBuffer: Buffer,
   filename: string,
-  languageHint?: string,
+  apiKey: string,
+  language: string,
 ): Promise<TranscribeResult> {
-  const apiKey = process.env.XAI_API_KEY;
-  if (!apiKey) {
-    return {
-      status: 'error',
-      reason: '[xai-stt] XAI_API_KEY is not set. Add it to Railway environment variables.',
-    };
-  }
-
-  // ── Build multipart/form-data ──────────────────────────────
-  // xAI REQUIREMENT: `file` field MUST be the last field in the form.
   const formData = new FormData();
 
-  // Language — always 'ru' for Russian financial speech.
-  // Hardcoding prevents Grok from auto-detecting Ukrainian or English
-  // fragments and switching language models mid-sentence.
-  formData.append('language', languageHint ?? 'ru');
+  // Model — whisper-large-v3-turbo: best speed/accuracy for Russian
+  formData.append('model', 'whisper-large-v3-turbo');
 
-  // Context prompt — biases vocabulary toward financial speech
-  // (see STT_FINANCE_PROMPT block above for rationale).
+  // Language — force Russian to prevent language switching
+  formData.append('language', language);
+
+  // Prompt — THIS ACTUALLY WORKS on Groq (unlike xAI)
+  // Biases the vocabulary toward financial speech with scale words
   formData.append('prompt', STT_FINANCE_PROMPT);
 
-  // Temperature = 0 → deterministic decoding.
-  // Eliminates random hallucinations where "тысяч" is dropped.
+  // Temperature = 0 → deterministic decoding, no random word drops
   formData.append('temperature', '0');
 
-  // Append file LAST — xAI strict ordering requirement
+  // Response format — plain text (lighter than JSON)
+  formData.append('response_format', 'text');
+
+  // File — must be a Blob with proper MIME type
   const ab = audioBuffer.buffer.slice(
     audioBuffer.byteOffset,
     audioBuffer.byteOffset + audioBuffer.byteLength,
@@ -117,16 +96,13 @@ export async function transcribeVoice(
   const blob = new Blob([ab], { type: 'audio/ogg' });
   formData.append('file', blob, filename);
 
-  // ── Call xAI STT API ───────────────────────────────────────
   const controller = new AbortController();
   const timeout = setTimeout(() => { controller.abort(); }, REQUEST_TIMEOUT_MS);
 
-  let responseJson: { text?: string; error?: string };
   try {
-    const response = await fetch(XAI_STT_ENDPOINT, {
+    const response = await fetch(GROQ_STT_ENDPOINT, {
       method: 'POST',
       headers: { Authorization: `Bearer ${apiKey}` },
-      // Do NOT set Content-Type manually — FormData sets it with boundary
       body: formData,
       signal: controller.signal,
     });
@@ -134,10 +110,78 @@ export async function transcribeVoice(
     clearTimeout(timeout);
 
     if (!response.ok) {
-      // SEC-12: Log only status code, not body
+      const statusCode = response.status;
+      console.error('[groq-stt] API returned non-OK status', { statusCode });
+      const isRetriable = statusCode === 429 || statusCode >= 500;
+      return {
+        status: 'error',
+        reason: isRetriable
+          ? `Groq STT temporarily unavailable (${String(statusCode)})`
+          : `Groq STT error (${String(statusCode)})`,
+      };
+    }
+
+    // response_format=text → body is plain text, not JSON
+    const text = await response.text();
+    const trimmed = text.trim();
+
+    if (!trimmed) return { status: 'empty' };
+
+    // Whisper non-speech placeholder tags
+    if (/^\[.{1,30}\]$/.test(trimmed)) return { status: 'empty' };
+
+    return { status: 'ok', text: trimmed };
+  } catch (err) {
+    clearTimeout(timeout);
+    const errorClass = err instanceof Error ? err.constructor.name : 'UnknownError';
+    console.error('[groq-stt] Fetch failed', { errorClass });
+    return { status: 'error', reason: `Groq STT fetch failed: ${errorClass}` };
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// Provider: xAI Grok STT (FALLBACK)
+// ─────────────────────────────────────────────────────────────
+
+async function transcribeWithXai(
+  audioBuffer: Buffer,
+  filename: string,
+  apiKey: string,
+  language: string,
+): Promise<TranscribeResult> {
+  const formData = new FormData();
+
+  // Language hint
+  formData.append('language', language);
+
+  // NOTE: xAI does NOT support `prompt` or `temperature`.
+  // These parameters are silently ignored by xAI's STT API.
+  // This is why "тысяч" is frequently dropped in transcriptions.
+
+  // File LAST — xAI strict ordering requirement
+  const ab = audioBuffer.buffer.slice(
+    audioBuffer.byteOffset,
+    audioBuffer.byteOffset + audioBuffer.byteLength,
+  ) as ArrayBuffer;
+  const blob = new Blob([ab], { type: 'audio/ogg' });
+  formData.append('file', blob, filename);
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => { controller.abort(); }, REQUEST_TIMEOUT_MS);
+
+  try {
+    const response = await fetch(XAI_STT_ENDPOINT, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}` },
+      body: formData,
+      signal: controller.signal,
+    });
+
+    clearTimeout(timeout);
+
+    if (!response.ok) {
       const statusCode = response.status;
       console.error('[xai-stt] API returned non-OK status', { statusCode });
-
       const isRetriable = statusCode === 429 || statusCode >= 500;
       return {
         status: 'error',
@@ -147,28 +191,74 @@ export async function transcribeVoice(
       };
     }
 
-    responseJson = (await response.json()) as { text?: string; error?: string };
+    const responseJson = (await response.json()) as { text?: string; error?: string };
+    const trimmed = (responseJson.text ?? '').trim();
+
+    if (!trimmed) return { status: 'empty' };
+    if (/^\[.{1,30}\]$/.test(trimmed)) return { status: 'empty' };
+
+    return { status: 'ok', text: trimmed };
   } catch (err) {
     clearTimeout(timeout);
     const errorClass = err instanceof Error ? err.constructor.name : 'UnknownError';
     console.error('[xai-stt] Fetch failed', { errorClass });
     return { status: 'error', reason: `xAI STT fetch failed: ${errorClass}` };
   }
+}
 
-  // ── Validate transcript ────────────────────────────────────
-  const trimmed = (responseJson.text ?? '').trim();
+// ─────────────────────────────────────────────────────────────
+// Public API: transcribeVoice (auto-selects provider)
+// ─────────────────────────────────────────────────────────────
 
-  if (!trimmed) {
-    // Empty response → audio was silence or noise below detection threshold
-    return { status: 'empty' };
+/**
+ * Transcribe an OGG/OPUS audio buffer to text.
+ *
+ * Provider selection:
+ *   - GROQ_API_KEY set → Groq Whisper (supports prompt/temperature)
+ *   - Only XAI_API_KEY → xAI Grok STT (no prompt support, less reliable for numbers)
+ *
+ * @param audioBuffer  - Raw audio bytes downloaded from Telegram
+ * @param filename     - Filename with extension (e.g. "voice.ogg")
+ * @param languageHint - Optional ISO-639-1 language hint (defaults to "ru")
+ * @returns TranscribeResult discriminated union.
+ *
+ * SEC-12: Transcribed text is returned to caller — NEVER logged here.
+ */
+export async function transcribeVoice(
+  audioBuffer: Buffer,
+  filename: string,
+  languageHint?: string,
+): Promise<TranscribeResult> {
+  const language = languageHint ?? 'ru';
+
+  // ── Priority 1: Groq Whisper ─────────────────────────────
+  const groqKey = process.env.GROQ_API_KEY;
+  if (groqKey) {
+    console.log('[stt] Using Groq Whisper (whisper-large-v3-turbo)');
+    const result = await transcribeWithGroq(audioBuffer, filename, groqKey, language);
+
+    // If Groq fails with a transient error, try xAI as fallback
+    if (result.status === 'error') {
+      const xaiKey = process.env.XAI_API_KEY;
+      if (xaiKey) {
+        console.warn('[stt] Groq failed, falling back to xAI', { reason: result.reason });
+        return transcribeWithXai(audioBuffer, filename, xaiKey, language);
+      }
+    }
+
+    return result;
   }
 
-  // Whisper-style non-speech placeholder tags (xAI uses same convention)
-  const NON_SPEECH_RE = /^\[.{1,30}\]$/;
-  if (NON_SPEECH_RE.test(trimmed)) {
-    return { status: 'empty' };
+  // ── Priority 2: xAI Grok STT ────────────────────────────
+  const xaiKey = process.env.XAI_API_KEY;
+  if (xaiKey) {
+    console.log('[stt] Using xAI Grok STT (no prompt support — numbers may be unreliable)');
+    return transcribeWithXai(audioBuffer, filename, xaiKey, language);
   }
 
-  // SEC-12: trimmed transcript NOT logged — returned to worker only
-  return { status: 'ok', text: trimmed };
+  // ── No provider available ─────────────────────────────────
+  return {
+    status: 'error',
+    reason: '[stt] Neither GROQ_API_KEY nor XAI_API_KEY is set. Add one to Railway environment variables.',
+  };
 }
