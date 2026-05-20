@@ -4485,6 +4485,79 @@ Midas создан, чтобы сделать учет денег максима
       // that second call will be silently rejected by Telegram (already answered).
       await answerCallbackQuery(cq.id);
 
+      // ── Phase 3.1: Transfer intercept — block incomplete transfers ──
+      // If draft intent=transfer but no transfer_target_account_id is set,
+      // the worker would call approveDraft() creating a transfer with direction=NULL.
+      // That transaction is semantically broken (shows as expense in reports).
+      // Enterprise fix: intercept here and redirect to the target account picker (tp: flow).
+      if (action === 'approve') {
+        try {
+          const { pool } = await import('@midas/database');
+          const tpCheck = await pool.query<{
+            parsed_intent: string | null;
+            transfer_target_account_id: string | null;
+            account_id: string | null;
+            parsed_amount: string | null;
+            parsed_currency: string | null;
+          }>(
+            `SELECT parsed_intent, transfer_target_account_id, account_id, parsed_amount, parsed_currency
+             FROM transaction_drafts
+             WHERE id = $1 AND workspace_id = $2 AND status = 'pending_user'`,
+            [draftId, workspaceId],
+          );
+          const tpRow = tpCheck.rows[0];
+          if (tpRow?.parsed_intent === 'transfer' && !tpRow.transfer_target_account_id) {
+            // Transfer without target → redirect to target account picker
+            const { getAvailableTargetAccounts, buildTargetPickerScreen, buildTargetAccountKeyboard } =
+              await import('../services/transfer-pairing.service.js');
+
+            const tpResolved = await resolveWorkspace(telegramUserId, chatId);
+            const sourceAccountId = tpRow.account_id;
+            const tpAmount   = String(tpRow.parsed_amount ?? '0');
+            const tpCurrency = tpRow.parsed_currency ?? 'USDT';
+
+            let sourceAccountName = 'Счёт';
+            if (sourceAccountId) {
+              try {
+                const nameRes = await pool.query<{ name: string }>(
+                  `SELECT name FROM account_sources WHERE id = $1 AND workspace_id = $2`,
+                  [sourceAccountId, workspaceId],
+                );
+                sourceAccountName = nameRes.rows[0]?.name ?? 'Счёт';
+              } catch { /* non-fatal */ }
+            }
+
+            // getAvailableTargetAccounts requires a valid excludeAccountId string.
+            // If source account is null (edge case), use a placeholder that matches no UUID.
+            const excludeId = sourceAccountId ?? '00000000000000000000000000';
+            const targets = await getAvailableTargetAccounts(tpResolved.workspaceId, tpResolved.userId, excludeId);
+            const pickerText = buildTargetPickerScreen(tpAmount, tpCurrency, sourceAccountName);
+            const pickerKb   = buildTargetAccountKeyboard(targets, draftId);
+
+            const tpMsgId = cq.message?.message_id ? String(cq.message.message_id) : null;
+            if (tpMsgId) {
+              void editMessageText(chatId, tpMsgId, pickerText, pickerKb);
+            } else {
+              void upsertBotMessage(telegramUserId, chatId, pickerText, pickerKb);
+            }
+
+            request.log.info({
+              msg: '[midas:bot:webhook] Phase 3.1: Transfer intercept — redirected to target picker',
+              draftId, workspaceId,
+            });
+            await reply.status(200).send({ ok: true });
+            return;
+          }
+        } catch (tpInterceptErr) {
+          // Non-fatal: fall through to normal approve flow
+          request.log.warn({
+            msg: '[midas:bot:webhook] Transfer intercept check failed — falling through to approve',
+            error: tpInterceptErr instanceof Error ? tpInterceptErr.message : String(tpInterceptErr),
+          });
+        }
+      }
+
+
       // Enqueue to callback-confirm queue (SEC-06: idempotency key)
       const idempotencyKey = IdempotencyKeyBuilder.callbackConfirm(
         telegramUserId,
@@ -4504,6 +4577,7 @@ Midas создан, чтобы сделать учет денег максима
       await callbackConfirmQueue.add(QUEUE_NAMES.CALLBACK_CONFIRM, payload, {
         jobId: idempotencyKey, // SEC-06: idempotent — duplicate taps are deduped
       });
+
 
       // Phase 1.36-UX fix: Clear stale clarification state so the next user
       // message is not silently consumed by the clar: intercept. The clar:
