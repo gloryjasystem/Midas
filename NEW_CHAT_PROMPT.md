@@ -1,5 +1,5 @@
 # MIDAS — ПРОМПТ ДЛЯ НОВОГО ЧАТА
-> Скопируй всё ниже в новый чат. Актуально на: 2026-05-20 11:50 (UTC+3)
+> Скопируй всё ниже в новый чат. Актуально на: 2026-05-20 16:05 (UTC+3)
 
 ---
 
@@ -114,6 +114,30 @@ Phase 3.1 intercept (при нажатии ✅ Подтвердить):
      ```
    - Применяется в text interceptor перед `patchDraftItemName` → хранится в DB уже в дательном
 
+### Сессия 2026-05-20 вечер (commits 00ce130, 136ca35, 506a9d4, 2b96fe6) — DB BUGFIXES
+
+6. **КРИТИЧЕСКИЙ ФИКС: `invalid input syntax for type uuid`** (перевод между счётами зависал):
+   - **Баг:** при нажатии ✅ на внутреннем переводе — `confirmation-worker` падал с `DatabaseError`
+   - **Root cause 1:** Колонка `transfer_group_id` в `transactions` была типа `UUID`, а приложение генерирует **ULID** (`01KS29EW...`) — не является валидным UUID
+   - **Root cause 2:** В коде `draft-confirmation.service.ts` были явные касты `$9::UUID` и `$8::UUID` → тоже неверно
+   - **Фикс 1:** Миграция `1780400000000_transfer-group-id-text` — меняет `UUID → TEXT`, пересоздаёт индекс
+   - **Фикс 2:** `draft-confirmation.service.ts` — убраны все `::UUID` касты (commit `00ce130`)
+
+7. **КРИТИЧЕСКИЙ ФИКС: `column d.current_screen does not exist`** (CRON-worker падал каждые 5 мин):
+   - **Баг:** `draft-expiration.worker` падал при каждом запуске CRON-задачи
+   - **Root cause:** Миграция `1780200000000_draft-current-screen` была в коде, но **никогда не применялась** к production DB (была пропущена между 1780100000000 и 1780300000000)
+   - **Фикс:** Применена вручную + применена `1780100000000_reminder-fn-add-account` (тоже пропущенная)
+
+8. **Авто-миграции при деплое** (`apps/background-workers/src/migrate.ts`, commit `136ca35`):
+   - `migrate.ts` — модуль который запускает `node-pg-migrate up` перед стартом воркеров
+   - `index.ts` — вызывает `await runMigrations()` как Step 0 перед регистрацией CRON и воркеров
+   - Использует multi-strategy path resolution (env var → package.json resolve → relative paths)
+   - **Non-fatal:** если путь не найден — логирует и продолжает (воркеры всё равно стартуют)
+
+9. **Подключение к production DB найдено:**
+   - Публичный URL: `postgresql://postgres:PLLSqArtPUoQsAYmvrpsmavfQMewgTRh@hopper.proxy.rlwy.net:46284/railway`
+   - Используется для ручного запуска миграций локально когда Railway CLI недоступен
+
 ---
 
 ## ШАГ 4 — КЛЮЧЕВЫЕ ФАЙЛЫ
@@ -177,21 +201,33 @@ packages/ai-core/src/schemas.ts
 
 ## ШАГ 6 — СЛЕДУЮЩИЕ ЗАДАЧИ (в порядке приоритета)
 
-### 🔴 Приоритет 1: E2E Тестирование (протестировать в боте)
+### ✅ СДЕЛАНО В ПОСЛЕДНЕЙ СЕССИИ (DB-фиксы 2026-05-20)
 ```
-ТЕСТ A: Внешний перевод
-  1. Написать «перевел 1000 долларов Алексею»
-  2. Выбрать счёт → выбрать «👤 Другому человеку»
-  3. Ввести имя → проверить что показывается «Алексею»
-  4. Выбрать категорию → нажать ✅ Подтвердить
-  5. ОЖИДАЕМО: транзакция записывается (НЕ открывается target picker!)
-  6. Проверить баланс: должен уменьшиться на 1000 USD
+✅ Миграция 1780400000000_transfer-group-id-text  → transfer_group_id: UUID → TEXT
+✅ Миграция 1780200000000_draft-current-screen     → добавлена колонка current_screen
+✅ Миграция 1780100000000_reminder-fn-add-account  → обновлена функция поиска черновиков
+✅ draft-confirmation.service.ts                   → убраны ::UUID касты
+✅ migrate.ts                                      → авто-миграции при деплое
 
-ТЕСТ B: Внутренний перевод
-  1. Написать «перевел 500 на тинькофф»
-  2. Выбрать «🔄 На мой другой счёт»
-  3. Выбрать target account → ✅ Подтвердить
-  4. ОЖИДАЕМО: оба баланса изменились (outbound - / inbound +)
+DB состояние проверено:
+  SELECT column_name, data_type FROM information_schema.columns
+  WHERE (table_name='transactions' AND column_name='transfer_group_id')
+     OR (table_name='transaction_drafts' AND column_name='current_screen');
+  → transfer_group_id: text ✅
+  → current_screen: text ✅
+```
+
+### 🔴 Приоритет 1: E2E Тестирование внутреннего перевода
+```
+ТЕСТ: Внутренний перевод (ранее падал с DatabaseError)
+  1. Написать «перевел 500 с тинькофф на сбер» (или назвать свои счета)
+  2. Выбрать счёт-источник → выбрать «🔄 На мой другой счёт»
+  3. Выбрать счёт-получатель из списка
+  4. Нажать ✅ Подтвердить
+  5. ОЖИДАЕМО: показывается карточка подтверждения с обоими балансами
+  6. Проверить /balance: source баланс уменьшился, target увеличился
+
+  Если ошибка — смотреть логи Railway → background-workers → [midas:confirmation-worker]
 ```
 
 ### 🟡 Приоритет 2: Phase 3.0 — DB Schema
@@ -203,6 +239,7 @@ ALTER TABLE account_sources
   ADD COLUMN wallet_subtype TEXT NOT NULL DEFAULT 'general'
     CHECK (wallet_subtype IN ('ton','crypto','ewallet','general'));
 
+-- Создать миграцию: packages/database/migrations/1780500000000_account-type-subtype.js
 -- Обновить: addAccount*, chooseCurKeyboard() в account-onboard-keyboard.service.ts
 ```
 
@@ -222,8 +259,14 @@ npx turbo run typecheck --filter=@midas/background-workers
 # Деплой (auto при push)
 git add -A && git commit -m "feat: ..." && git push origin main
 
+# Ручные миграции к production (когда нужно срочно)
+$env:DATABASE_URL = "postgresql://postgres:PLLSqArtPUoQsAYmvrpsmavfQMewgTRh@hopper.proxy.rlwy.net:46284/railway"
+npx node-pg-migrate up --migrations-dir midas-monorepo/packages/database/migrations --check-order=false
+# Запускать из: C:\Users\secvency\Desktop\Midas (git root)
+
 # Логи Railway (через MCP или Railway CLI)
-# MCP: railway-mcp-server → get-logs
+# MCP: railway-mcp-server → get-logs (требует Railway CLI)
+# Postgres прямой доступ (read-only): midas-postgres MCP server
 ```
 
 ---
@@ -239,5 +282,27 @@ git add -A && git commit -m "feat: ..." && git push origin main
 
 ---
 
-> **После прочтения этого промпта:** открой `workflow_state.md` (секция 1 и 8)
+> **После прочтения этого промпта:** открой `workflow_state.md` (секция 1 и 2)
 > для актуального состояния, затем можно начинать работу.
+
+---
+
+## ПРОМПТ ДЛЯ СЛЕДУЮЩЕГО ЧАТА
+
+```
+Прочитай полностью два файла:
+1. C:\Users\secvency\Desktop\Midas\NEW_CHAT_PROMPT.md
+2. C:\Users\secvency\Desktop\Midas\workflow_state.md (секции 1, 2, 3)
+
+После прочтения:
+1. Проверь состояние production DB через Postgres MCP:
+   SELECT column_name, data_type FROM information_schema.columns
+   WHERE (table_name='transactions' AND column_name='transfer_group_id')
+      OR (table_name='transaction_drafts' AND column_name='current_screen');
+   → Убедись что оба поля = text
+
+2. Начни с Приоритета 1 из файла NEW_CHAT_PROMPT.md (E2E тест внутреннего перевода).
+   Если тест проходит успешно — переходи к Приоритету 2 (Phase 3.0 DB Schema).
+
+Сообщи мне результат проверки DB и статус E2E теста перед началом разработки.
+```
