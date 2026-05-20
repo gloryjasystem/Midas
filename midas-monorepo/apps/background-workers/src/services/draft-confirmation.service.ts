@@ -775,11 +775,15 @@ export async function approvePairedTransfer(
       item_name: string | null;
       account_id: string | null;
       transfer_target_account_id: string | null;
+      account_debit_amount: string | null;    // XFX: credited amount in target currency
+      account_debit_currency: string | null;  // XFX: target account currency
       expires_at: string;
     }>(
       `SELECT id, status, parsed_amount, parsed_currency, parsed_intent,
               parsed_category_hint, item_name, account_id,
-              transfer_target_account_id, expires_at
+              transfer_target_account_id,
+              account_debit_amount, account_debit_currency,
+              expires_at
        FROM transaction_drafts
        WHERE id = $1 AND workspace_id = $2
        FOR UPDATE SKIP LOCKED`,
@@ -849,6 +853,19 @@ export async function approvePairedTransfer(
     const categoryId      = await resolveCategory(client, workspaceId, 'Перевод');
     const itemName        = draft.item_name ?? 'Перевод';
 
+    // XFX (cross-currency) inbound leg:
+    // When source and target accounts have different currencies, the user is asked
+    // "Сколько поступило на счёт?" and the answer is stored in account_debit_amount.
+    // For same-currency transfers account_debit_amount is NULL — fall back to amountStr.
+    // SEC-02: no parseFloat — keep as NUMERIC string.
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-conversion -- runtime Decimal
+    const inboundAmountStr  = draft.account_debit_amount
+      ? String(draft.account_debit_amount)
+      : amountStr;
+    const inboundCurrency   = draft.account_debit_currency ?? targetAcct.currency;
+    // exchange_rate for inbound leg: inboundAmt / outboundAmt (NUMERIC precision, computed in SQL)
+    const isXfxTransfer     = draft.account_debit_amount !== null && inboundCurrency !== currency;
+
     // Step 10: Mark draft approved
     await client.query(
       `UPDATE transaction_drafts SET status = 'approved', updated_at = NOW() WHERE id = $1`,
@@ -875,6 +892,8 @@ export async function approvePairedTransfer(
     );
 
     // Step 12: INSERT inbound (money arrives at target account)
+    // XFX: if user specified credited amount (account_debit_amount), use it + compute exchange rate.
+    // Same-currency: mirror outbound amount with 1:1 rate.
     await client.query(
       `INSERT INTO transactions (
          id, workspace_id,
@@ -884,13 +903,23 @@ export async function approvePairedTransfer(
          transfer_group_id, transfer_direction, created_at
        ) VALUES (
          $1, $2,
-         $3::NUMERIC, $4, 1::NUMERIC, $4, $3::NUMERIC,
+         $3::NUMERIC,                    -- original_amount = inbound amount in target currency
+         $4,                             -- currency = target account currency
+         CASE
+           WHEN $9::BOOLEAN              -- isXfxTransfer flag
+           THEN ROUND($3::NUMERIC / NULLIF($10::NUMERIC, 0), 4)  -- inboundAmt / outboundAmt
+           ELSE 1::NUMERIC
+         END,
+         $4,                             -- base_currency = target currency
+         $3::NUMERIC,                    -- base_amount = inbound amount
          $5, $6, $7,
-         NOW(), 'transfer', 'none',
+         NOW(), 'transfer',
+         CASE WHEN $9::BOOLEAN THEN 'user' ELSE 'none' END,
          $8, 'inbound', NOW()
        )`,
-      [inboundTxId, workspaceId, amountStr, targetAcct.currency,
-       categoryId, draft.transfer_target_account_id, itemName, transferGroupId],
+      [inboundTxId, workspaceId, inboundAmountStr, inboundCurrency,
+       categoryId, draft.transfer_target_account_id, itemName, transferGroupId,
+       isXfxTransfer, amountStr],
     );
 
     console.log('[midas:draft-confirmation] Paired transfer created', {
@@ -931,8 +960,8 @@ export async function approvePairedTransfer(
       outCurrency:        currency,
       sourceAccount:      srcName,
       balanceAfterSource: srcSnap.rows[0]?.balance ?? null,
-      inAmount:           amountStr,
-      inCurrency:         targetAcct.currency,
+      inAmount:           inboundAmountStr,   // XFX fix: actual credited amount
+      inCurrency:         inboundCurrency,    // XFX fix: target account currency
       targetAccount:      targetAcct.name,
       balanceAfterTarget: tgtSnap.rows[0]?.balance ?? null,
       transactionTime:    new Date().toISOString(),
