@@ -868,7 +868,7 @@ export async function approvePairedTransfer(
          $3::NUMERIC, $4, 1::NUMERIC, $4, $3::NUMERIC,
          $5, $6, $7, $8,
          NOW(), 'transfer', 'none',
-         $9::UUID, 'outbound', NOW()
+         $9, 'outbound', NOW()
        )`,
       [outboundTxId, workspaceId, amountStr, currency,
        categoryId, draft.account_id, draftId, itemName, transferGroupId],
@@ -887,7 +887,7 @@ export async function approvePairedTransfer(
          $3::NUMERIC, $4, 1::NUMERIC, $4, $3::NUMERIC,
          $5, $6, $7,
          NOW(), 'transfer', 'none',
-         $8::UUID, 'inbound', NOW()
+         $8, 'inbound', NOW()
        )`,
       [inboundTxId, workspaceId, amountStr, targetAcct.currency,
        categoryId, draft.transfer_target_account_id, itemName, transferGroupId],
