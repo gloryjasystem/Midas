@@ -4724,18 +4724,17 @@ Midas создан, чтобы сделать учет денег максима
               const isXfx = ptBackData.out_cur !== ptBackData.in_cur;
               const cardLines: string[] = [
                 '✅ <b>Перевод записан</b>',
-                '🔄 Внутренний перевод',
                 '',
+                `<blockquote>🔄 − ${formatAmount(ptBackData.out_amt)} ${ptBackData.out_cur}</blockquote>`,
                 `🏦 <b>${escapeHtml(ptBackData.out_acct)}</b> · ${ptBackData.out_cur}`,
-                `<blockquote>− ${formatAmount(ptBackData.out_amt)} ${ptBackData.out_cur}</blockquote>`,
                 '',
+                `<blockquote>🔄 + ${formatAmount(ptBackData.in_amt)} ${ptBackData.in_cur}</blockquote>`,
                 `🏦 <b>${escapeHtml(ptBackData.in_acct)}</b> · ${ptBackData.in_cur}`,
-                `<blockquote>+ ${formatAmount(ptBackData.in_amt)} ${ptBackData.in_cur}</blockquote>`,
                 ...(isXfx ? [
                   '',
                   `💱 ${calcRate(ptBackData.out_amt, ptBackData.in_amt) ?? '?'} ${ptBackData.in_cur}/${ptBackData.out_cur}`,
                 ] : []),
-                `🕐 ${formatPairedTime(ptBackData.tx_time)}`,
+                `⏰ ${formatPairedTime(ptBackData.tx_time)}`,
               ];
               void upsertBotMessage(telegramUserId, chatId, cardLines.join('\n'), {
                 inline_keyboard: [[
@@ -7250,18 +7249,17 @@ Midas создан, чтобы сделать учет денег максима
                 const isXfxCard = fullCard.out_cur !== fullCard.in_cur;
                 const cardLines: string[] = [
                   '✅ <b>Перевод записан</b>',
-                  '🔄 Внутренний перевод',
                   '',
+                  `<blockquote>🔄 − ${formatAmount(fullCard.out_amt)} ${fullCard.out_cur}</blockquote>`,
                   `🏦 <b>${escapeHtml(fullCard.out_acct)}</b> · ${fullCard.out_cur}`,
-                  `<blockquote>− ${formatAmount(fullCard.out_amt)} ${fullCard.out_cur}</blockquote>`,
                   '',
+                  `<blockquote>🔄 + ${formatAmount(fullCard.in_amt)} ${fullCard.in_cur}</blockquote>`,
                   `🏦 <b>${escapeHtml(fullCard.in_acct)}</b> · ${fullCard.in_cur}`,
-                  `<blockquote>+ ${formatAmount(fullCard.in_amt)} ${fullCard.in_cur}</blockquote>`,
                   ...(isXfxCard ? [
                     '',
                     `💱 ${calcRate(fullCard.out_amt, fullCard.in_amt) ?? '?'} ${fullCard.in_cur}/${fullCard.out_cur}`,
                   ] : []),
-                  `🕐 ${formatPairedTime(fullCard.tx_time)}`,
+                  `⏰ ${formatPairedTime(fullCard.tx_time)}`,
                 ];
                 void upsertBotMessage(telegramUserId, chatId, cardLines.join('\n'), {
                   inline_keyboard: [[

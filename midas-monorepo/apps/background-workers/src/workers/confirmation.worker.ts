@@ -179,19 +179,18 @@ async function processConfirmation(job: Job<CallbackConfirmJobPayload>): Promise
         const isXfx = paired.inCurrency !== paired.outCurrency;
         const lines: string[] = [
           '✅ <b>Перевод записан</b>',
-          '🔄 Внутренний перевод',
           '',
           // ── Outbound leg ──────────────────────────────────────────────────
+          // 🔄 иконка внутри blockquote слева от суммы (нет отдельной строки «Внутренний перевод»)
+          `<blockquote>🔄 − ${formatAmount(paired.outAmount)} ${paired.outCurrency}</blockquote>`,
           `🏦 <b>${paired.sourceAccount}</b> · ${paired.outCurrency}`,
-          // blockquote: только сумма списания — зелёная плашка слева в Telegram
-          `<blockquote>− ${formatAmount(paired.outAmount)} ${paired.outCurrency}</blockquote>`,
           ...(paired.balanceAfterSource
             ? [`   Остаток: ${formatAmount(paired.balanceAfterSource)} ${paired.outCurrency}`]
             : []),
           '',
           // ── Inbound leg ───────────────────────────────────────────────────
+          `<blockquote>🔄 + ${formatAmount(paired.inAmount)} ${paired.inCurrency}</blockquote>`,
           `🏦 <b>${paired.targetAccount}</b> · ${paired.inCurrency}`,
-          `<blockquote>+ ${formatAmount(paired.inAmount)} ${paired.inCurrency}</blockquote>`,
           ...(paired.balanceAfterTarget
             ? [`   Остаток: ${formatAmount(paired.balanceAfterTarget)} ${paired.inCurrency}`]
             : []),
@@ -201,7 +200,7 @@ async function processConfirmation(job: Job<CallbackConfirmJobPayload>): Promise
             `💱 ${calcRate(paired.outAmount, paired.inAmount) ?? '?'} ${paired.inCurrency}/${paired.outCurrency}`,
           ] : []),
           // ── Время в формате «10:32, 20 мая» ──────────────────────────────
-          `🕐 ${formatPairedTime(paired.transactionTime)}`,
+          `⏰ ${formatPairedTime(paired.transactionTime)}`,
         ];
         notificationMessage = lines.join('\n');
 
