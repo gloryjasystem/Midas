@@ -290,26 +290,16 @@ import {
   formatTxListHeader,
 } from '../services/transaction-keyboard.service.js';
 import {
-  buildTransferTypeScreen,
-  buildTransferTypeKeyboard,
   buildTargetPickerScreen,
   buildTargetAccountKeyboard,
   buildTransferPreviewScreen,
   buildTransferConfirmKeyboard,
-  buildRecipientScreen,
-  buildRecipientKeyboard,
-  buildExternalCategoryScreen,
-  buildExternalGroupKeyboard,
-  buildExternalSubcategoryByGroup,
   buildCrossCurrencyTransferScreen,
   buildCrossCurrencyTransferKeyboard,
   getAvailableTargetAccounts,
   setDraftTargetAccount,
   getDraftTransferState,
-  patchDraftItemName,
-  patchDraftCategoryForExternal,
   patchDraftCreditedAmount,
-  toRecipientDative,
 } from '../services/transfer-pairing.service.js';
 
 // ─────────────────────────────────────────────────────────────
@@ -1578,21 +1568,34 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
               // Phase 2.10+: Clear gate_sent — user resolved the picker, normal text flow resumes.
               void redisConnection.del(`midas:gate_sent:${telegramUserId}:${chatId}`).catch(() => {});
 
-              // ── Phase 3.0: Transfer intent → show transfer type picker ─────
-              // If the draft intent is 'transfer', route to the transfer pairing
-              // flow instead of the standard confirm preview.
+              // ── Phase 3.0 (refactored): Transfer intent → skip type picker, go straight to target account picker.
+              // Transfer = ONLY between own accounts. "Другому человеку" path removed (use expense instead).
               const pickDraft = await getDraftFields(iaResolved.workspaceId, iaResolved.userId, iaCmd.draftId);
               if (pickDraft?.parsed_intent === 'transfer') {
                 if (iaMsgId) {
-                  const tpText = buildTransferTypeScreen(
-                    pickDraft.parsed_amount ?? '0',
-                    pickDraft.parsed_currency ?? 'USDT',
-                    escapeHtml(pickedAcct.name),
-                  );
-                  void editMessageText(chatId, iaMsgId, tpText, buildTransferTypeKeyboard(iaCmd.draftId));
+                  const tpState = await getDraftTransferState(iaCmd.draftId, iaResolved.workspaceId, iaResolved.userId);
+                  if (!tpState?.sourceAccountId) {
+                    void editMessageText(chatId, iaMsgId, '⚠️ Не удалось загрузить данные перевода.');
+                  } else {
+                    const tpTargets = await getAvailableTargetAccounts(
+                      iaResolved.workspaceId, iaResolved.userId, tpState.sourceAccountId,
+                    );
+                    if (tpTargets.length === 0) {
+                      void editMessageText(
+                        chatId, iaMsgId,
+                        '⚠️ Нет других счётов для перевода. Сначала добавьте счёт.',
+                        buildTargetAccountKeyboard([], iaCmd.draftId),
+                      );
+                    } else {
+                      const tpPickerText = buildTargetPickerScreen(
+                        tpState.amount, tpState.currency, tpState.sourceAccountName,
+                      );
+                      void editMessageText(chatId, iaMsgId, tpPickerText, buildTargetAccountKeyboard(tpTargets, iaCmd.draftId));
+                    }
+                  }
                   try { await redisConnection.set(`midas:preview:${iaCmd.draftId}`, iaMsgId, 'EX', 3600); } catch { /* non-fatal */ }
                 }
-                request.log.info({ msg: '[midas:bot:webhook] ia:pk: transfer intent → type picker shown', workspaceId: iaResolved.workspaceId });
+                request.log.info({ msg: '[midas:bot:webhook] ia:pk: transfer intent → target picker shown', workspaceId: iaResolved.workspaceId });
               } else {
                 // Standard flow: show confirm preview
                 if (iaMsgId) {
@@ -1668,16 +1671,19 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
             } catch { /* non-fatal */ }
 
             if (iaMsgId) {
-              // Phase 3.0: If transfer intent, go back to type picker (not confirm preview)
+              // Phase 3.0 (refactored): Transfer intent → back to target picker directly (type picker removed)
               const backDraft = await getDraftFields(iaResolved.workspaceId, iaResolved.userId, iaCmd.draftId);
               if (backDraft?.parsed_intent === 'transfer' && backDraft.account_id) {
                 const backAcct = await getAccountById(iaResolved.workspaceId, iaResolved.userId, backDraft.account_id);
-                const tpText = buildTransferTypeScreen(
+                const backTargets = await getAvailableTargetAccounts(
+                  iaResolved.workspaceId, iaResolved.userId, backDraft.account_id,
+                );
+                const backPickerText = buildTargetPickerScreen(
                   backDraft.parsed_amount ?? '0',
                   backDraft.parsed_currency ?? 'USDT',
                   escapeHtml(backAcct?.name ?? '?'),
                 );
-                void editMessageText(chatId, iaMsgId, tpText, buildTransferTypeKeyboard(iaCmd.draftId));
+                void editMessageText(chatId, iaMsgId, backPickerText, buildTargetAccountKeyboard(backTargets, iaCmd.draftId));
               } else {
                 const previewRes = await confirmPreviewFull(iaResolved.workspaceId, iaResolved.userId, iaCmd.draftId);
                 void editMessageText(chatId, iaMsgId, previewRes.text, confirmKbForDraft(iaCmd.draftId, previewRes));
@@ -4162,155 +4168,8 @@ Midas создан, чтобы сделать учет денег максима
         await answerCallbackQuery(cq.id);
 
         try {
-          // ── tp:type:{internal|external}:{draftId} ────────────────
-          if (tpCmd === 'type') {
-            const direction = tpParts[2]; // 'internal' | 'external'
-            const draftIdTp = tpParts[3];
-            if (!draftIdTp) throw new Error('tp:type missing draftId');
-
-            if (direction === 'external') {
-              // Branch B: External transfer — show recipient name entry screen
-              const state = await getDraftTransferState(draftIdTp, tpResolved.workspaceId, tpResolved.userId);
-              if (!state) {
-                if (tpMsgId) void editMessageText(chatId, tpMsgId, '⚠️ Черновик не найден или истёк.');
-              } else {
-                const recipientText = buildRecipientScreen(
-                  state.amount, state.currency, state.sourceAccountName,
-                );
-                if (tpMsgId) void editMessageText(chatId, tpMsgId, recipientText, buildRecipientKeyboard(draftIdTp));
-                // Set Redis FSM state: awaiting recipient name text input
-                const rcptKey = `midas:tp_ext_rcpt:${chatId}`;
-                try {
-                  await redisConnection.set(
-                    rcptKey,
-                    `${draftIdTp}:${tpResolved.workspaceId}:${tpResolved.userId}`,
-                    'EX', 3600,
-                  );
-                } catch { /* non-fatal */ }
-              }
-            } else {
-              // Internal transfer — show target account picker
-              const state = await getDraftTransferState(draftIdTp, tpResolved.workspaceId, tpResolved.userId);
-              if (!state || !state.sourceAccountId) {
-                if (tpMsgId) void editMessageText(chatId, tpMsgId, '⚠️ Черновик не найден или истёк.');
-              } else {
-                const targets = await getAvailableTargetAccounts(
-                  tpResolved.workspaceId, tpResolved.userId, state.sourceAccountId,
-                );
-                if (targets.length === 0) {
-                  if (tpMsgId) void editMessageText(
-                    chatId, tpMsgId,
-                    '⚠️ Нет других счётов для перевода. Сначала добавьте счёт.',
-                    buildTransferTypeKeyboard(draftIdTp),
-                  );
-                } else {
-                  const pickerText = buildTargetPickerScreen(
-                    state.amount, state.currency, state.sourceAccountName,
-                  );
-                  if (tpMsgId) void editMessageText(chatId, tpMsgId, pickerText, buildTargetAccountKeyboard(targets, draftIdTp));
-                }
-              }
-            }
-
-          // ── tp:skip_rcpt:{draftId} — skip recipient, go to category group picker ──
-          } else if (tpCmd === 'skip_rcpt') {
-            const draftIdSkip = tpParts[2];
-            if (!draftIdSkip) throw new Error('tp:skip_rcpt missing draftId');
-
-            // Clear recipient await key
-            try { await redisConnection.del(`midas:tp_ext_rcpt:${chatId}`); } catch { /* non-fatal */ }
-
-            // Show group picker (level 1) with AI-suggested category on top
-            const [stateSkip, draftFSkip, allCatsSkip] = await Promise.all([
-              getDraftTransferState(draftIdSkip, tpResolved.workspaceId, tpResolved.userId),
-              getDraftFields(tpResolved.workspaceId, tpResolved.userId, draftIdSkip),
-              getWorkspaceCategories(tpResolved.workspaceId, tpResolved.userId),
-            ]);
-            const catHintSkip = draftFSkip?.parsed_category_hint ?? 'Другое';
-            const aiCatSkip = allCatsSkip.find((c) => c.name === catHintSkip)
-                           ?? allCatsSkip.find((c) => c.name === 'Другое')
-                           ?? null;
-            const catTextSkip = buildExternalCategoryScreen(
-              stateSkip?.amount ?? '0', stateSkip?.currency ?? 'USDT', null,
-            );
-            if (tpMsgId) void editMessageText(chatId, tpMsgId, catTextSkip, buildExternalGroupKeyboard(draftIdSkip, aiCatSkip));
-
-          } else if (tpCmd === 'grp') {
-            const groupKey   = tpParts[2];
-            const draftIdGrp = tpParts[3];
-            if (!groupKey || !draftIdGrp) throw new Error('tp:grp missing parts');
-
-            const stateGrp = await getDraftTransferState(draftIdGrp, tpResolved.workspaceId, tpResolved.userId);
-            const catScreenText = buildExternalCategoryScreen(
-              stateGrp?.amount ?? '0', stateGrp?.currency ?? 'USDT', null,
-            );
-
-            if (groupKey === 'back') {
-              // Return to group picker with AI suggestion on top
-              const [draftFBack, allCatsBack] = await Promise.all([
-                getDraftFields(tpResolved.workspaceId, tpResolved.userId, draftIdGrp),
-                getWorkspaceCategories(tpResolved.workspaceId, tpResolved.userId),
-              ]);
-              const catHintBack = draftFBack?.parsed_category_hint ?? 'Другое';
-              const aiCatBack = allCatsBack.find((c) => c.name === catHintBack)
-                             ?? allCatsBack.find((c) => c.name === 'Другое')
-                             ?? null;
-              if (tpMsgId) void editMessageText(chatId, tpMsgId, catScreenText, buildExternalGroupKeyboard(draftIdGrp, aiCatBack));
-
-            } else if (groupKey === 'other') {
-              // Immediately select category «Другое» from workspace
-              const allCatsGrp = await getWorkspaceCategories(tpResolved.workspaceId, tpResolved.userId);
-              const otherCat = allCatsGrp.find((c) => c.name === 'Другое');
-              const otherCatId = otherCat?.id ?? null;
-              const patchGrpRes = await patchDraftCategoryForExternal(
-                draftIdGrp, tpResolved.workspaceId, tpResolved.userId, otherCatId,
-              );
-              if (patchGrpRes === 'not_found') {
-                if (tpMsgId) void editMessageText(chatId, tpMsgId, '⚠️ Черновик не найден или истёк.');
-              } else {
-                const previewResGrp = await confirmPreviewFull(tpResolved.workspaceId, tpResolved.userId, draftIdGrp);
-                if (tpMsgId) {
-                  void editMessageText(chatId, tpMsgId, previewResGrp.text, confirmKbForDraft(draftIdGrp, previewResGrp));
-                  try { await redisConnection.set(`midas:preview:${draftIdGrp}`, tpMsgId, 'EX', 3600); } catch { /* non-fatal */ }
-                }
-              }
-
-            } else if (groupKey === 'life' || groupKey === 'biz') {
-              // Open DB-group subcategory list — mirrors tx:catg / draft:catg pickers
-              const groupName  = groupKey === 'life' ? 'Жизнь' : 'Бизнес';
-              const groupEmoji = groupKey === 'life' ? '🛒' : '💼';
-              const allCatsGrp2 = await getWorkspaceCategories(tpResolved.workspaceId, tpResolved.userId);
-              const subHdr = `<b>${groupEmoji} ${groupName}:</b>`;
-              if (tpMsgId) void editMessageText(
-                chatId, tpMsgId, subHdr,
-                buildExternalSubcategoryByGroup(allCatsGrp2, groupName, draftIdGrp),
-              );
-            }
-
-          // ── tp:cat:{categoryId|none}:{draftId} — category selected ────────
-          } else if (tpCmd === 'cat') {
-            const categoryIdRaw = tpParts[2]; // ULID or 'none'
-            const draftIdCat    = tpParts[3];
-            if (!categoryIdRaw || !draftIdCat) throw new Error('tp:cat missing parts');
-
-            const catId = categoryIdRaw === 'none' ? null : categoryIdRaw;
-            const patchRes = await patchDraftCategoryForExternal(
-              draftIdCat, tpResolved.workspaceId, tpResolved.userId, catId,
-            );
-
-            if (patchRes === 'not_found') {
-              if (tpMsgId) void editMessageText(chatId, tpMsgId, '⚠️ Черновик не найден или истёк.');
-            } else {
-              // Show standard confirm preview (intent is now 'expense')
-              const previewRes = await confirmPreviewFull(tpResolved.workspaceId, tpResolved.userId, draftIdCat);
-              if (tpMsgId) {
-                void editMessageText(chatId, tpMsgId, previewRes.text, confirmKbForDraft(draftIdCat, previewRes));
-                try { await redisConnection.set(`midas:preview:${draftIdCat}`, tpMsgId, 'EX', 3600); } catch { /* non-fatal */ }
-              }
-            }
-
           // ── tp:tgt:{accountId}:{draftId} ─────────────────────────
-          } else if (tpCmd === 'tgt') {
+          if (tpCmd === 'tgt') {
             // tpParts = ['tp','tgt','{accountId}','{draftId}']
             // accountId is a 26-char ULID — no colon in it
             const targetAccountId = tpParts[2];
@@ -4466,8 +4325,6 @@ Midas создан, чтобы сделать учет денег максима
               workspaceId: tpResolved.workspaceId,
             };
             await callbackConfirmQueue.add('reject', cancelPayload, { removeOnComplete: true, removeOnFail: 100 });
-            // Clean up recipient-await key if it was set (Branch B)
-            try { await redisConnection.del(`midas:tp_ext_rcpt:${chatId}`); } catch { /* non-fatal */ }
             // Clean up cross-currency await key if it was set (Branch A xfx)
             try { await redisConnection.del(`midas:tp_xfx:${chatId}`); } catch { /* non-fatal */ }
             if (tpMsgId) void editMessageText(chatId, tpMsgId, '🚫 Перевод отменён.');
@@ -7142,59 +6999,6 @@ Midas создан, чтобы сделать учет денег максима
         });
         await reply.status(200).send({ ok: true });
         return;
-      }
-    }
-
-    // ── Step 5h-tp: Phase 3.0 Branch B — Recipient name text intercept ──
-    // If user is answering "Кому переводишь?" during external transfer flow,
-    // intercept text before AI parse. Redis key set by tp:type:external handler.
-    if (!commandToken && message.text) {
-      const rcptKey = `midas:tp_ext_rcpt:${chatId}`;
-      const rcptRaw = await redisConnection.get(rcptKey);
-      if (rcptRaw) {
-        // Format: "{draftId}:{workspaceId}:{userId}"
-        const sepIdx1 = rcptRaw.indexOf(':');
-        const sepIdx2 = rcptRaw.indexOf(':', sepIdx1 + 1);
-        if (sepIdx1 > 0 && sepIdx2 > sepIdx1) {
-          const rcptDraftId = rcptRaw.slice(0, sepIdx1);
-          const rcptWsId    = rcptRaw.slice(sepIdx1 + 1, sepIdx2);
-          const rcptUserId  = rcptRaw.slice(sepIdx2 + 1);
-          // Convert name to dative case for grammatically correct display:
-          // "Алексей" → "Алексею", "Антон" → "Антону", "Мария" → "Марии".
-          // Latin names (Anton, Maria) are returned unchanged.
-          const recipientName = toRecipientDative(message.text.trim().slice(0, 100));
-
-          // Clean up Redis key
-          await redisConnection.del(rcptKey);
-
-          // Patch item_name on draft
-          const patchRes = await patchDraftItemName(rcptDraftId, rcptWsId, rcptUserId, recipientName);
-          if (patchRes === 'not_found') {
-            void upsertBotMessage(telegramUserId, chatId, '⏰ Черновик уже обработан или истёк.');
-          } else {
-            // Show group category picker (level 1) with AI-suggested category on top
-            const [stateRcpt, draftFieldsRcpt, allCatsRcpt] = await Promise.all([
-              getDraftTransferState(rcptDraftId, rcptWsId, rcptUserId),
-              getDraftFields(rcptWsId, rcptUserId, rcptDraftId),
-              getWorkspaceCategories(rcptWsId, rcptUserId),
-            ]);
-            const catHintRcpt = draftFieldsRcpt?.parsed_category_hint ?? 'Другое';
-            const aiCatRcpt = allCatsRcpt.find((c) => c.name === catHintRcpt)
-                           ?? allCatsRcpt.find((c) => c.name === 'Другое')
-                           ?? null;
-            const catText = buildExternalCategoryScreen(
-              stateRcpt?.amount ?? '0', stateRcpt?.currency ?? 'USDT', recipientName,
-            );
-            void upsertBotMessage(
-              telegramUserId, chatId,
-              catText,
-              buildExternalGroupKeyboard(rcptDraftId, aiCatRcpt),
-            );
-          }
-
-          await reply.status(200).send({ ok: true });
-          return;
-        }
       }
     }
 
