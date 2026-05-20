@@ -297,7 +297,8 @@ import {
   buildRecipientScreen,
   buildRecipientKeyboard,
   buildExternalCategoryScreen,
-  buildExternalCategoryKeyboard,
+  buildExternalGroupKeyboard,
+  buildExternalSubcategoryKeyboard,
   buildCrossCurrencyTransferScreen,
   buildCrossCurrencyTransferKeyboard,
   getAvailableTargetAccounts,
@@ -4208,7 +4209,7 @@ Midas создан, чтобы сделать учет денег максима
               }
             }
 
-          // ── tp:skip_rcpt:{draftId} — skip recipient, go to category picker ──
+          // ── tp:skip_rcpt:{draftId} — skip recipient, go to category group picker ──
           } else if (tpCmd === 'skip_rcpt') {
             const draftIdSkip = tpParts[2];
             if (!draftIdSkip) throw new Error('tp:skip_rcpt missing draftId');
@@ -4216,13 +4217,55 @@ Midas создан, чтобы сделать учет денег максима
             // Clear recipient await key
             try { await redisConnection.del(`midas:tp_ext_rcpt:${chatId}`); } catch { /* non-fatal */ }
 
-            // Show category picker
-            const state = await getDraftTransferState(draftIdSkip, tpResolved.workspaceId, tpResolved.userId);
-            const categories = await getWorkspaceCategories(tpResolved.workspaceId, tpResolved.userId);
-            const catText = buildExternalCategoryScreen(
-              state?.amount ?? '0', state?.currency ?? 'USDT', null,
+            // Show group picker (level 1)
+            const stateSkip = await getDraftTransferState(draftIdSkip, tpResolved.workspaceId, tpResolved.userId);
+            const catTextSkip = buildExternalCategoryScreen(
+              stateSkip?.amount ?? '0', stateSkip?.currency ?? 'USDT', null,
             );
-            if (tpMsgId) void editMessageText(chatId, tpMsgId, catText, buildExternalCategoryKeyboard(categories, draftIdSkip));
+            if (tpMsgId) void editMessageText(chatId, tpMsgId, catTextSkip, buildExternalGroupKeyboard(draftIdSkip));
+
+          // ── tp:grp:{groupKey}:{draftId} — group selected in category picker ──
+          // groupKey: 'services' | 'housing' | 'business' | 'other' | 'back'
+          } else if (tpCmd === 'grp') {
+            const groupKey   = tpParts[2]; // 'services' | 'housing' | 'business' | 'other' | 'back'
+            const draftIdGrp = tpParts[3];
+            if (!groupKey || !draftIdGrp) throw new Error('tp:grp missing parts');
+
+            const stateGrp = await getDraftTransferState(draftIdGrp, tpResolved.workspaceId, tpResolved.userId);
+            const catScreenText = buildExternalCategoryScreen(
+              stateGrp?.amount ?? '0', stateGrp?.currency ?? 'USDT', null,
+            );
+
+            if (groupKey === 'back') {
+              // Return to group picker
+              if (tpMsgId) void editMessageText(chatId, tpMsgId, catScreenText, buildExternalGroupKeyboard(draftIdGrp));
+
+            } else if (groupKey === 'other') {
+              // Immediately select category «Другое» from workspace
+              const allCatsGrp = await getWorkspaceCategories(tpResolved.workspaceId, tpResolved.userId);
+              const otherCat = allCatsGrp.find((c) => c.name === 'Другое');
+              const otherCatId = otherCat?.id ?? null;
+              const patchGrpRes = await patchDraftCategoryForExternal(
+                draftIdGrp, tpResolved.workspaceId, tpResolved.userId, otherCatId,
+              );
+              if (patchGrpRes === 'not_found') {
+                if (tpMsgId) void editMessageText(chatId, tpMsgId, '⚠️ Черновик не найден или истёк.');
+              } else {
+                const previewResGrp = await confirmPreviewFull(tpResolved.workspaceId, tpResolved.userId, draftIdGrp);
+                if (tpMsgId) {
+                  void editMessageText(chatId, tpMsgId, previewResGrp.text, confirmKbForDraft(draftIdGrp, previewResGrp));
+                  try { await redisConnection.set(`midas:preview:${draftIdGrp}`, tpMsgId, 'EX', 3600); } catch { /* non-fatal */ }
+                }
+              }
+
+            } else {
+              // Show subcategory picker for this group
+              const allCatsGrp2 = await getWorkspaceCategories(tpResolved.workspaceId, tpResolved.userId);
+              if (tpMsgId) void editMessageText(
+                chatId, tpMsgId, catScreenText,
+                buildExternalSubcategoryKeyboard(allCatsGrp2, groupKey, draftIdGrp),
+              );
+            }
 
           // ── tp:cat:{categoryId|none}:{draftId} — category selected ────────
           } else if (tpCmd === 'cat') {
@@ -6804,16 +6847,15 @@ Midas создан, чтобы сделать учет денег максима
           if (patchRes === 'not_found') {
             void upsertBotMessage(telegramUserId, chatId, '⏰ Черновик уже обработан или истёк.');
           } else {
-            // Show category picker
-            const categories = await getWorkspaceCategories(rcptWsId, rcptUserId);
-            const state = await getDraftTransferState(rcptDraftId, rcptWsId, rcptUserId);
+            // Show group category picker (level 1) — groups are static, no DB fetch needed
+            const stateRcpt = await getDraftTransferState(rcptDraftId, rcptWsId, rcptUserId);
             const catText = buildExternalCategoryScreen(
-              state?.amount ?? '0', state?.currency ?? 'USDT', recipientName,
+              stateRcpt?.amount ?? '0', stateRcpt?.currency ?? 'USDT', recipientName,
             );
             void upsertBotMessage(
               telegramUserId, chatId,
               catText,
-              buildExternalCategoryKeyboard(categories, rcptDraftId),
+              buildExternalGroupKeyboard(rcptDraftId),
             );
           }
 

@@ -232,10 +232,9 @@ export function buildRecipientScreen(
   fromAccountName: string,
 ): string {
   return [
-    `👤 <b>Перевод ${escapeHtml(amount)} ${escapeHtml(currency)}</b>`,
+    `🔄 <b>Перевод ${escapeHtml(amount)} ${escapeHtml(currency)}</b>`,
     `со счёта <b>${escapeHtml(fromAccountName)}</b>`,
     '',
-    '━━━━━━━━━━━━━━━━━━━━━━━',
     '<b>Кому переводишь?</b>',
     '',
     '<i>Напиши имя получателя или нажми «Пропустить»</i>',
@@ -263,40 +262,136 @@ export function buildExternalCategoryScreen(
 ): string {
   const recipientLine = recipientName
     ? `👤 Получатель: <b>${escapeHtml(recipientName)}</b>`
-    : '👤 Получатель: <i>не указан</i>';
-  return [
-    `💸 <b>Перевод ${escapeHtml(amount)} ${escapeHtml(currency)}</b>`,
-    recipientLine,
-    '',
-    '━━━━━━━━━━━━━━━━━━━━━━━',
-    '<b>Категория расхода:</b>',
-  ].join('\n');
+    : '';
+  const lines = [
+    `🔄 <b>Перевод ${escapeHtml(amount)} ${escapeHtml(currency)}</b>`,
+  ];
+  if (recipientLine) lines.push(recipientLine);
+  lines.push('', '<b>Категория:</b>');
+  return lines.join('\n');
+}
+
+// ─────────────────────────────────────────────────────────────
+// Category group constants — 2-level picker for external transfers
+// ─────────────────────────────────────────────────────────────
+
+/** Emoji icons for individual categories (matching project-wide taxonomy). */
+const CATEGORY_ICONS: Record<string, string> = {
+  // Services
+  'Кафе и рестораны': '☕',
+  'Продукты':         '🛒',
+  'Красота':          '💆',
+  'Здоровье':         '💊',
+  'Транспорт':        '🚗',
+  'Связь':            '📡',
+  'Подписки':         '📱',
+  'Образование':      '📚',
+  'Спорт':            '🏋',
+  'Развлечения':      '🎬',
+  'Путешествия':      '✈️',
+  'Подарки':          '🎁',
+  'Дети':             '👶',
+  'Фриланс':          '💻',
+  'Одежда':           '👗',
+  // Housing
+  'Жильё':            '🏠',
+  // Business
+  'Зарплаты и выплаты': '💵',
+  'Инвестиции':         '📈',
+  'Комиссии':           '💳',
+  'Крипто-комиссии':    '🪙',
+  'Налоги':             '🏛',
+  'Оборудование':       '🔩',
+  'Офис':               '🏢',
+  'Подрядчики':         '👷',
+  'Продажи':            '💰',
+  'Реклама':            '📣',
+  'Софт и сервисы':     '💾',
+  // Other
+  'Другое':             '🗂',
+};
+
+/**
+ * Maps group key → array of category names belonging to that group.
+ * Used to filter workspace categories when building subcategory pickers.
+ */
+const GROUP_CATEGORIES: Record<string, string[]> = {
+  services: [
+    'Кафе и рестораны', 'Продукты', 'Красота', 'Здоровье', 'Транспорт',
+    'Связь', 'Подписки', 'Образование', 'Спорт', 'Развлечения',
+    'Путешествия', 'Подарки', 'Дети', 'Фриланс', 'Одежда',
+  ],
+  housing: ['Жильё'],
+  business: [
+    'Зарплаты и выплаты', 'Инвестиции', 'Комиссии', 'Крипто-комиссии',
+    'Налоги', 'Оборудование', 'Офис', 'Подрядчики', 'Продажи',
+    'Реклама', 'Софт и сервисы',
+  ],
+  other: ['Другое'],
+};
+
+/**
+ * Level-1 keyboard — 4 group buttons in a 2×2 grid.
+ * Callback: tp:grp:{groupKey}:{draftId} (≤ 42 bytes ✅)
+ *
+ * 'other' group immediately selects category «Другое» (no sub-picker).
+ * 'back' is used internally by sub-picker to return here.
+ */
+export function buildExternalGroupKeyboard(draftId: string): InlineKeyboardMarkup {
+  return {
+    inline_keyboard: [
+      [
+        { text: '🔧 Услуги', callback_data: `tp:grp:services:${draftId}` },
+        { text: '🏠 Жильё',  callback_data: `tp:grp:housing:${draftId}` },
+      ],
+      [
+        { text: '💼 Бизнес', callback_data: `tp:grp:business:${draftId}` },
+        { text: '🗂 Другое', callback_data: `tp:grp:other:${draftId}` },
+      ],
+      [{ text: '✖ Отмена', callback_data: `tp:cancel:${draftId}` }],
+    ],
+  };
 }
 
 /**
- * Inline keyboard for category picker.
- * Uses tp:cat:{categoryId}:{draftId} callbacks.
- * Categories come from the workspace (getWorkspaceCategories).
+ * Level-2 keyboard — subcategories within a group, with emoji icons.
+ * Filters workspace categories by group name list.
+ * Callback: tp:cat:{categoryId}:{draftId} (≤ 60 bytes ✅)
+ * Back button: tp:grp:back:{draftId} (38 bytes ✅)
  */
-export function buildExternalCategoryKeyboard(
+export function buildExternalSubcategoryKeyboard(
   categories: Array<{ id: string; name: string }>,
+  groupKey: string,
   draftId: string,
 ): InlineKeyboardMarkup {
-  // Arrange in 2-column grid
+  const groupNames = GROUP_CATEGORIES[groupKey] ?? [];
+  // Filter and sort by group order
+  const filtered = categories
+    .filter((c) => groupNames.includes(c.name))
+    .sort((a, b) => groupNames.indexOf(a.name) - groupNames.indexOf(b.name));
+
   const rows: InlineKeyboardButton[][] = [];
-  for (let i = 0; i < categories.length; i += 2) {
+  for (let i = 0; i < filtered.length; i += 2) {
     const row: InlineKeyboardButton[] = [];
-    const c1 = categories[i];
-    if (c1) row.push({ text: c1.name, callback_data: `tp:cat:${c1.id}:${draftId}` });
-    if (i + 1 < categories.length) {
-      const c2 = categories[i + 1];
-      if (c2) row.push({ text: c2.name, callback_data: `tp:cat:${c2.id}:${draftId}` });
+    const c1 = filtered[i];
+    if (c1) {
+      const icon = CATEGORY_ICONS[c1.name] ?? '📁';
+      row.push({ text: `${icon} ${c1.name}`, callback_data: `tp:cat:${c1.id}:${draftId}` });
+    }
+    if (i + 1 < filtered.length) {
+      const c2 = filtered[i + 1];
+      if (c2) {
+        const icon = CATEGORY_ICONS[c2.name] ?? '📁';
+        row.push({ text: `${icon} ${c2.name}`, callback_data: `tp:cat:${c2.id}:${draftId}` });
+      }
     }
     rows.push(row);
   }
-  // "Без категории" + cancel
-  rows.push([{ text: '📦 Без категории', callback_data: `tp:cat:none:${draftId}` }]);
-  rows.push([{ text: '✖ Отмена', callback_data: `tp:cancel:${draftId}` }]);
+
+  rows.push([
+    { text: '◀️ Назад', callback_data: `tp:grp:back:${draftId}` },
+    { text: '✖ Отмена', callback_data: `tp:cancel:${draftId}` },
+  ]);
   return { inline_keyboard: rows };
 }
 
@@ -520,11 +615,13 @@ export async function patchDraftCategoryForExternal(
       if (catCheck.rows.length === 0) return 'not_found';
     }
 
-    // Also change parsed_intent to 'expense' — external transfers are expenses
+    // Variant A: keep parsed_intent = 'transfer' — external transfers stay as transfers.
+    // Category is stored for analytics (why the transfer was made).
+    // This matches enterprise patterns (Revolut, Wise, N26): person-to-person transfers
+    // are a distinct intent from expenses.
     const result = await client.query<{ id: string }>(
       `UPDATE transaction_drafts
        SET category_id = $1,
-           parsed_intent = 'expense',
            updated_at = NOW()
        WHERE id = $2
          AND workspace_id = $3
