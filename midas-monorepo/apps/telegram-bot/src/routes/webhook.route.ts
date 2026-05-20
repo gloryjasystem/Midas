@@ -4220,12 +4220,20 @@ Midas создан, чтобы сделать учет денег максима
             // Clear recipient await key
             try { await redisConnection.del(`midas:tp_ext_rcpt:${chatId}`); } catch { /* non-fatal */ }
 
-            // Show group picker (level 1)
-            const stateSkip = await getDraftTransferState(draftIdSkip, tpResolved.workspaceId, tpResolved.userId);
+            // Show group picker (level 1) with AI-suggested category on top
+            const [stateSkip, draftFSkip, allCatsSkip] = await Promise.all([
+              getDraftTransferState(draftIdSkip, tpResolved.workspaceId, tpResolved.userId),
+              getDraftFields(tpResolved.workspaceId, tpResolved.userId, draftIdSkip),
+              getWorkspaceCategories(tpResolved.workspaceId, tpResolved.userId),
+            ]);
+            const catHintSkip = draftFSkip?.parsed_category_hint ?? 'Другое';
+            const aiCatSkip = allCatsSkip.find((c) => c.name === catHintSkip)
+                           ?? allCatsSkip.find((c) => c.name === 'Другое')
+                           ?? null;
             const catTextSkip = buildExternalCategoryScreen(
               stateSkip?.amount ?? '0', stateSkip?.currency ?? 'USDT', null,
             );
-            if (tpMsgId) void editMessageText(chatId, tpMsgId, catTextSkip, buildExternalGroupKeyboard(draftIdSkip));
+            if (tpMsgId) void editMessageText(chatId, tpMsgId, catTextSkip, buildExternalGroupKeyboard(draftIdSkip, aiCatSkip));
 
           } else if (tpCmd === 'grp') {
             const groupKey   = tpParts[2];
@@ -4238,8 +4246,16 @@ Midas создан, чтобы сделать учет денег максима
             );
 
             if (groupKey === 'back') {
-              // Return to group picker
-              if (tpMsgId) void editMessageText(chatId, tpMsgId, catScreenText, buildExternalGroupKeyboard(draftIdGrp));
+              // Return to group picker with AI suggestion on top
+              const [draftFBack, allCatsBack] = await Promise.all([
+                getDraftFields(tpResolved.workspaceId, tpResolved.userId, draftIdGrp),
+                getWorkspaceCategories(tpResolved.workspaceId, tpResolved.userId),
+              ]);
+              const catHintBack = draftFBack?.parsed_category_hint ?? 'Другое';
+              const aiCatBack = allCatsBack.find((c) => c.name === catHintBack)
+                             ?? allCatsBack.find((c) => c.name === 'Другое')
+                             ?? null;
+              if (tpMsgId) void editMessageText(chatId, tpMsgId, catScreenText, buildExternalGroupKeyboard(draftIdGrp, aiCatBack));
 
             } else if (groupKey === 'other') {
               // Immediately select category «Другое» from workspace
@@ -7153,15 +7169,23 @@ Midas создан, чтобы сделать учет денег максима
           if (patchRes === 'not_found') {
             void upsertBotMessage(telegramUserId, chatId, '⏰ Черновик уже обработан или истёк.');
           } else {
-            // Show group category picker (level 1) — groups are static, no DB fetch needed
-            const stateRcpt = await getDraftTransferState(rcptDraftId, rcptWsId, rcptUserId);
+            // Show group category picker (level 1) with AI-suggested category on top
+            const [stateRcpt, draftFieldsRcpt, allCatsRcpt] = await Promise.all([
+              getDraftTransferState(rcptDraftId, rcptWsId, rcptUserId),
+              getDraftFields(rcptWsId, rcptUserId, rcptDraftId),
+              getWorkspaceCategories(rcptWsId, rcptUserId),
+            ]);
+            const catHintRcpt = draftFieldsRcpt?.parsed_category_hint ?? 'Другое';
+            const aiCatRcpt = allCatsRcpt.find((c) => c.name === catHintRcpt)
+                           ?? allCatsRcpt.find((c) => c.name === 'Другое')
+                           ?? null;
             const catText = buildExternalCategoryScreen(
               stateRcpt?.amount ?? '0', stateRcpt?.currency ?? 'USDT', recipientName,
             );
             void upsertBotMessage(
               telegramUserId, chatId,
               catText,
-              buildExternalGroupKeyboard(rcptDraftId),
+              buildExternalGroupKeyboard(rcptDraftId, aiCatRcpt),
             );
           }
 

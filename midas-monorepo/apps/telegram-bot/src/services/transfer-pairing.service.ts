@@ -391,15 +391,31 @@ const GROUP_CATEGORIES: Record<string, string[]> = {
 };
 
 /**
- * Level-1 keyboard — 4 group buttons in a 2×2 grid.
+ * Level-1 keyboard — AI suggestion row (top) + 4 group buttons in a 2×2 grid.
+ *
+ * aiCategory: matched category from workspace based on parsed_category_hint.
+ *   - If provided: shown as full-width ✨ button above the group grid.
+ *   - If null: no AI button (plain group picker).
  * Callback: tp:grp:{groupKey}:{draftId} (≤ 42 bytes ✅)
  *
  * 'other' group immediately selects category «Другое» (no sub-picker).
  * 'back' is used internally by sub-picker to return here.
  */
-export function buildExternalGroupKeyboard(draftId: string): InlineKeyboardMarkup {
+export function buildExternalGroupKeyboard(
+  draftId: string,
+  aiCategory?: { id: string; name: string } | null,
+): InlineKeyboardMarkup {
+  const icon = aiCategory ? (CATEGORY_ICONS[aiCategory.name] ?? '📁') : '🗂';
+  const aiName = aiCategory?.name ?? 'Другое';
+  const aiCbData = aiCategory
+    ? `tp:cat:${aiCategory.id}:${draftId}`
+    : `tp:grp:other:${draftId}`;
+
   return {
     inline_keyboard: [
+      // ── AI-suggested category (top, full-width) ──────────────────────
+      [{ text: `✨ ${icon} ${aiName}`, callback_data: aiCbData }],
+      // ── Group grid ───────────────────────────────────────────────────
       [
         { text: '🔧 Услуги', callback_data: `tp:grp:services:${draftId}` },
         { text: '🏠 Жильё',  callback_data: `tp:grp:housing:${draftId}` },
