@@ -4616,10 +4616,13 @@ Midas создан, чтобы сделать учет денег максима
               void upsertBotMessage(telegramUserId, chatId, [
                 '⚠️ <b>Удалить перевод?</b>',
                 '',
-                `• ${escapeHtml(ptDelData.out_acct)} −${ptDelData.out_amt} ${ptDelData.out_cur}`,
-                `• ${escapeHtml(ptDelData.in_acct)} +${ptDelData.in_amt} ${ptDelData.in_cur}`,
+                '<i>Изменение балансов после удаления:</i>',
+                // Знаки инвертированы: удаление — это отмена перевода.
+                // Outbound-счёт получает деньги обратно (+), inbound теряет зачисление (-).
+                `• ${escapeHtml(ptDelData.out_acct)} <b>+${ptDelData.out_amt} ${ptDelData.out_cur}</b>`,
+                `• ${escapeHtml(ptDelData.in_acct)} <b>−${ptDelData.in_amt} ${ptDelData.in_cur}</b>`,
                 '',
-                '<i>Балансы обоих счётов будут пересчитаны.</i>',
+                '<i>Оба счёта будут пересчитаны.</i>',
               ].join('\n'), {
                 inline_keyboard: [[
                   { text: '✅ Да, удалить', callback_data: `pt:del:yes:${ptTxId}` },
