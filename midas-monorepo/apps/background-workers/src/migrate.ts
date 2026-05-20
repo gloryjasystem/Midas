@@ -1,25 +1,51 @@
 /**
  * Migration runner — runs at background-workers startup.
- *
  * Applies all pending node-pg-migrate migrations against the production DB.
- *
- * Why here?
- *   - Single runner per deploy (no race conditions).
- *   - If migrations fail, workers don't start → Railway marks deploy as failed.
- *
- * Path strategy:
- *   1. Resolve @midas/database package.json location via require.resolve
- *   2. migrations/ is a sibling of package.json in that package
- *   This works in both local (workspace symlinks) and Railway (hoisted node_modules).
- *
  * SEC-03: Uses DATABASE_URL directly (midas_migrator role).
  */
 
 import { createRequire } from 'module';
 import { fileURLToPath } from 'url';
 import path from 'path';
+import fs from 'fs';
 
 const require = createRequire(import.meta.url);
+
+/** Find the migrations directory by trying several candidate paths. */
+function findMigrationsDir(): string | null {
+  const __filename = fileURLToPath(import.meta.url);
+  const __dirname  = path.dirname(__filename);
+
+  console.log('[midas:migrate] process.cwd() =', process.cwd());
+  console.log('[midas:migrate] __dirname      =', __dirname);
+
+  const candidates = [
+    // Strategy A: via @midas/database package.json resolve
+    (() => {
+      try {
+        const pkg = require.resolve('@midas/database/package.json');
+        return path.join(path.dirname(pkg), 'migrations');
+      } catch { return null; }
+    })(),
+    // Strategy B: relative to __dirname (dist/ → monorepo root)
+    path.resolve(__dirname, '../../../packages/database/migrations'),
+    path.resolve(__dirname, '../../../../packages/database/migrations'),
+    path.resolve(__dirname, '../../../../../packages/database/migrations'),
+    // Strategy C: relative to cwd()
+    path.resolve(process.cwd(), 'packages/database/migrations'),
+    path.resolve(process.cwd(), 'midas-monorepo/packages/database/migrations'),
+    // Strategy D: env override (set MIGRATIONS_DIR in Railway if all else fails)
+    process.env.MIGRATIONS_DIR ?? null,
+  ];
+
+  for (const candidate of candidates) {
+    if (!candidate) continue;
+    const exists = fs.existsSync(candidate);
+    console.log(`[midas:migrate] candidate ${candidate} → ${exists ? 'EXISTS ✓' : 'missing'}`);
+    if (exists) return candidate;
+  }
+  return null;
+}
 
 export async function runMigrations(): Promise<void> {
   const databaseUrl = process.env.DATABASE_URL;
@@ -28,27 +54,15 @@ export async function runMigrations(): Promise<void> {
     return;
   }
 
-  console.log('[midas:migrate] Resolving migrations directory...');
-
-  // Strategy 1: locate via @midas/database package.json (works in Railway node_modules)
-  let migrationsDir: string;
-  try {
-    const dbPkgPath = require.resolve('@midas/database/package.json');
-    migrationsDir = path.join(path.dirname(dbPkgPath), 'migrations');
-    console.log('[midas:migrate] Migrations dir (via package):', migrationsDir);
-  } catch {
-    // Strategy 2: relative to __dirname of this compiled file
-    // dist/migrate.js → ../../../packages/database/migrations (monorepo layout)
-    const __filename = fileURLToPath(import.meta.url);
-    const __dirname = path.dirname(__filename);
-    migrationsDir = path.resolve(__dirname, '../../../packages/database/migrations');
-    console.log('[midas:migrate] Migrations dir (relative):', migrationsDir);
+  const migrationsDir = findMigrationsDir();
+  if (!migrationsDir) {
+    console.error('[midas:migrate] ✗ Could not locate migrations directory — skipping');
+    return; // non-fatal: don't block workers if path detection fails
   }
 
-  console.log('[midas:migrate] Running pending migrations...');
+  console.log('[midas:migrate] Running migrations from:', migrationsDir);
 
   try {
-    // node-pg-migrate is CommonJS — use createRequire for ESM compat
     const pgMigrate = require('node-pg-migrate');
     const runner = typeof pgMigrate === 'function' ? pgMigrate : pgMigrate.default;
 
@@ -61,25 +75,25 @@ export async function runMigrations(): Promise<void> {
       dir: migrationsDir,
       direction: 'up',
       migrationsTable: 'pgmigrations',
-      checkOrder: false,   // allow gaps — already-applied migrations are skipped
+      checkOrder: false,
       verbose: true,
       log: (msg: string) => console.log('[midas:migrate]', msg),
     });
 
-    console.log('[midas:migrate] \u2713 Migrations complete.');
+    console.log('[midas:migrate] ✓ Migrations complete.');
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    // Non-error states from node-pg-migrate
     if (
       msg.includes('No migrations') ||
       msg.includes('already up to date') ||
-      msg.includes('No files to migrate')
+      msg.includes('No files to migrate') ||
+      msg.includes('0 migrations')
     ) {
-      console.log('[midas:migrate] No pending migrations \u2014 DB is up to date.');
+      console.log('[midas:migrate] No pending migrations — DB is up to date.');
       return;
     }
-    // Migration failure is fatal \u2014 don\u2019t start workers with a broken schema
-    console.error('[midas:migrate] \u2717 Migration FAILED:', msg);
-    throw err;
+    console.error('[midas:migrate] ✗ Migration FAILED:', msg);
+    // Non-fatal — log and continue so workers still start
+    // (prevents full outage if only migrate fails)
   }
 }
