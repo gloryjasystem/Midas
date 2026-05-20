@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Telegram Webhook Route — POST /webhook
  *
  * Entry point for all incoming Telegram updates.
@@ -7237,8 +7237,7 @@ Midas создан, чтобы сделать учет денег максима
                   `UPDATE transactions
                    SET base_amount    = $1::NUMERIC,
                        original_amount = $1::NUMERIC,
-                       exchange_rate   = ROUND($1::NUMERIC / NULLIF($2::NUMERIC, 0), 4),
-                       updated_at     = NOW()
+                       exchange_rate   = ROUND($1::NUMERIC / NULLIF($2::NUMERIC, 0), 4)
                    WHERE id = $3 AND workspace_id = $4 AND deleted_at IS NULL`,
                   [newInAmt, outRow.rows[0]!.base_amount, rInId, rWsId],
                 );
