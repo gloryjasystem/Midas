@@ -125,13 +125,25 @@ DEFAULT INTENT PRIORITY (CRITICAL — always output intent, never omit it):
 - If you see item + number with NO other context → expense.
 
 TRANSFER PRIORITY RULE (CRITICAL — overrides default "expense"):
-  If the message contains ANY of the verbs listed in TRANSFER signals above, intent MUST be "transfer"
-  — even if no destination account is mentioned. Voice transcription often strips the destination
-  (e.g. "перевел 3000 долларов" without saying where). This is STILL a transfer — the bot will ask
-  for the target account separately. Do NOT downgrade to "expense" just because no destination
-  or account_hint is present.
-  Example: "перевел 3000 долларов" → intent="transfer", amount="3000", currency="USD"
-  Example: "скинул 500 юздт" → intent="transfer", amount="500", currency="USDT"
+  "transfer" means money moved between the user's OWN accounts (wallet to wallet, bank to bank,
+  card to card, exchange to exchange). It is NEVER used when sending to another PERSON.
+
+  PERSON DETECTION — if a transfer verb is followed by a PERSON NAME (human first/last name,
+  or pronoun: ему, ей, другу, жене, Васе, Коле, Маше, and similar), the intent is:
+    → "debt_given" (if the user is sending money TO that person)
+    → "debt_received" (if the user RECEIVED money FROM that person)
+  NOT "transfer". Transfer verbs like "перевел", "скинул", "отправил" + person name = debt_given.
+
+  Transfer verbs WITHOUT a person name = "transfer" (even without a destination account).
+  Voice transcription often strips the destination account name. The bot will ask for it.
+
+  Examples:
+    "перевел 3000 долларов" (no person) → intent="transfer", amount="3000", currency="USD"
+    "скинул 500 юздт" (no person) → intent="transfer", amount="500", currency="USDT"
+    "перевел 1000 долларов Васе" (person=Вася) → intent="debt_given", person_hint="Вася"
+    "скинул 5000 Коле" (person=Коля) → intent="debt_given", person_hint="Коля"
+    "перевел на Binance 200 USDT" (account, not person) → intent="transfer", account_hint="Binance"
+    "отправил жене 3000" (person=жена) → intent="debt_given", person_hint="жена"
 
 
 
@@ -224,14 +236,16 @@ INCOME signals — if ANY of these appear, intent is "income":
   Income nouns alone: зарплата, получка, аванс, премия, стипендия, кешбэк, дивиденды,
     пенсия, пособие, фриланс, гонорар, подработка
 
-DEBT_GIVEN signals: "дал в долг", "одолжил [кому]", "дал взаймы", "дал денег [имя]"
+DEBT_GIVEN signals: "дал в долг", "одолжил [кому]", "дал взаймы", "дал денег [имя]",
+  and ANY transfer verb + PERSON NAME (see TRANSFER PRIORITY RULE above).
 DEBT_RECEIVED signals: "взял в долг", "занял у [кого]", "одолжил у [кого]", "взял взаймы"
-TRANSFER signals (MUST set intent="transfer" — even without destination account):
+TRANSFER signals — USE ONLY when sending between user's OWN accounts (NOT to a person):
   перевёл/перевел/перевела/перевели, перевод, переводил, переведи, перевести,
   перекинул/перекинула, перебросил/перебросила, скинул/скинула/скинь,
   кинул/кинула/кинь, закинул/закинула, отправил/отправила/отправь,
   вывел/вывела (с биржи), завёл/завел/завела (на биржу), обменял/обменяла, конвертнул/конвертнула
   Ukrainian: перевів, переказав, перекинув, скинув, кинув, відправив, вивів
+  CRITICAL: If ANY of these verbs is followed by a human name → debt_given, NOT transfer.
 
 CATEGORY \u2192 INTENT defaults (when no verb is present, category implies intent):
   EXPENSE categories: кофе, обед, ужин, завтрак, еда, продукты, ресторан, кафе, доставка,
@@ -330,6 +344,25 @@ Output: {"intent":"debt_given","amount":"5000","currency":"RUB","person_hint":"�
 
 User: "занял у Миши 10000"
 Output: {"intent":"debt_received","amount":"10000","person_hint":"Миша","item_hint":"долг от Миши","category_hint":"Другое","confidence":0.9}
+
+-- Transfer verb + PERSON = debt_given (CRITICAL — NOT transfer) --
+User: "перевел 1000 долларов Васе"
+Output: {"intent":"debt_given","amount":"1000","currency":"USD","person_hint":"Вася","item_hint":"перевод Васе","category_hint":"Другое","confidence":0.9}
+
+User: "скинул 5000 Коле"
+Output: {"intent":"debt_given","amount":"5000","person_hint":"Коля","item_hint":"перевод Коле","category_hint":"Другое","confidence":0.9}
+
+User: "отправил жене 3000 гривен"
+Output: {"intent":"debt_given","amount":"3000","currency":"UAH","person_hint":"жена","item_hint":"перевод жене","category_hint":"Другое","confidence":0.9}
+
+User: "перекинул маме 500 юздт"
+Output: {"intent":"debt_given","amount":"500","currency":"USDT","person_hint":"мама","item_hint":"перевод маме","category_hint":"Другое","confidence":0.9}
+
+User: "кинул другу 2000"
+Output: {"intent":"debt_given","amount":"2000","person_hint":"друг","item_hint":"перевод другу","category_hint":"Другое","confidence":0.9}
+
+User: "перевел 10 тысяч долларов Максиму"
+Output: {"intent":"debt_given","amount":"10000","currency":"USD","person_hint":"Максим","item_hint":"перевод Максиму","category_hint":"Другое","confidence":0.9}
 
 -- Transfer --
 User: "перекинул 10000 на Binance"

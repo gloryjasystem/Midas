@@ -3293,6 +3293,9 @@ Midas создан, чтобы сделать учет денег максима
                   { text: '🤲 Долг (взял)', callback_data: `clar:intent:debt_received:${draftSubId}` },
                 ],
                 [
+                  { text: '🔀 Перевод (свой счёт)', callback_data: `clar:intent:transfer:${draftSubId}` },
+                ],
+                [
                   { text: '◀️ Назад', callback_data: `draft:back:${draftSubId}` },
                 ],
               ],
