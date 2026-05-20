@@ -371,24 +371,6 @@ const CATEGORY_ICONS: Record<string, string> = {
   'Другое':             '🗂',
 };
 
-/**
- * Maps group key → array of category names belonging to that group.
- * Used to filter workspace categories when building subcategory pickers.
- */
-const GROUP_CATEGORIES: Record<string, string[]> = {
-  services: [
-    'Кафе и рестораны', 'Продукты', 'Красота', 'Здоровье', 'Транспорт',
-    'Связь', 'Подписки', 'Образование', 'Спорт', 'Развлечения',
-    'Путешествия', 'Подарки', 'Дети', 'Фриланс', 'Одежда',
-  ],
-  housing: ['Жильё'],
-  business: [
-    'Зарплаты и выплаты', 'Инвестиции', 'Комиссии', 'Крипто-комиссии',
-    'Налоги', 'Оборудование', 'Офис', 'Подрядчики', 'Продажи',
-    'Реклама', 'Софт и сервисы',
-  ],
-  other: ['Другое'],
-};
 
 /**
  * Level-1 keyboard — AI suggestion row (top) + 4 group buttons in a 2×2 grid.
@@ -435,43 +417,44 @@ export function buildExternalGroupKeyboard(
 }
 
 /**
- * Level-2 keyboard — subcategories within a group, with emoji icons.
- * Filters workspace categories by group name list.
+ * Level-2 keyboard — subcategories filtered by DB group ('Жизнь' | 'Бизнес').
+ *
+ * Mirrors manual pickers (tx:catg, draft:catg) exactly:
+ *   • Filters by c.group === groupName (DB enum)
+ *   • 2 buttons per row with emoji prefix from CATEGORY_ICONS
+ *   • Back → tp:grp:back:{draftId}
+ *
  * Callback: tp:cat:{categoryId}:{draftId} (≤ 60 bytes ✅)
- * Back button: tp:grp:back:{draftId} (38 bytes ✅)
  */
-export function buildExternalSubcategoryKeyboard(
-  categories: Array<{ id: string; name: string }>,
-  groupKey: string,
+export function buildExternalSubcategoryByGroup(
+  categories: Array<{ id: string; name: string; group: string }>,
+  groupName: string,
   draftId: string,
 ): InlineKeyboardMarkup {
-  const groupNames = GROUP_CATEGORIES[groupKey] ?? [];
-  // Filter and sort by group order
-  const filtered = categories
-    .filter((c) => groupNames.includes(c.name))
-    .sort((a, b) => groupNames.indexOf(a.name) - groupNames.indexOf(b.name));
-
+  const filtered = categories.filter((c) => c.group === groupName);
   const rows: InlineKeyboardButton[][] = [];
-  for (let i = 0; i < filtered.length; i += 2) {
-    const row: InlineKeyboardButton[] = [];
-    const c1 = filtered[i];
-    if (c1) {
-      const icon = CATEGORY_ICONS[c1.name] ?? '📁';
-      row.push({ text: `${icon} ${c1.name}`, callback_data: `tp:cat:${c1.id}:${draftId}` });
+
+  if (filtered.length === 0) {
+    rows.push([{ text: '⚠️ В этой группе нет категорий', callback_data: `tp:grp:back:${draftId}` }]);
+  } else {
+    for (let i = 0; i < filtered.length; i += 2) {
+      const a = filtered[i]!;
+      const b = filtered[i + 1];
+      const btnA = {
+        text: `${CATEGORY_ICONS[a.name] ?? '📁'} ${a.name}`,
+        callback_data: `tp:cat:${a.id}:${draftId}`,
+      };
+      rows.push(
+        b
+          ? [btnA, { text: `${CATEGORY_ICONS[b.name] ?? '📁'} ${b.name}`, callback_data: `tp:cat:${b.id}:${draftId}` }]
+          : [btnA],
+      );
     }
-    if (i + 1 < filtered.length) {
-      const c2 = filtered[i + 1];
-      if (c2) {
-        const icon = CATEGORY_ICONS[c2.name] ?? '📁';
-        row.push({ text: `${icon} ${c2.name}`, callback_data: `tp:cat:${c2.id}:${draftId}` });
-      }
-    }
-    rows.push(row);
   }
 
   rows.push([
-    { text: '◀️ Назад', callback_data: `tp:grp:back:${draftId}` },
-    { text: '✖ Отмена', callback_data: `tp:cancel:${draftId}` },
+    { text: '◀️ К группам', callback_data: `tp:grp:back:${draftId}` },
+    { text: '✖ Отмена',     callback_data: `tp:cancel:${draftId}` },
   ]);
   return { inline_keyboard: rows };
 }

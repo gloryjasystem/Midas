@@ -300,7 +300,7 @@ import {
   buildRecipientKeyboard,
   buildExternalCategoryScreen,
   buildExternalGroupKeyboard,
-  buildExternalSubcategoryKeyboard,
+  buildExternalSubcategoryByGroup,
   buildCrossCurrencyTransferScreen,
   buildCrossCurrencyTransferKeyboard,
   getAvailableTargetAccounts,
@@ -4275,12 +4275,15 @@ Midas создан, чтобы сделать учет денег максима
                 }
               }
 
-            } else {
-              // Show subcategory picker for this group
+            } else if (groupKey === 'life' || groupKey === 'biz') {
+              // Open DB-group subcategory list — mirrors tx:catg / draft:catg pickers
+              const groupName  = groupKey === 'life' ? 'Жизнь' : 'Бизнес';
+              const groupEmoji = groupKey === 'life' ? '🛒' : '💼';
               const allCatsGrp2 = await getWorkspaceCategories(tpResolved.workspaceId, tpResolved.userId);
+              const subHdr = `<b>${groupEmoji} ${groupName}:</b>`;
               if (tpMsgId) void editMessageText(
-                chatId, tpMsgId, catScreenText,
-                buildExternalSubcategoryKeyboard(allCatsGrp2, groupKey, draftIdGrp),
+                chatId, tpMsgId, subHdr,
+                buildExternalSubcategoryByGroup(allCatsGrp2, groupName, draftIdGrp),
               );
             }
 
