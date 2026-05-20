@@ -307,6 +307,7 @@ import {
   patchDraftItemName,
   patchDraftCategoryForExternal,
   patchDraftCreditedAmount,
+  toRecipientDative,
 } from '../services/transfer-pairing.service.js';
 
 // ─────────────────────────────────────────────────────────────
@@ -6850,7 +6851,10 @@ Midas создан, чтобы сделать учет денег максима
           const rcptDraftId = rcptRaw.slice(0, sepIdx1);
           const rcptWsId    = rcptRaw.slice(sepIdx1 + 1, sepIdx2);
           const rcptUserId  = rcptRaw.slice(sepIdx2 + 1);
-          const recipientName = message.text.trim().slice(0, 100); // Max 100 chars
+          // Convert name to dative case for grammatically correct display:
+          // "Алексей" → "Алексею", "Антон" → "Антону", "Мария" → "Марии".
+          // Latin names (Anton, Maria) are returned unchanged.
+          const recipientName = toRecipientDative(message.text.trim().slice(0, 100));
 
           // Clean up Redis key
           await redisConnection.del(rcptKey);
