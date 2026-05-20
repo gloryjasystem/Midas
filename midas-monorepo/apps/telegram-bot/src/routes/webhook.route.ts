@@ -4528,11 +4528,20 @@ Midas создан, чтобы сделать учет денег максима
       // that second call will be silently rejected by Telegram (already answered).
       await answerCallbackQuery(cq.id);
 
-      // ── Phase 3.1: Transfer intercept — block incomplete transfers ──
+      // ── Phase 3.1: Transfer intercept — block incomplete INTERNAL transfers ──
       // If draft intent=transfer but no transfer_target_account_id is set,
       // the worker would call approveDraft() creating a transfer with direction=NULL.
-      // That transaction is semantically broken (shows as expense in reports).
-      // Enterprise fix: intercept here and redirect to the target account picker (tp: flow).
+      // Enterprise fix: intercept and redirect to target account picker.
+      //
+      // EXCEPTION (Variant A / Branch B): External person-to-person transfers also have
+      // intent=transfer and no transfer_target_account_id, BUT they always have
+      // category_id set (the user selects a category in the Branch B flow).
+      // We must NOT intercept those — they should be confirmed directly.
+      //
+      // Intercept condition:
+      //   intent = 'transfer'
+      //   AND transfer_target_account_id IS NULL   ← incomplete internal transfer
+      //   AND category_id IS NULL                  ← NOT an external transfer (Branch B)
       if (action === 'approve') {
         try {
           const { pool } = await import('@midas/database');
@@ -4542,14 +4551,18 @@ Midas создан, чтобы сделать учет денег максима
             account_id: string | null;
             parsed_amount: string | null;
             parsed_currency: string | null;
+            category_id: string | null;
           }>(
-            `SELECT parsed_intent, transfer_target_account_id, account_id, parsed_amount, parsed_currency
+            `SELECT parsed_intent, transfer_target_account_id, account_id, parsed_amount, parsed_currency, category_id
              FROM transaction_drafts
              WHERE id = $1 AND workspace_id = $2 AND status = 'pending_user'`,
             [draftId, workspaceId],
           );
           const tpRow = tpCheck.rows[0];
-          if (tpRow?.parsed_intent === 'transfer' && !tpRow.transfer_target_account_id) {
+          // Only intercept INTERNAL transfers: intent=transfer, no target account, AND no category.
+          // External transfers (Branch B) have category_id set — let them through to normal confirm.
+          const isExternalTransfer = !!tpRow?.category_id;
+          if (tpRow?.parsed_intent === 'transfer' && !tpRow.transfer_target_account_id && !isExternalTransfer) {
             // Transfer without target → redirect to target account picker
             const { getAvailableTargetAccounts, buildTargetPickerScreen, buildTargetAccountKeyboard } =
               await import('../services/transfer-pairing.service.js');
