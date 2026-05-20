@@ -1,6 +1,16 @@
 /**
  * Migration runner — runs at background-workers startup.
  * Applies all pending node-pg-migrate migrations against the production DB.
+ *
+ * Path resolution strategy (in order of preference):
+ *   1. MIGRATIONS_DIR env var (explicit override for Railway)
+ *   2. require.resolve('@midas/database/package.json') → sibling migrations/
+ *   3. Relative paths from __dirname (dist/) going up the monorepo tree
+ *   4. Relative to process.cwd()
+ *
+ * Failure is NON-FATAL: logs the error and continues starting workers.
+ * This avoids full outage if migrate.ts has a path issue.
+ *
  * SEC-03: Uses DATABASE_URL directly (midas_migrator role).
  */
 
@@ -11,39 +21,44 @@ import fs from 'fs';
 
 const require = createRequire(import.meta.url);
 
-/** Find the migrations directory by trying several candidate paths. */
 function findMigrationsDir(): string | null {
   const __filename = fileURLToPath(import.meta.url);
   const __dirname  = path.dirname(__filename);
 
-  console.log('[midas:migrate] process.cwd() =', process.cwd());
-  console.log('[midas:migrate] __dirname      =', __dirname);
+  console.log('[midas:migrate] cwd =', process.cwd());
+  console.log('[midas:migrate] __dirname =', __dirname);
 
-  const candidates = [
-    // Strategy A: via @midas/database package.json resolve
+  const candidates: Array<string | null> = [
+    // Override via env var (set MIGRATIONS_DIR in Railway if needed)
+    process.env.MIGRATIONS_DIR ?? null,
+
+    // Via @midas/database package.json resolve (pnpm workspace)
     (() => {
       try {
-        const pkg = require.resolve('@midas/database/package.json');
-        return path.join(path.dirname(pkg), 'migrations');
+        return path.join(path.dirname(require.resolve('@midas/database/package.json')), 'migrations');
       } catch { return null; }
     })(),
-    // Strategy B: relative to __dirname (dist/ → monorepo root)
+
+    // Relative to __dirname (dist/migrate.js) — Railway Nixpacks layout:
+    // /app/midas-monorepo/apps/background-workers/dist/migrate.js
+    // ../../../ = /app/midas-monorepo/
     path.resolve(__dirname, '../../../packages/database/migrations'),
-    path.resolve(__dirname, '../../../../packages/database/migrations'),
-    path.resolve(__dirname, '../../../../../packages/database/migrations'),
-    // Strategy C: relative to cwd()
-    path.resolve(process.cwd(), 'packages/database/migrations'),
+
+    // Git repo root is one level above midas-monorepo
+    path.resolve(__dirname, '../../../../midas-monorepo/packages/database/migrations'),
+
+    // From cwd (Railway might set cwd to repo root)
     path.resolve(process.cwd(), 'midas-monorepo/packages/database/migrations'),
-    // Strategy D: env override (set MIGRATIONS_DIR in Railway if all else fails)
-    process.env.MIGRATIONS_DIR ?? null,
+    path.resolve(process.cwd(), 'packages/database/migrations'),
   ];
 
   for (const candidate of candidates) {
     if (!candidate) continue;
     const exists = fs.existsSync(candidate);
-    console.log(`[midas:migrate] candidate ${candidate} → ${exists ? 'EXISTS ✓' : 'missing'}`);
+    console.log(`[midas:migrate]  ${exists ? '✓' : '✗'} ${candidate}`);
     if (exists) return candidate;
   }
+
   return null;
 }
 
@@ -56,8 +71,8 @@ export async function runMigrations(): Promise<void> {
 
   const migrationsDir = findMigrationsDir();
   if (!migrationsDir) {
-    console.error('[midas:migrate] ✗ Could not locate migrations directory — skipping');
-    return; // non-fatal: don't block workers if path detection fails
+    console.error('[midas:migrate] ✗ Could not locate migrations dir — skipping (workers will still start)');
+    return;
   }
 
   console.log('[midas:migrate] Running migrations from:', migrationsDir);
@@ -67,7 +82,7 @@ export async function runMigrations(): Promise<void> {
     const runner = typeof pgMigrate === 'function' ? pgMigrate : pgMigrate.default;
 
     if (typeof runner !== 'function') {
-      throw new Error('node-pg-migrate did not export a callable function');
+      throw new Error('node-pg-migrate: no callable export found');
     }
 
     await runner({
@@ -83,17 +98,11 @@ export async function runMigrations(): Promise<void> {
     console.log('[midas:migrate] ✓ Migrations complete.');
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    if (
-      msg.includes('No migrations') ||
-      msg.includes('already up to date') ||
-      msg.includes('No files to migrate') ||
-      msg.includes('0 migrations')
-    ) {
-      console.log('[midas:migrate] No pending migrations — DB is up to date.');
+    if (msg.includes('No migrations') || msg.includes('No files')) {
+      console.log('[midas:migrate] No pending migrations.');
       return;
     }
-    console.error('[midas:migrate] ✗ Migration FAILED:', msg);
-    // Non-fatal — log and continue so workers still start
-    // (prevents full outage if only migrate fails)
+    // Non-fatal — log and continue
+    console.error('[midas:migrate] ✗ FAILED:', msg);
   }
 }
