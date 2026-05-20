@@ -33,10 +33,17 @@ import {
   EXPIRATION_CRON_JOB_ID,
 } from './workers/draft-expiration.worker.js';
 import { createVoiceParseWorker } from './workers/voice-parse.worker.js';
+import { runMigrations } from './migrate.js';
 import { QUEUE_NAMES } from '@midas/shared';
 import type { QueueEvents } from 'bullmq';
 
 console.log('[midas] background-workers starting...');
+
+// ─────────────────────────────────────────────────────────────
+// Step 0: Run pending DB migrations before starting workers
+// ─────────────────────────────────────────────────────────────
+
+await runMigrations();
 
 // ─────────────────────────────────────────────────────────────
 // Register repeatable CRON job for draft expiration (Phase 1.7)

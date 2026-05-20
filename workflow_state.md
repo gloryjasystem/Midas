@@ -1,7 +1,7 @@
 # WORKFLOW_STATE.MD — Диспетчер задач ИИ-агента Midas
 
 > **Тип:** MUTABLE — кратковременная память агента. Обновляется на каждом шаге работы.
-> **Обновлён:** 2026-05-20 10:17 (UTC+3)
+> **Обновлён:** 2026-05-20 11:47 (UTC+3)
 
 ---
 
@@ -9,13 +9,13 @@
 
 | Параметр | Значение |
 |---|---|
-| **PHASE** | Phase 3.1 (Transfer Intercept + AI Resilience ✅) |
-| **STEP** | Деплой 2026-05-20. Три фикса в одной сессии: (1) семантика intent/transfer исправлена — debt_given только при явном долговом языке; (2) Phase 3.1 Transfer Intercept — перехват approve при transfer без target_account_id → редирект на target picker; (3) ai-parse resilience — 3 попытки + exponential backoff + уведомление пользователю при финальном провале. |
-| **AGENT STATUS** | tsc 0 errors. Commits: `816ee6c` (неправильный долг — откачен), `0286673` (правильный фикс transfer+person), `7fe73a7` (ai-parse resilience). Railway auto-deploy запущен. |
+| **PHASE** | Phase 3.1+ (Transfer flow полностью исправлен ✅) |
+| **STEP** | Сессия 2026-05-20 (11:00–11:45). Три фикса: (1) Кнопка «Подтвердить» на внешнем переводе теперь корректно записывает транзакцию — исправлен Phase 3.1 intercept; (2) Имена получателей автоматически склоняются в дательный падеж (Алексей→Алексею); (3) Предыдущий фикс баланса (direction-aware formula) — подтверждён работающим. |
+| **AGENT STATUS** | tsc 0 errors. Commits: `8785e3c` (Phase 3.1 intercept fix), `8e274c4` (toRecipientDative). Railway auto-deploy запущен. |
 | **DEPLOYMENT** | Railway (spirited-happiness) — Midas Online, background-workers Online. Health: https://midas-production-f4f1.up.railway.app/health > ok |
-| **LAST COMPLETED** | 2026-05-20: (1) prompts.ts — TRANSFER PRIORITY RULE переписан: transfer verb + person = intent=transfer + person_hint (НЕ debt_given). debt_given = только явный долговой язык. (2) webhook.route.ts — Phase 3.1 Transfer Intercept: при нажатии ✅ Подтвердить на transfer-черновике без transfer_target_account_id → перехват → target picker. (3) queue-definitions.ts — attempts 2→3, backoff exponential. (4) ai-parse.worker.ts — уведомление '⚠️ ИИ временно недоступен' на финальном провале. |
-| **BLOCKER** | None. Нужно протестировать: (a) «перевел 1000 долларов Васе» → intent=transfer + person_hint; (b) нажатие ✅ на transfer-карточке → должен показаться target picker. |
-| **NEXT ACTION** | 1. E2E тест transfer с person_hint в боте. 2. Phase 3.0 DB Schema (account_type/wallet_subtype columns) — следующая запланированная фаза. |
+| **LAST COMPLETED** | (1) webhook.route.ts Phase 3.1 — intercept теперь проверяет category_id: external transfers (Branch B, имеют category_id) пропускаются напрямую к approveDraft, только internal без category_id → target picker. (2) transfer-pairing.service.ts — добавлена `toRecipientDative()`: rule-based склонение всех слов имени в дательный падеж; lateinские имена не изменяются. (3) webhook.route.ts text interceptor — применяет `toRecipientDative` к имени получателя перед сохранением в DB и отображением. |
+| **BLOCKER** | None. |
+| **NEXT ACTION** | 1. E2E тест: внешний перевод → «Подтвердить» → транзакция должна записаться. 2. E2E тест: имя «Алексей» → отображается «Алексею». 3. Phase 3.0 DB Schema (account_type/wallet_subtype) — следующая запланированная фаза. |
 
 
 ---
@@ -194,7 +194,7 @@ Workspace: C:\Users\secvency\Desktop\Midas\midas-monorepo
 - Баланс-дискрепанс исправлен: direction-aware formula в account.service.ts
 - Redis ETIMEDOUT: Railway GCP volume migration — решилось перезапуском Redis
 
-[Сессия 2026-05-20: Intent Semantics + Transfer Intercept + Resilience]
+[Сессия 2026-05-20 утро: Intent Semantics + Transfer Intercept + Resilience]
 
 1. ИСПРАВЛЕНА СЕМАНТИКА AI INTENT (prompts.ts):
    - «перевел 1000 Васе» → intent=transfer + person_hint=Вася (НЕ debt_given!)
@@ -215,10 +215,32 @@ Workspace: C:\Users\secvency\Desktop\Midas\midas-monorepo
    - Причина: Anthropic InternalServerError → бот молчал
    - Коммит: 7fe73a7
 
+[Сессия 2026-05-20 день: External Transfer Confirm Bug + Dative Names]
+
+4. PHASE 3.1 INTERCEPT — КРИТИЧЕСКИЙ ФИКС (webhook.route.ts) commit 8785e3c:
+   Root cause: Phase 3.1 intercept перехватывал ВСЕ переводы с intent=transfer
+   и отсутствием transfer_target_account_id — включая ВНЕШНИЕ (Branch B, человеку).
+   Внешние переводы тоже имеют intent=transfer + no target_account_id, НО у них
+   ВСЕГДА есть category_id (пользователь выбрал категорию в Branch B flow).
+   Фикс: добавлена проверка category_id в SQL + условие перехвата:
+     intent=transfer AND target IS NULL AND category_id IS NULL → target picker
+     intent=transfer AND target IS NULL AND category_id IS NOT NULL → approveDraft ✅
+
+5. АВТО-СКЛОНЕНИЕ ИМЁН ПОЛУЧАТЕЛЕЙ (transfer-pairing.service.ts + webhook.route.ts)
+   commit 8e274c4:
+   Проблема: «Перевод Алексей» — грамматически неверно по-русски.
+   Решение: rule-based функция toRecipientDative() — дательный падеж:
+     Алексей → Алексею   Антон → Антону   Мария → Марии
+     Дарья → Дарье       Иван → Ивану     Игорь → Игорю
+     Таня → Тане         Сергей → Сергею  Евгений → Евгению
+   Латинские имена (Anton, Maria) — без изменений.
+   Полные имена: «Иван Петров» → «Ивану Петрову» (каждое слово отдельно).
+   Применяется в text interceptor перед patchDraftItemName — хранится уже в дательном.
+
 ═══ КЛЮЧЕВЫЕ ФАЙЛЫ ═══
 packages/ai-core/src/prompts.ts                                     — AI intent rules (TRANSFER PRIORITY RULE, debt_given)
-apps/telegram-bot/src/routes/webhook.route.ts                       — webhook FSM, tp: callbacks, Phase 3.1 intercept
-apps/telegram-bot/src/services/transfer-pairing.service.ts          — target picker, getAvailableTargetAccounts
+apps/telegram-bot/src/routes/webhook.route.ts                       — webhook FSM, tp: callbacks, Phase 3.1 intercept (category_id guard)
+apps/telegram-bot/src/services/transfer-pairing.service.ts          — target picker, getAvailableTargetAccounts, toRecipientDative()
 apps/background-workers/src/services/draft-confirmation.service.ts  — approveDraft + approvePairedTransfer
 apps/background-workers/src/workers/ai-parse.worker.ts              — failed handler, resilience
 apps/background-workers/src/queues/queue-definitions.ts             — retry config
@@ -228,15 +250,16 @@ confirmation.worker.ts пикирует transfer_target_account_id:
   ≠ NULL → approvePairedTransfer() → paired outbound+inbound транзакции
   NULL   → approveDraft() → одиночная транзакция (expense/income/debt_*/transfer)
 
-Phase 3.1 добавляет перехват в webhook.route.ts ПЕРЕД enqueue:
-  approve + intent=transfer + no target → показать target picker (tp: flow)
-  approve + intent=transfer + target есть → enqueue → approvePairedTransfer()
+Phase 3.1 перехват в webhook.route.ts ПЕРЕД enqueue:
+  approve + intent=transfer + no target + NO category_id → target picker (tp: flow) [internal]
+  approve + intent=transfer + no target + HAS category_id → approveDraft() [external/Branch B] ✅
+  approve + intent=transfer + target есть → approvePairedTransfer() [internal paired]
 
 ═══ СЛЕДУЮЩИЕ ЗАДАЧИ ═══
 Приоритет 1: E2E тест в боте:
-  - «перевел 1000 долларов Васе» → должен: intent=transfer + person_hint
-  - Нажать ✅ Подтвердить → должен: показаться target picker
-  - Выбрать target → tp:confirm → оба баланса должны измениться
+  - «перевел 1000 долларов Алексею» → intent=transfer + записать транзакцию
+  - Нажать ✅ Подтвердить → должно записаться (НЕ показывать target picker)
+  - Имя получателя → показывается «Алексею» везде
 
 Приоритет 2: Phase 3.0 — DB Schema:
   - account_type колонка (card/cash/wallet/exchange/custom)
