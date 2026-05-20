@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Transfer Pairing Service — Phase 3.0
  *
  * Provides:
@@ -393,24 +393,19 @@ export function buildExternalGroupKeyboard(
   draftId: string,
   aiCategory?: { id: string; name: string } | null,
 ): InlineKeyboardMarkup {
-  const aiName    = aiCategory?.name ?? 'Другое';
-  const aiCbData  = aiCategory
+  const aiName   = aiCategory?.name ?? 'Другое';
+  const aiCbData = aiCategory
     ? `tp:cat:${aiCategory.id}:${draftId}`
     : `tp:grp:other:${draftId}`;
 
   return {
     inline_keyboard: [
-      // ── ✨ AI-suggested category (full-width, no category icon) ────────
       [{ text: `✨ ${aiName}`, callback_data: aiCbData }],
-      // ── Group grid (row order: Бизнес+Жильё first, Услуги+Другое below) ─
       [
-        { text: '💼 Бизнес', callback_data: `tp:grp:business:${draftId}` },
-        { text: '🏠 Жильё',  callback_data: `tp:grp:housing:${draftId}` },
+        { text: '💼 Бизнес', callback_data: `tp:grp:biz:${draftId}` },
+        { text: '🛒 Жизнь',  callback_data: `tp:grp:life:${draftId}` },
       ],
-      [
-        { text: '🔧 Услуги', callback_data: `tp:grp:services:${draftId}` },
-        { text: '🗂 Другое', callback_data: `tp:grp:other:${draftId}` },
-      ],
+      [{ text: '🗂 Другое', callback_data: `tp:grp:other:${draftId}` }],
       [{ text: '✖ Отмена', callback_data: `tp:cancel:${draftId}` }],
     ],
   };
