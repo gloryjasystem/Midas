@@ -1,7 +1,7 @@
 # WORKFLOW_STATE.MD — Диспетчер задач ИИ-агента Midas
 
 > **Тип:** MUTABLE — кратковременная память агента. Обновляется на каждом шаге работы.
-> **Обновлён:** 2026-05-20 11:47 (UTC+3)
+> **Обновлён:** 2026-05-20 16:15 (UTC+3)
 
 ---
 
@@ -9,13 +9,16 @@
 
 | Параметр | Значение |
 |---|---|
-| **PHASE** | Phase 3.1+ (Transfer flow полностью исправлен ✅) |
-| **STEP** | Сессия 2026-05-20 (11:00–11:45). Три фикса: (1) Кнопка «Подтвердить» на внешнем переводе теперь корректно записывает транзакцию — исправлен Phase 3.1 intercept; (2) Имена получателей автоматически склоняются в дательный падеж (Алексей→Алексею); (3) Предыдущий фикс баланса (direction-aware formula) — подтверждён работающим. |
-| **AGENT STATUS** | tsc 0 errors. Commits: `8785e3c` (Phase 3.1 intercept fix), `8e274c4` (toRecipientDative). Railway auto-deploy запущен. |
+| **PHASE** | Phase 3.1+ DB Bugfixes ✅ |
+| **STEP** | Сессия 2026-05-20 13:00–16:15 (UTC+3). Три критических DB-фикса: (1) `transfer_group_id UUID→TEXT` — устранён DatabaseError при внутреннем переводе; (2) колонка `current_screen` добавлена — устранено падение CRON-воркера каждые 5 мин; (3) `migrate.ts` — авто-миграции при деплое. |
+| **AGENT STATUS** | tsc 0 errors. Commits: `00ce130` (remove ::UUID), `136ca35` (migrate.ts), `2b96fe6` (final migrate.ts), `36adbe4` (docs). Миграции применены вручную через public proxy URL. |
 | **DEPLOYMENT** | Railway (spirited-happiness) — Midas Online, background-workers Online. Health: https://midas-production-f4f1.up.railway.app/health > ok |
-| **LAST COMPLETED** | (1) webhook.route.ts Phase 3.1 — intercept теперь проверяет category_id: external transfers (Branch B, имеют category_id) пропускаются напрямую к approveDraft, только internal без category_id → target picker. (2) transfer-pairing.service.ts — добавлена `toRecipientDative()`: rule-based склонение всех слов имени в дательный падеж; lateinские имена не изменяются. (3) webhook.route.ts text interceptor — применяет `toRecipientDative` к имени получателя перед сохранением в DB и отображением. |
+| **DB STATE** | `transfer_group_id`: TEXT ✅ \| `current_screen`: TEXT ✅ \| Все 5 миграций (1780000000000–1780400000000) применены ✅ |
+| **DATABASE_URL (public)** | `postgresql://postgres:PLLSqArtPUoQsAYmvrpsmavfQMewgTRh@hopper.proxy.rlwy.net:46284/railway` |
+| **LAST COMPLETED** | (1) Миграция `1780400000000`: transfer_group_id UUID→TEXT. (2) Миграция `1780200000000`: добавлена `current_screen TEXT` (была пропущена при деплое). (3) Миграция `1780100000000`: обновлена функция reminder. (4) `draft-confirmation.service.ts`: убраны `::UUID` касты от `$9` и `$8`. (5) `migrate.ts`: авто-миграции Step 0 перед CRON/воркерами. |
 | **BLOCKER** | None. |
-| **NEXT ACTION** | 1. E2E тест: внешний перевод → «Подтвердить» → транзакция должна записаться. 2. E2E тест: имя «Алексей» → отображается «Алексею». 3. Phase 3.0 DB Schema (account_type/wallet_subtype) — следующая запланированная фаза. |
+| **NEXT ACTION** | 1. E2E тест внутреннего перевода (DatabaseError должен быть устранён). 2. Phase 3.0 DB Schema (`account_type`/`wallet_subtype` → миграция `1780500000000`). 3. Phase 3.2 Report 3.0 (топ-5 + категории). |
+
 
 
 ---
