@@ -660,12 +660,15 @@ export interface AccountBalanceForPreview {
 /**
  * Fetch balance + name + currency for an account (for preview card balance block).
  *
- * Uses the same D1-D3 formula as balance.service.ts:
+ * Uses the SAME direction-aware formula as balance.service.ts:
  *   balance = initial_balance
  *           + SUM(income + debt_received WHERE base_currency = acct.currency)
  *           - SUM(expense + debt_given WHERE base_currency = acct.currency)
+ *           + SUM(transfer inbound WHERE base_currency = acct.currency)      ← Phase 3.0
+ *           - SUM(transfer outbound/NULL WHERE base_currency = acct.currency) ← Phase 3.0
  *
- * transfer is excluded (D3 neutral).
+ * Phase 3.0: transfer with direction='inbound' adds, outbound/NULL subtracts.
+ * External person-to-person transfers have direction=NULL → treated as outbound (debit).
  * SEC-02: All arithmetic in PostgreSQL NUMERIC — no JS float.
  * SEC-03: explicit workspace_id filter (no RLS dependency in background worker).
  *
@@ -693,6 +696,16 @@ export async function getAccountBalanceForPreview(
              THEN t.base_amount END), 0)
          - COALESCE(SUM(CASE
              WHEN t.transaction_intent IN ('expense', 'debt_given')
+              AND t.base_currency = a.currency
+             THEN t.base_amount END), 0)
+         + COALESCE(SUM(CASE
+             WHEN t.transaction_intent = 'transfer'
+              AND t.transfer_direction = 'inbound'
+              AND t.base_currency = a.currency
+             THEN t.base_amount END), 0)
+         - COALESCE(SUM(CASE
+             WHEN t.transaction_intent = 'transfer'
+              AND (t.transfer_direction = 'outbound' OR t.transfer_direction IS NULL)
               AND t.base_currency = a.currency
              THEN t.base_amount END), 0)
        )::TEXT AS balance
@@ -766,7 +779,9 @@ export interface WorkspaceAccountEntry {
  * Used by ai-parse.worker.ts to build the account picker keyboard directly,
  * without going through the telegram-bot service layer.
  *
- * Balance formula: same D1-D3 as getAccountBalanceForPreview.
+ * Balance formula: SAME direction-aware formula as balance.service.ts (Phase 3.0).
+ * Phase 3.0: transfer with direction='inbound' adds, outbound/NULL subtracts.
+ * External person-to-person transfers have direction=NULL → treated as outbound (debit).
  * SEC-01: returns only names + IDs (no sensitive financial metadata beyond balance).
  * SEC-03: workspace_id filter; excludes deleted + onboarding-placeholder rows.
  *
@@ -789,6 +804,16 @@ export async function getWorkspaceAccountsForPicker(
              THEN t.base_amount END), 0)
          - COALESCE(SUM(CASE
              WHEN t.transaction_intent IN ('expense', 'debt_given')
+              AND t.base_currency = a.currency
+             THEN t.base_amount END), 0)
+         + COALESCE(SUM(CASE
+             WHEN t.transaction_intent = 'transfer'
+              AND t.transfer_direction = 'inbound'
+              AND t.base_currency = a.currency
+             THEN t.base_amount END), 0)
+         - COALESCE(SUM(CASE
+             WHEN t.transaction_intent = 'transfer'
+              AND (t.transfer_direction = 'outbound' OR t.transfer_direction IS NULL)
               AND t.base_currency = a.currency
              THEN t.base_amount END), 0)
        )::TEXT AS balance
