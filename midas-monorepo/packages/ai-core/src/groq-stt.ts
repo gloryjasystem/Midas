@@ -24,20 +24,8 @@ const GROQ_STT_ENDPOINT = 'https://api.groq.com/openai/v1/audio/transcriptions';
 const REQUEST_TIMEOUT_MS = 15_000;
 const LLM_TIMEOUT_MS     = 8_000;
 
-// ─────────────────────────────────────────────────────────────
-// xAI STT prompt — biases decoder toward crypto tickers
-//
-// Injected as `prompt` field in the xAI STT request (same mechanism
-// as Groq/OpenAI Whisper). Seeds the decoder with "USDT" so the model
-// prefers USDT over USD when the user says "USDT" or "юсдт" etc.
-// SEC-12: this is a static system string — no user data.
-// ─────────────────────────────────────────────────────────────
-
-const XAI_STT_CRYPTO_PROMPT =
-  'USDT USDC BTC ETH TON SOL TRX XRP MATIC. ' +
-  'Tether USDT. Купил USDT. Перевёл USDT. Продал USDT. ' +
-  'Десять тысяч USDT. Сто USDT. Тысяча USDT. ' +
-  'юсдт юздт тезер тезеры.';
+// NOTE: xAI STT does NOT support a `prompt` field — only language+file.
+// (Confirmed: adding extra FormData fields breaks xAI's number rendering.)
 
 // ─────────────────────────────────────────────────────────────
 // Groq Whisper prompt (used only when GROQ_API_KEY is set)
@@ -179,9 +167,10 @@ async function transcribeWithXai(
   // language first — xAI ordering requirement
   formData.append('language', language);
 
-  // prompt: seeds the decoder context to prefer USDT over USD and other
-  // crypto tickers over phonetically similar words. Must come before `file`.
-  formData.append('prompt', XAI_STT_CRYPTO_PROMPT);
+  // NOTE: xAI STT does NOT support `prompt`, `temperature`, or any extra
+  // FormData fields. Adding unknown fields causes xAI to switch from
+  // word-based rendering to digit mode — dropping scale words (тысяч etc.).
+  // ONLY language + file are sent. (confirmed broken in commit 1d79738)
 
   // File LAST — xAI strict ordering requirement
   const ab = audioBuffer.buffer.slice(
@@ -190,6 +179,7 @@ async function transcribeWithXai(
   ) as ArrayBuffer;
   const blob = new Blob([ab], { type: 'audio/ogg' });
   formData.append('file', blob, filename);
+
 
   const controller = new AbortController();
   const timeout = setTimeout(() => { controller.abort(); }, REQUEST_TIMEOUT_MS);
