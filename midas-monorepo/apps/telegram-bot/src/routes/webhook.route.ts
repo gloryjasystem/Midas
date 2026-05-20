@@ -7195,9 +7195,8 @@ Midas создан, чтобы сделать учет денег максима
             await redisConnection.del(ptRateKey);
 
             // Обновляем inbound-ногу: base_amount, original_amount, exchange_rate
+            // rWsId и rUserId взяты напрямую из Redis ключа — resolveWorkspace не нужен.
             try {
-              const resolved = await resolveWorkspace(telegramUserId, chatId);
-              if (resolved.workspaceId !== rWsId) throw new Error('workspace mismatch');
 
               await withTenantTransaction(rWsId, rUserId, async (c) => {
                 // Получаем outbound сумму для пересчёта курса
