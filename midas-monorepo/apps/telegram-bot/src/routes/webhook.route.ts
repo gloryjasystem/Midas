@@ -4493,7 +4493,11 @@ Midas создан, чтобы сделать учет денег максима
           const ptResolved = await resolveWorkspace(telegramUserId, chatId);
 
           // ── pt:edit — показать меню редактирования ───────────────────────────
+          // При входе чистим Redis-ключ rate: навигация «Назад» из rate-prompt
+          // попадает сюда через pt:edit, ключ должен быть удалён.
           if (ptCmd === 'edit') {
+            try { await redisConnection.del(`midas:pt_rate:${chatId}`); } catch { /* non-fatal */ }
+
             const ptTxData = await withTenantTransaction(
               ptResolved.workspaceId, ptResolved.userId,
               async (c) => {
@@ -4537,7 +4541,8 @@ Midas создан, чтобы сделать учет денег максима
                 inline_keyboard: [
                   ...(isXfx ? [[{ text: '💱 Изменить курс конвертации', callback_data: `pt:rate:${ptTxId}` }]] : []),
                   [{ text: '🗑️ Удалить перевод', callback_data: `pt:del:ask:${ptTxId}` }],
-                  [{ text: '✖️ Отмена',           callback_data: `pt:cancel:${ptTxId}` }],
+                  // Cancel из меню → восстановить исходную карточку перевода
+                  [{ text: '✖️ Отмена',           callback_data: `pt:back:${ptTxId}` }],
                 ],
               });
             }
@@ -4579,7 +4584,8 @@ Midas создан, чтобы сделать учет денег максима
                 '',
                 `<i>Введите сумму в ${ptRateData.in_cur}:</i>`,
               ].join('\n'), {
-                inline_keyboard: [[{ text: '✖️ Отмена', callback_data: `pt:cancel:${ptTxId}` }]],
+                // Cancel из запроса курса → назад в меню (pt:edit)
+                inline_keyboard: [[{ text: '✖️ Назад', callback_data: `pt:edit:${ptTxId}` }]],
               });
             }
 
@@ -4626,17 +4632,51 @@ Midas создан, чтобы сделать учет денег максима
               ].join('\n'), {
                 inline_keyboard: [[
                   { text: '✅ Да, удалить', callback_data: `pt:del:yes:${ptTxId}` },
-                  { text: '✖️ Отмена',    callback_data: `pt:cancel:${ptTxId}` },
+                  // Cancel из подтверждения → назад в меню (pt:edit)
+                  { text: '✖️ Назад',       callback_data: `pt:edit:${ptTxId}` },
                 ]],
               });
             }
 
           // ── pt:del:yes — выполнить удаление обеих ног ───────────────────────
+          // Сначала читаем данные ДО удаления — для финального сообщения с инвертированными знаками.
           } else if (ptCmd === 'del' && ptSub === 'yes') {
+            const ptDelYesData = await withTenantTransaction(
+              ptResolved.workspaceId, ptResolved.userId,
+              async (c) => {
+                const r = await c.query<{
+                  out_acct: string; out_amt: string; out_cur: string;
+                  in_acct: string;  in_amt: string;  in_cur: string;
+                }>(
+                  `SELECT
+                     src.name AS out_acct,
+                     out.base_amount::text AS out_amt, out.base_currency AS out_cur,
+                     tgt.name AS in_acct,
+                     inp.base_amount::text AS in_amt, inp.base_currency AS in_cur
+                   FROM transactions out
+                   JOIN account_sources src ON src.id = out.account_id
+                   JOIN transactions inp
+                     ON inp.transfer_group_id = out.transfer_group_id
+                    AND inp.transfer_direction = 'inbound'
+                    AND inp.workspace_id = $2
+                   JOIN account_sources tgt ON tgt.id = inp.account_id
+                   WHERE out.id = $1 AND out.workspace_id = $2 AND out.deleted_at IS NULL`,
+                  [ptTxId, ptResolved.workspaceId],
+                );
+                return r.rows[0] ?? null;
+              },
+            );
+
             const delResult = await softDeletePairedTransfer(ptTxId, ptResolved.workspaceId, ptResolved.userId);
-            if (delResult.status === 'ok') {
-              void upsertBotMessage(telegramUserId, chatId,
-                '🗑️ <b>Перевод удалён</b>\n\nБалансы обоих счётов пересчитаны.');
+            if (delResult.status === 'ok' && ptDelYesData) {
+              // Терминальное состояние — без кнопок. Показываем что изменилось (инвертированные знаки).
+              void upsertBotMessage(telegramUserId, chatId, [
+                '🗑️ <b>Перевод удалён</b>',
+                '',
+                '<i>Изменение балансов:</i>',
+                `• ${escapeHtml(ptDelYesData.out_acct)} +${ptDelYesData.out_amt} ${ptDelYesData.out_cur}`,
+                `• ${escapeHtml(ptDelYesData.in_acct)} −${ptDelYesData.in_amt} ${ptDelYesData.in_cur}`,
+              ].join('\n'));
               request.log.info({ msg: '[midas:pt:del:yes] paired transfer deleted', workspaceId: ptResolved.workspaceId });
             } else if (delResult.status === 'already_deleted') {
               void upsertBotMessage(telegramUserId, chatId, 'ℹ️ Перевод уже был удалён.');
@@ -4644,14 +4684,69 @@ Midas создан, чтобы сделать учет денег максима
               void upsertBotMessage(telegramUserId, chatId, '⚠️ Перевод не найден.');
             }
 
-          // ── pt:cancel — закрыть меню ─────────────────────────────────────────
-          } else if (ptCmd === 'cancel') {
-            try { await redisConnection.del(`midas:pt_rate:${chatId}`); } catch { /* non-fatal */ }
-            const ptCancelMsgId = await getActiveMessageId(telegramUserId, chatId);
-            if (ptCancelMsgId) {
-              void deleteMessage(chatId, ptCancelMsgId);
-              void clearActiveMessageId(telegramUserId, chatId);
+          // ── pt:back — восстановить карточку перевода ────────────────────────
+          // Вызывается Cancel из меню редактирования (pt:edit).
+          // Перестраивает карточку Вариант 1Б и добавляет [✏️ Изменить запись].
+          } else if (ptCmd === 'back') {
+            const { formatAmount, calcRate, formatPairedTime } = await import('../utils/screen-builder.js');
+
+            const ptBackData = await withTenantTransaction(
+              ptResolved.workspaceId, ptResolved.userId,
+              async (c) => {
+                const r = await c.query<{
+                  out_acct: string; out_amt: string; out_cur: string;
+                  in_acct: string;  in_amt: string;  in_cur: string;
+                  tx_time: string;
+                }>(
+                  `SELECT
+                     src.name AS out_acct,
+                     out.base_amount::text AS out_amt, out.base_currency AS out_cur,
+                     tgt.name AS in_acct,
+                     inp.base_amount::text AS in_amt, inp.base_currency AS in_cur,
+                     out.transaction_time::text AS tx_time
+                   FROM transactions out
+                   JOIN account_sources src ON src.id = out.account_id
+                   JOIN transactions inp
+                     ON inp.transfer_group_id = out.transfer_group_id
+                    AND inp.transfer_direction = 'inbound'
+                    AND inp.workspace_id = $2
+                   JOIN account_sources tgt ON tgt.id = inp.account_id
+                   WHERE out.id = $1 AND out.workspace_id = $2 AND out.deleted_at IS NULL`,
+                  [ptTxId, ptResolved.workspaceId],
+                );
+                return r.rows[0] ?? null;
+              },
+            );
+
+            if (!ptBackData) {
+              void upsertBotMessage(telegramUserId, chatId, '⚠️ Перевод не найден или уже удалён.');
+            } else {
+              const isXfx = ptBackData.out_cur !== ptBackData.in_cur;
+              const cardLines: string[] = [
+                '✅ <b>Перевод записан</b>',
+                '🔄 Внутренний перевод',
+                '',
+                `🏦 <b>${escapeHtml(ptBackData.out_acct)}</b> · ${ptBackData.out_cur}`,
+                `<blockquote>− ${formatAmount(ptBackData.out_amt)} ${ptBackData.out_cur}</blockquote>`,
+                '',
+                `🏦 <b>${escapeHtml(ptBackData.in_acct)}</b> · ${ptBackData.in_cur}`,
+                `<blockquote>+ ${formatAmount(ptBackData.in_amt)} ${ptBackData.in_cur}</blockquote>`,
+                ...(isXfx ? [
+                  '',
+                  `💱 ${calcRate(ptBackData.out_amt, ptBackData.in_amt) ?? '?'} ${ptBackData.in_cur}/${ptBackData.out_cur}`,
+                ] : []),
+                `🕐 ${formatPairedTime(ptBackData.tx_time)}`,
+              ];
+              void upsertBotMessage(telegramUserId, chatId, cardLines.join('\n'), {
+                inline_keyboard: [[
+                  { text: '✏️ Изменить запись', callback_data: `pt:edit:${ptTxId}` },
+                ]],
+              });
             }
+            request.log.info({ msg: '[midas:pt:back] card restored', workspaceId: ptResolved.workspaceId });
+
+          } else {
+            request.log.warn({ msg: '[midas:pt] unknown pt cmd', ptCmd });
           }
 
         } catch (ptErr: unknown) {
@@ -7124,21 +7219,63 @@ Midas создан, чтобы сделать учет денег максима
                 );
               });
 
-              const { formatAmount, calcRate } = await import('../utils/screen-builder.js');
-              const outRow2 = await withTenantTransaction(rWsId, rUserId, async (c) => {
-                const r = await c.query<{ base_amount: string; base_currency: string }>(
-                  `SELECT base_amount::text, base_currency FROM transactions WHERE id = $1 AND workspace_id = $2`,
+              const { formatAmount, calcRate, formatPairedTime } = await import('../utils/screen-builder.js');
+              // Перестраиваем полную карточку перевода с обновлёнными данными
+              const fullCard = await withTenantTransaction(rWsId, rUserId, async (c) => {
+                const r = await c.query<{
+                  out_acct: string; out_amt: string; out_cur: string;
+                  in_acct: string;  in_amt: string;  in_cur: string;
+                  tx_time: string;
+                }>(
+                  `SELECT
+                     src.name AS out_acct,
+                     out.base_amount::text AS out_amt, out.base_currency AS out_cur,
+                     tgt.name AS in_acct,
+                     inp.base_amount::text AS in_amt, inp.base_currency AS in_cur,
+                     out.transaction_time::text AS tx_time
+                   FROM transactions out
+                   JOIN account_sources src ON src.id = out.account_id
+                   JOIN transactions inp
+                     ON inp.transfer_group_id = out.transfer_group_id
+                    AND inp.transfer_direction = 'inbound'
+                    AND inp.workspace_id = $2
+                   JOIN account_sources tgt ON tgt.id = inp.account_id
+                   WHERE out.id = $1 AND out.workspace_id = $2 AND out.deleted_at IS NULL`,
                   [rOutId, rWsId],
                 );
                 return r.rows[0] ?? null;
               });
-              const rate = outRow2 ? calcRate(outRow2.base_amount, newInAmt) : null;
-              void upsertBotMessage(telegramUserId, chatId, [
-                '✅ <b>Курс обновлён</b>',
-                '',
-                `📥 Теперь: <code>+${formatAmount(newInAmt)} ${rInCur}</code>`,
-                ...(rate && outRow2 ? [`💱 Курс: ${rate} ${rInCur}/${outRow2.base_currency}`] : []),
-              ].join('\n'));
+
+              if (fullCard) {
+                const isXfxCard = fullCard.out_cur !== fullCard.in_cur;
+                const cardLines: string[] = [
+                  '✅ <b>Перевод записан</b>',
+                  '🔄 Внутренний перевод',
+                  '',
+                  `🏦 <b>${escapeHtml(fullCard.out_acct)}</b> · ${fullCard.out_cur}`,
+                  `<blockquote>− ${formatAmount(fullCard.out_amt)} ${fullCard.out_cur}</blockquote>`,
+                  '',
+                  `🏦 <b>${escapeHtml(fullCard.in_acct)}</b> · ${fullCard.in_cur}`,
+                  `<blockquote>+ ${formatAmount(fullCard.in_amt)} ${fullCard.in_cur}</blockquote>`,
+                  ...(isXfxCard ? [
+                    '',
+                    `💱 ${calcRate(fullCard.out_amt, fullCard.in_amt) ?? '?'} ${fullCard.in_cur}/${fullCard.out_cur}`,
+                  ] : []),
+                  `🕐 ${formatPairedTime(fullCard.tx_time)}`,
+                ];
+                void upsertBotMessage(telegramUserId, chatId, cardLines.join('\n'), {
+                  inline_keyboard: [[
+                    { text: '✏️ Изменить запись', callback_data: `pt:edit:${rOutId}` },
+                  ]],
+                });
+              } else {
+                // Запасной вариант — минималистичное подтверждение
+                void upsertBotMessage(telegramUserId, chatId, [
+                  '✅ <b>Курс обновлён</b>',
+                  '',
+                  `📥 Теперь: <code>+${formatAmount(newInAmt)} ${rInCur}</code>`,
+                ].join('\n'));
+              }
               request.log.info({ msg: '[midas:pt:rate] inbound amount updated', workspaceId: rWsId });
             } catch (ptRateErr: unknown) {
               const errClass = ptRateErr instanceof Error ? ptRateErr.constructor.name : 'UnknownError';

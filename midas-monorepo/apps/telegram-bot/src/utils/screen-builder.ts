@@ -366,6 +366,15 @@ function formatTransactionTime(iso: string): string {
 }
 
 /**
+ * Public alias of formatTransactionTime for use in webhook handlers
+ * that rebuild paired-transfer confirmation cards (pt:back, pt:rate success).
+ * Format: "10:32, 20 мая"
+ */
+export function formatPairedTime(iso: string): string {
+  return formatTransactionTime(iso);
+}
+
+/**
  * Build the post-confirmation "Записано" card.
  *
  * Layout (no account):
