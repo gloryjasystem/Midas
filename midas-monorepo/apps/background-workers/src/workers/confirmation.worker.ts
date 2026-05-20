@@ -40,6 +40,10 @@ import {
   buildNotFoundScreen,
   buildIntentMissingScreen,
   buildPostConfirmKeyboard,
+  buildPairedEditKeyboard,
+  formatPairedTime,
+  formatAmount,
+  calcRate,
 } from '../utils/screen-builder.js';
 
 // ─────────────────────────────────────────────────────────────
@@ -169,27 +173,42 @@ async function processConfirmation(job: Job<CallbackConfirmJobPayload>): Promise
       // Use explicit type assertion after the discriminant check so TS narrows correctly.
       if (('outboundTxId' in result) && result.outcome === 'approved') {
         const paired = result as Extract<PairedTransferResult, { outcome: 'approved' }>;
-        // Build paired transfer success card
-        notificationMessage = [
+
+        // ── Вариант 1Б: blockquote только на суммах, остальное — обычный текст ──
+        // Формат совпадает с buildConfirmedScreen для одиночных транзакций.
+        const isXfx = paired.inCurrency !== paired.outCurrency;
+        const lines: string[] = [
           '✅ <b>Перевод записан</b>',
-          '',
           '🔄 Внутренний перевод',
-          '━━━━━━━━━━━━━━━━━━━━━━━',
-          `📤 <b>${paired.sourceAccount}</b>`,
-          `    − <code>${paired.outAmount} ${paired.outCurrency}</code>`,
-          paired.balanceAfterSource
-            ? `    Остаток: <code>${paired.balanceAfterSource} ${paired.outCurrency}</code>`
-            : '',
           '',
-          `📥 <b>${paired.targetAccount}</b>`,
-          `    + <code>${paired.inAmount} ${paired.inCurrency}</code>`,
-          paired.balanceAfterTarget
-            ? `    Остаток: <code>${paired.balanceAfterTarget} ${paired.inCurrency}</code>`
-            : '',
-          '━━━━━━━━━━━━━━━━━━━━━━━',
-          `🕐 ${new Date(paired.transactionTime).toLocaleString('ru-RU', { timeZone: 'UTC' })}`,
-        ].filter(Boolean).join('\n');
-        inlineKeyboardJson = undefined; // No post-confirm action for paired transfers
+          // ── Outbound leg ──────────────────────────────────────────────────
+          `🏦 <b>${paired.sourceAccount}</b> · ${paired.outCurrency}`,
+          // blockquote: только сумма списания — зелёная плашка слева в Telegram
+          `<blockquote>− ${formatAmount(paired.outAmount)} ${paired.outCurrency}</blockquote>`,
+          ...(paired.balanceAfterSource
+            ? [`   Остаток: ${formatAmount(paired.balanceAfterSource)} ${paired.outCurrency}`]
+            : []),
+          '',
+          // ── Inbound leg ───────────────────────────────────────────────────
+          `🏦 <b>${paired.targetAccount}</b> · ${paired.inCurrency}`,
+          `<blockquote>+ ${formatAmount(paired.inAmount)} ${paired.inCurrency}</blockquote>`,
+          ...(paired.balanceAfterTarget
+            ? [`   Остаток: ${formatAmount(paired.balanceAfterTarget)} ${paired.inCurrency}`]
+            : []),
+          // ── XFX rate (только при разных валютах) ─────────────────────────
+          ...(isXfx ? [
+            '',
+            `💱 ${calcRate(paired.outAmount, paired.inAmount) ?? '?'} ${paired.inCurrency}/${paired.outCurrency}`,
+          ] : []),
+          // ── Время в формате «10:32, 20 мая» ──────────────────────────────
+          `🕐 ${formatPairedTime(paired.transactionTime)}`,
+        ];
+        notificationMessage = lines.join('\n');
+
+        // Кнопка «Изменить запись» — используем outboundTxId как якорь
+        inlineKeyboardJson = JSON.stringify(
+          buildPairedEditKeyboard(paired.outboundTxId),
+        );
       } else {
         // Standard single-leg approve
         const std = result as Exclude<typeof result, { outboundTxId: string }>;

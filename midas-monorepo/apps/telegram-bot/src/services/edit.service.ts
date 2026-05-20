@@ -430,6 +430,52 @@ export async function softDeleteTransaction(
   });
 }
 
+/**
+ * Soft-delete BOTH legs of an internal paired transfer atomically.
+ *
+ * Finds the transfer_group_id from outboundTxId, then sets deleted_at = NOW()
+ * on ALL transactions sharing that group (outbound + inbound).
+ *
+ * D1: workspace_id check on initial SELECT.
+ * D3: withTenantTransaction — single atomic UPDATE.
+ * SEC-12: No amounts logged.
+ *
+ * Returns:
+ *   'ok'             — both legs deleted.
+ *   'not_found'      — outboundTxId not found or not a paired transfer.
+ *   'already_deleted'— transfer was already soft-deleted.
+ */
+export async function softDeletePairedTransfer(
+  outboundTxId: string,
+  workspaceId: string,
+  userId: string,
+): Promise<UpdateResult> {
+  if (!ULID_RE.test(outboundTxId)) return { status: 'not_found' };
+
+  return withTenantTransaction(workspaceId, userId, async (client) => {
+    // Step 1: fetch transfer_group_id + delete status (D1 + D6).
+    const check = await client.query<{ transfer_group_id: string | null; deleted_at: string | null }>(
+      `SELECT transfer_group_id, deleted_at
+       FROM transactions
+       WHERE id = $1 AND workspace_id = $2`,
+      [outboundTxId, workspaceId],
+    );
+    if (check.rows.length === 0) return { status: 'not_found' };
+    const { transfer_group_id, deleted_at } = check.rows[0]!;
+    if (!transfer_group_id) return { status: 'not_found' }; // not a paired transfer
+    if (deleted_at !== null) return { status: 'already_deleted' };
+
+    // Step 2: soft-delete ALL legs sharing the same transfer_group_id.
+    await client.query(
+      `UPDATE transactions
+       SET deleted_at = NOW()
+       WHERE transfer_group_id = $1 AND workspace_id = $2 AND deleted_at IS NULL`,
+      [transfer_group_id, workspaceId],
+    );
+    return { status: 'ok' };
+  });
+}
+
 /** Fetch all accounts for this workspace (for account picker), including running balance.
  * Balance formula mirrors balance.service.ts (D2: NUMERIC-only arithmetic in PostgreSQL).
  * Only active (non-deleted) accounts are returned; deleted ones retain historical tx links.

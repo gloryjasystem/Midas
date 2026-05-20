@@ -589,6 +589,38 @@ export function buildPostConfirmKeyboard(transactionId: string): InlineKeyboard 
 }
 
 /**
+ * Кнопка «Изменить запись» для подтверждённого парного (внутреннего) перевода.
+ * callback_data: pt:edit:{outboundTxId}
+ * outboundTxId — ULID исходящей ноги; используется как ключ для поиска обеих ног
+ * через transfer_group_id.
+ */
+export function buildPairedEditKeyboard(outboundTxId: string): InlineKeyboard {
+  return {
+    inline_keyboard: [[
+      { text: '✏️ Изменить запись', callback_data: `pt:edit:${outboundTxId}` },
+    ]],
+  };
+}
+
+/**
+ * Format ISO timestamp to Russian short form for paired transfer card.
+ * Output: "10:32, 20 мая"  (same style as buildConfirmedScreen / formatTransactionTime)
+ */
+export function formatPairedTime(iso: string): string {
+  try {
+    const d = new Date(iso);
+    const hh = d.getUTCHours().toString().padStart(2, '0');
+    const mm = d.getUTCMinutes().toString().padStart(2, '0');
+    const months = ['янв', 'фев', 'мар', 'апр', 'мая', 'июн',
+                    'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
+    const month = months[d.getUTCMonth()] ?? '';
+    return `${hh}:${mm}, ${d.getUTCDate()} ${month}`;
+  } catch {
+    return '';
+  }
+}
+
+/**
  * Phase 1.36-UX: Reply Keyboard to re-activate the persistent bottom navigation.
  * Used in the sendMessage path (reject/expire) where editMessageText cannot carry
  * a ReplyKeyboardMarkup. Labels MUST match NAV_BTN_* constants in webhook.route.ts.
