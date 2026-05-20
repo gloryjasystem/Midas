@@ -1069,7 +1069,31 @@ export function createAiParseWorker(): Worker<AiParseJobPayload> {
         sanitizeErr instanceof Error ? sanitizeErr.constructor.name : 'UnknownError';
       console.error('[midas:ai-parse-worker] Sanitize catch', { errorClass: errClass });
     });
+
+    // ── Phase 3.1: Notify user on final failure so they know to retry ──
+    // Only notify on final failure (no more retries left)
+    const maxAttempts = job?.opts.attempts ?? 1;
+    const isFinalFail = (job?.attemptsMade ?? 0) >= maxAttempts;
+    if (isFinalFail && job?.data.chatId) {
+      const failChatId = String(job.data.chatId);
+      const failAlertId = ulid();
+      void notificationsQueue.add(
+        QUEUE_NAMES.NOTIFICATIONS,
+        {
+          alertId: failAlertId,
+          workspaceId: job.data.workspaceId ?? 'unknown',
+          chatId: failChatId,
+          message:
+            '⚠️ <b>Не удалось обработать сообщение</b>\n\n' +
+            'ИИ временно недоступен. Попробуйте отправить сообщение ещё раз через несколько секунд.',
+        },
+        { jobId: IdempotencyKeyBuilder.notification(job.data.workspaceId ?? 'unknown', failAlertId) },
+      ).catch(() => { /* Non-fatal: secondary notification failure */ });
+    }
   });
+
+
+
 
   return worker;
 }

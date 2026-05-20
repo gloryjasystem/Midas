@@ -68,10 +68,10 @@ export const webhookIngestionQueue = new Queue<WebhookIngestionJobPayload>(
 // ─────────────────────────────────────────────────────────────
 
 const aiParseDefaultJobOptions: DefaultJobOptions = {
-  attempts: 2,
+  attempts: 3, // Phase 3.1: 3 retries for resilience against Anthropic InternalServerError
   backoff: {
-    type: 'fixed',
-    delay: 5000, // 5s fixed — Claude API rate limit recovery
+    type: 'exponential',
+    delay: 5000, // 5s → 10s → 20s — covers Anthropic transient 500 errors
   },
   removeOnComplete: {
     count: 500,
@@ -83,6 +83,7 @@ const aiParseDefaultJobOptions: DefaultJobOptions = {
     age: 86_400, // 24 hours in seconds (ADR-013 draft TTL matches)
   },
 };
+
 
 export const aiParseQueue = new Queue<AiParseJobPayload>(QUEUE_NAMES.AI_PARSE, {
   connection: redisConnection,
