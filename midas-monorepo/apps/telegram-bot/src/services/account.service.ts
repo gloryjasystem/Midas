@@ -565,11 +565,15 @@ async function findNextAvailableName(
   workspaceId: string,
   baseName: string,
 ): Promise<string> {
-  // Fetch all names matching "baseName" or "baseName N" (N = integer)
+  // Fetch all names matching "baseName" or "baseName N" (N = integer).
+  // NOTE: We do NOT filter by deleted_at IS NULL here because the UNIQUE index
+  // (account_sources_workspace_id_name_key) covers ALL rows — including
+  // soft-deleted ones. If we only checked active names, we might pick a name
+  // like "Binance 2" that is soft-deleted, and the INSERT would fail with a
+  // constraint violation (DatabaseError).
   const res = await client.query<{ name: string }>(
     `SELECT name FROM account_sources
      WHERE workspace_id = $1
-       AND deleted_at IS NULL
        AND (name = $2 OR name LIKE $2 || ' %')`,
     [workspaceId, baseName],
   );
@@ -637,7 +641,37 @@ export async function addAccountReturningId(
         return { status: 'created', accountId };
       }
 
-      // ── Attempt 2: auto-suffix ──────────────────────────────────────────
+      // ── Attempt 1b: check if conflict was with a soft-deleted row ───────
+      // The UNIQUE index covers ALL rows (including soft-deleted), so
+      // ON CONFLICT fires even when the existing row has deleted_at set.
+      // If that's the case, reactivate the soft-deleted row with new currency
+      // instead of creating a confusing "Binance 3" when "Binance" was merely deleted.
+      const reactivated = await client.query<{ id: string }>(
+        `UPDATE account_sources
+         SET deleted_at = NULL,
+             currency = $4,
+             updated_at = NOW()
+         WHERE workspace_id = $1
+           AND name = $2
+           AND deleted_at IS NOT NULL
+         RETURNING id`,
+        [workspaceId, name, accountId, currency],
+      );
+
+      if ((reactivated.rowCount ?? 0) > 0) {
+        const reactivatedId = reactivated.rows[0]!.id;
+        // Set workspace defaults if needed
+        await client.query(
+          `UPDATE workspaces
+           SET default_expense_account_id = COALESCE(default_expense_account_id, $1),
+               default_income_account_id  = COALESCE(default_income_account_id,  $1)
+           WHERE id = $2`,
+          [reactivatedId, workspaceId],
+        );
+        return { status: 'created', accountId: reactivatedId };
+      }
+
+      // ── Attempt 2: auto-suffix (name taken by an ACTIVE account) ────────
       const suffixedName = await findNextAvailableName(client, workspaceId, name);
       const suffixedId = generateUlid();
 

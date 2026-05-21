@@ -31,11 +31,11 @@
 |---|---|
 | **PHASE** | Phase 2: Account Onboarding — Duplicate Name Handling (AC-DUP) |
 | **STEP** | Сессия 2026-05-21 13:20–16:55 (UTC+3). Реализован Variant 4 авто-суффикса дублирующих имён счетов + серия UX-фиксов ac:more. Тестирование завершено. |
-| **AGENT STATUS** | tsc 0 errors (bg-workers + telegram-bot). Commits: fe7f577 → 557ff67 → 786024f. Pushed to main. Railway auto-deploy triggered. |
+| **AGENT STATUS** | tsc 0 errors (bg-workers + telegram-bot). Commits: 786024f → 8e5014a. Pushed to main. Railway auto-deploy triggered. |
 | **DEPLOYMENT** | Railway (spirited-happiness) — Midas Online, background-workers Online. Health: https://midas-production-f4f1.up.railway.app/health > ok |
 | **DB STATE** | Без изменений. Все миграции применены ✅. account_sources НЕ имеет колонки balance — баланс вычисляется CTE из transactions. UNIQUE(workspace_id, name) constraint активен. |
 | **DATABASE_URL (public)** | `postgresql://postgres:PLLSqArtPUoQsAYmvrpsmavfQMewgTRh@hopper.proxy.rlwy.net:46284/railway` |
-| **LAST COMPLETED** | Phase 3.1-FIX: inline account creation during active draft — properly returns to draft with updated currency + transfer target picker routing. showDraftAfterAccountCreation() helper. Commit: 786024f. |
+| **LAST COMPLETED** | Phase 3.1-FIX v2: transfer account creation returns to SOURCE picker (not target), new account first in list. showDraftAfterAccountCreation() v2. Commit: 8e5014a. |
 | **BLOCKER** | None. |
 | **NEXT ACTION** | 1. Тестировать Phase 3.1-FIX (inline account creation + transfer routing). 2. Phase 3.1 — расширение словаря детектора категорий. 3. Phase 3.2 — Report 3.0 (категорийная аналитика). |
 
