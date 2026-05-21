@@ -649,13 +649,13 @@ export async function addAccountReturningId(
       const reactivated = await client.query<{ id: string }>(
         `UPDATE account_sources
          SET deleted_at = NULL,
-             currency = $4,
+             currency = $3,
              updated_at = NOW()
          WHERE workspace_id = $1
            AND name = $2
            AND deleted_at IS NOT NULL
          RETURNING id`,
-        [workspaceId, name, accountId, currency],
+        [workspaceId, name, currency],
       );
 
       if ((reactivated.rowCount ?? 0) > 0) {
