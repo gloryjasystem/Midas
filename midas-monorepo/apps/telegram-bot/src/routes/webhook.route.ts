@@ -4572,8 +4572,7 @@ Midas создан, чтобы сделать учет денег максима
               workspaceId: tpResolved.workspaceId,
             };
             await callbackConfirmQueue.add('approve_paired', payload, { removeOnComplete: true, removeOnFail: 100 });
-            // Optimistic UI: show spinner while worker processes
-            if (tpMsgId) void editMessageText(chatId, tpMsgId, '⏳ Записываю перевод...');
+
 
           // ── tp:newac:{draftId} — «➕ Создать счёт» on target picker ──
           } else if (tpCmd === 'newac') {
