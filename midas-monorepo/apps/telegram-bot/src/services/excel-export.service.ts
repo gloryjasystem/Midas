@@ -1556,7 +1556,7 @@ function buildSheet1(wb: ExcelJS.Workbook, rows: TxRow[], from: Date, to: Date, 
     ['Операция',                    18],  // D=4
     ['Исполнитель',                 16],  // E=5
     ['Счёт',                        18],  // F=6
-    ['Вал.\nсчёта',                  8],  // G=7
+    ['Вал.\nсчёта',                 18],  // G=7  — widened for cross-ccy transfers like "UAH → USDT"
     ['Сумма',                       18],  // H=8
     ['Курс к USD',                  28],  // I=9 — widened for rate text
     ['≈ USD',                       14],  // J=10
@@ -1777,7 +1777,7 @@ function buildSheet1(wb: ExcelJS.Workbook, rows: TxRow[], from: Date, to: Date, 
       // Alignment by column type
       const horiz =
         (ci === 7 || ci === 13) ? 'right' as const :
-        (ci === 0 || ci === 1 || ci === 2 || ci === 6 || ci === 11) ? 'center' as const :
+        (ci === 0 || ci === 1 || ci === 2 || ci === 6 || ci === 10 || ci === 11) ? 'center' as const :
         'left' as const;
       cell.alignment = { vertical: 'middle', horizontal: horiz };
       // D=4 (ci=3): Операция — colour + bold
