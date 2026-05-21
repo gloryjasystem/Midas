@@ -735,10 +735,12 @@ export type PairedTransferResult =
       outAmount:      string;
       outCurrency:    string;
       sourceAccount:  string;
+      balanceBeforeSource: string | null;
       balanceAfterSource: string | null;
       inAmount:       string;
       inCurrency:     string;
       targetAccount:  string;
+      balanceBeforeTarget: string | null;
       balanceAfterTarget: string | null;
       transactionTime: string;
     }
@@ -951,6 +953,18 @@ export async function approvePairedTransfer(
       client.query<{ balance: string }>(BALANCE_SQL, [workspaceId, draft.transfer_target_account_id]),
     ]);
 
+    // Compute balanceBefore for both legs via numericReverse:
+    // outbound subtracted → balanceBefore = balanceAfter + outAmount
+    // inbound added      → balanceBefore = balanceAfter - inAmount
+    const balanceAfterSrcRaw = srcSnap.rows[0]?.balance ?? null;
+    const balanceAfterTgtRaw = tgtSnap.rows[0]?.balance ?? null;
+    const balanceBeforeSrcRaw = balanceAfterSrcRaw !== null
+      ? (() => { try { return numericReverse(balanceAfterSrcRaw, amountStr, false); } catch { return null; } })()
+      : null;
+    const balanceBeforeTgtRaw = balanceAfterTgtRaw !== null
+      ? (() => { try { return numericReverse(balanceAfterTgtRaw, inboundAmountStr, true); } catch { return null; } })()
+      : null;
+
     return {
       outcome:            'approved',
       outboundTxId,
@@ -959,11 +973,13 @@ export async function approvePairedTransfer(
       outAmount:          amountStr,
       outCurrency:        currency,
       sourceAccount:      srcName,
-      balanceAfterSource: srcSnap.rows[0]?.balance ?? null,
-      inAmount:           inboundAmountStr,   // XFX fix: actual credited amount
-      inCurrency:         inboundCurrency,    // XFX fix: target account currency
+      balanceBeforeSource: balanceBeforeSrcRaw,
+      balanceAfterSource: balanceAfterSrcRaw,
+      inAmount:           inboundAmountStr,
+      inCurrency:         inboundCurrency,
       targetAccount:      targetAcct.name,
-      balanceAfterTarget: tgtSnap.rows[0]?.balance ?? null,
+      balanceBeforeTarget: balanceBeforeTgtRaw,
+      balanceAfterTarget: balanceAfterTgtRaw,
       transactionTime:    new Date().toISOString(),
     };
   });

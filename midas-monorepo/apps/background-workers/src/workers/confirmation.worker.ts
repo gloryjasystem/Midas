@@ -44,7 +44,9 @@ import {
   formatPairedTime,
   formatAmount,
   calcRate,
+  escapeHtml,
 } from '../utils/screen-builder.js';
+
 
 // ─────────────────────────────────────────────────────────────
 // Telegram API — answer callback_query
@@ -174,35 +176,62 @@ async function processConfirmation(job: Job<CallbackConfirmJobPayload>): Promise
       if (('outboundTxId' in result) && result.outcome === 'approved') {
         const paired = result as Extract<PairedTransferResult, { outcome: 'approved' }>;
 
-        // ── Вариант 1Б: blockquote только на суммах, остальное — обычный текст ──
-        // Формат совпадает с buildConfirmedScreen для одиночных транзакций.
         const isXfx = paired.inCurrency !== paired.outCurrency;
+
+        // ── Single blockquote: amount + route (unified with expense card) ────
+        const routeLine = `${escapeHtml(paired.sourceAccount)} \u2192 ${escapeHtml(paired.targetAccount)}`;
+        const amtLine   = `\ud83d\udd04 <b>${formatAmount(paired.outAmount)} ${escapeHtml(paired.outCurrency)}</b>`;
+        const blockBody = isXfx
+          ? `${amtLine}\n${routeLine}\n\u2192 ${formatAmount(paired.inAmount)} ${escapeHtml(paired.inCurrency)}`
+          : `${amtLine}\n${routeLine}`;
+        const blockquote = `<blockquote>${blockBody}</blockquote>`;
+
+        // ── Outbound leg: \u0418\u0442\u043e\u0433: before \u2212 amount = after ────────────────────────────
+        const srcSuffix = paired.sourceAccount.toUpperCase().endsWith(paired.outCurrency.toUpperCase())
+          ? '' : ` \u00b7 ${escapeHtml(paired.outCurrency)}`;
+        const srcAfterIsNeg = paired.balanceAfterSource?.startsWith('-') ?? false;
+        const srcAfterFmt   = paired.balanceAfterSource != null
+          ? (srcAfterIsNeg
+              ? `\u26a0\ufe0f <b>${formatAmount(paired.balanceAfterSource)} ${escapeHtml(paired.outCurrency)}</b>`
+              : `<b>${formatAmount(paired.balanceAfterSource)} ${escapeHtml(paired.outCurrency)}</b>`)
+          : null;
+        const srcItog = paired.balanceBeforeSource != null && srcAfterFmt != null
+          ? `\u0418\u0442\u043e\u0433: ${formatAmount(paired.balanceBeforeSource)} \u2212 ${formatAmount(paired.outAmount)} = ${srcAfterFmt}`
+          : srcAfterFmt ? `\u041e\u0441\u0442\u0430\u0442\u043e\u043a: ${srcAfterFmt}` : null;
+
+        // ── Inbound leg: \u0418\u0442\u043e\u0433: before + amount = after ────────────────────────────
+        const tgtSuffix = paired.targetAccount.toUpperCase().endsWith(paired.inCurrency.toUpperCase())
+          ? '' : ` \u00b7 ${escapeHtml(paired.inCurrency)}`;
+        const tgtAfterIsNeg = paired.balanceAfterTarget?.startsWith('-') ?? false;
+        const tgtAfterFmt   = paired.balanceAfterTarget != null
+          ? (tgtAfterIsNeg
+              ? `\u26a0\ufe0f <b>${formatAmount(paired.balanceAfterTarget)} ${escapeHtml(paired.inCurrency)}</b>`
+              : `<b>${formatAmount(paired.balanceAfterTarget)} ${escapeHtml(paired.inCurrency)}</b>`)
+          : null;
+        const tgtItog = paired.balanceBeforeTarget != null && tgtAfterFmt != null
+          ? `\u0418\u0442\u043e\u0433: ${formatAmount(paired.balanceBeforeTarget)} + ${formatAmount(paired.inAmount)} = ${tgtAfterFmt}`
+          : tgtAfterFmt ? `\u041e\u0441\u0442\u0430\u0442\u043e\u043a: ${tgtAfterFmt}` : null;
+
+        // ── XFX rate line (only cross-currency) ───────────────────────────────
+        const xfxLine = isXfx
+          ? `\ud83d\udcb1 ${calcRate(paired.outAmount, paired.inAmount) ?? '?'} ${escapeHtml(paired.inCurrency)}/${escapeHtml(paired.outCurrency)}`
+          : null;
+
         const lines: string[] = [
-          '✅ <b>Перевод записан</b>',
+          '\u2705 <b>\u0417\u0430\u043f\u0438\u0441\u0430\u043d\u043e</b>',
           '',
-          // ── Outbound leg ──────────────────────────────────────────────────
-          // 🔄 иконка внутри blockquote слева от суммы (нет отдельной строки «Внутренний перевод»)
-          `<blockquote>🔄 − ${formatAmount(paired.outAmount)} ${paired.outCurrency}</blockquote>`,
-          `🏦 <b>${paired.sourceAccount}</b> · ${paired.outCurrency}`,
-          ...(paired.balanceAfterSource
-            ? [`   Остаток: ${formatAmount(paired.balanceAfterSource)} ${paired.outCurrency}`]
-            : []),
+          blockquote,
           '',
-          // ── Inbound leg ───────────────────────────────────────────────────
-          `<blockquote>🔄 + ${formatAmount(paired.inAmount)} ${paired.inCurrency}</blockquote>`,
-          `🏦 <b>${paired.targetAccount}</b> · ${paired.inCurrency}`,
-          ...(paired.balanceAfterTarget
-            ? [`   Остаток: ${formatAmount(paired.balanceAfterTarget)} ${paired.inCurrency}`]
-            : []),
-          // ── XFX rate (только при разных валютах) ─────────────────────────
-          ...(isXfx ? [
-            '',
-            `💱 ${calcRate(paired.outAmount, paired.inAmount) ?? '?'} ${paired.inCurrency}/${paired.outCurrency}`,
-          ] : []),
-          // ── Время в формате «10:32, 20 мая» ──────────────────────────────
-          `⏰ ${formatPairedTime(paired.transactionTime)}`,
+          `\ud83c\udfe6 <b>${escapeHtml(paired.sourceAccount)}</b>${srcSuffix}`,
+          ...(srcItog ? [srcItog] : []),
+          '',
+          `\ud83c\udfe6 <b>${escapeHtml(paired.targetAccount)}</b>${tgtSuffix}`,
+          ...(tgtItog ? [tgtItog] : []),
+          ...(xfxLine ? ['', xfxLine] : []),
+          `\u23f0 <i>${formatPairedTime(paired.transactionTime)}</i>`,
         ];
         notificationMessage = lines.join('\n');
+
 
         // Кнопка «Изменить запись» — используем outboundTxId как якорь
         inlineKeyboardJson = JSON.stringify(
