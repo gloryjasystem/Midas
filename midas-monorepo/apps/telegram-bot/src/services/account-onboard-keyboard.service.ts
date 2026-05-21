@@ -59,7 +59,8 @@ export type OnboardStep =
   | 'cur_pick'
   | 'cur_search'           // currency free-text search active
   | 'cur_input'
-  | 'bal_input';
+  | 'bal_input'
+  | 'ren_input';           // Phase AC-DUP: rename after auto-suffix
 
 /** Wallet sub-category — drives currency routing */
 export type WalletSubtype = 'crypto' | 'ewallet' | 'ton' | 'lightning';
@@ -103,6 +104,8 @@ export interface AccountOnboardState {
    * this holds the draftId to link the new account to after creation.
    */
   linkedDraftId?: string;
+  /** Phase AC-DUP: true when account name was auto-suffixed due to duplicate */
+  wasAutoSuffixed?: boolean;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -775,7 +778,9 @@ export type AccountOnboardCmd =
   | { cmd: 'wallet_subtype'; subtype: WalletSubtype } // Phase 2.3: wallet sub-type selection
   | { cmd: 'type_back' }                   // Phase 2.3: back to type picker from wallet subtype
   | { cmd: 'cur_search' }                  // master_roadmap: open currency free-text search
-  | { cmd: 'cur_list' };                   // master_roadmap: return to currency list from search
+  | { cmd: 'cur_list' }                    // master_roadmap: return to currency list from search
+  | { cmd: 'ren'; accountId: string }      // Phase AC-DUP: rename auto-suffixed account
+  | { cmd: 'ren_ok' };                     // Phase AC-DUP: accept auto-suffixed name
 
 // ─────────────────────────────────────────────────────────────
 // Parser — SEC-01 allowlist
@@ -894,6 +899,15 @@ export function parseAccountCallback(data: string): AccountOnboardCmd | null {
   if (sub === 'bal') {
     const act = parts[2] ?? '';
     if (act === 's') return { cmd: 'bal_skip' };
+    return null;
+  }
+
+  // Phase AC-DUP: rename auto-suffixed account
+  if (sub === 'ren') {
+    const idOrAct = parts[2] ?? '';
+    if (idOrAct === 'ok') return { cmd: 'ren_ok' };
+    // ac:ren:{accountId} — ULID is 26 chars
+    if (idOrAct.length >= 20) return { cmd: 'ren', accountId: idOrAct };
     return null;
   }
 
@@ -1438,6 +1452,24 @@ export function buildAfterCreateKeyboard(): InlineKeyboardMarkup {
       [
         { text: '➕ Добавить ещё счёт', callback_data: 'ac:more' },
         { text: '✅ Готово',             callback_data: 'ac:done' },
+      ],
+    ],
+  };
+}
+
+/**
+ * Phase AC-DUP: keyboard shown after auto-suffixed account is created and balance is set.
+ * Offers rename (✏️) or accept (✅ OK).
+ *
+ * ac:ren:{id}  → enter rename flow
+ * ac:ren:ok    → accept name, show standard after-create keyboard
+ */
+export function buildSuffixedSuccessKeyboard(accountId: string): InlineKeyboardMarkup {
+  return {
+    inline_keyboard: [
+      [
+        { text: '✏️ Переименовать', callback_data: `ac:ren:${accountId}` },
+        { text: '✅ OK',            callback_data: 'ac:ren:ok' },
       ],
     ],
   };

@@ -34,7 +34,7 @@
  * SEC-12: No raw_text or user PII in logs or output.
  */
 
-import { withTenantTransaction } from '@midas/database';
+import { withTenantTransaction, type PoolClient } from '@midas/database';
 import { monotonicFactory } from 'ulid';
 import { escapeHtml } from '../utils/html-escape.js';
 import { classifyCurrency } from './account-currency-validator.service.js';
@@ -534,33 +534,71 @@ export async function addAccountWithCurrency(
 }
 
 // ─────────────────────────────────────────────────────────────
-// addAccountReturningId — Phase 2.2
+// addAccountReturningId — Phase 2.2 + Auto-suffix (Phase AC-DUP)
 // ─────────────────────────────────────────────────────────────
 
 /**
  * Result of addAccountReturningId().
- *   created   — new row inserted; accountId is the ULID of the new account.
- *   duplicate — name already exists in this workspace; accountId is undefined.
+ *   created             — new row inserted with the original name.
+ *   created_with_suffix — original name was taken; inserted with auto-suffix (e.g. "Монобанк 2").
+ *
+ * In both cases accountId is always set (creation never fails due to duplicates).
  */
 export interface AddAccountWithIdResult {
-  status: 'created' | 'duplicate';
-  accountId?: string;
+  status: 'created' | 'created_with_suffix';
+  accountId: string;
+  /** Final name after auto-suffix (only when status = 'created_with_suffix') */
+  finalName?: string;
+}
+
+/**
+ * Find the next available name with numeric suffix.
+ * "Монобанк" → checks "Монобанк 2", "Монобанк 3"... until free slot found.
+ *
+ * Runs INSIDE an existing transaction — must receive the client.
+ *
+ * SEC-03: explicit workspace_id filter.
+ * SEC-02: no float arithmetic — simple integer counter.
+ */
+async function findNextAvailableName(
+  client: PoolClient,
+  workspaceId: string,
+  baseName: string,
+): Promise<string> {
+  // Fetch all names matching "baseName" or "baseName N" (N = integer)
+  const res = await client.query<{ name: string }>(
+    `SELECT name FROM account_sources
+     WHERE workspace_id = $1
+       AND deleted_at IS NULL
+       AND (name = $2 OR name LIKE $2 || ' %')`,
+    [workspaceId, baseName],
+  );
+
+  // Build set of existing names for O(1) lookup
+  const existingNames = new Set(res.rows.map((r: { name: string }) => r.name));
+
+  // Find first free suffix starting from 2
+  let suffix = 2;
+  while (existingNames.has(`${baseName} ${suffix}`)) {
+    suffix++;
+    // Safety: cap at 100 to prevent infinite loop (should never happen in practice)
+    if (suffix > 100) break;
+  }
+  return `${baseName} ${suffix}`;
 }
 
 /**
  * Insert a new account_sources row with an explicitly supplied currency and
  * return the generated account ULID on success.
  *
- * This is the Phase 2.2 successor to addAccountWithCurrency() for the guided
- * onboarding flow. The returned accountId is stored in AccountOnboardState and
- * used by the bal_input step to call setAccountBalanceById() without a second
- * DB round-trip.
+ * Phase AC-DUP: If the name already exists → auto-suffix ("Монобанк 2") and
+ * return status='created_with_suffix'. The flow is NEVER interrupted by duplicates.
  *
  * @param workspaceId - Internal workspace ULID (from trusted backend — SEC-03)
  * @param userId      - Internal user ULID (required by withTenantTransaction)
  * @param name        - Account name (pre-validated, non-empty, max 100 chars)
  * @param currency    - Explicit currency code (pre-validated, non-empty, max 10 chars)
- * @returns AddAccountWithIdResult: { status, accountId? }
+ * @returns AddAccountWithIdResult: { status, accountId, finalName? }
  *
  * SEC-03: INSERT runs inside withTenantTransaction — RLS enforced.
  * SEC-02: No financial amounts. No float arithmetic.
@@ -572,12 +610,13 @@ export async function addAccountReturningId(
   name: string,
   currency: string,
 ): Promise<AddAccountWithIdResult> {
-  const accountId = generateUlid();
-
-  const rowsInserted = await withTenantTransaction<number>(
+  return withTenantTransaction<AddAccountWithIdResult>(
     workspaceId,
     userId,
     async (client) => {
+      const accountId = generateUlid();
+
+      // ── Attempt 1: try original name ────────────────────────────────────
       const result = await client.query<{ id: string }>(
         `INSERT INTO account_sources (id, workspace_id, name, type, currency)
          VALUES ($1, $2, $3, 'manual'::account_source_type, $4)
@@ -585,9 +624,9 @@ export async function addAccountReturningId(
          RETURNING id`,
         [accountId, workspaceId, name, currency],
       );
+
       if ((result.rowCount ?? 0) > 0) {
-        // Atomically set default account pointers on the workspace only if unset.
-        // This ensures the FIRST created account becomes the default — never overwritten.
+        // Original name was free — set workspace defaults if needed
         await client.query(
           `UPDATE workspaces
            SET default_expense_account_id = COALESCE(default_expense_account_id, $1),
@@ -595,14 +634,33 @@ export async function addAccountReturningId(
            WHERE id = $2`,
           [accountId, workspaceId],
         );
+        return { status: 'created', accountId };
       }
-      return result.rowCount ?? 0;
+
+      // ── Attempt 2: auto-suffix ──────────────────────────────────────────
+      const suffixedName = await findNextAvailableName(client, workspaceId, name);
+      const suffixedId = generateUlid();
+
+      await client.query(
+        `INSERT INTO account_sources (id, workspace_id, name, type, currency)
+         VALUES ($1, $2, $3, 'manual'::account_source_type, $4)`,
+        [suffixedId, workspaceId, suffixedName, currency],
+      );
+
+      // Set workspace defaults if needed (same logic as above)
+      await client.query(
+        `UPDATE workspaces
+         SET default_expense_account_id = COALESCE(default_expense_account_id, $1),
+             default_income_account_id  = COALESCE(default_income_account_id,  $1)
+         WHERE id = $2`,
+        [suffixedId, workspaceId],
+      );
+
+      return { status: 'created_with_suffix', accountId: suffixedId, finalName: suffixedName };
     },
   );
-
-  if (rowsInserted === 0) return { status: 'duplicate' };
-  return { status: 'created', accountId };
 }
+
 
 // ─────────────────────────────────────────────────────────────
 // addChildAccount — Phase B-5/B-8
@@ -615,14 +673,14 @@ export async function addAccountReturningId(
  *   - Have parent_account_id set to the parent's ULID.
  *   - Do NOT update workspace default_expense/income pointers
  *     (only top-level accounts should be workspace defaults).
- *   - Name uniqueness enforced by account_sources_workspace_id_name_key.
+ *   - Phase AC-DUP: auto-suffix on duplicate (same logic as addAccountReturningId).
  *
  * @param workspaceId     - Internal workspace ULID (SEC-03)
  * @param userId          - Internal user ULID
  * @param parentAccountId - ULID of the parent account (pre-validated by caller)
  * @param name            - Child account name (pre-validated, non-empty, max 100 chars)
  * @param currency        - Currency code (pre-validated)
- * @returns { status: 'created', accountId } | { status: 'duplicate' }
+ * @returns { status: 'created' | 'created_with_suffix', accountId, finalName? }
  *
  * SEC-03: INSERT inside withTenantTransaction — RLS enforced.
  * SEC-02: No financial arithmetic.
@@ -635,12 +693,12 @@ export async function addChildAccount(
   name: string,
   currency: string,
 ): Promise<AddAccountWithIdResult> {
-  const accountId = generateUlid();
-
-  const rowsInserted = await withTenantTransaction<number>(
+  return withTenantTransaction<AddAccountWithIdResult>(
     workspaceId,
     userId,
     async (client) => {
+      const accountId = generateUlid();
+
       const result = await client.query<{ id: string }>(
         `INSERT INTO account_sources
            (id, workspace_id, name, type, currency, parent_account_id)
@@ -649,14 +707,24 @@ export async function addChildAccount(
          RETURNING id`,
         [accountId, workspaceId, name, currency, parentAccountId],
       );
-      // Phase B-8: do NOT update workspace defaults for child accounts.
-      // Only top-level (parent_account_id IS NULL) accounts are workspace defaults.
-      return result.rowCount ?? 0;
+
+      if ((result.rowCount ?? 0) > 0) {
+        // Phase B-8: do NOT update workspace defaults for child accounts.
+        return { status: 'created', accountId };
+      }
+
+      // Auto-suffix fallback
+      const suffixedName = await findNextAvailableName(client, workspaceId, name);
+      const suffixedId = generateUlid();
+      await client.query(
+        `INSERT INTO account_sources
+           (id, workspace_id, name, type, currency, parent_account_id)
+         VALUES ($1, $2, $3, 'manual'::account_source_type, $4, $5)`,
+        [suffixedId, workspaceId, suffixedName, currency, parentAccountId],
+      );
+      return { status: 'created_with_suffix', accountId: suffixedId, finalName: suffixedName };
     },
   );
-
-  if (rowsInserted === 0) return { status: 'duplicate' };
-  return { status: 'created', accountId };
 }
 
 // ─────────────────────────────────────────────────────────────
