@@ -566,10 +566,11 @@ function buildSheet0Summary(
     }
   }
 
-  const intentDefs: [string, IntentKey, 1 | -1][] = [
+  // sign: 1 = positive (income), -1 = expense, 0 = neutral (transfers — no P&L impact)
+  const intentDefs: [string, IntentKey, 1 | -1 | 0][] = [
     ['💰 Доходы',       'income',        1],
     ['💸 Расходы',      'expense',       -1],
-    ['🔄 Переводы',     'transfer',      -1],
+    ['🔄 Переводы',     'transfer',       0],
     ['🤝 Долги (дал)',  'debt_given',    -1],
     ['🤲 Долги (взял)', 'debt_received',  1],
   ];
@@ -606,10 +607,12 @@ function buildSheet0Summary(
       const slice = currencyEntries.slice(rowOffset * CURRENCIES_PER_ROW, (rowOffset + 1) * CURRENCIES_PER_ROW);
       let col = 3;
       for (const [cur, total] of slice) {
-        const signed = sign * total;
+        const isNeutral = sign === 0;
+        const signed = isNeutral ? total : sign * total;
         const c = ws.getCell(r, col);
-        c.value = `${fmtAmtSigned(signed)} ${cur}`;
-        c.font  = { size: 9, name: 'Calibri', color: { argb: signed >= 0 ? `FF${C_INCOME}` : `FF${C_EXPENSE}` } };
+        // Transfers: show absolute amount without +/- sign, neutral blue color
+        c.value = isNeutral ? `${total.toFixed(2)} ${cur}` : `${fmtAmtSigned(signed)} ${cur}`;
+        c.font  = { size: 9, name: 'Calibri', color: { argb: isNeutral ? 'FF2D6A9F' : (signed >= 0 ? `FF${C_INCOME}` : `FF${C_EXPENSE}`) } };
         c.fill  = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_GREY_BG}` } };
         c.border = { bottom: { style: 'thin', color: { argb: `FF${C_TBL_BORDER}` } }, right: { style: 'thin', color: { argb: `FF${C_TBL_BORDER}` } } };
         c.alignment = { horizontal: 'center', vertical: 'middle' };
@@ -640,12 +643,13 @@ function buildSheet0Summary(
   }
   const convRows: ConvRow[] = [];
   for (const cur of allCurs) {
+    // Net P&L: transfers are EXCLUDED — they are neutral (money stays in portfolio)
     const net =
       (im.income.byCur.get(cur) ?? 0) +
       (im.debt_received.byCur.get(cur) ?? 0) -
-      (im.expense.byCur.get(cur) ?? 0) +
-      (transferSigned.get(cur) ?? 0) -
+      (im.expense.byCur.get(cur) ?? 0) -
       (im.debt_given.byCur.get(cur) ?? 0);
+    // Note: transferSigned intentionally NOT included — transfers don't affect P&L
     const rate   = usdRates.get(cur.toUpperCase()) ?? null;
     const source = (rateSources.get(cur.toUpperCase()) ?? 'uncovered') as RateSource | 'uncovered';
     convRows.push({ currency: cur, net, rate, usd: rate !== null ? net * rate : null, source });
@@ -865,7 +869,9 @@ function buildSheet0Summary(
     }
     const acc = accMap.get(k)!;
     const debitAbs = parseFloat(row.account_debit_amount ?? row.original_amount);
-    const isInflow = row.transaction_intent === 'income' || row.transaction_intent === 'debt_received';
+    const isInflow = row.transaction_intent === 'income'
+      || row.transaction_intent === 'debt_received'
+      || (row.transaction_intent === 'transfer' && row.transfer_direction === 'inbound');
     acc.netChange += isInflow ? debitAbs : -debitAbs;
   }
   for (const [name, acc] of accMap) {
@@ -927,7 +933,8 @@ function buildSheet0Summary(
   };
 
   for (const [cur, t] of byCur) {
-    const net    = t.income + t.debtReceived - t.expense - t.transfer - t.debtGiven;
+    // Net P&L: transfers EXCLUDED — they are neutral, not an expense
+    const net    = t.income + t.debtReceived - t.expense - t.debtGiven;
     const netClr = net >= 0 ? `FF${C_INCOME}` : `FF${C_EXPENSE}`;
     const fillBg = { type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb: `FF${C_TOTAL_BG}` } };
 
@@ -943,7 +950,7 @@ function buildSheet0Summary(
     if (t.income       > 0) parts.push(`💰 +${fmtAmtSigned(t.income).replace('+ ', '')}`);
     if (t.debtReceived > 0) parts.push(`🤲 +${fmtAmtSigned(t.debtReceived).replace('+ ', '')}`);
     if (t.expense      > 0) parts.push(`💸 ${fmtAmtSigned(-t.expense)}`);
-    if (t.transfer     > 0) parts.push(`🔄 ${fmtAmtSigned(-t.transfer)}`);
+    if (t.transfer     > 0) parts.push(`🔄 ${t.transfer.toFixed(2)}`);
     if (t.debtGiven    > 0) parts.push(`🤝 ${fmtAmtSigned(-t.debtGiven)}`);
 
     ws.mergeCells(r, 3, r, 4);
@@ -996,7 +1003,8 @@ function buildSheet0Summary(
   type CatSummary = { totalUsd: number; originals: Map<string, number>; uncovered: Map<string, number>; count: number };
   const catMap = new Map<string, CatSummary>();
 
-  const OUT_INTENTS = new Set(['expense', 'transfer', 'debt', 'debt_given']);
+  // Transfers EXCLUDED from expense categories — they are neutral (not an expense)
+  const OUT_INTENTS = new Set(['expense', 'debt', 'debt_given']);
   for (const row of rows) {
     if (!OUT_INTENTS.has(row.transaction_intent)) continue;
     const name = row.category_name;
@@ -1048,11 +1056,10 @@ function buildSheet0Summary(
     ws.getRow(r).height = 16;
     r++;
 
-    const lrFloors = mainTopList.map(([, cs]) => grandTotalUsd > 0 ? Math.floor((cs.totalUsd / grandTotalUsd) * 100) : 0);
-    const lrRemainder = 100 - lrFloors.reduce((a, b) => a + b, 0);
-    const lrOrder = mainTopList.map((entry, i) => ({ i, frac: grandTotalUsd > 0 ? (entry[1].totalUsd / grandTotalUsd) * 100 % 1 : 0 })).sort((a, b) => b.frac - a.frac);
-    const lrPcts = [...lrFloors];
-    lrOrder.slice(0, lrRemainder).forEach(({ i }) => { lrPcts[i] = (lrPcts[i] ?? 0) + 1; });
+    // Use 1 decimal place for percentages to avoid 0%/100% rounding artifacts
+    const lrPcts = mainTopList.map(([, cs]) =>
+      grandTotalUsd > 0 ? parseFloat(((cs.totalUsd / grandTotalUsd) * 100).toFixed(1)) : 0
+    );
 
     const fmtK = (amt: number, cur: string): string => {
       const abs = Math.abs(amt);
@@ -1083,7 +1090,7 @@ function buildSheet0Summary(
       rc3.alignment = { horizontal: 'left', vertical: 'middle' };
 
       const rc4 = ws.getCell(r, 4);
-      rc4.value = `${String(pct)}%`;
+      rc4.value = `${(pct ?? 0).toFixed(1)}%`;
       rc4.font  = { size: 9, name: 'Calibri', color: { argb: 'FF888888' } };
       rc4.fill  = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_GREY_BG}` } };
       rc4.alignment = { horizontal: 'center', vertical: 'middle' };
