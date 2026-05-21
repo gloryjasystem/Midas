@@ -2418,6 +2418,7 @@ function buildSheet3(wb: ExcelJS.Workbook, rows: TxRow[], usdRates: Map<string, 
   type CatEntry = {
     group:          string;
     count:          number;
+    expenseCount:   number;
     expenseUsd:     number;
     incomeUsd:      number;
     uncovered:      string[];   // "50 TRX" for missing rates
@@ -2443,9 +2444,10 @@ function buildSheet3(wb: ExcelJS.Workbook, rows: TxRow[], usdRates: Map<string, 
 
     if (PL_INTENTS.has(r.transaction_intent)) {
       const key = r.category_name;
-      const cat = catMap.get(key) ?? { group: r.category_group, count: 0, expenseUsd: 0, incomeUsd: 0, uncovered: [] };
+      const cat = catMap.get(key) ?? { group: r.category_group, count: 0, expenseCount: 0, expenseUsd: 0, incomeUsd: 0, uncovered: [] };
       cat.count++;
       if (r.transaction_intent === 'expense') {
+        cat.expenseCount++;
         cat.expenseUsd += usd ?? 0;
         if (unc) cat.uncovered.push(unc);
       } else {
@@ -2487,6 +2489,7 @@ function buildSheet3(wb: ExcelJS.Workbook, rows: TxRow[], usdRates: Map<string, 
   const grandExpUsd = sorted.reduce((s, [, c]) => s + c.expenseUsd, 0);
   const grandIncUsd = sorted.reduce((s, [, c]) => s + c.incomeUsd, 0);
   const grandOps    = sorted.reduce((s, [, c]) => s + c.count, 0);
+  const grandExpOps = sorted.reduce((s, [, c]) => s + c.expenseCount, 0);
 
   const thinB = {
     top:    { style: 'thin' as const, color: { argb: `FF${C_TBL_BORDER}` } },
@@ -2532,8 +2535,8 @@ function buildSheet3(wb: ExcelJS.Workbook, rows: TxRow[], usdRates: Map<string, 
       color: net >= 0 ? `FF${C_INCOME}` : `FF${C_EXPENSE}`,
       fill: { type: 'pattern', pattern: 'solid',
         fgColor: { argb: net >= 0 ? 'FFE8F8F5' : 'FFFDEDEC' } } });
-    // Avg check per category
-    const avgChk = cat.count > 0 ? cat.expenseUsd / cat.count : 0;
+    // Avg check per category (expense only)
+    const avgChk = cat.expenseCount > 0 ? cat.expenseUsd / cat.expenseCount : 0;
     setCell(8, avgChk > 0 ? avgChk : '', { align: 'right', numFmt: '#,##0.00', color: 'FF888888' });
     setCell(9, cat.uncovered.length > 0 ? `+ ${cat.uncovered.slice(0, 3).join(', ')} (н/д)` : '',
       { align: 'left', color: 'FFAAAAAA' });
@@ -2604,7 +2607,7 @@ function buildSheet3(wb: ExcelJS.Workbook, rows: TxRow[], usdRates: Map<string, 
   gt7.fill  = gtFill; gt7.alignment = { horizontal: 'right', vertical: 'middle' };
 
   // Ø чек grand total
-  const grandAvgChk = grandOps > 0 ? grandExpUsd / grandOps : 0;
+  const grandAvgChk = grandExpOps > 0 ? grandExpUsd / grandExpOps : 0;
   const gt8 = ws.getCell(gtRow, 8);
   gt8.value = grandAvgChk > 0 ? grandAvgChk : '';
   gt8.numFmt = '#,##0.00';
@@ -3026,6 +3029,10 @@ function buildSheet5DailyBreakdown(
   let cumul = 0;
   let grandInc = 0, grandExp = 0, grandTfr = 0, grandOps = 0;
 
+  // Pre-compute average daily expense for burn rate (fixed denominator)
+  const totalExpAll = sorted.reduce((s, [, d]) => s + d.expenseUsd, 0);
+  const avgDailyExpFixed = sorted.length > 0 ? totalExpAll / sorted.length : 0;
+
   for (const [dateStr, d] of sorted) {
     const net = d.incomeUsd - d.expenseUsd;
     cumul += net;
@@ -3068,9 +3075,8 @@ function buildSheet5DailyBreakdown(
         fgColor: { argb: net >= 0 ? 'FFE8F8F5' : 'FFFDEDEC' } } });
     sc(8, cumul, { align: 'right', numFmt: '#,##0.00', bold: true,
       color: cumul >= 0 ? `FF${C_INCOME}` : `FF${C_EXPENSE}` });
-    // Burn rate = daily expense relative to avg
-    const avgDailyExp = grandExp / (rn - DATA_START + 1);
-    const burnRatio = avgDailyExp > 0 ? d.expenseUsd / avgDailyExp : 0;
+    // Burn rate = daily expense relative to fixed avg across ALL days
+    const burnRatio = avgDailyExpFixed > 0 ? d.expenseUsd / avgDailyExpFixed : 0;
     if (d.expenseUsd > 0) {
       const burnClr = burnRatio > 1.5 ? `FF${C_EXPENSE}` : burnRatio > 1 ? 'FFD4AC0D' : `FF${C_INCOME}`;
       sc(9, `×${burnRatio.toFixed(1)}`, { align: 'center', color: burnClr, bold: burnRatio > 1.5 });
