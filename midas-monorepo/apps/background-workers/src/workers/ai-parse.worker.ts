@@ -164,27 +164,29 @@ function classifyPickerCcy(code: string): 'fiat' | 'stablecoin' | 'crypto' {
 /**
  * Filter/sort picker accounts by transaction currency.
  *
+ * @param strict - when true (transfer intent), always exact-match only.
+ *                 when false (fiat expense/income/debt), show all fiat sorted.
+ *
  * Rules:
- *   - crypto/stablecoin: STRICT exact match only (e.g. USDT → only USDT accounts).
- *   - fiat: sort by relevance — exact-currency accounts first, then other fiat accounts.
- *     Cross-currency fiat payment (e.g. USD price on EUR card) is a valid real-world
- *     scenario handled by the XFX flow, so we don’t hide any fiat accounts.
- *   - transfer (any currency): always strict — see shouldFilterByCurrency().
+ *   - strict=true OR crypto/stablecoin: STRICT exact match only.
+ *   - strict=false + fiat: exact-currency first, then other fiat accounts.
+ *     Cross-currency fiat payment (e.g. USD price on EUR card) is valid (XFX flow).
  */
 function filterPickerAccounts(
   accounts: WorkspaceAccountEntry[],
   txCurrency: string,
+  strict: boolean,
 ): WorkspaceAccountEntry[] {
   const txCur = txCurrency.toUpperCase();
-  if (classifyPickerCcy(txCur) === 'fiat') {
-    // Fiat: show all fiat accounts, exact match first
+  if (!strict && classifyPickerCcy(txCur) === 'fiat') {
+    // Fiat non-transfer: show all fiat accounts, exact match first
     const exact = accounts.filter(a => a.currency.toUpperCase() === txCur);
     const other = accounts.filter(
       a => a.currency.toUpperCase() !== txCur && classifyPickerCcy(a.currency) === 'fiat',
     );
     return [...exact, ...other];
   }
-  // Crypto / stablecoin: strict exact match only
+  // Strict (transfer) or crypto/stablecoin: exact match only
   return accounts.filter(a => a.currency.toUpperCase() === txCur);
 }
 
@@ -362,8 +364,9 @@ async function processAiParse(job: Job<AiParseJobPayload>): Promise<void> {
           const gateCur = pendingDraft.parsedCurrency ?? null;
           // Strict filter for transfer intent AND crypto/stablecoin currencies.
           // Fiat cross-currency (e.g. USD expense on EUR card) is valid — XFX flow.
-          pickerAccountsGate = (gateCur && shouldFilterByCurrency(pendingDraft.parsedIntent, gateCur))
-            ? filterPickerAccounts(allGateAccounts, gateCur)
+          const gateStrict = shouldFilterByCurrency(pendingDraft.parsedIntent, gateCur);
+          pickerAccountsGate = (gateCur && gateStrict)
+            ? filterPickerAccounts(allGateAccounts, gateCur, gateStrict)
             : allGateAccounts;
         } catch {
           pickerAccountsGate = [];
@@ -752,9 +755,9 @@ async function processAiParse(job: Job<AiParseJobPayload>): Promise<void> {
         const allPickerAccounts = await getWorkspaceAccountsForPicker(workspaceId);
         totalAccountCount = allPickerAccounts.length;
         const txCur = aiData?.currency ?? null;
-        const isTransfer = shouldFilterByCurrency(aiData?.intent, txCur);
-        pickerAccounts = (txCur && isTransfer)
-          ? filterPickerAccounts(allPickerAccounts, txCur)
+        const isStrict = shouldFilterByCurrency(aiData?.intent, txCur);
+        pickerAccounts = (txCur && isStrict)
+          ? filterPickerAccounts(allPickerAccounts, txCur, isStrict)
           : allPickerAccounts;
       } catch {
         pickerAccounts = [];
