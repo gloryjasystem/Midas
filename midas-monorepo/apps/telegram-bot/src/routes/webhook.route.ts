@@ -1302,10 +1302,37 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
                 acResolved.workspaceId, acResolved.userId, accountName, acCmd.code,
               );
 
+              // ── Handle: same name + same currency → already exists ─────
+              if (res.status === 'already_exists') {
+                const dupState: AccountOnboardState = {
+                  step: 'rename_for_dup',
+                  accountType: state.accountType,
+                  name: state.name,
+                  currency: acCmd.code,
+                  linkedDraftId: state.linkedDraftId,
+                  walletSubtype: state.walletSubtype,
+                };
+                await redisConnection.set(acKey, JSON.stringify(dupState), 'EX', ONBOARD_STATE_TTL_SEC);
 
-              // Phase AC-DUP: account is always created (auto-suffix on duplicate)
+                const dupMsg =
+                  `⚠️ Счёт <b>${escapeHtml(accountName)} · ${escapeHtml(acCmd.code)}</b> уже существует.\n\n` +
+                  `<i>Введите другое название или нажмите кнопку ниже.</i>`;
+                const dupKb = {
+                  inline_keyboard: [
+                    [{ text: `✅ Использовать ${accountName} ${acCmd.code}`, callback_data: `ac:use:${res.existingAccountId}` }],
+                    [{ text: '✖️ Отмена', callback_data: 'ac:fin' }],
+                  ],
+                };
+                if (acMsgId) void editMessageText(chatId, acMsgId, dupMsg, dupKb);
+                else void upsertBotMessage(telegramUserId, chatId, dupMsg, dupKb);
+                await reply.status(200).send({ ok: true });
+                return;
+              }
+
+              // ── Handle: child created OR normal create OR auto-suffix ──
+              const wasChild = res.status === 'created_as_child';
               const wasAutoSuffixed = res.status === 'created_with_suffix';
-              const effectiveName = wasAutoSuffixed ? res.finalName! : accountName;
+              const effectiveName = (wasChild || wasAutoSuffixed) ? res.finalName! : accountName;
 
               // Phase LD: custom account created — soft-delete the onboarding placeholder.
               // Non-fatal: if placeholder already gone or never existed, 'none' is returned.
@@ -1325,10 +1352,13 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
               };
               await redisConnection.set(acKey, JSON.stringify(newState), 'EX', ONBOARD_STATE_TTL_SEC);
 
-              // Phase AC-DUP: balance prompt with auto-suffix info
-              const balPrompt = wasAutoSuffixed
-                ? `ℹ️ Счёт «${escapeHtml(accountName)}» уже существует.\nСоздан как «<b>${escapeHtml(effectiveName)}</b>» · ${escapeHtml(acCmd.code)}\n\n💰 Введите начальный баланс\nили нажмите «Пропустить»:`
-                : buildBalancePromptText(escapeHtml(effectiveName), escapeHtml(acCmd.code));
+              // Balance prompt — context-aware message
+              const balPrompt = wasChild
+                ? `✅ Добавлена валюта <b>${escapeHtml(acCmd.code)}</b> к счёту <b>${escapeHtml(accountName)}</b>\n\n` +
+                  `Счёт: <b>${escapeHtml(effectiveName)}</b>\n\n💰 Введите начальный баланс\nили нажмите «Пропустить»:`
+                : wasAutoSuffixed
+                  ? `ℹ️ Счёт «${escapeHtml(accountName)}» уже существует.\nСоздан как «<b>${escapeHtml(effectiveName)}</b>» · ${escapeHtml(acCmd.code)}\n\n💰 Введите начальный баланс\nили нажмите «Пропустить»:`
+                  : buildBalancePromptText(escapeHtml(effectiveName), escapeHtml(acCmd.code));
 
               if (acMsgId) void editMessageText(chatId, acMsgId, balPrompt, buildSkipBalanceKeyboard());
               request.log.info({ msg: '[midas:bot:webhook] ac: account created, awaiting balance', workspaceId: acResolved.workspaceId });
@@ -1534,6 +1564,37 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
               void editMessageText(chatId, acMsgId, '✅ Счёт сохранён.', buildAfterCreateKeyboard());
             } else {
               void upsertBotMessage(telegramUserId, chatId, '✅ Счёт сохранён.', buildAfterCreateKeyboard());
+            }
+
+          } else if (acCmd.cmd === 'use_existing') {
+            // User chose to use existing account (same name + same currency duplicate)
+            const rawStateUse = await redisConnection.get(acKey);
+            let linkedDraftIdUse: string | undefined;
+            let useCurrency = 'USD';
+            if (rawStateUse) {
+              try {
+                const s = JSON.parse(rawStateUse) as AccountOnboardState;
+                linkedDraftIdUse = s.linkedDraftId;
+                useCurrency = s.currency ?? 'USD';
+              } catch { /* ignore */ }
+            }
+            await redisConnection.del(acKey);
+
+            if (linkedDraftIdUse) {
+              // Link existing account to the draft and show confirmation / picker
+              await showDraftAfterAccountCreation(
+                acResolved.workspaceId, acResolved.userId,
+                telegramUserId, chatId,
+                linkedDraftIdUse, acCmd.accountId, useCurrency,
+              );
+              request.log.info({ msg: '[midas:bot:webhook] ac: use_existing — linked to draft', workspaceId: acResolved.workspaceId });
+            } else {
+              // Standalone flow — just show confirmation
+              if (acMsgId) {
+                void editMessageText(chatId, acMsgId, '✅ Счёт выбран.', buildAfterCreateKeyboard());
+              } else {
+                void upsertBotMessage(telegramUserId, chatId, '✅ Счёт выбран.', buildAfterCreateKeyboard());
+              }
             }
 
           } else {
@@ -6633,6 +6694,73 @@ Midas создан, чтобы сделать учет денег максима
           await redisConnection.del(acKey);
           // Malformed state — fall through to normal flow
           acState = { step: 'type_pick' };
+        }
+
+        // ── rename_for_dup: user is renaming after "already exists" ──────
+        // Currency is already known — skip fuzzy match + currency picker.
+        if (acState.step === 'rename_for_dup' && acState.currency) {
+          const raw = message.text.trim();
+          const trimmed = capitalizeFirst(raw);
+          if (raw.length === 0) {
+            void upsertBotMessage(telegramUserId, chatId,
+              '🤔 Введите новое название для счёта:');
+            await reply.status(200).send({ ok: true });
+            return;
+          }
+          if (trimmed.length > 100) {
+            void upsertBotMessage(telegramUserId, chatId,
+              '⚠️ Название слишком длинное (макс. 100 символов). Попробуй покороче:');
+            await reply.status(200).send({ ok: true });
+            return;
+          }
+
+          let resolved: { workspaceId: string; userId: string };
+          try {
+            resolved = await resolveWorkspace(telegramUserId, chatId);
+          } catch {
+            await reply.status(200).send({ ok: true });
+            return;
+          }
+
+          const renRes = await addAccountReturningId(
+            resolved.workspaceId, resolved.userId, trimmed, acState.currency,
+          );
+
+          if (renRes.status === 'already_exists') {
+            // Still duplicate — show error again, stay in rename_for_dup
+            const dupState2: AccountOnboardState = { ...acState, name: trimmed };
+            await redisConnection.set(acKey, JSON.stringify(dupState2), 'EX', ONBOARD_STATE_TTL_SEC);
+            void upsertBotMessage(telegramUserId, chatId,
+              `⚠️ Счёт <b>${escapeHtml(trimmed)} · ${escapeHtml(acState.currency)}</b> тоже уже существует.\n\n` +
+              `<i>Введите другое название:</i>`);
+            await reply.status(200).send({ ok: true });
+            return;
+          }
+
+          // Account created (or child created) — proceed to bal_input
+          try {
+            await softDeletePlaceholderAccount(resolved.workspaceId, resolved.userId);
+          } catch { /* non-fatal */ }
+
+          const effName = renRes.finalName ?? trimmed;
+          const balState: AccountOnboardState = {
+            step: 'bal_input',
+            accountType: acState.accountType,
+            name: effName,
+            accountId: renRes.accountId,
+            currency: acState.currency,
+            linkedDraftId: acState.linkedDraftId,
+          };
+          await redisConnection.set(acKey, JSON.stringify(balState), 'EX', ONBOARD_STATE_TTL_SEC);
+
+          const prefix = renRes.status === 'created_as_child'
+            ? `✅ Добавлена валюта <b>${escapeHtml(acState.currency)}</b> к счёту <b>${escapeHtml(trimmed)}</b>\n\nСчёт: <b>${escapeHtml(effName)}</b>\n\n`
+            : `✅ Счёт <b>${escapeHtml(effName)} · ${escapeHtml(acState.currency)}</b> создан.\n\n`;
+          void upsertBotMessage(telegramUserId, chatId,
+            prefix + '💰 Введите начальный баланс\nили нажмите «Пропустить»:',
+            buildSkipBalanceKeyboard());
+          await reply.status(200).send({ ok: true });
+          return;
         }
 
         if (acState.step === 'name_input') {

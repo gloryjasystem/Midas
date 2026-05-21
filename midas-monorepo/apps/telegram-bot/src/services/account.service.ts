@@ -545,10 +545,12 @@ export async function addAccountWithCurrency(
  * In both cases accountId is always set (creation never fails due to duplicates).
  */
 export interface AddAccountWithIdResult {
-  status: 'created' | 'created_with_suffix';
+  status: 'created' | 'created_with_suffix' | 'created_as_child' | 'already_exists';
   accountId: string;
-  /** Final name after auto-suffix (only when status = 'created_with_suffix') */
+  /** Final name after auto-suffix or child creation */
   finalName?: string;
+  /** ID of the existing account (only when status = 'already_exists') */
+  existingAccountId?: string;
 }
 
 /**
@@ -671,7 +673,46 @@ export async function addAccountReturningId(
         return { status: 'created', accountId: reactivatedId };
       }
 
-      // ── Attempt 2: auto-suffix (name taken by an ACTIVE account) ────────
+      // ── Attempt 2: name conflict with ACTIVE account ────────────────────
+      // Check: is the existing account in a DIFFERENT currency?
+      // If yes → create child account under existing parent.
+      // If same currency → return 'already_exists' so UI can offer rename.
+      const existingRow = await client.query<{ id: string; currency: string }>(
+        `SELECT id, currency FROM account_sources
+         WHERE workspace_id = $1 AND name = $2 AND deleted_at IS NULL
+         LIMIT 1`,
+        [workspaceId, name],
+      );
+
+      if (existingRow.rows.length > 0) {
+        const existing = existingRow.rows[0]!;
+
+        if (existing.currency.toUpperCase() === currency.toUpperCase()) {
+          // ── SAME name + SAME currency → already exists ──
+          return { status: 'already_exists', accountId: existing.id, existingAccountId: existing.id };
+        }
+
+        // ── SAME name + DIFFERENT currency → create child under existing ──
+        const childName = `${name} \u00b7 ${currency}`;
+        const childId = generateUlid();
+        const childResult = await client.query<{ id: string }>(
+          `INSERT INTO account_sources
+             (id, workspace_id, name, type, currency, parent_account_id)
+           VALUES ($1, $2, $3, 'manual'::account_source_type, $4, $5)
+           ON CONFLICT ON CONSTRAINT account_sources_workspace_id_name_key DO NOTHING
+           RETURNING id`,
+          [childId, workspaceId, childName, currency, existing.id],
+        );
+
+        if ((childResult.rowCount ?? 0) > 0) {
+          return { status: 'created_as_child', accountId: childId, finalName: childName };
+        }
+
+        // Child name also taken → already exists with this currency
+        return { status: 'already_exists', accountId: existing.id, existingAccountId: existing.id };
+      }
+
+      // ── Fallback: auto-suffix (edge case — no active row found) ──────────
       const suffixedName = await findNextAvailableName(client, workspaceId, name);
       const suffixedId = generateUlid();
 
@@ -681,7 +722,6 @@ export async function addAccountReturningId(
         [suffixedId, workspaceId, suffixedName, currency],
       );
 
-      // Set workspace defaults if needed (same logic as above)
       await client.query(
         `UPDATE workspaces
          SET default_expense_account_id = COALESCE(default_expense_account_id, $1),

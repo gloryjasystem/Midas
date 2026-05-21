@@ -60,7 +60,8 @@ export type OnboardStep =
   | 'cur_search'           // currency free-text search active
   | 'cur_input'
   | 'bal_input'
-  | 'ren_input';           // Phase AC-DUP: rename after auto-suffix
+  | 'ren_input'           // Phase AC-DUP: rename after auto-suffix
+  | 'rename_for_dup';     // Same-name+same-currency: user must pick a different name
 
 /** Wallet sub-category — drives currency routing */
 export type WalletSubtype = 'crypto' | 'ewallet' | 'ton' | 'lightning';
@@ -780,7 +781,8 @@ export type AccountOnboardCmd =
   | { cmd: 'cur_search' }                  // master_roadmap: open currency free-text search
   | { cmd: 'cur_list' }                    // master_roadmap: return to currency list from search
   | { cmd: 'ren'; accountId: string }      // Phase AC-DUP: rename auto-suffixed account
-  | { cmd: 'ren_ok' };                     // Phase AC-DUP: accept auto-suffixed name
+  | { cmd: 'ren_ok' }                      // Phase AC-DUP: accept auto-suffixed name
+  | { cmd: 'use_existing'; accountId: string };  // Use existing account (same name+currency)
 
 // ─────────────────────────────────────────────────────────────
 // Parser — SEC-01 allowlist
@@ -909,6 +911,13 @@ export function parseAccountCallback(data: string): AccountOnboardCmd | null {
     // ac:ren:{accountId} — ULID is 26 chars
     if (idOrAct.length >= 20) return { cmd: 'ren', accountId: idOrAct };
     return null;
+  }
+
+  // ac:use:{accountId} — use existing account (same name+currency duplicate)
+  if (sub === 'use') {
+    const accountId = parts[2] ?? '';
+    if (accountId.length < 20) return null;
+    return { cmd: 'use_existing', accountId };
   }
 
   return null;
