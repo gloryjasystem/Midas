@@ -668,7 +668,7 @@ function buildSheet0Summary(
     c.value = lbl;
     c.font  = { bold: true, size: 8, name: 'Calibri', color: { argb: 'FF2D6A9F' } };
     c.fill  = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_TOTAL_HDR}` } };
-    c.alignment = { horizontal: 'center', vertical: 'middle' };
+    c.alignment = { horizontal: i === 3 ? 'right' : 'center', vertical: 'middle' };
     c.border = thinBorder;
   });
   ws.getRow(r).height = 16;
@@ -685,7 +685,7 @@ function buildSheet0Summary(
 
     const c2 = ws.getCell(r, 2);
     c2.value = fmtAmtSigned(row.net); c2.font = { bold: true, size: 9, name: 'Calibri', color: { argb: netClr } };
-    c2.fill = fillBg; c2.border = thinBorder; c2.alignment = { horizontal: 'right', vertical: 'middle' };
+    c2.fill = fillBg; c2.border = thinBorder; c2.alignment = { horizontal: 'center', vertical: 'middle' };
 
     const c3 = ws.getCell(r, 3);
     if (row.source === 'hardcoded') {
