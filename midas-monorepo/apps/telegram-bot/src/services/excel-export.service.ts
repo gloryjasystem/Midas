@@ -2646,7 +2646,6 @@ function buildSheet4(
   const RU_MONTHS = ['Январь','Февраль','Март','Апрель','Май','Июнь',
                      'Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
 
-  /** Returns a sortable key + display label for the period bucket */
   const bucketKey = (d: Date): { key: string; label: string } => {
     if (!useWeeks) {
       const idx = d.getMonth();
@@ -2655,9 +2654,8 @@ function buildSheet4(
         label: `${RU_MONTHS[idx]} ${d.getFullYear()}`,
       };
     }
-    // Week-level: ISO week start (Monday)
     const day = new Date(d); day.setHours(0, 0, 0, 0);
-    const dow = (day.getDay() + 6) % 7; // Mon=0
+    const dow = (day.getDay() + 6) % 7;
     const weekStart = new Date(day); weekStart.setDate(day.getDate() - dow);
     const weekEnd   = new Date(weekStart); weekEnd.setDate(weekStart.getDate() + 6);
     return {
@@ -2666,33 +2664,38 @@ function buildSheet4(
     };
   };
 
-  // ── Aggregate with USD conversion ───────────────────────────
+  // ── Aggregate ───────────────────────────────────────────────
   type Bucket = {
-    label:      string;
-    count:      number;
-    incomeUsd:  number;
-    expenseUsd: number;
-    transferUsd: number;
-    debtUsd:    number;   // net: debt_received - debt_given
+    label:           string;
+    count:           number;
+    incomeUsd:       number;
+    expenseUsd:      number;
+    transferVolume:  number;  // FIX: track VOLUME (not net) of internal transfers
+    transferNet:     number;  // real net (≈0 for internal, real for external)
+    debtUsd:         number;
   };
   const bucketMap = new Map<string, Bucket>();
 
   for (const r of rows) {
     const d    = new Date(r.transaction_time);
     const { key, label } = bucketKey(d);
-    const b    = bucketMap.get(key) ?? { label, count: 0, incomeUsd: 0, expenseUsd: 0, transferUsd: 0, debtUsd: 0 };
+    const b    = bucketMap.get(key) ?? {
+      label, count: 0, incomeUsd: 0, expenseUsd: 0,
+      transferVolume: 0, transferNet: 0, debtUsd: 0,
+    };
     const amt  = parseFloat(r.original_amount);
     const cur  = r.currency.toUpperCase();
     const rate = usdRates.get(cur) ?? null;
     const usd  = rate !== null ? amt * rate : 0;
 
     b.count++;
-    if (r.transaction_intent === 'income')         b.incomeUsd   += usd;
-    else if (r.transaction_intent === 'expense')   b.expenseUsd  += usd;
+    if (r.transaction_intent === 'income')       b.incomeUsd  += usd;
+    else if (r.transaction_intent === 'expense') b.expenseUsd += usd;
     else if (r.transaction_intent === 'transfer') {
-      // Direction-aware: internal outbound=−, inbound=+, unpaired=+
-      const sign = r.transfer_direction === 'inbound' ? 1 : (r.transfer_direction === 'outbound' ? -1 : 1);
-      b.transferUsd += sign * usd;
+      // FIX: volume = always add; net = direction-aware (≈0 for internal pairs)
+      b.transferVolume += usd;
+      const sign = r.transfer_direction === 'inbound' ? 1 : -1;
+      b.transferNet += sign * usd;
     }
     else if (r.transaction_intent === 'debt_received') b.debtUsd += usd;
     else if (r.transaction_intent === 'debt_given')    b.debtUsd -= usd;
@@ -2706,7 +2709,6 @@ function buildSheet4(
   const ws = wb.addWorksheet('По месяцам');
   const TOTAL_COLS = 10;
 
-  // Row 1: Title
   ws.mergeCells(1, 1, 1, TOTAL_COLS);
   const titleCell = ws.getCell(1, 1);
   titleCell.value = `MIDAS · Динамика ${granLabel} (≈ USD)`;
@@ -2715,20 +2717,21 @@ function buildSheet4(
   titleCell.alignment = { horizontal: 'center', vertical: 'middle' };
   ws.getRow(1).height = 32;
 
-  // Row 2: Headers
   const HDR_ROW = 2;
   const periodLabel = useWeeks ? 'Неделя' : 'Месяц';
+  // FIX: renamed columns — "Savings Rate" → "Норма сбер.", "Δ Расходов" → "Тренд расх.",
+  //      "Переводы" → "Объём переводов", "Долги нетто" → "Долги", "Кумул." → "Итог нарастающий"
   const colDefs: Array<[string, number]> = [
-    [periodLabel,            22],
-    ['Операций',           10],
-    ['Доходы ≈ USD',        16],
-    ['Расходы ≈ USD',       16],
-    ['Чистый ≈ USD',        16],
-    ['Savings\nRate %',     13],
-    ['Δ Расходов',         13],
-    ['Переводы\n≈ USD',    14],
-    ['Долги нетто\n≈ USD', 14],
-    ['Кумул.\n≈ USD',       16],
+    [periodLabel,                22],  // A
+    ['Операций',                 10],  // B
+    ['Доходы ≈ USD',             16],  // C
+    ['Расходы ≈ USD',            16],  // D
+    ['Чистый ≈ USD',             16],  // E
+    ['Норма\nсбережений %',      14],  // F  (was: Savings Rate %)
+    ['Тренд\nрасходов',          13],  // G  (was: Δ Расходов)
+    ['Объём\nпереводов ≈ USD',   16],  // H  (was: Переводы ≈ USD — net, confusing)
+    ['Долги\n≈ USD',             14],  // I  (was: Долги нетто ≈ USD)
+    ['Итог\nнарастающий',        17],  // J  (was: Кумул. ≈ USD)
   ];
   colDefs.forEach(([text, width], i) => hdr(ws, i + 1, HDR_ROW, text, width));
   ws.getRow(HDR_ROW).height = 30;
@@ -2740,26 +2743,33 @@ function buildSheet4(
     right:  { style: 'thin' as const, color: { argb: `FF${C_TBL_BORDER}` } },
   };
 
-  // ── Data rows ───────────────────────────────────────────────
   const DATA_START = 3;
   let rn = DATA_START;
   let prevExpUsd = 0;
-  let grandInc = 0, grandExp = 0, grandOps = 0, grandTfr = 0, grandDebt = 0;
+  let grandInc = 0, grandExp = 0, grandOps = 0, grandTfrVol = 0, grandDebt = 0;
   let cumulativeNet = 0;
 
   for (let si = 0; si < sorted.length; si++) {
     const [, b] = sorted[si]!;
     const net = b.incomeUsd - b.expenseUsd;
-    const sr  = b.incomeUsd > 0 ? ((b.incomeUsd - b.expenseUsd) / b.incomeUsd) * 100 : 0;
+
+    // FIX: Savings Rate — only show when income > 0, handle edge case gracefully
+    // Also cap at ±999% to avoid -3049% nonsense
+    const hasMeaningfulIncome = b.incomeUsd >= 1;
+    const sr = hasMeaningfulIncome
+      ? Math.max(-999, Math.min(999, ((b.incomeUsd - b.expenseUsd) / b.incomeUsd) * 100))
+      : null;
+
+    // FIX: Δ renamed to "Тренд" — only show when previous period exists
     const deltaExp = si > 0 && prevExpUsd > 0
       ? ((b.expenseUsd - prevExpUsd) / prevExpUsd) * 100
       : null;
 
-    grandInc  += b.incomeUsd;
-    grandExp  += b.expenseUsd;
-    grandOps  += b.count;
-    grandTfr  += b.transferUsd;
-    grandDebt += b.debtUsd;
+    grandInc    += b.incomeUsd;
+    grandExp    += b.expenseUsd;
+    grandOps    += b.count;
+    grandTfrVol += b.transferVolume;
+    grandDebt   += b.debtUsd;
 
     const bgArgb = rn % 2 === 0 ? `FF${C_ROW_ODD}` : 'FFFFFFFF';
     const fillBg = { type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb: bgArgb } };
@@ -2779,42 +2789,64 @@ function buildSheet4(
       if (opts.numFmt) c.numFmt = opts.numFmt;
     };
 
-    // A — Period
     sc(1, b.label, { bold: true, color: 'FF1A3C5E' });
-    // B — Ops count
     sc(2, b.count, { align: 'center' });
-    // C — Income USD
-    sc(3, b.incomeUsd, { align: 'right', numFmt: '#,##0.00',
-      color: b.incomeUsd > 0 ? `FF${C_INCOME}` : 'FF888888' });
-    // D — Expense USD
-    sc(4, b.expenseUsd, { align: 'right', numFmt: '#,##0.00',
-      color: b.expenseUsd > 0 ? `FF${C_EXPENSE}` : 'FF888888' });
-    // E — Net USD
+
+    // Доходы — "—" вместо красного нуля
+    if (b.incomeUsd > 0) {
+      sc(3, b.incomeUsd, { align: 'right', numFmt: '#,##0.00', color: `FF${C_INCOME}` });
+    } else {
+      sc(3, '—', { align: 'center', color: 'FFBBBBBB', italic: true });
+    }
+
+    // Расходы
+    if (b.expenseUsd > 0) {
+      sc(4, b.expenseUsd, { align: 'right', numFmt: '#,##0.00', color: `FF${C_EXPENSE}` });
+    } else {
+      sc(4, '—', { align: 'center', color: 'FFBBBBBB', italic: true });
+    }
+
+    // Чистый P&L
     sc(5, net, { align: 'right', numFmt: '#,##0.00', bold: true,
       color: net >= 0 ? `FF${C_INCOME}` : `FF${C_EXPENSE}`,
       fill: { type: 'pattern', pattern: 'solid',
         fgColor: { argb: net >= 0 ? 'FFE8F8F5' : 'FFFDEDEC' } } });
-    // F — Savings Rate %
-    if (b.incomeUsd > 0) {
+
+    // Норма сбережений — только когда есть доход
+    if (sr !== null) {
       const srClr = sr >= 20 ? `FF${C_INCOME}` : sr >= 0 ? 'FFD4AC0D' : `FF${C_EXPENSE}`;
       sc(6, parseFloat(sr.toFixed(1)), { align: 'right', numFmt: '0.0"%"', color: srClr, bold: sr >= 20 });
     } else {
-      sc(6, '—', { align: 'center', color: 'FFCCCCCC', italic: true });
+      // No income this period — metric not applicable
+      sc(6, 'нет доходов', { align: 'center', color: 'FFCCCCCC', italic: true });
     }
-    // G — Δ Expenses
+
+    // Тренд расходов — только начиная со второго периода
     if (deltaExp !== null) {
-      const arrow = deltaExp > 0 ? '↑' : '↓';
+      const arrow = deltaExp > 0 ? '▲' : '▼';
       const dClr  = deltaExp > 0 ? `FF${C_EXPENSE}` : `FF${C_INCOME}`;
       sc(7, `${arrow} ${deltaExp > 0 ? '+' : ''}${deltaExp.toFixed(1)}%`, { align: 'center', color: dClr, bold: true });
     } else {
-      sc(7, '—', { align: 'center', color: 'FFCCCCCC', italic: true });
+      sc(7, si === 0 ? 'первый период' : '—', { align: 'center', color: 'FFCCCCCC', italic: true });
     }
-    // H — Transfers USD (secondary)
-    sc(8, b.transferUsd, { align: 'right', numFmt: '#,##0.00', italic: true, color: 'FF888888' });
-    // I — Debts net USD (secondary)
-    sc(9, b.debtUsd, { align: 'right', numFmt: '+#,##0.00;-#,##0.00', italic: true,
-      color: b.debtUsd >= 0 ? 'FF888888' : `FF${C_EXPENSE}` });
-    // J — Cumulative Net Worth
+
+    // FIX: Объём переводов — показываем ОБЪЁМ (не сбивающее с толку нетто)
+    // Если переводов не было — прочерк
+    if (b.transferVolume > 0) {
+      sc(8, b.transferVolume, { align: 'right', numFmt: '#,##0.00', italic: true, color: 'FF2D6A9F' });
+    } else {
+      sc(8, '—', { align: 'center', color: 'FFBBBBBB', italic: true });
+    }
+
+    // Долги — только если были
+    if (b.debtUsd !== 0) {
+      sc(9, b.debtUsd, { align: 'right', numFmt: '+#,##0.00;-#,##0.00', italic: true,
+        color: b.debtUsd >= 0 ? 'FF888888' : `FF${C_EXPENSE}` });
+    } else {
+      sc(9, '—', { align: 'center', color: 'FFBBBBBB', italic: true });
+    }
+
+    // Итог нарастающий
     cumulativeNet += net;
     sc(10, cumulativeNet, { align: 'right', numFmt: '#,##0.00', bold: true,
       color: cumulativeNet >= 0 ? `FF${C_INCOME}` : `FF${C_EXPENSE}` });
@@ -2823,10 +2855,10 @@ function buildSheet4(
     rn++;
   }
 
-  // ── Grand Total footer row ──────────────────────────────────
+  // ── Grand Total footer ──────────────────────────────────────
   const gtFill   = { type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb: `FF${C_GRAND_BG}` } };
   const gtBorder = {
-    top: { style: 'medium' as const, color: { argb: 'FF0D2840' } },
+    top:    { style: 'medium' as const, color: { argb: 'FF0D2840' } },
     bottom: { style: 'medium' as const, color: { argb: 'FF0D2840' } },
     left:   { style: 'thin'   as const, color: { argb: `FF${C_TBL_BORDER}` } },
     right:  { style: 'thin'   as const, color: { argb: `FF${C_TBL_BORDER}` } },
@@ -2838,13 +2870,11 @@ function buildSheet4(
     ws.getCell(gtRow, ci).border = gtBorder;
   }
 
-  const gtFont = (color: string, size = 9) => ({ bold: true, size, name: 'Calibri', color: { argb: color } } as const);
-  const gtAlign = (h: 'left'|'center'|'right' = 'right') =>
-    ({ horizontal: h, vertical: 'middle' } as const);
+  const gtFont  = (color: string, size = 9) => ({ bold: true, size, name: 'Calibri', color: { argb: color } } as const);
+  const gtAlign = (h: 'left'|'center'|'right' = 'right') => ({ horizontal: h, vertical: 'middle' } as const);
 
   const g1 = ws.getCell(gtRow, 1);
-  g1.value = 'ИТОГО'; g1.font = gtFont('FFB0C8E0', 10); g1.fill = gtFill;
-  g1.alignment = gtAlign('right');
+  g1.value = 'ИТОГО'; g1.font = gtFont('FFB0C8E0', 10); g1.fill = gtFill; g1.alignment = gtAlign('right');
 
   const g2 = ws.getCell(gtRow, 2);
   g2.value = grandOps; g2.font = gtFont('FFB0C8E0'); g2.fill = gtFill; g2.alignment = gtAlign('center');
@@ -2862,19 +2892,26 @@ function buildSheet4(
   g5.value = grandNet; g5.numFmt = '#,##0.00';
   g5.font  = gtFont(grandNet >= 0 ? 'FF7DCEA0' : 'FFE57373', 10); g5.fill = gtFill; g5.alignment = gtAlign();
 
-  // Avg savings rate
-  const avgSr = grandInc > 0 ? ((grandInc - grandExp) / grandInc) * 100 : 0;
+  // Итоговая норма сбережений — только если были доходы
   const g6 = ws.getCell(gtRow, 6);
-  g6.value = `avg ${avgSr.toFixed(1)}%`;
-  g6.font  = gtFont(avgSr >= 20 ? 'FF7DCEA0' : avgSr >= 0 ? 'FFD4AC0D' : 'FFE57373');
-  g6.fill  = gtFill; g6.alignment = gtAlign();
+  if (grandInc >= 1) {
+    const avgSr = Math.max(-999, Math.min(999, ((grandInc - grandExp) / grandInc) * 100));
+    g6.value = `avg ${avgSr.toFixed(1)}%`;
+    g6.font  = gtFont(avgSr >= 20 ? 'FF7DCEA0' : avgSr >= 0 ? 'FFD4AC0D' : 'FFE57373');
+  } else {
+    g6.value = '—';
+    g6.font  = gtFont('FFCCCCCC');
+  }
+  g6.fill = gtFill; g6.alignment = gtAlign();
 
   const g8 = ws.getCell(gtRow, 8);
-  g8.value = grandTfr; g8.numFmt = '#,##0.00';
+  g8.value = grandTfrVol > 0 ? grandTfrVol : '—';
+  if (grandTfrVol > 0) g8.numFmt = '#,##0.00';
   g8.font = gtFont('FFB0C8E0'); g8.fill = gtFill; g8.alignment = gtAlign();
 
   const g9 = ws.getCell(gtRow, 9);
-  g9.value = grandDebt; g9.numFmt = '+#,##0.00;-#,##0.00';
+  g9.value = grandDebt !== 0 ? grandDebt : '—';
+  if (grandDebt !== 0) g9.numFmt = '+#,##0.00;-#,##0.00';
   g9.font = gtFont('FFB0C8E0'); g9.fill = gtFill; g9.alignment = gtAlign();
 
   const g10 = ws.getCell(gtRow, 10);
@@ -2886,23 +2923,24 @@ function buildSheet4(
   const fnRow = gtRow + 1;
   ws.mergeCells(fnRow, 1, fnRow, TOTAL_COLS);
   const fn = ws.getCell(fnRow, 1);
-  fn.value = `Гранулярность: ${granLabel} (авто) · Все суммы конвертированы в USD на дату экспорта · Savings Rate = (Incomes − Expenses) / Incomes × 100`;
+  fn.value = [
+    `Гранулярность: ${granLabel} (авто)`,
+    'Все суммы ≈ USD по курсу на дату экспорта',
+    'Норма сбережений = (Доходы − Расходы) / Доходы × 100  (показывается только при наличии дохода)',
+    'Объём переводов — суммарный оборот по счетам (не нетто)',
+    'Итог нарастающий — накопленный чистый P&L за все периоды',
+  ].join('   ·   ');
   fn.font  = { size: 7, italic: true, name: 'Calibri', color: { argb: 'FFAAAAAA' } };
   fn.fill  = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_GREY_BG}` } };
   fn.border = { top: { style: 'thin', color: { argb: `FF${C_TBL_BORDER}` } } };
   ws.getRow(fnRow).height = 14;
 
-  // ── Freeze + gridlines ──────────────────────────────────────
   ws.views = [{
     state: 'frozen', ySplit: HDR_ROW, xSplit: 0,
     activeCell: `A${DATA_START}`, showGridLines: false,
   }];
-  ws.properties.tabColor = { argb: 'FF2D6A9F' }; // blue tab — FP&A analytics
+  ws.properties.tabColor = { argb: 'FF2D6A9F' };
 }
-
-// ═══════════════════════════════════════════════════════════════
-// Sheet 5: «По дням» — Daily Breakdown
-// ═══════════════════════════════════════════════════════════════
 
 function buildSheet5DailyBreakdown(
   wb: ExcelJS.Workbook,
