@@ -141,38 +141,66 @@ function buildNonsenseKeyboard(): object {
 }
 
 // ─────────────────────────────────────────────────────────────
-// Currency-aware picker filtering
+// Currency classification + picker filtering
 // ─────────────────────────────────────────────────────────────
 
+// Mirrors draft-expiration.worker.ts (keep in sync)
+const PICKER_STABLECOINS = new Set([
+  'USDT', 'USDC', 'DAI', 'BUSD', 'TUSD', 'USDP', 'FDUSD', 'PYUSD', 'USDS', 'GUSD',
+]);
+const PICKER_KNOWN_CRYPTOS = new Set([
+  'BTC', 'ETH', 'BNB', 'SOL', 'ADA', 'XRP', 'DOGE', 'DOT', 'AVAX', 'MATIC',
+  'LINK', 'LTC', 'TRX', 'XMR', 'ETC', 'XLM', 'ATOM', 'FIL', 'NEAR', 'APT',
+  'ARB', 'OP', 'INJ', 'TON', 'NOT', 'DOGS', 'HMSTR', 'CATI',
+]);
+
+function classifyPickerCcy(code: string): 'fiat' | 'stablecoin' | 'crypto' {
+  const upper = code.toUpperCase();
+  if (PICKER_STABLECOINS.has(upper)) return 'stablecoin';
+  if (PICKER_KNOWN_CRYPTOS.has(upper)) return 'crypto';
+  return /^[A-Z]{2,5}$/.test(upper) ? 'fiat' : 'crypto';
+}
+
 /**
- * Filter picker accounts by transaction currency — STRICT exact match.
- * Used ONLY for transfer intent (both source and target accounts must
- * match the respective currency side).
+ * Filter/sort picker accounts by transaction currency.
  *
- * For expense/income/debt intents — cross-currency is valid (e.g. pay
- * USD price with a EUR card) and is handled by the XFX flow. Do NOT
- * call this function for those intents.
- *
- * "100 EUR" → only EUR accounts. "1000 USDT" → only USDT accounts.
+ * Rules:
+ *   - crypto/stablecoin: STRICT exact match only (e.g. USDT → only USDT accounts).
+ *   - fiat: sort by relevance — exact-currency accounts first, then other fiat accounts.
+ *     Cross-currency fiat payment (e.g. USD price on EUR card) is a valid real-world
+ *     scenario handled by the XFX flow, so we don’t hide any fiat accounts.
+ *   - transfer (any currency): always strict — see shouldFilterByCurrency().
  */
 function filterPickerAccounts(
   accounts: WorkspaceAccountEntry[],
   txCurrency: string,
 ): WorkspaceAccountEntry[] {
   const txCur = txCurrency.toUpperCase();
-  return accounts.filter((a) => a.currency.toUpperCase() === txCur);
+  if (classifyPickerCcy(txCur) === 'fiat') {
+    // Fiat: show all fiat accounts, exact match first
+    const exact = accounts.filter(a => a.currency.toUpperCase() === txCur);
+    const other = accounts.filter(
+      a => a.currency.toUpperCase() !== txCur && classifyPickerCcy(a.currency) === 'fiat',
+    );
+    return [...exact, ...other];
+  }
+  // Crypto / stablecoin: strict exact match only
+  return accounts.filter(a => a.currency.toUpperCase() === txCur);
 }
 
 /**
- * Returns true if the account picker should be filtered strictly by
- * transaction currency.
+ * Returns true if the account picker should apply strict currency filtering
+ * (only exact-match accounts shown, no cross-currency fallback).
  *
- * Rule: strict filtering only for `transfer` intent.
- * For expense / income / debt_given / debt_received — show all accounts;
- * cross-currency payment is a valid real-world scenario (XFX flow).
+ * Rules:
+ *   - transfer → always strict (source/target must match their currency sides).
+ *   - crypto/stablecoin expense/income/debt → strict (can’t pay BTC with ETH).
+ *   - fiat expense/income/debt → NOT strict; cross-currency is valid (XFX flow).
  */
-function shouldFilterByCurrency(intent: string | null | undefined): boolean {
-  return intent === 'transfer';
+function shouldFilterByCurrency(intent: string | null | undefined, currency?: string | null): boolean {
+  if (intent === 'transfer') return true;
+  if (currency && classifyPickerCcy(currency) !== 'fiat') return true;
+  return false;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -332,9 +360,9 @@ async function processAiParse(job: Job<AiParseJobPayload>): Promise<void> {
         try {
           const allGateAccounts = await getWorkspaceAccountsForPicker(workspaceId);
           const gateCur = pendingDraft.parsedCurrency ?? null;
-          // Strict currency filter ONLY for transfer intent (SEC: cross-currency
-          // expense/income/debt is valid — handled by XFX flow, not blocked here).
-          pickerAccountsGate = (gateCur && shouldFilterByCurrency(pendingDraft.parsedIntent))
+          // Strict filter for transfer intent AND crypto/stablecoin currencies.
+          // Fiat cross-currency (e.g. USD expense on EUR card) is valid — XFX flow.
+          pickerAccountsGate = (gateCur && shouldFilterByCurrency(pendingDraft.parsedIntent, gateCur))
             ? filterPickerAccounts(allGateAccounts, gateCur)
             : allGateAccounts;
         } catch {
@@ -724,7 +752,7 @@ async function processAiParse(job: Job<AiParseJobPayload>): Promise<void> {
         const allPickerAccounts = await getWorkspaceAccountsForPicker(workspaceId);
         totalAccountCount = allPickerAccounts.length;
         const txCur = aiData?.currency ?? null;
-        const isTransfer = shouldFilterByCurrency(aiData?.intent);
+        const isTransfer = shouldFilterByCurrency(aiData?.intent, txCur);
         pickerAccounts = (txCur && isTransfer)
           ? filterPickerAccounts(allPickerAccounts, txCur)
           : allPickerAccounts;
@@ -760,7 +788,7 @@ async function processAiParse(job: Job<AiParseJobPayload>): Promise<void> {
         // Show "no accounts in currency" prompt ONLY for transfer intent.
         // For expense/income/debt — if no accounts at all it's a new user; otherwise
         // all accounts are shown (they just get XFX mode).
-        const isTransferIntent = shouldFilterByCurrency(aiData?.intent);
+        const isTransferIntent = shouldFilterByCurrency(aiData?.intent, txCurDisplay);
         const hasAccountsButWrongCurrency = totalAccountCount > 0 && !!txCurDisplay && isTransferIntent;
 
         if (hasAccountsButWrongCurrency) {

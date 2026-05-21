@@ -1480,19 +1480,49 @@ export async function getWorkspaceAccountsWithBalances(
       }));
 
       // ── Currency-context filtering ──────────────────────────────────────
-      // Strict currency filter applies ONLY for transfer intent.
-      // For expense / income / debt_given / debt_received — cross-currency
-      // payment is a valid real-world scenario (e.g. paying USD price with
-      // a EUR card). The XFX flow handles the conversion on the confirmation
-      // card. Filtering here would incorrectly hide valid accounts.
+      // Mirrors ai-parse.worker.ts + draft-expiration.worker.ts logic.
       //
-      // parsedCurrency = null OR intent ≠ 'transfer' → return all accounts.
-      // parsedCurrency set AND intent === 'transfer'  → exact-match filter.
-      const isTransfer = intent === 'transfer';
-      if (!parsedCurrency || !isTransfer) return rawAccounts;
+      // No filter needed (return all):
+      //   parsedCurrency = null (unknown currency, show everything)
+      //
+      // Strict exact-match filter (return only matching currency):
+      //   intent === 'transfer' (both sides must match their currency)
+      //   crypto / stablecoin currency (can’t cross-pay BTC with ETH)
+      //
+      // Fiat cross-currency — sort, don’t filter:
+      //   intent = expense/income/debt + fiat currency →
+      //   exact-currency accounts first, then other fiat accounts.
+      //   Cross-currency payment (e.g. USD price on EUR card) is valid;
+      //   the XFX flow handles conversion on the confirmation card.
+      if (!parsedCurrency) return rawAccounts;
 
       const txCur = parsedCurrency.toUpperCase();
-      return rawAccounts.filter(a => a.currency.toUpperCase() === txCur);
+      const isTransfer = intent === 'transfer';
+
+      // Currency classifier (mirrors PICKER_STABLECOINS / PICKER_KNOWN_CRYPTOS)
+      const STABLES = new Set(['USDT','USDC','DAI','BUSD','TUSD','USDP','FDUSD','PYUSD','USDS','GUSD']);
+      const CRYPTOS = new Set(['BTC','ETH','BNB','SOL','ADA','XRP','DOGE','DOT','AVAX','MATIC',
+        'LINK','LTC','TRX','XMR','ETC','XLM','ATOM','FIL','NEAR','APT',
+        'ARB','OP','INJ','TON','NOT','DOGS','HMSTR','CATI']);
+      const isFiat = !STABLES.has(txCur) && !CRYPTOS.has(txCur) && /^[A-Z]{2,5}$/.test(txCur);
+
+      if (isTransfer || !isFiat) {
+        // Transfer or crypto/stablecoin: strict exact-match only
+        return rawAccounts.filter(a => a.currency.toUpperCase() === txCur);
+      }
+
+      // Fiat expense/income/debt: sort by relevance, show all fiat accounts
+      const exact = rawAccounts.filter(a => a.currency.toUpperCase() === txCur);
+      const otherFiat = rawAccounts.filter(a => {
+        const c = a.currency.toUpperCase();
+        return c !== txCur && !STABLES.has(c) && !CRYPTOS.has(c) && /^[A-Z]{2,5}$/.test(c);
+      });
+      const crypto = rawAccounts.filter(a => {
+        const c = a.currency.toUpperCase();
+        return STABLES.has(c) || CRYPTOS.has(c) || !/^[A-Z]{2,5}$/.test(c);
+      });
+      // crypto accounts are shown last (they were sorted by the SQL ORDER BY anyway)
+      return [...exact, ...otherFiat, ...crypto];
     },
   );
 }
