@@ -1,7 +1,7 @@
 ﻿# WORKFLOW_STATE.MD — Диспетчер задач ИИ-агента Midas
 
 > **Тип:** MUTABLE — кратковременная память агента. Обновляется на каждом шаге работы.
-> **Обновлён:** 2026-05-21 18:46 (UTC+3)
+> **Обновлён:** 2026-05-21 21:24 (UTC+3)
 
 ---
 
@@ -9,15 +9,15 @@
 
 | Параметр | Значение |
 |---|---|
-| **PHASE** | Phase 3: Strict currency filter + Multi-currency child accounts + Transfer UX ✅ |
-| **STEP** | Сессия 2026-05-21 17:35–18:46 (UTC+3). Реализованы: строгая фильтрация валют, child-счета из inline-онбординга, удалён спиннер перевода. Тестирование завершено. |
-| **AGENT STATUS** | tsc 0 errors (bg-workers + telegram-bot). Commits: c678c9f → 1213450 → fe14bcf. Pushed to main. Railway auto-deploy triggered. |
+| **PHASE** | Excel Export 2.0 — Sheet 0 Overhaul ✅ |
+| **STEP** | Сессия 2026-05-21 18:00–21:24 (UTC+3). Sheet 0 полностью переработан: smart period, движение капитала per-pair, удалён лист Контрагенты. Все изменения запушены. |
+| **AGENT STATUS** | tsc 0 errors. Commits: fdf21fc → 54f0d8c → afb08fa. Pushed to main. Railway auto-deploy triggered. |
 | **DEPLOYMENT** | Railway (spirited-happiness) — Midas Online, background-workers Online. Health: https://midas-production-f4f1.up.railway.app/health > ok |
 | **DB STATE** | `transfer_group_id`: TEXT ✅ \| `current_screen`: TEXT ✅ \| Все 5 миграций (1780000000000–1780400000000) применены ✅ |
 | **DATABASE_URL (public)** | `postgresql://postgres:PLLSqArtPUoQsAYmvrpsmavfQMewgTRh@hopper.proxy.rlwy.net:46284/railway` |
-| **LAST COMPLETED** | Phase Multi-CCY Inline: мультивалютные child-счета из inline-онбординга + строгая фильтрация валют + удалён спиннер. Commits: c678c9f, 1213450, fe14bcf. |
+| **LAST COMPLETED** | Excel Sheet 0 overhaul + удалён Sheet 6 Контрагенты. Commits: fdf21fc, 54f0d8c, afb08fa. |
 | **BLOCKER** | None. |
-| **NEXT ACTION** | 1. Phase 3.1 — расширение словаря детектора категорий. 2. Phase 3.2 — Report 3.0 (категорийная аналитика). |
+| **NEXT ACTION** | 1. Phase 3.1 — расширение словаря item-category-detector.service.ts (500+ записей). 2. Phase 3.2 — Report 3.0 (категорийная аналитика). |
 
 
 
@@ -93,6 +93,14 @@
 | Phase Currency-Filter: Строгая фильтрация валют в пикере | ✅ DEPLOYED | **Сессия 2026-05-21 15:30–16:30 (UTC+3). Commit: c678c9f.** (1) `ai-parse.worker.ts`: строгий exact-match по валюте — показываем только счета точно в нужной валюте. (2) `account.service.ts`: getWorkspaceAccountsWithBalances() — SQL-фильтр по currency. (3) `account-inline-keyboard.service.ts`: удалён некорректный badge. (4) Currency-aware empty state при отсутствии счетов в нужной валюте. |
 | Phase Multi-CCY Inline: Мультивалютные child-счета из инлайн-онбординга | ✅ DEPLOYED | **Сессия 2026-05-21 17:35–18:11 (UTC+3). Commits: 1213450, fe14bcf.** (1) `account.service.ts`: AddAccountWithIdResult расширен статусами `created_as_child` и `already_exists`. Attempt 2: разная валюта — создаёт child "Binance · BTC" с parent_account_id; та же — already_exists. (2) `account-onboard-keyboard.service.ts`: шаг `rename_for_dup` в FSM; команда `use_existing`; парсер `ac:use:{id}` (33 байта). (3) `webhook.route.ts`: ac:currency — 3 статуса; ac:use handler линкует существующий к драфту; rename_for_dup перехватывает текст ДО fuzzy match. (4) Удалён спиннер "Записываю перевод..." — commit fe14bcf. |
 
+
+| **Excel Export 2.0 — Sheet 1 Fixes (Transfers)** | ✅ DEPLOYED | **Сессия 2026-05-21 (начало). Файл: `apps/telegram-bot/src/services/excel-export.service.ts`.** (1) **Sheet 1 «Транзакции»**: переводы показываются в ОДНОЙ строке (не двух) — используется `transfer_direction` + `paired_account_name`. Колонка «Источник» (G) расширена, показывает «Счёт А → Счёт Б». Нейтральное форматирование (без красного/зелёного цвета). (2) **Колонка K «Категория»**: выравнивание по центру. (3) **Sheet 3 «Категории»**: исправлен расчёт Ø чек — `expenseUsd / count`. (4) **Sheet 5 «По дням»**: исправлен burn rate — `totalExpenseUsd / days`. |
+
+| **Excel Export 2.0 — Sheet 0 Full Overhaul** | ✅ DEPLOYED | **Сессия 2026-05-21 18:00–21:10 (UTC+3). Commit: fdf21fc. Файл: `apps/telegram-bot/src/services/excel-export.service.ts`, функция `buildSheet0Summary` (полный rewrite).** (1) **Smart Period**: если `dateFrom = epoch (< 2000-01-01)` → используется `MIN(transaction_time)` из строк; заголовок показывает «c [дата] (вся история) — [to]»; строка «Период:» помечена синим + «вся история». Исправлена ошибка 1970 года в сводке. (2) **Ширина колонки D**: 14 → 28 символов — для корректного отображения крупных сумм (напр. 20 000 USDT). (3) **Вертикальные разделители A|B и B|C** в таблице «СВОДКА ЗА ПЕРИОД»: `border.right: thin` на каждой ячейке строки. (4) **Overflow валют**: при >3 валют на один intent (income/expense/transfer) список переносится блоками по 3 (wrap every 3 currencies per row). (5) **Удалён блок «Топ-5 крупнейших расходов»** — решение владельца, лишний шум. (6) **Редизайн «ДВИЖЕНИЕ КАПИТАЛА»**: вместо агрегата по валютам — per-pair строки (таблица): №, Со счёта, На счёт, Списано (красный), Зачислено (зелёный). При кросс-конвертации: `+ 43.00 USDT (курс: 0.0430)`. Внешние переводы отдельный красный блок. Зелёный footer «✅ Нетто-влияние на P&L: 0». |
+
+| **Excel Export 2.0 — Remove Sheet 6 Контрагенты** | ✅ DEPLOYED | **Commit: 54f0d8c.** Лист «Контрагенты» (buildSheet6PayeeAnalytics) удалён полностью — всегда был пустым, т.к. поле `person_name` никогда не заполняется через бота. Удалены: вызов функции + сама функция (188 строк). tsc 0 ошибок. |
+
+| **Excel Export 2.0 — Column D Center Alignment** | ✅ DEPLOYED | **Commit: afb08fa.** В секции «ДВИЖЕНИЕ КАПИТАЛА» (Sheet 0): заголовок «Списано» (col 4) и значения (`−X.XX CUR`) выровнены по центру (`horizontal: center`). Ранее было `right`. |
 ---
 
 ## 3. ПРИНЯТЫЕ АРХИТЕКТУРНЫЕ РЕШЕНИЯ
