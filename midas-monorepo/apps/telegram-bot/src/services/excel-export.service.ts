@@ -2962,55 +2962,59 @@ function buildSheet5DailyBreakdown(
   ws.getRow(1).height = 32;
 
   // Row 2: Headers
+  // FIX: "Burn Rate" → "Активность\nрасходов", "Кумул." → "Итог нарастающий"
+  // FIX: "Переводы ≈ USD" → "Переводы\n(объём)"  — shows volume not net
   const HDR_ROW = 2;
   const colDefs: Array<[string, number]> = [
-    ['Дата',             16],
-    ['День нед.',        12],
-    ['Операций',       10],
-    ['Доходы ≈ USD',    16],
-    ['Расходы ≈ USD',   16],
-    ['Переводы ≈ USD',  14],
-    ['Чистый ≈ USD',    16],
-    ['Кумул. ≈ USD',    16],
-    ['Burn Rate',        14],
+    ['Дата',               14],  // A — FIX: will align center
+    ['День\nнед.',         10],  // B
+    ['Опер.',              8],   // C
+    ['Доходы ≈ USD',       16],  // D
+    ['Расходы ≈ USD',      16],  // E
+    ['Переводы\n(объём)',  14],  // F  (was: Переводы ≈ USD — was showing outbound only, confusing)
+    ['Чистый ≈ USD',       16],  // G
+    ['Итог\nнарастающий', 16],  // H  (was: Кумул. ≈ USD)
+    ['Активность\nрасходов', 14], // I  (was: Burn Rate — English, unexplained)
   ];
   colDefs.forEach(([text, width], i) => hdr(ws, i + 1, HDR_ROW, text, width));
-  ws.getRow(HDR_ROW).height = 28;
+  ws.getRow(HDR_ROW).height = 30;
 
   // Aggregate by date
   type DayBucket = {
-    date: Date;
-    ops: number;
-    incomeUsd: number;
-    expenseUsd: number;
-    transferUsd: number;
+    date:         Date;
+    ops:          number;
+    incomeUsd:    number;
+    expenseUsd:   number;
+    transferVolume: number; // FIX: track outbound volume, not net
   };
   const dayMap = new Map<string, DayBucket>();
   const WEEKDAYS_RU = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
 
   for (const row of rows) {
     const txDate = new Date(row.transaction_time);
-    const key = fmtDate(txDate);
-    const bucket = dayMap.get(key) ?? { date: txDate, ops: 0, incomeUsd: 0, expenseUsd: 0, transferUsd: 0 };
+    const key    = fmtDate(txDate);
+    const bucket = dayMap.get(key) ?? { date: txDate, ops: 0, incomeUsd: 0, expenseUsd: 0, transferVolume: 0 };
     bucket.ops++;
-    const amt = parseFloat(row.original_amount);
-    const cur = row.currency.toUpperCase();
+    const amt  = parseFloat(row.original_amount);
+    const cur  = row.currency.toUpperCase();
     const rate = usdRates.get(cur) ?? null;
-    const usd = rate !== null ? amt * rate : 0;
+    const usd  = rate !== null ? amt * rate : 0;
 
     if (row.transaction_intent === 'income' || row.transaction_intent === 'debt_received') {
       bucket.incomeUsd += usd;
     } else if (row.transaction_intent === 'expense') {
       bucket.expenseUsd += usd;
     } else if (row.transaction_intent === 'transfer') {
-      if (row.transfer_direction === 'outbound') bucket.transferUsd += usd;
+      // FIX: track outbound volume (what actually moved from a particular account)
+      if (row.transfer_direction === 'outbound' || row.transfer_direction === null) {
+        bucket.transferVolume += usd;
+      }
     }
     dayMap.set(key, bucket);
   }
 
   const sorted = [...dayMap.entries()].sort(([a], [b]) => a.localeCompare(b));
 
-  // Data rows
   const thinB = {
     top:    { style: 'thin' as const, color: { argb: `FF${C_TBL_BORDER}` } },
     bottom: { style: 'thin' as const, color: { argb: `FF${C_TBL_BORDER}` } },
@@ -3023,20 +3027,22 @@ function buildSheet5DailyBreakdown(
   let cumul = 0;
   let grandInc = 0, grandExp = 0, grandTfr = 0, grandOps = 0;
 
-  // Pre-compute average daily expense for burn rate (fixed denominator)
-  const totalExpAll = sorted.reduce((s, [, d]) => s + d.expenseUsd, 0);
-  const avgDailyExpFixed = sorted.length > 0 ? totalExpAll / sorted.length : 0;
+  // Pre-compute average daily expense across days that HAD expenses (for meaningful burn rate)
+  const daysWithExpense   = sorted.filter(([, d]) => d.expenseUsd > 0);
+  const totalExpAll       = sorted.reduce((s, [, d]) => s + d.expenseUsd, 0);
+  const avgDailyExpFixed  = daysWithExpense.length > 0 ? totalExpAll / daysWithExpense.length : 0;
 
   for (const [dateStr, d] of sorted) {
     const net = d.incomeUsd - d.expenseUsd;
     cumul += net;
     grandInc += d.incomeUsd;
     grandExp += d.expenseUsd;
-    grandTfr += d.transferUsd;
+    grandTfr += d.transferVolume;
     grandOps += d.ops;
 
-    const dow = WEEKDAYS_RU[d.date.getDay()]!;
+    const dow       = WEEKDAYS_RU[d.date.getDay()]!;
     const isWeekend = d.date.getDay() === 0 || d.date.getDay() === 6;
+    // Weekend: warm yellow tint; weekday: alternating white/very light grey
     const bgArgb = isWeekend ? 'FFFEF9E7' : (rn % 2 === 0 ? `FF${C_ROW_ODD}` : 'FFFFFFFF');
     const fillBg = { type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb: bgArgb } };
     ws.getRow(rn).height = 18;
@@ -3055,35 +3061,67 @@ function buildSheet5DailyBreakdown(
       if (opts.numFmt) c.numFmt = opts.numFmt;
     };
 
-    sc(1, dateStr, { bold: true, color: isWeekend ? 'FFD4AC0D' : 'FF1A3C5E' });
-    sc(2, dow, { align: 'center', color: isWeekend ? 'FFD4AC0D' : 'FF888888', italic: isWeekend });
-    sc(3, d.ops, { align: 'center' });
-    sc(4, d.incomeUsd, { align: 'right', numFmt: '#,##0.00',
-      color: d.incomeUsd > 0 ? `FF${C_INCOME}` : 'FF888888' });
-    sc(5, d.expenseUsd, { align: 'right', numFmt: '#,##0.00',
-      color: d.expenseUsd > 0 ? `FF${C_EXPENSE}` : 'FF888888' });
-    sc(6, d.transferUsd, { align: 'right', numFmt: '#,##0.00', italic: true, color: 'FF888888' });
+    // FIX: Дата — по центру (было left)
+    sc(1, dateStr, { bold: true, align: 'center', color: isWeekend ? 'FFD4AC0D' : 'FF1A3C5E' });
+    sc(2, dow,     { align: 'center', color: isWeekend ? 'FFD4AC0D' : 'FF888888', italic: isWeekend });
+    sc(3, d.ops,   { align: 'center' });
+
+    // Доходы — прочерк вместо 0.00
+    if (d.incomeUsd > 0) {
+      sc(4, d.incomeUsd, { align: 'right', numFmt: '#,##0.00', color: `FF${C_INCOME}` });
+    } else {
+      sc(4, '—', { align: 'center', color: 'FFBBBBBB', italic: true });
+    }
+
+    // Расходы — прочерк вместо 0.00
+    if (d.expenseUsd > 0) {
+      sc(5, d.expenseUsd, { align: 'right', numFmt: '#,##0.00', color: `FF${C_EXPENSE}` });
+    } else {
+      sc(5, '—', { align: 'center', color: 'FFBBBBBB', italic: true });
+    }
+
+    // Переводы (объём) — прочерк если не было
+    if (d.transferVolume > 0) {
+      sc(6, d.transferVolume, { align: 'right', numFmt: '#,##0.00', italic: true, color: 'FF2D6A9F' });
+    } else {
+      sc(6, '—', { align: 'center', color: 'FFBBBBBB', italic: true });
+    }
+
+    // Чистый P&L — цветной фон
     sc(7, net, { align: 'right', numFmt: '#,##0.00', bold: true,
       color: net >= 0 ? `FF${C_INCOME}` : `FF${C_EXPENSE}`,
       fill: { type: 'pattern', pattern: 'solid',
         fgColor: { argb: net >= 0 ? 'FFE8F8F5' : 'FFFDEDEC' } } });
+
+    // Итог нарастающий
     sc(8, cumul, { align: 'right', numFmt: '#,##0.00', bold: true,
       color: cumul >= 0 ? `FF${C_INCOME}` : `FF${C_EXPENSE}` });
-    // Burn rate = daily expense relative to fixed avg across ALL days
-    const burnRatio = avgDailyExpFixed > 0 ? d.expenseUsd / avgDailyExpFixed : 0;
-    if (d.expenseUsd > 0) {
-      const burnClr = burnRatio > 1.5 ? `FF${C_EXPENSE}` : burnRatio > 1 ? 'FFD4AC0D' : `FF${C_INCOME}`;
-      sc(9, `×${burnRatio.toFixed(1)}`, { align: 'center', color: burnClr, bold: burnRatio > 1.5 });
+
+    // FIX: "Активность расходов" — переименовано и объяснено через текст, не формулу
+    // Смысл: сколько этот день стоил относительно твоего среднего дня
+    // ×0.5 = в 2 раза дешевле среднего · ×1.0 = норма · ×2.0 = вдвое выше нормы
+    if (d.expenseUsd > 0 && avgDailyExpFixed > 0) {
+      const burnRatio = d.expenseUsd / avgDailyExpFixed;
+      // Color: green if below avg, yellow if ×1–1.5, red if above ×1.5
+      const burnClr = burnRatio > 1.5 ? `FF${C_EXPENSE}` : burnRatio > 1.0 ? 'FFD4AC0D' : `FF${C_INCOME}`;
+      const label   = burnRatio > 1.5 ? `×${burnRatio.toFixed(1)} ↑↑` :
+                      burnRatio > 1.0 ? `×${burnRatio.toFixed(1)} ↑` :
+                      burnRatio < 0.5 ? `×${burnRatio.toFixed(1)} ↓↓` :
+                                        `×${burnRatio.toFixed(1)}`;
+      sc(9, label, { align: 'center', color: burnClr, bold: burnRatio > 1.5 });
+    } else if (d.expenseUsd === 0) {
+      sc(9, 'без расходов', { align: 'center', color: `FF${C_INCOME}`, italic: true });
     } else {
       sc(9, '—', { align: 'center', color: 'FFCCCCCC', italic: true });
     }
+
     rn++;
   }
 
   // Grand Total
   const gtFill   = { type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb: `FF${C_GRAND_BG}` } };
   const gtBorder = {
-    top: { style: 'medium' as const, color: { argb: 'FF0D2840' } },
+    top:    { style: 'medium' as const, color: { argb: 'FF0D2840' } },
     bottom: { style: 'medium' as const, color: { argb: 'FF0D2840' } },
     left:   { style: 'thin'   as const, color: { argb: `FF${C_TBL_BORDER}` } },
     right:  { style: 'thin'   as const, color: { argb: `FF${C_TBL_BORDER}` } },
@@ -3095,46 +3133,64 @@ function buildSheet5DailyBreakdown(
     ws.getCell(gtRow, ci).border = gtBorder;
   }
 
-  const gtFont = (color: string, size = 9) => ({ bold: true, size, name: 'Calibri', color: { argb: color } } as const);
-  const gtAlign = (h: 'left'|'center'|'right' = 'right') =>
-    ({ horizontal: h, vertical: 'middle' } as const);
+  const gtFont  = (color: string, size = 9) => ({ bold: true, size, name: 'Calibri', color: { argb: color } } as const);
+  const gtAlign = (h: 'left'|'center'|'right' = 'right') => ({ horizontal: h, vertical: 'middle' } as const);
 
   const g1 = ws.getCell(gtRow, 1);
   g1.value = `ИТОГО (${String(sorted.length)} дн.)`; g1.font = gtFont('FFB0C8E0', 10); g1.fill = gtFill;
-  g1.alignment = gtAlign('right');
+  g1.alignment = gtAlign('center');
+
   const g3 = ws.getCell(gtRow, 3);
   g3.value = grandOps; g3.font = gtFont('FFB0C8E0'); g3.fill = gtFill; g3.alignment = gtAlign('center');
+
   const g4 = ws.getCell(gtRow, 4);
-  g4.value = grandInc; g4.numFmt = '#,##0.00';
+  g4.value = grandInc > 0 ? grandInc : '—'; if (grandInc > 0) g4.numFmt = '#,##0.00';
   g4.font = gtFont(grandInc > 0 ? 'FF7DCEA0' : 'FFB0C8E0', 10); g4.fill = gtFill; g4.alignment = gtAlign();
+
   const g5 = ws.getCell(gtRow, 5);
-  g5.value = grandExp; g5.numFmt = '#,##0.00';
+  g5.value = grandExp > 0 ? grandExp : '—'; if (grandExp > 0) g5.numFmt = '#,##0.00';
   g5.font = gtFont(grandExp > 0 ? 'FFE57373' : 'FFB0C8E0', 10); g5.fill = gtFill; g5.alignment = gtAlign();
+
   const g6 = ws.getCell(gtRow, 6);
-  g6.value = grandTfr; g6.numFmt = '#,##0.00';
+  g6.value = grandTfr > 0 ? grandTfr : '—'; if (grandTfr > 0) g6.numFmt = '#,##0.00';
   g6.font = gtFont('FFB0C8E0'); g6.fill = gtFill; g6.alignment = gtAlign();
+
   const grandNet = grandInc - grandExp;
   const g7 = ws.getCell(gtRow, 7);
   g7.value = grandNet; g7.numFmt = '#,##0.00';
   g7.font = gtFont(grandNet >= 0 ? 'FF7DCEA0' : 'FFE57373', 10); g7.fill = gtFill; g7.alignment = gtAlign();
+
   const g8 = ws.getCell(gtRow, 8);
   g8.value = cumul; g8.numFmt = '#,##0.00';
   g8.font = gtFont(cumul >= 0 ? 'FF7DCEA0' : 'FFE57373', 10); g8.fill = gtFill; g8.alignment = gtAlign();
 
-  // Footnote
+  // Avg activity in grand total
+  if (avgDailyExpFixed > 0) {
+    const g9 = ws.getCell(gtRow, 9);
+    g9.value = `~${avgDailyExpFixed.toLocaleString('ru', { maximumFractionDigits: 0 })} USD/день`;
+    g9.font  = gtFont('FFB0C8E0', 8); g9.fill = gtFill; g9.alignment = gtAlign('center');
+  }
+
+  // Footnote — expanded, human-readable
   const fnRow = gtRow + 1;
   ws.mergeCells(fnRow, 1, fnRow, TOTAL_COLS);
   const fn = ws.getCell(fnRow, 1);
-  fn.value = 'Burn Rate: ×1.0 = средний расход за день · >×1.5 = выше нормы (красный) · Выходные выделены жёлтым';
+  fn.value = [
+    'Выходные выделены жёлтым',
+    'Переводы — объём исходящих операций между счетами (деньги остались в портфеле)',
+    'Активность расходов: ×1.0 = ваш средний день  ·  ×2.0 = потратили вдвое больше нормы  ·  ×0.5 = вдвое экономнее',
+    '↑↑ красный = заметно выше нормы  ·  зелёный = в рамках нормы',
+    'Итог нарастающий = накопленный чистый P&L с первого дня периода',
+  ].join('   ·   ');
   fn.font  = { size: 7, italic: true, name: 'Calibri', color: { argb: 'FFAAAAAA' } };
   fn.fill  = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_GREY_BG}` } };
   fn.border = { top: { style: 'thin', color: { argb: `FF${C_TBL_BORDER}` } } };
+  ws.getRow(fnRow).height = 14;
 
-  // Freeze + gridlines
   ws.views = [{
     state: 'frozen', ySplit: HDR_ROW, xSplit: 0,
     activeCell: `A${DATA_START}`, showGridLines: false,
   }];
-  ws.properties.tabColor = { argb: 'FFE67E22' }; // orange tab
+  ws.properties.tabColor = { argb: 'FFE67E22' };
 }
 
