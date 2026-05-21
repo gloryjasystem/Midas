@@ -4508,7 +4508,7 @@ Midas создан, чтобы сделать учет денег максима
                 transaction_time:  ptTxData.tx_time,
               };
               const cardText = buildTransferDetailCard(syntheticPair);
-              const cardKb   = buildTransferViewKeyboard(ptTxId);
+              const cardKb   = buildTransferViewKeyboard(ptTxId, 'pt');
               void upsertBotMessage(telegramUserId, chatId, cardText, cardKb);
             }
 
@@ -4705,7 +4705,7 @@ Midas создан, чтобы сделать учет денег максима
                 transaction_time:  ptBackData.tx_time,
               };
               const cardText = buildTransferDetailCard(syntheticPair);
-              const cardKb   = buildTransferViewKeyboard(ptTxId);
+              const cardKb   = buildTransferViewKeyboard(ptTxId, 'pt');
               void upsertBotMessage(telegramUserId, chatId, cardText, cardKb);
             }
             request.log.info({ msg: '[midas:pt:back] card restored', workspaceId: ptResolved.workspaceId });

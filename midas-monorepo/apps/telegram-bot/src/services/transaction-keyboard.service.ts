@@ -340,19 +340,25 @@ export function buildTransferDetailCard(pair: TransferPairRow): string {
  *   [🗑 Удалить перевод]
  *   [✖️ Отмена]
  *
- * "Отмена" restores the success card when from === 's',
- * otherwise closes the keyboard.
+ * Cancel behavior by context:
+ *   from === 's'  → tx:done:{txId}   (restore floating success card)
+ *   from === 'pt' → tx:v:{txId}:pt   (re-render this same rich card; prevents message deletion)
+ *   undefined     → tx:close          (delete the message — used from tx list)
  */
 export function buildTransferViewKeyboard(
   outboundTxId: string,
   from?: string,
 ): InlineKeyboardMarkup {
   const sf = from ? `:${from}` : '';
+  let cancelCallback: string;
+  if (from === 's')  cancelCallback = `tx:done:${outboundTxId}`;
+  else if (from === 'pt') cancelCallback = `tx:v:${outboundTxId}:pt`;
+  else               cancelCallback = 'tx:close';
   return {
     inline_keyboard: [
       [{ text: '📈 Изменить курс конвертации', callback_data: `tx:tf:rate:${outboundTxId}${sf}` }],
       [{ text: '🗑 Удалить перевод',           callback_data: `tx:tf:del:${outboundTxId}${sf}` }],
-      [{ text: '✖️ Отмена',                    callback_data: from === 's' ? `tx:done:${outboundTxId}` : 'tx:close' }],
+      [{ text: '✖️ Отмена',                    callback_data: cancelCallback }],
     ],
   };
 }
