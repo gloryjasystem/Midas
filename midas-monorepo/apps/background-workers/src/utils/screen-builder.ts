@@ -439,7 +439,7 @@ export function buildClarificationScreen(data: ClarificationScreenData): string 
   const lines: string[] = ['🤔 <b>Уточнение</b>', ''];
   if (data.intent) lines.push(`${intentEmoji(data.intent)} ${intentLabel(data.intent)}`);
   if (data.amount) lines.push(`Сумма: <b>${escapeHtml(data.amount)} ${escapeHtml(data.currency ?? 'USDT')}</b>`);
-  if (data.categoryHint) lines.push(`Категория: ${escapeHtml(data.categoryHint)}`);
+  if (data.categoryHint && data.intent !== 'transfer') lines.push(`Категория: ${escapeHtml(data.categoryHint)}`);
   lines.push('');
   switch (data.field) {
     case 'amount':

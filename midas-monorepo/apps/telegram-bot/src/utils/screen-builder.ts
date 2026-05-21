@@ -628,7 +628,7 @@ export function buildClarificationScreen(data: ClarificationScreenData): string 
   if (data.amount) {
     lines.push(`Сумма: <b>${data.amount} ${data.currency ?? 'USDT'}</b>`);
   }
-  if (data.categoryHint) {
+  if (data.categoryHint && data.intent !== 'transfer') {
     lines.push(`Категория: ${data.categoryHint}`);
   }
 
