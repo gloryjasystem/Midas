@@ -1,27 +1,7 @@
 ﻿# WORKFLOW_STATE.MD — Диспетчер задач ИИ-агента Midas
 
 > **Тип:** MUTABLE — кратковременная память агента. Обновляется на каждом шаге работы.
-> **Обновлён:** 2026-05-21 11:43 (UTC+3)
-
----
-
-### ⛔ КРИТИЧЕСКОЕ ПРАВИЛО КОДИРОВКИ — ОБЯЗАТЕЛЬНО К ИСПОЛНЕНИЮ
-
-**Этот файл содержит кириллицу и эмодзи. Он ОБЯЗАН оставаться в кодировке UTF-8 с BOM.**
-
-**Причина:** На Windows PowerShell перекодирует UTF-8 через системную кодовую страницу (CP437/CP866/CP1251) при любом перенаправлении вывода (`>`, `|`, `Out-File`, `Set-Content`). Это превращает кириллицу в нечитаемые символы типа `╨Ф╨╕╤Б╨┐╨╡╤В╤З╨╡╤А` и `тАФ`. Файл уже был повреждён так дважды.
-
-**ЗАПРЕЩЕНО:**
-- ❌ Использовать PowerShell `>`, `>>`, `Out-File`, `Set-Content` для записи в этот файл
-- ❌ Использовать `git show ... > file` или `git show ... | Out-File` в PowerShell
-- ❌ Использовать `replace_file_content` / `multi_replace_file_content` с кириллическим текстом без проверки кодировки результата
-- ❌ Читать файл одной кодировкой и сохранять в другой
-
-**ОБЯЗАТЕЛЬНО:**
-- ✅ Редактировать ТОЛЬКО через Node.js (`fs.readFileSync('file','utf8')` / `fs.writeFileSync('file', '\uFEFF' + content, 'utf8')`)
-- ✅ Или через `cmd /c "git show ... > file"` (cmd.exe не перекодирует байты)
-- ✅ После КАЖДОГО изменения файла — проверить, что нет символов `╨`, `╤`, `тАФ` в выводе: `node -e "const c=require('fs').readFileSync('workflow_state.md','utf8'); let b=0; for(const l of c.split('\\n')){if(l.includes('╨')||l.includes('╤'))b++;} console.log(b?'❌ ПОВРЕЖДЁН: '+b+' строк':'✅ OK')"`
-- ✅ Если файл повреждён — восстановить чистую версию из git: `cmd /c "git show HEAD~1:workflow_state.md > workflow_state.md"`
+> **Обновлён:** 2026-05-21 18:46 (UTC+3)
 
 ---
 
@@ -29,15 +9,15 @@
 
 | Параметр | Значение |
 |---|---|
-| **PHASE** | Phase 2: Account Onboarding — Duplicate Name Handling (AC-DUP) |
-| **STEP** | Сессия 2026-05-21 13:20–16:55 (UTC+3). Реализован Variant 4 авто-суффикса дублирующих имён счетов + серия UX-фиксов ac:more. Тестирование завершено. |
-| **AGENT STATUS** | tsc 0 errors (bg-workers + telegram-bot). Commits: 786024f → 8e5014a. Pushed to main. Railway auto-deploy triggered. |
+| **PHASE** | Phase 3: Strict currency filter + Multi-currency child accounts + Transfer UX ✅ |
+| **STEP** | Сессия 2026-05-21 17:35–18:46 (UTC+3). Реализованы: строгая фильтрация валют, child-счета из inline-онбординга, удалён спиннер перевода. Тестирование завершено. |
+| **AGENT STATUS** | tsc 0 errors (bg-workers + telegram-bot). Commits: c678c9f → 1213450 → fe14bcf. Pushed to main. Railway auto-deploy triggered. |
 | **DEPLOYMENT** | Railway (spirited-happiness) — Midas Online, background-workers Online. Health: https://midas-production-f4f1.up.railway.app/health > ok |
-| **DB STATE** | Без изменений. Все миграции применены ✅. account_sources НЕ имеет колонки balance — баланс вычисляется CTE из transactions. UNIQUE(workspace_id, name) constraint активен. |
+| **DB STATE** | `transfer_group_id`: TEXT ✅ \| `current_screen`: TEXT ✅ \| Все 5 миграций (1780000000000–1780400000000) применены ✅ |
 | **DATABASE_URL (public)** | `postgresql://postgres:PLLSqArtPUoQsAYmvrpsmavfQMewgTRh@hopper.proxy.rlwy.net:46284/railway` |
-| **LAST COMPLETED** | Phase 3.1-FIX v2: transfer account creation returns to SOURCE picker (not target), new account first in list. showDraftAfterAccountCreation() v2. Commit: 8e5014a. |
+| **LAST COMPLETED** | Phase Multi-CCY Inline: мультивалютные child-счета из inline-онбординга + строгая фильтрация валют + удалён спиннер. Commits: c678c9f, 1213450, fe14bcf. |
 | **BLOCKER** | None. |
-| **NEXT ACTION** | 1. Тестировать Phase 3.1-FIX (inline account creation + transfer routing). 2. Phase 3.1 — расширение словаря детектора категорий. 3. Phase 3.2 — Report 3.0 (категорийная аналитика). |
+| **NEXT ACTION** | 1. Phase 3.1 — расширение словаря детектора категорий. 2. Phase 3.2 — Report 3.0 (категорийная аналитика). |
 
 
 
@@ -109,11 +89,9 @@
 | 2.10+ Gate Fix — Frozen UI on Concurrent Input | ? DEPLOYED | **Проблема:** пользователь пишет TX1 (пикер счёта открыт), TX2 > step-7 удаляет пикер до того как gate установит `gate_sent` > gate присылает новую карточку. TX3 > step-7 снова удаляет gate-карточку (gate_sent НЕ проверялся) > ai-parse молчит (gate_sent установлен) > UI зависает. **Фикс 1:** `webhook.route.ts` step-7 строки 5446–5458 — `EXISTS midas:gate_sent:` перед deleteMessage; если активен — карточка и `midas:am:` не трогаются. **Фикс 2:** `webhook.route.ts` ia:pk: строка 1539 — `DEL midas:gate_sent:` после выбора счёта > нормальный flow восстанавливается. **Фикс 3:** `ai-parse.worker.ts` — gate реконструирует полный пикер счетов когда `accountId = null`. **Жизненный цикл gate_sent:** SET в ai-parse > DEL при ia:cancel (строка 1432, до фикса) / ia:pk: (строка 1539, НОВОЕ) / approve/reject в confirmation.worker (строка 268, до фикса) / TTL 1h. Commit `8d25ec1`. tsc 0 ошибок. Railway ? оба сервиса Online. |
 
 | Phase 3.1+ DB Bugfixes | ✅ DEPLOYED | **Сессия 2026-05-20 13:00–16:00.** (1) Миграция `1780400000000_transfer-group-id-text`: `transfer_group_id UUID→TEXT` + пересоздан индекс. Применена вручную через public proxy URL. (2) Миграция `1780200000000_draft-current-screen`: добавлена колонка `current_screen TEXT` в `transaction_drafts` (была пропущена при деплое). (3) Миграция `1780100000000_reminder-fn-add-account`: обновлена функция reminder. (4) `draft-confirmation.service.ts`: убраны `::UUID` касты от `$9` и `$8`. (5) `apps/background-workers/src/migrate.ts`: авто-миграции при старте background-workers (Step 0 перед CRON). **DB проверено:** transfer_group_id=text ✅ current_screen=text ✅. PUBLIC DATABASE_URL: `postgresql://postgres:PLLSqArtPUoQsAYmvrpsmavfQMewgTRh@hopper.proxy.rlwy.net:46284/railway` |
-| Phase 3.1-Refactor: Transfer internal-only | ✅ DEPLOYED | **Сессия 2026-05-20 18:26–20:30 (UTC+3). Commit: 0c23097.** Полный рефакторинг transfer flow: удалён промежуточный экран «Куда уходят деньги?» и весь Branch B (внешние переводы). Transfer теперь только между своими счетами. Удалены 12 функций + Redis-ключ midas:tp_ext_rcpt + text interceptor. ia:pk и ia:back при intent=transfer теперь сразу показывают buildTargetAccountKeyboard. |
-| Phase 3.1-UX Transfer Picker First | ✅ DEPLOYED | **Сессия 2026-05-21 11:37–11:43 (UTC+3). Commit: 2d0d8dd.** i-parse.worker.ts: при intent=transfer с parsed_amount — сразу source account picker («🔄 Перевод · {amount} {currency} → С какого счёта?»). Скрыта кнопка «Создать счёт». Gate path: аналогично. richPreview не показывается — picker header IS the screen. ia:pk handler уже маршрутизировал transfer → target picker (без изменений). tsc 0 errors оба пакета. |
-| Phase 3.1-UX Transfer UI Fixes | ✅ DEPLOYED | **Сессия 2026-05-21 10:21–10:55 (UTC+3). Commits: ae45bae → f3de3a9 → 3229455 → ccc6b79.** **(1)** `webhook.route.ts` pt:back + pt:rate SQL: баланс теперь вычисляется через CTE (`WITH bal AS (...)`). `account_sources` НЕ имеет колонки `balance` — без CTE SQL бросал ошибку «column does not exist». **(2)** `webhook.route.ts` tx:tf:rate: при `tfFrom==='pt'` карточка после обновления курса показывается через `upsertBotMessage` (не `editMsg`), чтобы Redis `midas:am:{chatId}` оставался в sync — иначе кнопка Отмена «не нажималась». **(3)** Success Card теперь включает `Остаток: X CUR` для обоих счетов (src + tgt). **(4)** `screen-builder.ts` (обе копии): `buildClarificationScreen` — добавлено условие `data.intent !== 'transfer'` перед строкой «Категория: ...»; для переводов категория не показывается. **Transfer Rich Card nav flow:** Success Card → pt:edit → Transfer Rich Card → [📈 Изм.курс → ввод → ✅ Курс обновлён + Rich Card] → Отмена → Success Card. |
-| Phase 2 AC-DUP: Авто-суффикс дублирующих имён счетов | ✅ DEPLOYED |
-| Phase 3.1-FIX: Inline Account Creation Returns to Draft | ✅ DEPLOYED | **Сессия 2026-05-21 14:38–15:45 (UTC+3). Commit: 786024f.** `webhook.route.ts`: новый хелпер `showDraftAfterAccountCreation()` (строки 727–820) — центральная точка возврата к draft после создания счёта через onboarding. **(1)** `patchDraftCurrency()` — обновляет валюту draft на валюту созданного счёта (USD→USDT). **(2)** `getDraftFields()` — проверяет `parsed_intent === 'transfer'`. **(3)** При transfer: `getDraftTransferState()` → `buildTargetPickerScreen()` + `buildTargetAccountKeyboard()` — показывает target picker. **(4)** При non-transfer: `confirmPreviewFull()` + `confirmKbForDraft()` — показывает confirm preview. **(5)** `finalMsgId` tracking — await upsertBotMessage для корректного Redis `midas:preview:{draftId}`. Заменено в 3 handler'ах: `bal_skip` (строка ~1338), `bal_input` (строка ~6875), `cur_input` (строка ~6810). tsc 0 errors оба пакета. | **Сессия 2026-05-21 13:20–16:55 (UTC+3). Commits: fe7f577 → 2f042df → 32efd0d → 557ff67.** Variant 4 «Автосуффикс + уведомление». **(1)** `account.service.ts`: `findNextAvailableName()` — находит первое свободное имя «Монобанк 2», «Монобанк 3» внутри транзакции; `addAccountReturningId` — никогда не возвращает `duplicate`. **(2)** `account-onboard-keyboard.service.ts`: `buildSuffixedSuccessKeyboard()` — кнопки «✏️ Переименовать» / «✅ OK»; `ren_input` шаг FSM. **(3)** `webhook.route.ts`: callbacks `ac:ren`, `ac:ren_ok`; text-handler `ren_input`; валидация rename (длина + дубликат). **(4)** `ac:more` fix: открывает type_pick пикер вместо SETUP_COMPLETE_TEXT. **(5)** `ac:more` fix: использует NEW_ACCOUNT_TEXT (не ACCOUNTS_EMPTY_TEXT). **(6)** `ac:more` fix: `getActiveMessageId` → `deleteMessage` → `clearActiveMessageId` → новый пикер — старая карточка удаляется. |
+
+| Phase Currency-Filter: Строгая фильтрация валют в пикере | ✅ DEPLOYED | **Сессия 2026-05-21 15:30–16:30 (UTC+3). Commit: c678c9f.** (1) `ai-parse.worker.ts`: строгий exact-match по валюте — показываем только счета точно в нужной валюте. (2) `account.service.ts`: getWorkspaceAccountsWithBalances() — SQL-фильтр по currency. (3) `account-inline-keyboard.service.ts`: удалён некорректный badge. (4) Currency-aware empty state при отсутствии счетов в нужной валюте. |
+| Phase Multi-CCY Inline: Мультивалютные child-счета из инлайн-онбординга | ✅ DEPLOYED | **Сессия 2026-05-21 17:35–18:11 (UTC+3). Commits: 1213450, fe14bcf.** (1) `account.service.ts`: AddAccountWithIdResult расширен статусами `created_as_child` и `already_exists`. Attempt 2: разная валюта — создаёт child "Binance · BTC" с parent_account_id; та же — already_exists. (2) `account-onboard-keyboard.service.ts`: шаг `rename_for_dup` в FSM; команда `use_existing`; парсер `ac:use:{id}` (33 байта). (3) `webhook.route.ts`: ac:currency — 3 статуса; ac:use handler линкует существующий к драфту; rename_for_dup перехватывает текст ДО fuzzy match. (4) Удалён спиннер "Записываю перевод..." — commit fe14bcf. |
 
 ---
 
@@ -200,85 +178,104 @@ midas-monorepo/
 ¦   +-- telegram-bot/          # @midas/telegram-bot
 ¦   L-- background-workers/    # @midas/background-workers
 +-- packages/
-## 6. ТЕКУЩИЙ TRANSFER FLOW (после рефакторинга 2026-05-20)
+## 6. ТЕКУЩАЯ ФАЗА — PHASE 1.30: Smart Account Onboarding
 
-> ⚠️ **Branch B (внешние переводы) УДАЛЁН.** Transfer = только между своими счетами.
+> ? **COMPLETED / ACCEPTED (Phase 1.30). See Section 10 history.**
 
-### Архитектура transfer intent-routing
-
-```
-AI парсит текст → intent=transfer
-  → если amount есть → сразу target account picker (buildTargetAccountKeyboard)
-  → если amount нет → clarification card (без категории)
-
-Target picker (tp: namespace):
-  tp:tgt:{accountId} → setDraftTargetAccount → getDraftTransferState → preview
-  
-  getDraftTransferState():
-    same_currency → auto-rate (1.0) → success card
-    diff_currency → prompt for rate → user enters rate → success card
-
-confirmation.worker.ts:
-  transfer_target_account_id ≠ NULL → approvePairedTransfer()
-    → outbound tx (source, -amount) + inbound tx (target, +converted_amount)
-    → transfer_group_id links them
-  transfer_target_account_id = NULL → approveDraft() (shouldn't happen for transfers)
-```
-
-### Ключевые файлы (актуальные)
-
-| Файл | Роль |
-|---|---|
-| `webhook.route.ts` | FSM: ia:pk (account picker), tp:tgt (target select), pt:back/pt:edit/pt:rate (Transfer Rich Card), tx:tf:rate (rate text intercept) |
-| `transfer-pairing.service.ts` | buildTargetPickerScreen, buildTargetAccountKeyboard, getAvailableTargetAccounts, setDraftTargetAccount, getDraftTransferState |
-| `draft-confirmation.service.ts` | approvePairedTransfer (paired outbound+inbound), approveDraft |
-| `screen-builder.ts` (оба) | buildClarificationScreen (без категории для transfer), buildPreviewScreen, buildConfirmedScreen |
-| `ai-parse.worker.ts` | gate logic, resilience (3 attempts, exponential backoff) |
-| `prompts.ts` | TRANSFER PRIORITY RULE: «перевел Васе» = transfer (НЕ debt_given) |
-
-### Redis-ключи transfer flow
-
-| Ключ | TTL | Назначение |
-|---|---|---|
-| `midas:tp:{odraftId}` | 300s | State для target picker FSM |
-| `midas:am:{userId}:{chatId}` | 24h | Active message pointer — используется для edit-first UX |
-| `midas:gate_sent:{userId}:{chatId}` | 1h | Флаг что gate уже показан (предотвращает повторы) |
-
-### Transfer Rich Card навигация
+**Objective:**
+Replace the flat "Счетов пока нет." empty-state with a guided interactive keyboard when /accounts is empty (Scenario Д) and show a guided account setup keyboard for new users after /start (Scenario Е). UX layer only — no migration, no new commands, no AI changes.
 
 ```
-Success Card → [✏️ Изменить] → Transfer Rich Card:
-  📈 Изменить курс → ввод числа → ✅ Курс обновлён + Rich Card
-  ✏️ Изменить сумму → ввод числа → обновлённая Rich Card
-  ❌ Отмена → возврат к Success Card
+ПРОЕКТ: Midas Telegram Bot (персональный финансовый учёт через Telegram).
+Railway (project: spirited-happiness). MCP: Railway, GitHub, Postgres, Filesystem.
+Auto-deploy: push to main > GitHub > Railway строит Midas + background-workers.
+Workspace: C:\Users\secvency\Desktop\Midas\midas-monorepo
 
-Balance на Success Card: вычисляется CTE (account_sources НЕ имеет колонки balance)
+ПРОЧИТАЙ СНАЧАЛА: C:\Users\secvency\Desktop\Midas\workflow_state.md
+— там полная история, архитектура, Redis-ключи и следующие задачи.
+
+═══ ЧТО СДЕЛАНО В ПОСЛЕДНИХ СЕССИЯХ (2026-05-19 / 2026-05-20) ═══
+
+[Сессия 2026-05-19: Transfer Flow + Redis Fix]
+- transfer-pairing.service.ts — полный FSM transfer flow (A1/A2a/A2b/B ветки)
+- approvePairedTransfer() — создаёт paired outbound+inbound транзакции
+- Баланс-дискрепанс исправлен: direction-aware formula в account.service.ts
+- Redis ETIMEDOUT: Railway GCP volume migration — решилось перезапуском Redis
+
+[Сессия 2026-05-20 утро: Intent Semantics + Transfer Intercept + Resilience]
+
+1. ИСПРАВЛЕНА СЕМАНТИКА AI INTENT (prompts.ts):
+   - «перевел 1000 Васе» → intent=transfer + person_hint=Вася (НЕ debt_given!)
+   - «скинул 5000 Коле» → intent=transfer + person_hint=Коля
+   - debt_given = ТОЛЬКО при явном долговом языке: «дал в долг», «займ», «кредит»
+   - Откачен неправильный коммит 816ee6c
+   - Правильный коммит: 0286673
+
+2. PHASE 3.1: TRANSFER INTERCEPT (webhook.route.ts):
+   Root cause: при нажатии ✅ Подтвердить на transfer без transfer_target_account_id
+   → approveDraft() создавал транзакцию с direction=NULL → показывалась как расход
+   Фикс: перехват перед enqueue → показываем target picker
+   Коммит: 0286673
+
+3. AI-PARSE RESILIENCE (queue-definitions.ts + ai-parse.worker.ts):
+   - attempts: 2 → 3, backoff: exponential (5s/10s/20s)
+   - При финальном провале: уведомление '⚠️ ИИ временно недоступен'
+   - Причина: Anthropic InternalServerError → бот молчал
+   - Коммит: 7fe73a7
+
+[Сессия 2026-05-20 день: External Transfer Confirm Bug + Dative Names]
+
+4. PHASE 3.1 INTERCEPT — КРИТИЧЕСКИЙ ФИКС (webhook.route.ts) commit 8785e3c:
+   Root cause: Phase 3.1 intercept перехватывал ВСЕ переводы с intent=transfer
+   и отсутствием transfer_target_account_id — включая ВНЕШНИЕ (Branch B, человеку).
+   Внешние переводы тоже имеют intent=transfer + no target_account_id, НО у них
+   ВСЕГДА есть category_id (пользователь выбрал категорию в Branch B flow).
+   Фикс: добавлена проверка category_id в SQL + условие перехвата:
+     intent=transfer AND target IS NULL AND category_id IS NULL → target picker
+     intent=transfer AND target IS NULL AND category_id IS NOT NULL → approveDraft ✅
+
+5. АВТО-СКЛОНЕНИЕ ИМЁН ПОЛУЧАТЕЛЕЙ (transfer-pairing.service.ts + webhook.route.ts)
+   commit 8e274c4:
+   Проблема: «Перевод Алексей» — грамматически неверно по-русски.
+   Решение: rule-based функция toRecipientDative() — дательный падеж:
+     Алексей → Алексею   Антон → Антону   Мария → Марии
+     Дарья → Дарье       Иван → Ивану     Игорь → Игорю
+     Таня → Тане         Сергей → Сергею  Евгений → Евгению
+   Латинские имена (Anton, Maria) — без изменений.
+   Полные имена: «Иван Петров» → «Ивану Петрову» (каждое слово отдельно).
+   Применяется в text interceptor перед patchDraftItemName — хранится уже в дательном.
+
+═══ КЛЮЧЕВЫЕ ФАЙЛЫ ═══
+packages/ai-core/src/prompts.ts                                     — AI intent rules (TRANSFER PRIORITY RULE, debt_given)
+apps/telegram-bot/src/routes/webhook.route.ts                       — webhook FSM, tp: callbacks, Phase 3.1 intercept (category_id guard)
+apps/telegram-bot/src/services/transfer-pairing.service.ts          — target picker, getAvailableTargetAccounts, toRecipientDative()
+apps/background-workers/src/services/draft-confirmation.service.ts  — approveDraft + approvePairedTransfer
+apps/background-workers/src/workers/ai-parse.worker.ts              — failed handler, resilience
+apps/background-workers/src/queues/queue-definitions.ts             — retry config
+
+═══ АРХИТЕКТУРА INTENT-ROUTING ═══
+confirmation.worker.ts пикирует transfer_target_account_id:
+  ≠ NULL → approvePairedTransfer() → paired outbound+inbound транзакции
+  NULL   → approveDraft() → одиночная транзакция (expense/income/debt_*/transfer)
+
+Phase 3.1 перехват в webhook.route.ts ПЕРЕД enqueue:
+  approve + intent=transfer + no target + NO category_id → target picker (tp: flow) [internal]
+  approve + intent=transfer + no target + HAS category_id → approveDraft() [external/Branch B] ✅
+  approve + intent=transfer + target есть → approvePairedTransfer() [internal paired]
+
+═══ СЛЕДУЮЩИЕ ЗАДАЧИ ═══
+Приоритет 1: E2E тест в боте:
+  - «перевел 1000 долларов Алексею» → intent=transfer + записать транзакцию
+  - Нажать ✅ Подтвердить → должно записаться (НЕ показывать target picker)
+  - Имя получателя → показывается «Алексею» везде
+
+Приоритет 2: Phase 3.0 — DB Schema:
+  - account_type колонка (card/cash/wallet/exchange/custom)
+  - wallet_subtype колонка (ton/crypto/ewallet/general)
+  - Миграция + обновить сигнатуры addAccount*, chooseCurKeyboard()
 ```
 
-### Баланс — CTE-формула (account_sources.balance НЕ существует!)
 
-```sql
-WITH bal AS (
-  SELECT a.id,
-    COALESCE(a.initial_balance, 0)
-    + COALESCE(SUM(CASE WHEN t.transaction_intent IN ('income','debt_received') THEN t.base_amount
-                        WHEN t.transaction_intent = 'transfer' AND t.transfer_direction = 'inbound' THEN t.base_amount
-                        ELSE 0 END), 0)
-    - COALESCE(SUM(CASE WHEN t.transaction_intent IN ('expense','debt_given') THEN t.base_amount
-                        WHEN t.transaction_intent = 'transfer' AND t.transfer_direction = 'outbound' THEN t.base_amount
-                        ELSE 0 END), 0) AS balance
-  FROM account_sources a
-  LEFT JOIN transactions t ON t.account_id = a.id AND t.deleted_at IS NULL
-  WHERE a.workspace_id = $1
-  GROUP BY a.id
-)
-```
-
-### Следующие задачи
-
-1. ~~**Transfer Picker First:**~~ ✅ DONE (commit 2d0d8dd) — source picker сразу показывается при transfer с суммой
-2. **Phase 3.1:** Расширение словаря детектора категорий
-3. **Phase 3.2:** Report 3.0 — категорийная аналитика
 ---
 
 ## 7. MCP SERVERS & INFRASTRUCTURE (Production)
@@ -313,68 +310,121 @@ WITH bal AS (
 
 ---
 
-## 8. ФАЙЛЫ ДЛЯ ЧТЕНИЯ В НОВОМ ЧАТЕ
+## 8. ФАЙЛЫ ДЛЯ ЧТЕНИЯ В НОВОМ ЧАТЕ (Phase 3.1 context)
 
-**✅ ТЕКУЩИЙ КОНТЕКСТ: Transfer = только internal (между своими счетами). Branch B удалён. UI fixes задеплоены.**
+**✅ ТЕКУЩИЙ КОНТЕКСТ: Transfer intent семантика исправлена. Phase 3.1 Transfer Intercept задеплоен. ai-parse resilience улучшена.**
 
 **ОБЯЗАТЕЛЬНО прочитать в новом чате:**
 ```
-C:\Users\secvency\Desktop\Midas\midas-monorepo\workflow_state.md              ← секции 1, 3, 6
-apps/telegram-bot/src/routes/webhook.route.ts                                   ← tp: и pt: handlers, ia:pk
-apps/telegram-bot/src/services/transfer-pairing.service.ts                      ← target picker, getDraftTransferState
-apps/background-workers/src/services/draft-confirmation.service.ts              ← approvePairedTransfer
-apps/telegram-bot/src/utils/screen-builder.ts                                   ← buildClarificationScreen (без категории для transfer)
-apps/background-workers/src/utils/screen-builder.ts                             ← то же
-packages/ai-core/src/prompts.ts                                                 ← TRANSFER PRIORITY RULE
+packages/ai-core/src/prompts.ts                                      < TRANSFER PRIORITY RULE + debt_given семантика (lines 127-148, 246-257)
+apps/telegram-bot/src/routes/webhook.route.ts                        < Phase 3.1 Transfer Intercept (lines ~4488-4560)
+apps/telegram-bot/src/services/transfer-pairing.service.ts           < tp: flow, target picker, getAvailableTargetAccounts
+apps/background-workers/src/services/draft-confirmation.service.ts   < approvePairedTransfer + approveDraft
+apps/background-workers/src/workers/ai-parse.worker.ts               < failed handler + resilience (lines 1056-1090)
+apps/background-workers/src/queues/queue-definitions.ts              < aiParseDefaultJobOptions (attempts=3, exponential)
 ```
 
 **НЕ ЧИТАТЬ (не нужны сейчас):**
 ```
 packages/database/smoke-test-phase*.mjs
-docs/event_storming_part*.md
-docs/adr/ADR-*
+apps/telegram-bot/src/services/excel-export.service.ts
 ```
+
+**Изменения сессии 2026-05-20:**
+
+### [1] prompts.ts — Исправлена семантика intent
+- **TRANSFER PRIORITY RULE** переписан:
+  - `transfer verb + person name` = `intent=transfer` + `person_hint` (НЕ debt_given!)
+  - `debt_given` = ТОЛЬКО при явном долговом языке: «дал в долг», «займ», «кредит»
+  - 4 примера: «перевел 1000 Васе» → transfer+person_hint, «скинул Коле» → transfer+person_hint
+- **DEBT_GIVEN signals** — явно указано: transfer verbs alone ≠ debt_given
+- Откачен предыдущий неправильный коммит `816ee6c` (тот, где transfer+person → debt_given)
+
+### [2] webhook.route.ts — Phase 3.1: Transfer Intercept
+- **Проблема (root cause):** При нажатии ✅ Подтвердить на transfer-черновике без `transfer_target_account_id` → `approveDraft()` создавал транзакцию с `transfer_direction=NULL` → показывалась как расход
+- **Фикс:** Перехват ПЕРЕД enqueue в callback-confirm queue:
+  - Читает черновик из DB
+  - Если `intent=transfer` И нет `transfer_target_account_id` → НЕ enqueue
+  - Вместо этого: показывает target account picker (`buildTargetPickerScreen` + `buildTargetAccountKeyboard`)
+  - Fall-through при ошибке перехвата (non-fatal, не крашит воркер)
+- Файл: `import('../services/transfer-pairing.service.js')` — правильный путь
+
+### [3] queue-definitions.ts + ai-parse.worker.ts — Resilience
+- `attempts: 2 → 3`
+- `backoff: fixed 5s → exponential 5s/10s/20s`
+- При финальном провале: enqueue в `notificationsQueue` → пользователь получает:
+  `⚠️ Не удалось обработать сообщение. ИИ временно недоступен. Попробуйте через несколько секунд.`
+- Причина: Anthropic выдал `InternalServerError` (HTTP 500) → оба retry упали → бот молчал
+
+**Коммиты (актуальные):**
+- `0286673` — fix: revert wrong debt_given for person transfers; add Phase 3.1 transfer intercept
+- `7fe73a7` — fix: notify user on AI parse final failure; increase ai-parse retries to 3
+
+
 ---
 
 ## 9. ПРОМПТ ДЛЯ СТАРТА НОВОГО ЧАТА
 
 ```
-ПРОЕКТ: Midas — Telegram Bot для персонального финансового учёта.
-Workspace: C:\Users\secvency\Desktop\Midas\midas-monorepo
+ПРОЕКТ: Midas — Telegram-бот для личного финансового учёта.
 Railway (project: spirited-happiness). MCP: Railway, GitHub, Postgres, Filesystem.
-Auto-deploy: push to main → GitHub → Railway строит Midas + background-workers.
-DATABASE_URL (public): postgresql://postgres:PLLSqArtPUoQsAYmvrpsmavfQMewgTRh@hopper.proxy.rlwy.net:46284/railway
+Auto-deploy: push to main > GitHub > Railway строит Midas + background-workers.
+DB: postgresql://postgres:PLLSqArtPUoQsAYmvrpsmavfQMewgTRh@hopper.proxy.rlwy.net:46284/railway
 
-ПРОЧИТАЙ СНАЧАЛА: C:\Users\secvency\Desktop\Midas\midas-monorepo\workflow_state.md
-— секции 1 (текущее состояние), 3 (архитектурные решения), 6 (transfer flow).
+ПОСЛЕДНИЕ РЕАЛИЗОВАННЫЕ СЕССИИ (2026-05-21):
 
-═══ ТЕКУЩЕЕ СОСТОЯНИЕ (2026-05-21) ═══
+[Сессия 1: Строгая фильтрация валют в пикере счетов — commit c678c9f]
+ПРОБЛЕМА: при записи транзакции «1000 EUR» пикер счетов показывал долларовые и гривневые счета.
+РЕШЕНИЕ:
+- ai-parse.worker.ts: filterPickerAccounts() — строгий exact-match по валюте (только счета точно в нужной валюте)
+- account.service.ts: getWorkspaceAccountsWithBalances() — добавлен SQL-фильтр по currency
+- account-inline-keyboard.service.ts: удалён некорректный badge, добавлен currency-aware empty state
+  («У вас нет счетов в EUR» + кнопка «Создать счёт в EUR»)
+РЕЗУЛЬТАТ: пользователь видит только релевантные счета для валюты транзакции.
 
-Transfer flow полностью рефакторен:
-- Branch B (внешние переводы, другому человеку) УДАЛЁН
-- Transfer = только между своими счетами (internal-only)
-- При intent=transfer с суммой → сразу target account picker
-- При intent=transfer без суммы → clarification card (без категории)
-- Transfer Rich Card: Изменить курс/сумму, Отмена → Success Card
-- Баланс вычисляется CTE (account_sources НЕ имеет колонки balance)
+[Сессия 2: Мультивалютные child-счета из инлайн-онбординга — commits 1213450, fe14bcf]
+ПРОБЛЕМА: при создании «Binance» (BTC) когда уже есть «Binance» (USDT) — создавался «Binance 2».
+РЕШЕНИЕ:
+- account.service.ts: AddAccountWithIdResult + статусы created_as_child / already_exists.
+  Attempt 2: разная валюта → child «Binance · BTC» с parent_account_id; та же → already_exists.
+- account-onboard-keyboard.service.ts: шаг rename_for_dup в FSM; команда use_existing; парсер ac:use:{id}.
+- webhook.route.ts:
+    ac:currency handler — 3 ветки (child/already_exists/normal)
+    ac:use handler — линкует существующий счёт к драфту через showDraftAfterAccountCreation()
+    rename_for_dup text handler — перехватывает текст ДО fuzzy match, создаёт с уже известной валютой
+- Удалён спиннер «Записываю перевод...» — оставался виден после записи перевода (commit fe14bcf)
+РЕЗУЛЬТАТ:
+  «Binance» (USDT) есть → создаём «Binance» (BTC) → «Добавлена валюта BTC к счёту Binance»
+  «Binance» (USDT) есть → создаём «Binance» (USDT) → «Счёт уже существует» + кнопка «Использовать»
+  /balance → «Binance» → мультивалютная карточка: USDT + BTC (Phase B-5 уже реализован)
 
-Последние фиксы (4 коммита: ae45bae → ccc6b79):
-1. SQL CTE для баланса на Success Card (pt:back, pt:rate)
-2. Кнопка Отмена — upsertBotMessage вместо editMsg (Redis midas:am sync)
-3. SQL-ошибка pt:back — CTE вместо несуществующей колонки balance
-4. Clarification card — скрыта «Категория: Другое» для transfer
+КЛЮЧЕВЫЕ ФАЙЛЫ (последние изменения):
+apps/telegram-bot/src/services/account.service.ts              ← AddAccountWithIdResult + Attempt 2
+apps/telegram-bot/src/services/account-onboard-keyboard.service.ts ← rename_for_dup + use_existing
+apps/telegram-bot/src/routes/webhook.route.ts                  ← ac:currency + ac:use + rename_for_dup
+apps/background-workers/src/workers/ai-parse.worker.ts         ← filterPickerAccounts()
 
-═══ СЛЕДУЮЩИЕ ЗАДАЧИ ═══
-1. Transfer Picker First: при transfer с суммой — сразу picker (минуя preview card)
-2. Phase 3.1: расширение словаря детектора категорий
-3. Phase 3.2: Report 3.0 — категорийная аналитика
+АРХИТЕКТУРА СЧЕТОВ (мультивалютная система):
+- account_sources: id, workspace_id, name, currency, parent_account_id (NULL = top-level)
+- child создаётся с pattern: «{parentName} · {currency}» и parent_account_id = parent.id
+- /balance: buildBalanceListKeyboard() группирует по parentAccountId — автоматически
+- В пикерах: строгий фильтр по валюте транзакции (не по группе fiat/crypto)
 
-═══ КЛЮЧЕВЫЕ ПРАВИЛА ═══
+TRANSFER FLOW (рефакторинг 2026-05-20):
+- Branch B (внешние переводы) УДАЛЁН. Transfer = только между своими счетами.
+- Intent=transfer → source picker → ia:pk → target picker (tp: namespace) → курс (если разные CCY)
+- success card: «Остаток src: X · Остаток tgt: Y»
+
+СЛЕДУЮЩИЕ ЗАДАЧИ:
+1. Phase 3.1 — расширение словаря детектора категорий
+2. Phase 3.2 — Report 3.0 (категорийная аналитика)
+
+ПРАВИЛА:
 - Финансовая математика: ТОЛЬКО NUMERIC/BigInt, никаких float (SEC-02)
 - Все мутации через withTenantTransaction (SEC-03)
-- Не трогать project_config.md
-- account_sources НЕ имеет колонки balance — баланс через CTE из transactions
-- workflow_state.md: редактировать ТОЛЬКО через Node.js (НЕ PowerShell!) — см. правило кодировки в файле
+- Не трогать project_config.md без явного разрешения
+- Читать workflow_state.md секции 1, 8, 9 перед началом работы
+- workflow_state.md редактировать ТОЛЬКО через Node.js (не PowerShell!) — правило кодировки UTF-8 BOM
 ```
 
 
@@ -1347,45 +1397,7 @@ ALTER TABLE account_sources
 
 ---
 
-### 🔮 Phase 5.0 — Ghost State Resilience (Intent Gate) — ДАЛЁКОЕ БУДУЩЕЕ
-
-> **Приоритет: ЗАПЛАНИРОВАНО НА БУДУЩЕЕ.** Реализовывать только по явной команде владельца.
-> Подробный план зафиксирован в артефактах агента: `ghost_state_plan.md`.
-> **Не начинать до завершения Phase 3 + Phase 4.**
-
-**Проблема:**
-Пользователь удаляет сообщение бота во время flow создания счёта (FSM активен в Redis),
-уходит, возвращается и пишет транзакцию — например, «кофе 150».
-На шагах `name_input` / `cur_search` / `ren_input` бот принимает «кофе 150»
-как название счёта и создаёт счёт «кофе 150» — критический UX-баг.
-
-**Три уровня защиты (реализовать последовательно):**
-
-1. **TTL (уже есть)** — Redis-ключ с ONBOARD_STATE_TTL_SEC.
-
-2. **Intent Gate / Smart Escape (главное):**
-   - Добавить функцию `looksLikeTransaction(text)` в `webhook.route.ts`
-   - Правило: цифра + буква = транзакция → сброс wizard → AI-парсер (seamless, без уведомлений)
-   - Исключение: чистое число НЕ escape для `bal_input`
-   - Шаги: `name_input`, `cur_search`, `ren_input`
-
-3. **Re-send при Ghost State:**
-   - Если `editMessageText` упал (сообщение удалено) — переотправить тот же пикер
-   - Шаги: `type_pick`, `cur_pick` (callback-ветки)
-
-**Приоритизация задач внутри фазы:**
-- 🔴 КРИТИЧНО: Intent Gate для `name_input` / `cur_search` / `ren_input` (сложность: низкая)
-- 🟡 ВАЖНО: Re-send промпта при ghost state (сложность: средняя)
-- 🟢 ХОРОШО: Per-step TTL — name=5min, bal=15min, type=30min (сложность: низкая)
-
-**Что НЕ делать:**
-- Не показывать «wizard сброшен» — seamless escape без уведомлений
-- Не блокировать транзакции из-за незаконченного wizard'а
-- Не хранить wizard-состояние дольше 30 минут без активности
-
----
-
-### 🔮 Phase 4.0 — Telegram Mini App (Frontend)
+### ?? Phase 4.0 — Telegram Mini App (Frontend)
 
 > **Приоритет: НИЗКИЙ / БУДУЩЕЕ.** React 19 + Vite 8.
 > Визуальный дашборд баланса, диаграммы расходов по категориям, история транзакций.
