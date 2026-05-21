@@ -352,17 +352,27 @@ async function processAiParse(job: Job<AiParseJobPayload>): Promise<void> {
         }
         if (pickerAccountsGate.length > 0) {
           const intentGate = pendingDraft.parsedIntent;
-          const pickerHeaderGate = (intentGate === 'income' || intentGate === 'debt_received')
-            ? '\uD83C\uDFE6 <b>\u041D\u0430 \u043A\u0430\u043A\u043E\u0439 \u0441\u0447\u0451\u0442 \u0437\u0430\u0447\u0438\u0441\u043B\u0438\u0442\u044C?</b>'
-            : '\uD83C\uDFE6 <b>\u0421 \u043A\u0430\u043A\u043E\u0433\u043e \u0441\u0447\u0451\u0442\u0430 \u0441\u043F\u0438\u0441\u0430\u0442\u044C?</b>';
+          // Transfer Picker First: dedicated header for transfer source picker (Phase 3.1-UX)
+          const isTransferGate = intentGate === 'transfer' && !!pendingDraft.parsedAmount;
+          const pickerHeaderGate = isTransferGate
+            ? `\uD83D\uDD04 <b>\u041F\u0435\u0440\u0435\u0432\u043E\u0434 \u00B7 ${escapeHtml(pendingDraft.parsedAmount!)} ${escapeHtml(pendingDraft.parsedCurrency ?? '')}\n\n\uD83D\uDCE4 \u0421 \u043A\u0430\u043A\u043E\u0433\u043E \u0441\u0447\u0451\u0442\u0430 \u0441\u043F\u0438\u0441\u0430\u0442\u044C?</b>`
+            : (intentGate === 'income' || intentGate === 'debt_received')
+              ? '\uD83C\uDFE6 <b>\u041D\u0430 \u043A\u0430\u043A\u043E\u0439 \u0441\u0447\u0451\u0442 \u0437\u0430\u0447\u0438\u0441\u043B\u0438\u0442\u044C?</b>'
+              : '\uD83C\uDFE6 <b>\u0421 \u043A\u0430\u043A\u043E\u0433\u043e \u0441\u0447\u0451\u0442\u0430 \u0441\u043F\u0438\u0441\u0430\u0442\u044C?</b>';
           const pickerRowsGate = pickerAccountsGate.slice(0, 8).map((acc) => {
             const balDisplay = acc.balance.replace(/\.?0+$/, '') || '0';
             return [{ text: `\uD83C\uDFE6 ${acc.name} \u00B7 ${balDisplay} ${acc.currency}`, callback_data: `ia:pk:${acc.id}:${pendingDraft.draftId}` }];
           });
-          pickerRowsGate.push([{ text: '\u2795 \u0421\u043E\u0437\u0434\u0430\u0442\u044C \u0441\u0447\u0451\u0442', callback_data: `ia:newac:${pendingDraft.draftId}` }]);
+          // Transfer: hide "Создать счёт" — you can't transfer from a non-existing account
+          if (!isTransferGate) {
+            pickerRowsGate.push([{ text: '\u2795 \u0421\u043E\u0437\u0434\u0430\u0442\u044C \u0441\u0447\u0451\u0442', callback_data: `ia:newac:${pendingDraft.draftId}` }]);
+          }
           pickerRowsGate.push([{ text: '\u2716\uFE0F \u041E\u0442\u043C\u0435\u043D\u0430', callback_data: `ia:cancel:${pendingDraft.draftId}` }]);
           gateInlineKeyboard = { inline_keyboard: pickerRowsGate };
-          gateFinalMessage = gateMessageText + '\n\n' + pickerHeaderGate;
+          // Transfer: skip the generic gate alert text — show only the picker header
+          gateFinalMessage = isTransferGate
+            ? pickerHeaderGate
+            : gateMessageText + '\n\n' + pickerHeaderGate;
         } else {
           gateInlineKeyboard = buildConfirmKeyboard(pendingDraft.draftId, null, null);
         }
@@ -740,24 +750,33 @@ async function processAiParse(job: Job<AiParseJobPayload>): Promise<void> {
       if (pickerAccounts.length > 0) {
         // Build picker: one row per account + "Без счёта" last row
         const intent = aiData?.intent ?? null;
-        const pickerHeader = (intent === 'income' || intent === 'debt_received')
-          ? '\uD83C\uDFE6 <b>\u041D\u0430 \u043A\u0430\u043A\u043E\u0439 \u0441\u0447\u0451\u0442 \u0437\u0430\u0447\u0438\u0441\u043B\u0438\u0442\u044C?</b>'
-          : '\uD83C\uDFE6 <b>\u0421 \u043A\u0430\u043A\u043E\u0433\u043e \u0441\u0447\u0451\u0442\u0430 \u0441\u043F\u0438\u0441\u0430\u0442\u044C?</b>';
+        // Transfer Picker First (Phase 3.1-UX): when transfer with amount — show dedicated
+        // source picker screen instead of preview card (user immediately picks source account).
+        const isTransferWithAmount = intent === 'transfer' && !!aiData?.amount;
+        const pickerHeader = isTransferWithAmount
+          ? `\uD83D\uDD04 <b>\u041F\u0435\u0440\u0435\u0432\u043E\u0434 \u00B7 ${escapeHtml(aiData!.amount!)} ${escapeHtml(aiData?.currency ?? '')}\n\n\uD83D\uDCE4 \u0421 \u043A\u0430\u043A\u043E\u0433\u043E \u0441\u0447\u0451\u0442\u0430 \u0441\u043F\u0438\u0441\u0430\u0442\u044C?</b>`
+          : (intent === 'income' || intent === 'debt_received')
+            ? '\uD83C\uDFE6 <b>\u041D\u0430 \u043A\u0430\u043A\u043E\u0439 \u0441\u0447\u0451\u0442 \u0437\u0430\u0447\u0438\u0441\u043B\u0438\u0442\u044C?</b>'
+            : '\uD83C\uDFE6 <b>\u0421 \u043A\u0430\u043A\u043E\u0433\u043e \u0441\u0447\u0451\u0442\u0430 \u0441\u043F\u0438\u0441\u0430\u0442\u044C?</b>';
 
         const pickerRows = pickerAccounts.slice(0, 8).map((acc) => {
           // Strip trailing zeros: 15400.0000 → 15400
           const balDisplay = acc.balance.replace(/\.?0+$/, '') || '0';
           return [{ text: `\uD83C\uDFE6 ${acc.name} \u00B7 ${balDisplay} ${acc.currency}`, callback_data: `ia:pk:${acc.id}:${draftId}` }];
         });
-        
-        pickerRows.push([{ text: '➕ Создать счёт', callback_data: `ia:newac:${draftId}` }]);
+
+        // Transfer: hide "Создать счёт" — you can't transfer from a non-existing account
+        if (!isTransferWithAmount) {
+          pickerRows.push([{ text: '➕ Создать счёт', callback_data: `ia:newac:${draftId}` }]);
+        }
         pickerRows.push([{ text: '✖️ Отмена', callback_data: `ia:cancel:${draftId}` }]);
 
         inlineKeyboard = { inline_keyboard: pickerRows };
-        previewMsg = richPreview + '\n\n' + pickerHeader;
+        // Transfer Picker First: skip richPreview — picker header IS the screen
+        previewMsg = isTransferWithAmount ? pickerHeader : richPreview + '\n\n' + pickerHeader;
 
         console.log('[midas:ai-parse-worker] No account_hint — showing picker', {
-          workspaceId, draftId, accountCount: pickerAccounts.length,
+          workspaceId, draftId, accountCount: pickerAccounts.length, isTransferWithAmount,
         });
       } else {
         // No accounts in workspace yet (fresh user / after reset).
