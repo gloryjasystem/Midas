@@ -725,6 +725,102 @@ function confirmKbForDraft(draftId: string, res: ConfirmPreviewResult) {
   return confirmKb(draftId, res.account, xfx);
 }
 
+/**
+ * Phase 3.1-FIX: Return to draft flow after creating a new account.
+ *
+ * Called from bal_skip, bal_input, and cur_input handlers when onboarding
+ * was triggered from a draft picker (linkedDraftId is set).
+ *
+ * Steps:
+ *   1. Link the new account to the draft (setDraftAccountId)
+ *   2. Update draft currency to match the new account's currency (patchDraftCurrency)
+ *   3. Soft-delete placeholder account
+ *   4. Route based on intent:
+ *      - transfer → show target account picker (not confirm preview!)
+ *      - all others → show confirm preview card
+ *
+ * @param workspaceId     - workspace ULID
+ * @param userId          - internal user ULID
+ * @param telegramUserId  - Telegram user ID string (for Redis keys)
+ * @param chatId          - Telegram chat ID string
+ * @param linkedDraftId   - draft to link the new account to
+ * @param newAccountId    - newly created account ULID
+ * @param newAccountCurrency - currency of the new account (e.g. 'USDT')
+ */
+async function showDraftAfterAccountCreation(
+  workspaceId: string,
+  userId: string,
+  telegramUserId: string,
+  chatId: string,
+  linkedDraftId: string,
+  newAccountId: string,
+  newAccountCurrency: string,
+): Promise<void> {
+  // 1. Link account to draft
+  try {
+    await setDraftAccountId(workspaceId, userId, linkedDraftId, newAccountId);
+  } catch { /* non-fatal */ }
+
+  // 2. Update draft currency to match account currency
+  try {
+    await patchDraftCurrency(workspaceId, userId, linkedDraftId, newAccountCurrency);
+  } catch { /* non-fatal */ }
+
+  // 3. Soft-delete onboarding placeholder
+  try {
+    await softDeletePlaceholderAccount(workspaceId, userId);
+  } catch { /* non-fatal */ }
+
+  // 4. Fetch the updated draft to check intent
+  const linkedDraft = await getDraftFields(workspaceId, userId, linkedDraftId);
+  const msgId = await getActiveMessageId(telegramUserId, chatId);
+  await clearActiveMessageId(telegramUserId, chatId);
+
+  let finalMsgId: string | null | undefined = msgId;
+
+  if (linkedDraft?.parsed_intent === 'transfer') {
+    // Transfer intent → show target account picker (skip confirm preview)
+    const tpState = await getDraftTransferState(linkedDraftId, workspaceId, userId);
+    if (tpState?.sourceAccountId) {
+      const tpTargets = await getAvailableTargetAccounts(
+        workspaceId, userId, tpState.sourceAccountId,
+      );
+      const tpPickerText = buildTargetPickerScreen(
+        tpState.amount, tpState.currency, tpState.sourceAccountName,
+      );
+      const tpKb = buildTargetAccountKeyboard(tpTargets, linkedDraftId);
+      if (msgId) {
+        void editMessageText(chatId, msgId, tpPickerText, tpKb);
+      } else {
+        finalMsgId = await upsertBotMessage(telegramUserId, chatId, tpPickerText, tpKb);
+      }
+    } else {
+      // Fallback: transfer state not found — show standard preview
+      const previewRes = await confirmPreviewFull(workspaceId, userId, linkedDraftId);
+      if (msgId) {
+        void editMessageText(chatId, msgId, previewRes.text, confirmKbForDraft(linkedDraftId, previewRes));
+      } else {
+        finalMsgId = await upsertBotMessage(telegramUserId, chatId, previewRes.text, confirmKbForDraft(linkedDraftId, previewRes));
+      }
+    }
+  } else {
+    // Non-transfer intent → standard confirm preview card
+    const previewRes = await confirmPreviewFull(workspaceId, userId, linkedDraftId);
+    if (msgId) {
+      void editMessageText(chatId, msgId, previewRes.text, confirmKbForDraft(linkedDraftId, previewRes));
+    } else {
+      finalMsgId = await upsertBotMessage(telegramUserId, chatId, previewRes.text, confirmKbForDraft(linkedDraftId, previewRes));
+    }
+  }
+
+  // Store preview msg for confirmation worker
+  try {
+    if (finalMsgId) {
+      await redisConnection.set(`midas:preview:${linkedDraftId}`, finalMsgId, 'EX', 3600);
+    }
+  } catch { /* non-fatal */ }
+}
+
 
 
 
@@ -1242,23 +1338,13 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
 
             if (linkedDraftIdBal && linkedAccountIdBal) {
               await redisConnection.del(acKey);
-              try {
-                await setDraftAccountId(acResolved.workspaceId, acResolved.userId, linkedDraftIdBal, linkedAccountIdBal);
-              } catch { /* non-fatal */ }
-              try {
-                await softDeletePlaceholderAccount(acResolved.workspaceId, acResolved.userId);
-              } catch { /* non-fatal */ }
-              const pickerMsgIdBal = await getActiveMessageId(telegramUserId, chatId);
-              await clearActiveMessageId(telegramUserId, chatId);
-              const previewResNewAcc = await confirmPreviewFull(acResolved.workspaceId, acResolved.userId, linkedDraftIdBal);
-              const confirmMsgNewAcc = previewResNewAcc.text;
-              if (pickerMsgIdBal) {
-                void editMessageText(chatId, pickerMsgIdBal, confirmMsgNewAcc, confirmKbForDraft(linkedDraftIdBal, previewResNewAcc));
-                try { await redisConnection.set(`midas:preview:${linkedDraftIdBal}`, pickerMsgIdBal, 'EX', 3600); } catch { /* non-fatal */ }
-              } else {
-                void upsertBotMessage(telegramUserId, chatId, confirmMsgNewAcc, confirmKbForDraft(linkedDraftIdBal, previewResNewAcc));
-              }
-              request.log.info({ msg: '[midas:bot:webhook] ac: bal_skip — account linked to draft', workspaceId: acResolved.workspaceId });
+              // Phase 3.1-FIX: centralized helper handles currency update + transfer routing
+              await showDraftAfterAccountCreation(
+                acResolved.workspaceId, acResolved.userId,
+                telegramUserId, chatId,
+                linkedDraftIdBal, linkedAccountIdBal, skippedCur || 'USDT',
+              );
+              request.log.info({ msg: '[midas:bot:webhook] ac: bal_skip — account linked to draft (Phase 3.1-FIX)', workspaceId: acResolved.workspaceId });
               // Skip standard D4 / first-account success screen
             } else if (wasAutoSuffixedSkip && skippedAccountId) {
               // Phase AC-DUP: show suffixed success with rename/OK buttons
@@ -6723,20 +6809,13 @@ Midas создан, чтобы сделать учет денег максима
 
             // ── Phase 2.5: If launched from draft picker — link account and return to draft ──
             if (acState.linkedDraftId && res.accountId) {
-              try {
-                await setDraftAccountId(resolved.workspaceId, resolved.userId, acState.linkedDraftId, res.accountId);
-              } catch { /* non-fatal */ }
-              const pickerMsgIdCi = await getActiveMessageId(telegramUserId, chatId);
-              await clearActiveMessageId(telegramUserId, chatId);
-              const previewResCi = await confirmPreviewFull(resolved.workspaceId, resolved.userId, acState.linkedDraftId);
-              const confirmMsgCi = previewResCi.text;
-              if (pickerMsgIdCi) {
-                void editMessageText(chatId, pickerMsgIdCi, confirmMsgCi, confirmKbForDraft(acState.linkedDraftId, previewResCi));
-                try { await redisConnection.set(`midas:preview:${acState.linkedDraftId}`, pickerMsgIdCi, 'EX', 3600); } catch { /* non-fatal */ }
-              } else {
-                void upsertBotMessage(telegramUserId, chatId, confirmMsgCi, confirmKbForDraft(acState.linkedDraftId, previewResCi));
-              }
-              request.log.info({ msg: '[midas:bot:webhook] ac: cur_input — account linked to draft', workspaceId: resolved.workspaceId });
+              // Phase 3.1-FIX: centralized helper handles currency update + transfer routing
+              await showDraftAfterAccountCreation(
+                resolved.workspaceId, resolved.userId,
+                telegramUserId, chatId,
+                acState.linkedDraftId, res.accountId, rawCode,
+              );
+              request.log.info({ msg: '[midas:bot:webhook] ac: cur_input — account linked to draft (Phase 3.1-FIX)', workspaceId: resolved.workspaceId });
               await reply.status(200).send({ ok: true });
               return; // Skip standard D4 / first-account success screen
             }
@@ -6795,23 +6874,13 @@ Midas создан, чтобы сделать учет денег максима
 
             // ── Phase 2.5: If launched from draft picker — link account and return to draft ──
             if (acState.linkedDraftId) {
-              try {
-                await setDraftAccountId(resolved.workspaceId, resolved.userId, acState.linkedDraftId, acState.accountId);
-              } catch { /* non-fatal */ }
-              try {
-                await softDeletePlaceholderAccount(resolved.workspaceId, resolved.userId);
-              } catch { /* non-fatal */ }
-              const pickerMsgIdBi2 = await getActiveMessageId(telegramUserId, chatId);
-              await clearActiveMessageId(telegramUserId, chatId);
-              const previewResBi2 = await confirmPreviewFull(resolved.workspaceId, resolved.userId, acState.linkedDraftId);
-              const confirmMsgBi2 = previewResBi2.text;
-              if (pickerMsgIdBi2) {
-                void editMessageText(chatId, pickerMsgIdBi2, confirmMsgBi2, confirmKbForDraft(acState.linkedDraftId, previewResBi2));
-                try { await redisConnection.set(`midas:preview:${acState.linkedDraftId}`, pickerMsgIdBi2, 'EX', 3600); } catch { /* non-fatal */ }
-              } else {
-                void upsertBotMessage(telegramUserId, chatId, confirmMsgBi2, confirmKbForDraft(acState.linkedDraftId, previewResBi2));
-              }
-              request.log.info({ msg: '[midas:bot:webhook] ac: bal_input — account linked to draft', workspaceId: resolved.workspaceId });
+              // Phase 3.1-FIX: centralized helper handles currency update + transfer routing
+              await showDraftAfterAccountCreation(
+                resolved.workspaceId, resolved.userId,
+                telegramUserId, chatId,
+                acState.linkedDraftId, acState.accountId, acState.currency || 'USDT',
+              );
+              request.log.info({ msg: '[midas:bot:webhook] ac: bal_input — account linked to draft (Phase 3.1-FIX)', workspaceId: resolved.workspaceId });
               await reply.status(200).send({ ok: true });
               return; // Skip standard D4 / first-account success screen
             }
