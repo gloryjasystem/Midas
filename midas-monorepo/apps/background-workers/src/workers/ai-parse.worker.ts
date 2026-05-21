@@ -182,13 +182,12 @@ function filterPickerAccounts(
 ): WorkspaceAccountEntry[] {
   const txCur = txCurrency.toUpperCase();
   if (!strict && classifyPickerCcy(txCur) === 'fiat') {
-    // Fiat non-transfer: sort by relevance, show ALL accounts
+    // Fiat non-transfer: only fiat accounts, exact-currency first
     const exact     = accounts.filter(a => a.currency.toUpperCase() === txCur);
     const otherFiat = accounts.filter(
       a => a.currency.toUpperCase() !== txCur && classifyPickerCcy(a.currency) === 'fiat',
     );
-    const crypto    = accounts.filter(a => classifyPickerCcy(a.currency) !== 'fiat');
-    return [...exact, ...otherFiat, ...crypto];
+    return [...exact, ...otherFiat]; // crypto accounts excluded for fiat transactions
   }
   // Strict (transfer) or crypto/stablecoin: exact match only
   return accounts.filter(a => a.currency.toUpperCase() === txCur);

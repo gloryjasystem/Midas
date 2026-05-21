@@ -1511,18 +1511,14 @@ export async function getWorkspaceAccountsWithBalances(
         return rawAccounts.filter(a => a.currency.toUpperCase() === txCur);
       }
 
-      // Fiat expense/income/debt: sort by relevance, show all fiat accounts
+      // Fiat expense/income/debt: only fiat accounts, exact-currency first
       const exact = rawAccounts.filter(a => a.currency.toUpperCase() === txCur);
       const otherFiat = rawAccounts.filter(a => {
         const c = a.currency.toUpperCase();
         return c !== txCur && !STABLES.has(c) && !CRYPTOS.has(c) && /^[A-Z]{2,5}$/.test(c);
       });
-      const crypto = rawAccounts.filter(a => {
-        const c = a.currency.toUpperCase();
-        return STABLES.has(c) || CRYPTOS.has(c) || !/^[A-Z]{2,5}$/.test(c);
-      });
-      // crypto accounts are shown last (they were sorted by the SQL ORDER BY anyway)
-      return [...exact, ...otherFiat, ...crypto];
+      // crypto accounts excluded — fiat transaction doesn't need crypto accounts
+      return [...exact, ...otherFiat];
     },
   );
 }
