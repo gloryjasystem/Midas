@@ -4687,26 +4687,30 @@ Midas создан, чтобы сделать учет денег максима
             if (!ptBackData) {
               void upsertBotMessage(telegramUserId, chatId, '⚠️ Перевод не найден или уже удалён.');
             } else {
-              // Phase 3.1-UX: unified Transfer Rich Card on Cancel/Back
-              const { buildTransferDetailCard, buildTransferViewKeyboard } = await import('../services/transaction-keyboard.service.js');
-              const syntheticPair = {
-                outbound_tx_id:    ptTxId,
-                transfer_group_id: ptTxId,
-                from_account:      ptBackData.out_acct,
-                from_amount:       ptBackData.out_amt,
-                from_currency:     ptBackData.out_cur,
-                to_account:        ptBackData.in_acct,
-                to_amount:         ptBackData.in_amt,
-                to_currency:       ptBackData.in_cur,
-                exchange_rate:     ptBackData.out_cur !== ptBackData.in_cur
-                  ? (ptBackData.exchange_rate ?? '0')
-                  : '1',
-                is_cross_currency: ptBackData.out_cur !== ptBackData.in_cur,
-                transaction_time:  ptBackData.tx_time,
-              };
-              const cardText = buildTransferDetailCard(syntheticPair);
-              const cardKb   = buildTransferViewKeyboard(ptTxId, 'pt');
-              void upsertBotMessage(telegramUserId, chatId, cardText, cardKb);
+              // Restore the "✅ Перевод записан" success card (Screenshot 1)
+              // with the '✏️ Изменить запись' button that opens the Transfer Rich Card.
+              // Amounts are re-queried from DB so they reflect any rate changes.
+              const { formatAmount, calcRate, formatPairedTime } = await import('../utils/screen-builder.js');
+              const isXfx = ptBackData.out_cur !== ptBackData.in_cur;
+              const cardLines: string[] = [
+                '✅ <b>Перевод записан</b>',
+                '',
+                `<blockquote>🔄 − ${formatAmount(ptBackData.out_amt)} ${ptBackData.out_cur}</blockquote>`,
+                `🏦 <b>${escapeHtml(ptBackData.out_acct)}</b> · ${ptBackData.out_cur}`,
+                '',
+                `<blockquote>🔄 + ${formatAmount(ptBackData.in_amt)} ${ptBackData.in_cur}</blockquote>`,
+                `🏦 <b>${escapeHtml(ptBackData.in_acct)}</b> · ${ptBackData.in_cur}`,
+                ...(isXfx ? [
+                  '',
+                  `💱 ${calcRate(ptBackData.out_amt, ptBackData.in_amt) ?? '?'} ${ptBackData.in_cur}/${ptBackData.out_cur}`,
+                ] : []),
+                `⏰ ${formatPairedTime(ptBackData.tx_time)}`,
+              ];
+              void upsertBotMessage(telegramUserId, chatId, cardLines.join('\n'), {
+                inline_keyboard: [[
+                  { text: '✏️ Изменить запись', callback_data: `pt:edit:${ptTxId}` },
+                ]],
+              });
             }
             request.log.info({ msg: '[midas:pt:back] card restored', workspaceId: ptResolved.workspaceId });
 

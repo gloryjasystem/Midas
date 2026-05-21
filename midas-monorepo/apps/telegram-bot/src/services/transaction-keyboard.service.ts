@@ -351,9 +351,10 @@ export function buildTransferViewKeyboard(
 ): InlineKeyboardMarkup {
   const sf = from ? `:${from}` : '';
   let cancelCallback: string;
-  if (from === 's')  cancelCallback = `tx:done:${outboundTxId}`;
-  else if (from === 'pt') cancelCallback = `tx:v:${outboundTxId}:pt`;
-  else               cancelCallback = 'tx:close';
+  if (from === 's')   cancelCallback = `tx:done:${outboundTxId}`;
+  else if (from === 'pt') cancelCallback = `pt:back:${outboundTxId}`;  // → restores Screenshot 1 (success card)
+  else                cancelCallback = 'tx:close';
+
   return {
     inline_keyboard: [
       [{ text: '📈 Изменить курс конвертации', callback_data: `tx:tf:rate:${outboundTxId}${sf}` }],
