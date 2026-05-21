@@ -2625,6 +2625,12 @@ function buildSheet3(wb: ExcelJS.Workbook, rows: TxRow[], usdRates: Map<string, 
   }];
   ws.properties.tabColor = { argb: `FF${C_EXPENSE}` };
 }
+
+
+// ─────────────────────────────────────────────────────────────
+// Sheet 4: По месяцам
+// ─────────────────────────────────────────────────────────────
+
 function buildSheet4(
   wb: ExcelJS.Workbook, rows: TxRow[],
   _from: Date, _to: Date, usdRates: Map<string, number>,
@@ -2935,6 +2941,11 @@ function buildSheet4(
   ws.properties.tabColor = { argb: 'FF2D6A9F' };
 }
 
+
+// ═══════════════════════════════════════════════════════════════
+// Sheet 5: «По дням» — Daily Breakdown
+// ═══════════════════════════════════════════════════════════════
+
 function buildSheet5DailyBreakdown(
   wb: ExcelJS.Workbook,
   rows: TxRow[],
@@ -3186,4 +3197,3 @@ function buildSheet5DailyBreakdown(
   }];
   ws.properties.tabColor = { argb: 'FFE67E22' };
 }
-
