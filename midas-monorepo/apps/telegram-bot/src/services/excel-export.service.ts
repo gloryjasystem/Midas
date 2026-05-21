@@ -251,6 +251,7 @@ interface TxRow {
   transfer_direction: string | null;  // 'inbound' | 'outbound' | null
   transfer_group_id: string | null;   // UUID linking paired transfer legs
   paired_account_name: string | null; // name of the other account in internal transfer
+  initial_balance: string;            // account opening balance from account_sources
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -340,6 +341,7 @@ export async function exportTransactionsExcel(
          ROUND(wb.balance_after, 2)::text AS balance_after,
          wb.transfer_direction,
          wb.transfer_group_id::text,
+          a.initial_balance::text           AS initial_balance,
          -- Paired account name: find the OTHER leg of the same transfer_group_id
          (SELECT a2.name
           FROM transactions t2
@@ -1955,14 +1957,15 @@ function buildSheet2(wb: ExcelJS.Workbook, rows: TxRow[], usdRates: Map<string, 
 
   // ── Row 2: Column headers ────────────────────────────────────
   const HDR_ROW = 2;
+  // FIX 3: renamed columns to plain human-readable Russian
   const colDefs: Array<[string, number]> = [
     ['Счёт',                   24],  // A=1
     ['Тип актива',             16],  // B=2
     ['Вал.',                    8],  // C=3
-    ['Нач. остаток',           18],  // D=4
-    ['Оборот (+)',             16],  // E=5
-    ['Оборот (−)',             16],  // F=6
-    ['Итог. остаток',          18],  // G=7
+    ['Баланс\nна начало',      18],  // D=4  (was: Нач. остаток)
+    ['Поступления',            16],  // E=5  (was: Оборот (+))
+    ['Списания',               16],  // F=6  (was: Оборот (−))
+    ['Баланс\nсейчас',         18],  // G=7  (was: Итог. остаток)
     ['≈ USD',                  15],  // H=8
     ['Доля %',                 14],  // I=9
     ['Последняя\nоперация',    16],  // J=10
@@ -1972,12 +1975,14 @@ function buildSheet2(wb: ExcelJS.Workbook, rows: TxRow[], usdRates: Map<string, 
 
   // ── Aggregate per account ────────────────────────────────────
   type AccData = {
-    currency:     string;
-    accountType:  string;
-    inflow:       number;   // income + debt_received
-    outflow:      number;   // expense + transfer + debt_given  (stored positive)
-    closingBal:   number;   // balance_after of most recent tx (rows sorted DESC)
-    lastDate:     Date;
+    currency:        string;
+    accountType:     string;
+    inflow:          number;   // income + debt_received + inbound transfers
+    outflow:         number;   // expense + debt_given + outbound transfers (stored positive)
+    outflowTransfer: number;   // portion of outflow that is internal transfers
+    closingBal:      number;   // balance_after of most recent tx (rows sorted DESC)
+    initialBalance:  number;   // initial_balance from account_sources (set via /set_balance)
+    lastDate:        Date;
   };
   const accMap = new Map<string, AccData>();
 
@@ -1985,22 +1990,36 @@ function buildSheet2(wb: ExcelJS.Workbook, rows: TxRow[], usdRates: Map<string, 
     const key    = r.account_name;
     const amt    = parseFloat(r.account_debit_amount ?? r.original_amount);
     const txDate = new Date(r.transaction_time);
-    const isIn   = r.transaction_intent === 'income' || r.transaction_intent === 'debt_received';
+    // FIX 1: inbound transfer counts as inflow, NOT outflow
+    const isIn =
+      r.transaction_intent === 'income'        ||
+      r.transaction_intent === 'debt_received' ||
+      (r.transaction_intent === 'transfer' && r.transfer_direction === 'inbound');
 
     if (!accMap.has(key)) {
       // First encounter = most recent tx (rows DESC) → take balance_after as closing balance
+      // FIX 2: also capture initial_balance directly from DB
       accMap.set(key, {
-        currency:    r.account_currency,
-        accountType: r.account_type,
-        inflow:      0,
-        outflow:     0,
-        closingBal:  parseFloat(r.balance_after),
-        lastDate:    txDate,
+        currency:        r.account_currency,
+        accountType:     r.account_type,
+        inflow:          0,
+        outflow:         0,
+        outflowTransfer: 0,
+        closingBal:      parseFloat(r.balance_after),
+        initialBalance:  parseFloat(r.initial_balance ?? '0'),
+        lastDate:        txDate,
       });
     }
     const acc = accMap.get(key)!;
-    if (isIn) acc.inflow  += amt;
-    else      acc.outflow += amt;
+    if (isIn) {
+      acc.inflow += amt;
+    } else {
+      acc.outflow += amt;
+      // Track how much of outflow is internal transfers (for tooltip hint)
+      if (r.transaction_intent === 'transfer' && r.transfer_direction === 'outbound') {
+        acc.outflowTransfer += amt;
+      }
+    }
     // lastDate: keep the most recent (rows are DESC so first encountered = most recent)
     if (txDate > acc.lastDate) acc.lastDate = txDate;
   }
@@ -2016,7 +2035,8 @@ function buildSheet2(wb: ExcelJS.Workbook, rows: TxRow[], usdRates: Map<string, 
   const accRows: AccRow[] = [];
 
   for (const [name, acc] of accMap) {
-    const openingBal  = acc.closingBal - acc.inflow + acc.outflow;
+    // FIX 2: use initial_balance from DB directly — no backward derivation
+    const openingBal  = acc.initialBalance;
     const rate        = usdRates.get(acc.currency.toUpperCase()) ?? null;
     const usdEquiv    = rate !== null ? acc.closingBal * rate : null;
     accRows.push({ ...acc, name, openingBal, usdEquiv, portfolioPct: 0 });
@@ -2097,6 +2117,14 @@ function buildSheet2(wb: ExcelJS.Workbook, rows: TxRow[], usdRates: Map<string, 
     cf.font  = { size: 9, name: 'Calibri', color: { argb: `FF${C_EXPENSE}` } };
     cf.fill  = fillBg; cf.border = thinBorder;
     cf.alignment = { vertical: 'middle', horizontal: 'right' };
+    // FIX 4: tooltip hint — how much of outflow is internal transfers vs real spending
+    if (ar.outflowTransfer > 0 && ar.outflow > 0) {
+      const realExpense = ar.outflow - ar.outflowTransfer;
+      const parts: string[] = [];
+      if (ar.outflowTransfer > 0) parts.push(`переводы между счетами: ${ar.outflowTransfer.toLocaleString('ru')}`);
+      if (realExpense > 0)        parts.push(`реальные расходы: ${realExpense.toLocaleString('ru')}`);
+      cf.note = { texts: [{ text: parts.join('\n') }] };
+    }
 
     const cg = ws.getCell(rn, 7);
     cg.value = ar.closingBal; cg.numFmt = nf;
