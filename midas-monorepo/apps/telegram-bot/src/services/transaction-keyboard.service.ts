@@ -37,6 +37,7 @@ import type { InlineKeyboardButton, InlineKeyboardMarkup } from './telegram-api.
 import { escapeHtml } from '../utils/html-escape.js';
 import type { TxListItem, MonthMiniStats, IntentFilter } from './transaction-hub.service.js';
 import { EDITABLE_INTENTS } from './edit.service.js';
+import type { TransferPairRow } from './edit.service.js';
 
 // ─────────────────────────────────────────────────────────────
 // Helpers
@@ -145,6 +146,17 @@ export function buildTxListKeyboard(
     const amt   = formatAmountStr(tx.base_amount);
     const cur   = fmtCurrency(tx.base_currency);
     const date  = shortDate(tx.transaction_time);
+
+    // Phase 3.1-UX: transfer-specific rich format
+    if (tx.transaction_intent === 'transfer' && tx.from_account && tx.to_account && tx.to_amount && tx.to_currency) {
+      const toAmt = formatAmountStr(tx.to_amount);
+      const toCur = fmtCurrency(tx.to_currency);
+      rows.push([{
+        text: `\uD83D\uDD04 ${tx.from_account} \u2192 ${tx.to_account}  ${amt} ${cur} \u2192 ${toAmt} ${toCur}  ${date}`,
+        callback_data: `tx:v:${tx.id}`,
+      }]);
+      continue;
+    }
 
     // Show item_name if exists, else fall back to category
     const label = tx.item_name
@@ -258,6 +270,64 @@ export function buildSearchResultsKeyboard(
 }
 
 // ─────────────────────────────────────────────────────────────
+// Phase 3.1-UX: Transfer Rich Card
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Build the HTML text for a Transfer Rich Card (detail view).
+ */
+export function buildTransferDetailCard(pair: TransferPairRow): string {
+  const fromAmt = formatAmountStr(pair.from_amount);
+  const fromCur = fmtCurrency(pair.from_currency);
+  const toAmt   = formatAmountStr(pair.to_amount);
+  const toCur   = fmtCurrency(pair.to_currency);
+
+  const MONTHS_RU_GEN = [
+    '\u044F\u043D\u0432\u0430\u0440\u044F', '\u0444\u0435\u0432\u0440\u0430\u043B\u044F', '\u043C\u0430\u0440\u0442\u0430', '\u0430\u043F\u0440\u0435\u043B\u044F', '\u043C\u0430\u044F', '\u0438\u044E\u043D\u044F',
+    '\u0438\u044E\u043B\u044F', '\u0430\u0432\u0433\u0443\u0441\u0442\u0430', '\u0441\u0435\u043D\u0442\u044F\u0431\u0440\u044F', '\u043E\u043A\u0442\u044F\u0431\u0440\u044F', '\u043D\u043E\u044F\u0431\u0440\u044F', '\u0434\u0435\u043A\u0430\u0431\u0440\u044F',
+  ];
+  const d   = new Date(pair.transaction_time);
+  const day = d.getDate();
+  const mon = MONTHS_RU_GEN[d.getMonth()] ?? '';
+  const yr  = d.getFullYear();
+  const hh  = String(d.getHours()).padStart(2, '0');
+  const mm  = String(d.getMinutes()).padStart(2, '0');
+  const dateStr = `${String(day)} ${mon} ${String(yr)}, ${hh}:${mm}`;
+
+  const lines = [
+    '\uD83D\uDCB1 <b>\u041F\u0435\u0440\u0435\u0432\u043E\u0434</b>',
+    '',
+    `\uD83C\uDFE6 \u0418\u0437:  <b>${escapeHtml(pair.from_account)}</b>  \u00b7  \u2212<code>${fromAmt} ${fromCur}</code>`,
+    `\uD83C\uDFE6 \u0412:   <b>${escapeHtml(pair.to_account)}</b>  \u00b7  +<code>${toAmt} ${toCur}</code>`,
+  ];
+
+  if (pair.is_cross_currency) {
+    const rateClean = pair.exchange_rate.replace(/\.?(\d*?)0+$/, (_, d) => d ? `.${d as string}` : '');
+    lines.push('', `\uD83D\uDCC8 \u041A\u0443\u0440\u0441: <code>1 ${fromCur} = ${rateClean} ${toCur}</code>`);
+  }
+
+  lines.push(`\uD83D\uDCC5 ${dateStr}`);
+  return lines.join('\n');
+}
+
+/**
+ * Build the inline keyboard for a Transfer Rich Card.
+ */
+export function buildTransferViewKeyboard(
+  outboundTxId: string,
+  from?: string,
+): InlineKeyboardMarkup {
+  const sf = from ? `:${from}` : '';
+  return {
+    inline_keyboard: [
+      [{ text: '\uD83D\uDCC8 \u0418\u0437\u043C\u0435\u043D\u0438\u0442\u044C \u043A\u0443\u0440\u0441', callback_data: `tx:tf:rate:${outboundTxId}${sf}` }],
+      [{ text: '\uD83D\uDDD1\uFE0F \u0423\u0434\u0430\u043B\u0438\u0442\u044C \u043F\u0435\u0440\u0435\u0432\u043E\u0434', callback_data: `tx:tf:del:${outboundTxId}${sf}` }],
+      [{ text: '\u2716\uFE0F \u041E\u0442\u043C\u0435\u043D\u0430', callback_data: from === 's' ? `tx:done:${outboundTxId}` : 'tx:close' }],
+    ],
+  };
+}
+
+// ─────────────────────────────────────────────────────────────
 // Formatting
 // ─────────────────────────────────────────────────────────────
 
@@ -271,13 +341,6 @@ const MONTH_NAMES_RU = [
 
 /**
  * Format the transaction list header with mini stats.
- * HTML-safe output.
- *
- * Phase 2.0 — filter-specific headers:
- *   'a': "📋 Транзакции\n\nЗа май: 62 расхода · 18 доходов · 7 долгов"
- *   'e': "📋 Расходы за май (62 шт. · 32,150.00 USDT)"
- *   'i': "📋 Доходы за май (18 шт. · 45,200.00 USDT)"
- *   'd': "📋 Долги за май (7 шт.)"
  */
 export function formatTxListHeader(
   stats: MonthMiniStats,
@@ -287,7 +350,6 @@ export function formatTxListHeader(
   const cur = escapeHtml(stats.currency);
 
   if (filter === 'a') {
-    // All transactions — summary line
     const parts: string[] = [];
     if (stats.expense_count > 0)
       parts.push(`${String(stats.expense_count)} расход${pluralRu(stats.expense_count)}`);
@@ -317,13 +379,11 @@ export function formatTxListHeader(
     return `<b>\uD83E\uDD1D Долги за ${monthName}</b> (${String(total)} шт.)`;
   }
 
-  // filter === 't'
   return `<b>\uD83D\uDD04 Переводы за ${monthName}</b> (${String(stats.transfer_count)} шт.)`;
 }
 
 /**
  * Russian plural suffix helper for count words.
- * 1 расход, 2 расхода, 5 расходов → returns "", "а", "ов"
  */
 function pluralRu(n: number): string {
   const abs = Math.abs(n) % 100;
@@ -340,7 +400,6 @@ function pluralRu(n: number): string {
 
 /**
  * Parsed transaction callback command.
- * Union type covers all tx: callback_data patterns.
  */
 export type TxCallbackCmd =
   | { cmd: 'list'; page: number; filter: IntentFilter }
@@ -366,15 +425,15 @@ export type TxCallbackCmd =
   | { cmd: 'confirm_int'; txId: string; intent: string; from?: string }
   | { cmd: 'cancel' }
   | { cmd: 'close' }
-  | { cmd: 'done'; txId: string };
+  | { cmd: 'done'; txId: string }
+  | { cmd: 'transfer_rate'; txId: string; from?: string }
+  | { cmd: 'transfer_delete'; txId: string; from?: string }
+  | { cmd: 'transfer_delete_confirm'; txId: string; from?: string };
 
 const VALID_FILTERS: readonly string[] = ['a', 'e', 'i', 'd', 't'];
 
 /**
  * Parse a tx: callback_data string into a typed command.
- * Returns null for invalid/unrecognized data (silently rejected).
- *
- * Supports tx:l:{page} without filter (default 'a') for ed: → tx: remap compatibility.
  */
 export function parseTxCallback(data: string): TxCallbackCmd | null {
   if (!data.startsWith('tx:')) return null;
@@ -382,20 +441,16 @@ export function parseTxCallback(data: string): TxCallbackCmd | null {
   const parts = data.split(':');
   const sub = parts[1] ?? '';
 
-  // tx:x → cancel
   if (sub === 'x') return { cmd: 'cancel' };
 
-  // tx:close → close (remove keyboard)
   if (sub === 'close') return { cmd: 'close' };
   
-  // tx:done:<txId> → done (restore simple success card)
   if (sub === 'done') {
     const txId = parts[2] ?? '';
     if (!ULID_RE.test(txId)) return null;
     return { cmd: 'done', txId };
   }
 
-  // tx:sr:p:{page} → search results page navigation
   if (sub === 'sr') {
     if (parts[2] === 'p') {
       const page = parseInt(parts[3] ?? '0', 10);
@@ -405,19 +460,15 @@ export function parseTxCallback(data: string): TxCallbackCmd | null {
     return null;
   }
 
-  // tx:l:<page>:<filter?> → list (filter defaults to 'a' for ed: compat)
   if (sub === 'l') {
     const page = parseInt(parts[2] ?? '0', 10);
     if (isNaN(page) || page < 0) return null;
     let filter = (parts[3] ?? 'a') as IntentFilter;
-    // Backward compat: stale cached buttons may send 'dg' or 'dr' (old split debt filters).
-    // Merge both into 'd' (combined debts) — Variant B.
     if ((filter as string) === 'dg' || (filter as string) === 'dr') filter = 'd';
     if (!VALID_FILTERS.includes(filter)) return null;
     return { cmd: 'list', page, filter };
   }
 
-  // tx:v:<txId>[:<from>] → view
   if (sub === 'v') {
     const txId = parts[2] ?? '';
     if (!ULID_RE.test(txId)) return null;
@@ -425,7 +476,6 @@ export function parseTxCallback(data: string): TxCallbackCmd | null {
     return { cmd: 'view', txId, from };
   }
 
-  // tx:s → search namespace
   if (sub === 's') {
     if (parts.length === 2) return { cmd: 'search_menu' };
     const searchSub = parts[2] ?? '';
@@ -437,7 +487,6 @@ export function parseTxCallback(data: string): TxCallbackCmd | null {
       if (!ULID_RE.test(catId)) return null;
       return { cmd: 'search_cat_result', catId };
     }
-    // tx:s:dt[:{sub}] — date search
     if (searchSub === 'dt') {
       if (parts.length === 3) return { cmd: 'search_date_menu' };
       const dtSub = parts[3] ?? '';
@@ -452,7 +501,6 @@ export function parseTxCallback(data: string): TxCallbackCmd | null {
     return null;
   }
 
-  // tx:f:<field>:<txId>[:<page>][:<from>] → edit fields (mirrors ed:f:*)
   if (sub === 'f') {
     const field = parts[2] ?? '';
     const txId  = parts[3] ?? '';
@@ -469,7 +517,6 @@ export function parseTxCallback(data: string): TxCallbackCmd | null {
     return null;
   }
 
-  // tx:c:<type>:<txId>:<value> → confirm changes
   if (sub === 'c') {
     const type  = parts[2] ?? '';
     const txId  = parts[3] ?? '';
@@ -491,14 +538,24 @@ export function parseTxCallback(data: string): TxCallbackCmd | null {
     return null;
   }
 
-  // tx:d:<action>:<txId>[:<from>] → delete flow
   if (sub === 'd') {
     const action = parts[2] ?? '';
     const txId   = parts[3] ?? '';
     if (!ULID_RE.test(txId)) return null;
-    const from = parts[4]; // preserve 'from' context (e.g. 's' = came from success card)
+    const from = parts[4];
     if (action === 'ask') return { cmd: 'delete_ask', txId, from };
     if (action === 'yes') return { cmd: 'delete_confirm', txId, from };
+    return null;
+  }
+
+  if (sub === 'tf') {
+    const action = parts[2] ?? '';
+    const txId   = parts[3] ?? '';
+    if (!ULID_RE.test(txId)) return null;
+    const from = parts[4];
+    if (action === 'rate') return { cmd: 'transfer_rate', txId, from };
+    if (action === 'del')  return { cmd: 'transfer_delete', txId, from };
+    if (action === 'dely') return { cmd: 'transfer_delete_confirm', txId, from };
     return null;
   }
 

@@ -110,6 +110,26 @@ export interface TransactionCard extends TransactionListItem {
   exchange_rate:   string;
   is_cross_currency: boolean;  // exchange_rate != 1.000000000000
   account_deleted:  boolean;   // true when linked account has been soft-deleted
+  transfer_group_id:  string | null;  // Phase 3.1-UX: non-null for paired transfers
+  transfer_direction: string | null;  // 'outbound' | 'inbound' | null
+}
+
+/**
+ * Full paired transfer data — both legs joined.
+ * Used for rendering the Transfer Rich Card.
+ */
+export interface TransferPairRow {
+  outbound_tx_id:   string;
+  from_account:     string;
+  from_amount:      string;   // NUMERIC string (SEC-02)
+  from_currency:    string;
+  to_account:       string;
+  to_amount:        string;   // NUMERIC string (SEC-02)
+  to_currency:      string;
+  exchange_rate:    string;   // from inbound leg, or '1' for same-currency
+  is_cross_currency: boolean;
+  transaction_time: string;   // ISO timestamp
+  transfer_group_id: string;
 }
 
 export type UpdateResult =
@@ -206,7 +226,9 @@ export async function getTransactionCard(
          t.account_id,
          t.item_name,
          (t.exchange_rate != 1.000000000000)                    AS is_cross_currency,
-         (t.account_id IS NOT NULL AND a.deleted_at IS NOT NULL) AS account_deleted
+         (t.account_id IS NOT NULL AND a.deleted_at IS NOT NULL) AS account_deleted,
+         t.transfer_group_id,
+         t.transfer_direction
        FROM transactions t
        LEFT JOIN categories     c ON c.id = t.category_id
        LEFT JOIN account_sources a ON a.id = t.account_id
@@ -218,6 +240,145 @@ export async function getTransactionCard(
     return r.rows[0] ?? null;
   });
   return result;
+}
+
+/**
+ * Fetch both legs of a paired transfer.
+ * Given ANY tx ID (outbound or inbound), finds the pair via transfer_group_id
+ * and returns a normalized TransferPairRow with source → target direction.
+ *
+ * Returns null if:
+ *   - Transaction not found
+ *   - Not a paired transfer (transfer_group_id IS NULL)
+ *   - Paired leg missing (orphaned transfer)
+ *
+ * SEC-03: withTenantTransaction. SEC-02: NUMERIC strings.
+ */
+export async function getTransferPair(
+  txId: string,
+  workspaceId: string,
+  userId: string,
+): Promise<TransferPairRow | null> {
+  if (!ULID_RE.test(txId)) return null;
+
+  return withTenantTransaction(workspaceId, userId, async (client) => {
+    // Step 1: find the transfer_group_id from the given tx
+    const groupRes = await client.query<{ transfer_group_id: string | null }>(
+      `SELECT transfer_group_id FROM transactions
+       WHERE id = $1 AND workspace_id = $2 AND deleted_at IS NULL`,
+      [txId, workspaceId],
+    );
+    const groupId = groupRes.rows[0]?.transfer_group_id;
+    if (!groupId) return null;
+
+    // Step 2: fetch both legs joined with account names
+    const pairRes = await client.query<{
+      out_id:         string;
+      from_account:   string;
+      from_amount:    string;
+      from_currency:  string;
+      to_account:     string;
+      to_amount:      string;
+      to_currency:    string;
+      exchange_rate:  string;
+      is_cross_currency: boolean;
+      transaction_time: string;
+    }>(
+      `SELECT
+         t_out.id                              AS out_id,
+         COALESCE(a_src.name, '—')             AS from_account,
+         ROUND(t_out.base_amount, 2)::text     AS from_amount,
+         t_out.base_currency                   AS from_currency,
+         COALESCE(a_tgt.name, '—')             AS to_account,
+         ROUND(t_in.base_amount, 2)::text      AS to_amount,
+         t_in.base_currency                    AS to_currency,
+         t_in.exchange_rate::text              AS exchange_rate,
+         (t_out.base_currency != t_in.base_currency) AS is_cross_currency,
+         t_out.transaction_time::text
+       FROM transactions t_out
+       JOIN transactions t_in
+         ON  t_in.transfer_group_id = t_out.transfer_group_id
+         AND t_in.transfer_direction = 'inbound'
+         AND t_in.deleted_at IS NULL
+       LEFT JOIN account_sources a_src ON a_src.id = t_out.account_id
+       LEFT JOIN account_sources a_tgt ON a_tgt.id = t_in.account_id
+       WHERE t_out.transfer_group_id = $1
+         AND t_out.transfer_direction = 'outbound'
+         AND t_out.workspace_id = $2
+         AND t_out.deleted_at IS NULL
+       LIMIT 1`,
+      [groupId, workspaceId],
+    );
+
+    const row = pairRes.rows[0];
+    if (!row) return null;
+
+    return {
+      outbound_tx_id:    row.out_id,
+      from_account:      row.from_account,
+      from_amount:       row.from_amount,
+      from_currency:     row.from_currency,
+      to_account:        row.to_account,
+      to_amount:         row.to_amount,
+      to_currency:       row.to_currency,
+      exchange_rate:     row.exchange_rate,
+      is_cross_currency: row.is_cross_currency,
+      transaction_time:  row.transaction_time,
+      transfer_group_id: groupId,
+    };
+  });
+}
+
+/**
+ * Update the exchange rate of a paired transfer.
+ * Recalculates the inbound leg's base_amount based on the new rate.
+ *
+ * newRate is a user-typed string like "0.999" or "43.5".
+ * Inbound amount = outbound amount × newRate (computed in PostgreSQL NUMERIC).
+ *
+ * SEC-02: all arithmetic in PostgreSQL. SEC-03: withTenantTransaction.
+ */
+export async function updateTransferExchangeRate(
+  outboundTxId: string,
+  workspaceId: string,
+  userId: string,
+  newRate: string,
+): Promise<UpdateResult> {
+  if (!ULID_RE.test(outboundTxId)) return { status: 'not_found' };
+
+  // Validate rate format: positive decimal, up to 12 digits total
+  const rateRe = /^\d{1,8}(\.\d{1,8})?$/;
+  if (!rateRe.test(newRate)) return { status: 'invalid_amount' };
+
+  return withTenantTransaction(workspaceId, userId, async (client) => {
+    // Step 1: find transfer_group_id from outbound leg
+    const check = await client.query<{ transfer_group_id: string | null; base_amount: string }>(
+      `SELECT transfer_group_id, base_amount::text
+       FROM transactions
+       WHERE id = $1 AND workspace_id = $2 AND deleted_at IS NULL
+         AND transfer_direction = 'outbound'`,
+      [outboundTxId, workspaceId],
+    );
+    if (check.rows.length === 0) return { status: 'not_found' };
+    const { transfer_group_id } = check.rows[0]!;
+    if (!transfer_group_id) return { status: 'not_found' };
+
+    // Step 2: update inbound leg — recalculate amount + set exchange_rate
+    // new_inbound_amount = outbound_amount × newRate (NUMERIC precision)
+    await client.query(
+      `UPDATE transactions
+       SET base_amount      = ROUND($3::NUMERIC * $4::NUMERIC, 4),
+           original_amount  = ROUND($3::NUMERIC * $4::NUMERIC, 4),
+           exchange_rate     = $4::NUMERIC
+       WHERE transfer_group_id = $1
+         AND workspace_id = $2
+         AND transfer_direction = 'inbound'
+         AND deleted_at IS NULL`,
+      [transfer_group_id, workspaceId, check.rows[0]!.base_amount, newRate],
+    );
+
+    return { status: 'ok' };
+  });
 }
 
 // ─────────────────────────────────────────────────────────────

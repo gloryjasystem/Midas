@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Telegram Webhook Route — POST /webhook
  *
  * Entry point for all incoming Telegram updates.
@@ -1952,26 +1952,41 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
             // subsequent free-form messages as an amount input.
             void redisConnection.del(`midas:tx:edit:amt:${telegramUserId}:${chatId}`);
             void redisConnection.del(editStateKey(telegramUserId, chatId));
+            // Also clear transfer rate edit key if present
+            void redisConnection.del(`midas:tf_rate:${telegramUserId}:${chatId}`);
 
             const card = await getTransactionCard(txCmd.txId, txResolved.workspaceId, txResolved.userId);
             if (card) {
-              const { formatTxDetailCard } = await import('../utils/screen-builder.js');
-              const text = formatTxDetailCard(card);
-              const rows: { text: string; callback_data: string }[][] = [];
-              // Preserve the 'from' context in all sub-action callbacks so that
-              // navigating deeper and returning always brings back this view with
-              // the same context intact.
-              const sf = txCmd.from ? `:${txCmd.from}` : '';
-              if (!card.is_cross_currency) rows.push([{ text: '\u270F\uFE0F \u0418\u0437\u043C\u0435\u043D\u0438\u0442\u044C \u0441\u0443\u043C\u043C\u0443', callback_data: `tx:f:amt:${txCmd.txId}${sf}` }]);
-              rows.push([{ text: '\uD83D\uDCC1 \u0418\u0437\u043C\u0435\u043D\u0438\u0442\u044C \u043A\u0430\u0442\u0435\u0433\u043E\u0440\u0438\u044E', callback_data: `tx:f:cat:${txCmd.txId}:0${sf}` }]);
-              rows.push([{ text: '\uD83C\uDFE6 \u0418\u0437\u043C\u0435\u043D\u0438\u0442\u044C \u0441\u0447\u0451\u0442', callback_data: `tx:f:acc:${txCmd.txId}${sf}` }]);
-              rows.push([{ text: '\uD83D\uDD04 \u0418\u0437\u043C\u0435\u043D\u0438\u0442\u044C \u0442\u0438\u043F', callback_data: `tx:f:int:${txCmd.txId}${sf}` }]);
-              rows.push([{ text: '\uD83D\uDDD1\uFE0F \u0423\u0434\u0430\u043B\u0438\u0442\u044C', callback_data: `tx:d:ask:${txCmd.txId}${sf}` }]);
-              // BUG-FIX: when from === 's' (arrived from a floating success card via ed:v:),
-              // "Закрыть" must restore Screenshot 1 via tx:done rather than delete the message.
-              const closeCallback = txCmd.from === 's' ? `tx:done:${txCmd.txId}` : 'tx:close';
-              rows.push([{ text: '\u2716\uFE0F \u0417\u0430\u043A\u0440\u044B\u0442\u044C', callback_data: closeCallback }]);
-              if (txMsgId) void editMessageText(chatId, txMsgId, text, { inline_keyboard: rows });
+              // Phase 3.1-UX: Transfer Rich Card — show paired transfer view
+              if (card.transaction_intent === 'transfer' && card.transfer_group_id) {
+                const { getTransferPair } = await import('../services/edit.service.js');
+                const { buildTransferDetailCard, buildTransferViewKeyboard } = await import('../services/transaction-keyboard.service.js');
+                const pair = await getTransferPair(txCmd.txId, txResolved.workspaceId, txResolved.userId);
+                if (pair) {
+                  const text = buildTransferDetailCard(pair);
+                  const kb   = buildTransferViewKeyboard(pair.outbound_tx_id, txCmd.from);
+                  if (txMsgId) void editMessageText(chatId, txMsgId, text, kb);
+                } else {
+                  // Orphaned transfer leg — fall through to standard card
+                  const { formatTxDetailCard } = await import('../utils/screen-builder.js');
+                  const text = formatTxDetailCard(card);
+                  if (txMsgId) void editMessageText(chatId, txMsgId, text, { inline_keyboard: [[{ text: '\u25C0\uFE0F \u041D\u0430\u0437\u0430\u0434', callback_data: 'tx:l:0:a' }]] });
+                }
+              } else {
+                // Standard transaction card (non-transfer)
+                const { formatTxDetailCard } = await import('../utils/screen-builder.js');
+                const text = formatTxDetailCard(card);
+                const rows: { text: string; callback_data: string }[][] = [];
+                const sf = txCmd.from ? `:${txCmd.from}` : '';
+                if (!card.is_cross_currency) rows.push([{ text: '\u270F\uFE0F \u0418\u0437\u043C\u0435\u043D\u0438\u0442\u044C \u0441\u0443\u043C\u043C\u0443', callback_data: `tx:f:amt:${txCmd.txId}${sf}` }]);
+                rows.push([{ text: '\uD83D\uDCC1 \u0418\u0437\u043C\u0435\u043D\u0438\u0442\u044C \u043A\u0430\u0442\u0435\u0433\u043E\u0440\u0438\u044E', callback_data: `tx:f:cat:${txCmd.txId}:0${sf}` }]);
+                rows.push([{ text: '\uD83C\uDFE6 \u0418\u0437\u043C\u0435\u043D\u0438\u0442\u044C \u0441\u0447\u0451\u0442', callback_data: `tx:f:acc:${txCmd.txId}${sf}` }]);
+                rows.push([{ text: '\uD83D\uDD04 \u0418\u0437\u043C\u0435\u043D\u0438\u0442\u044C \u0442\u0438\u043F', callback_data: `tx:f:int:${txCmd.txId}${sf}` }]);
+                rows.push([{ text: '\uD83D\uDDD1\uFE0F \u0423\u0434\u0430\u043B\u0438\u0442\u044C', callback_data: `tx:d:ask:${txCmd.txId}${sf}` }]);
+                const closeCallback = txCmd.from === 's' ? `tx:done:${txCmd.txId}` : 'tx:close';
+                rows.push([{ text: '\u2716\uFE0F \u0417\u0430\u043A\u0440\u044B\u0442\u044C', callback_data: closeCallback }]);
+                if (txMsgId) void editMessageText(chatId, txMsgId, text, { inline_keyboard: rows });
+              }
             } else {
               if (txMsgId) void editMessageText(chatId, txMsgId, '\u26A0\uFE0F \u0422\u0440\u0430\u043D\u0437\u0430\u043A\u0446\u0438\u044F \u043D\u0435 \u043D\u0430\u0439\u0434\u0435\u043D\u0430.', { inline_keyboard: [[{ text: '\u25C0\uFE0F \u041D\u0430\u0437\u0430\u0434', callback_data: 'tx:l:0:a' }]] });
             }
@@ -2086,6 +2101,54 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
             } else {
               if (txMsgId) void editMessageText(chatId, txMsgId, '\u26A0\uFE0F \u0422\u0440\u0430\u043D\u0437\u0430\u043A\u0446\u0438\u044F \u043D\u0435 \u043D\u0430\u0439\u0434\u0435\u043D\u0430.', { inline_keyboard: [[{ text: '\u25C0\uFE0F \u041A \u0441\u043F\u0438\u0441\u043A\u0443', callback_data: 'tx:l:0:a' }]] });
             }
+
+            // ── Phase 3.1-UX: tx:tf:rate — start rate edit (text interceptor) ──
+          } else if (txCmd.cmd === 'transfer_rate') {
+            // Set Redis interceptor: next free-text message from this user/chat → rate input
+            const rateKey = `midas:tf_rate:${telegramUserId}:${chatId}`;
+            const ratePayload = `${txCmd.txId}:${txMsgId ?? ''}:${txCmd.from ?? ''}`;
+            try { await redisConnection.set(rateKey, ratePayload, 'EX', 300); } catch { /* non-fatal */ }
+
+            // Show rate input prompt
+            const { getTransferPair } = await import('../services/edit.service.js');
+            const ratePair = await getTransferPair(txCmd.txId, txResolved.workspaceId, txResolved.userId);
+            if (ratePair && txMsgId) {
+              const currentRate = ratePair.is_cross_currency
+                ? ratePair.exchange_rate.replace(/\.?0+$/, '')
+                : '1';
+              void editMessageText(chatId, txMsgId,
+                `📈 <b>Изменить курс конвертации</b>\n\n` +
+                `Текущий: <code>1 ${escapeHtml(ratePair.from_currency)} = ${currentRate} ${escapeHtml(ratePair.to_currency)}</code>\n\n` +
+                `Введите новый курс (например: <code>0.999</code> или <code>43.5</code>):`,
+                { inline_keyboard: [[{ text: '◀️ Отмена', callback_data: `tx:v:${txCmd.txId}${txCmd.from ? `:${txCmd.from}` : ''}` }]] },
+              );
+            }
+
+            // ── Phase 3.1-UX: tx:tf:del — delete confirmation ──
+          } else if (txCmd.cmd === 'transfer_delete') {
+            const sf = txCmd.from ? `:${txCmd.from}` : '';
+            if (txMsgId) void editMessageText(chatId, txMsgId,
+              '🗑️ <b>Удалить перевод?</b>\n\nОбе стороны перевода (списание и зачисление) будут удалены.\nЭто действие нельзя отменить.',
+              { inline_keyboard: [
+                [{ text: '🗑️ Да, удалить', callback_data: `tx:tf:dely:${txCmd.txId}${sf}` }],
+                [{ text: '◀️ Отмена', callback_data: `tx:v:${txCmd.txId}${sf}` }],
+              ] },
+            );
+
+            // ── Phase 3.1-UX: tx:tf:dely — execute paired delete ──
+          } else if (txCmd.cmd === 'transfer_delete_confirm') {
+            const { softDeletePairedTransfer } = await import('../services/edit.service.js');
+            const delResult = await softDeletePairedTransfer(txCmd.txId, txResolved.workspaceId, txResolved.userId);
+            if (delResult.status === 'ok') {
+              if (txCmd.from === 's') {
+                if (txMsgId) void editMessageText(chatId, txMsgId, '✅ Перевод удалён.', { inline_keyboard: [[{ text: '✖️ Закрыть', callback_data: 'tx:close' }]] });
+              } else {
+                if (txMsgId) void editMessageText(chatId, txMsgId, '✅ Перевод удалён.', { inline_keyboard: [[{ text: '◀️ К списку', callback_data: 'tx:l:0:a' }]] });
+              }
+            } else {
+              if (txMsgId) void editMessageText(chatId, txMsgId, '⚠️ Перевод не найден.', { inline_keyboard: [[{ text: '◀️ К списку', callback_data: 'tx:l:0:a' }]] });
+            }
+
             // ── tx:s:n → search by name (set Redis intercept) ──
           } else if (txCmd.cmd === 'search_name') {
             const searchKey = `midas:tx:search:${telegramUserId}:${chatId}`;
@@ -6864,6 +6927,60 @@ Midas создан, чтобы сделать учет денег максима
         } else if (txEdStateTxId) {
           // Malformed state
           await redisConnection.del(txEdKey);
+        }
+      }
+    }
+
+    // ── Step 5g-tf-rate: Phase 3.1-UX — transfer rate edit text intercept ────────
+    // If user tapped "📈 Изменить курс конвертации" and then typed a new rate.
+    if (!commandToken) {
+      const tfRateKey = `midas:tf_rate:${telegramUserId}:${chatId}`;
+      const tfRatePayload = await redisConnection.get(tfRateKey);
+      if (tfRatePayload) {
+        const [tfTxId, tfMsgId, tfFrom] = tfRatePayload.split(':') as [string, string | undefined, string | undefined];
+        if (tfTxId && /^[0-9A-Z]{26}$/.test(tfTxId)) {
+          const rateInput = (message.text ?? '').trim().replace(',', '.');
+          // Validate: positive decimal number
+          if (!/^\d{1,8}(\.\d{1,8})?$/.test(rateInput) || rateInput === '0') {
+            await redisConnection.expire(tfRateKey, 300);
+            void upsertBotMessage(telegramUserId, chatId, '⚠️ Неверный формат. Введите число, например: <code>0.999</code> или <code>43.5</code>');
+            await reply.status(200).send({ ok: true });
+            return;
+          }
+
+          try {
+            const resolved = await resolveWorkspace(telegramUserId, chatId);
+            const { updateTransferExchangeRate, getTransferPair } = await import('../services/edit.service.js');
+            const res = await updateTransferExchangeRate(tfTxId, resolved.workspaceId, resolved.userId, rateInput);
+            await redisConnection.del(tfRateKey);
+
+            if (res.status === 'ok') {
+              // Refresh the transfer card
+              const pair = await getTransferPair(tfTxId, resolved.workspaceId, resolved.userId);
+              if (pair && tfMsgId) {
+                const { buildTransferDetailCard, buildTransferViewKeyboard } = await import('../services/transaction-keyboard.service.js');
+                const { editMessageText: editMsg, deleteMessage } = await import('../services/telegram-api.js');
+                const cardText = buildTransferDetailCard(pair);
+                const kb = buildTransferViewKeyboard(pair.outbound_tx_id, tfFrom);
+                void editMsg(chatId, tfMsgId, `✅ Курс обновлён.\n\n${cardText}`, kb);
+                void deleteMessage(chatId, String(message.message_id));
+              } else {
+                void upsertBotMessage(telegramUserId, chatId, '✅ Курс обновлён.');
+              }
+              request.log.info({ msg: '[midas:bot:webhook] tf rate: exchange rate updated', txId: tfTxId });
+            } else {
+              void upsertBotMessage(telegramUserId, chatId, '⚠️ Не удалось обновить курс.');
+            }
+          } catch (err: unknown) {
+            await redisConnection.del(tfRateKey);
+            const errorClass = err instanceof Error ? err.constructor.name : 'UnknownError';
+            request.log.error({ msg: '[midas:bot:webhook] tf rate update failed', txId: tfTxId, errorClass });
+            void upsertBotMessage(telegramUserId, chatId, '⚠️ Не удалось сохранить. Попробуйте позже.');
+          }
+          await reply.status(200).send({ ok: true });
+          return;
+        } else {
+          await redisConnection.del(tfRateKey);
         }
       }
     }

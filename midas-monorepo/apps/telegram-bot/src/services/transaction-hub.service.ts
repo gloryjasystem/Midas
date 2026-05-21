@@ -35,6 +35,12 @@ export interface TxListItem {
   transaction_time: string;   // ISO timestamp
   category_name: string;
   item_name: string | null;
+  // Phase 3.1-UX: optional transfer enrichment (only for outbound transfer rows)
+  transfer_direction?: string | null;  // 'outbound' | null (inbound filtered out)
+  from_account?: string | null;        // source account name
+  to_account?: string | null;          // target account name
+  to_amount?: string | null;           // NUMERIC string — inbound amount
+  to_currency?: string | null;         // inbound currency
 }
 
 export interface MonthMiniStats {
@@ -82,11 +88,31 @@ export async function getTransactionList(
          t.transaction_intent,
          t.transaction_time::text,
          COALESCE(c.name, '—') AS category_name,
-         t.item_name
+         t.item_name,
+         t.transfer_direction,
+         -- Phase 3.1-UX: transfer enrichment (NULL for non-transfers)
+         COALESCE(a_src.name, NULL) AS from_account,
+         COALESCE(a_tgt.name, NULL) AS to_account,
+         ROUND(t_in.base_amount, 2)::text AS to_amount,
+         t_in.base_currency AS to_currency
        FROM transactions t
        LEFT JOIN categories c ON c.id = t.category_id
+       -- Phase 3.1-UX: join source account for transfer display
+       LEFT JOIN account_sources a_src ON a_src.id = t.account_id
+         AND t.transaction_intent = 'transfer'
+       -- Phase 3.1-UX: join inbound leg + target account for transfer display
+       LEFT JOIN transactions t_in
+         ON  t_in.transfer_group_id = t.transfer_group_id
+         AND t_in.transfer_direction = 'inbound'
+         AND t_in.deleted_at IS NULL
+         AND t.transaction_intent = 'transfer'
+         AND t.transfer_direction = 'outbound'
+       LEFT JOIN account_sources a_tgt ON a_tgt.id = t_in.account_id
+         AND t.transaction_intent = 'transfer'
        WHERE t.workspace_id = $1
          AND t.deleted_at IS NULL
+         -- Phase 3.1-UX: hide inbound transfer legs (shown as part of outbound)
+         AND (t.transfer_direction IS DISTINCT FROM 'inbound')
          AND (
            $2 = 'a'
            OR ($2 = 'e'  AND t.transaction_intent = 'expense')
@@ -117,6 +143,8 @@ export async function countFilteredTransactions(
        FROM transactions
        WHERE workspace_id = $1
          AND deleted_at IS NULL
+         -- Phase 3.1-UX: hide inbound transfer legs from count
+         AND (transfer_direction IS DISTINCT FROM 'inbound')
          AND (
            $2 = 'a'
            OR ($2 = 'e' AND transaction_intent = 'expense')
@@ -161,7 +189,9 @@ export async function getMonthMiniStats(
          COUNT(*) FILTER (WHERE transaction_intent = 'income')::text AS income_count,
          COUNT(*) FILTER (WHERE transaction_intent = 'debt_given')::text    AS debt_given_count,
          COUNT(*) FILTER (WHERE transaction_intent = 'debt_received')::text AS debt_received_count,
-         COUNT(*) FILTER (WHERE transaction_intent = 'transfer')::text      AS transfer_count,
+         -- Phase 3.1-UX: count only outbound legs (pairs shown as one)
+         COUNT(*) FILTER (WHERE transaction_intent = 'transfer'
+           AND (transfer_direction IS DISTINCT FROM 'inbound'))::text       AS transfer_count,
          COALESCE(SUM(base_amount) FILTER (WHERE transaction_intent = 'expense'), 0)::text AS expense_total,
          COALESCE(SUM(base_amount) FILTER (WHERE transaction_intent = 'income'), 0)::text AS income_total
        FROM transactions
