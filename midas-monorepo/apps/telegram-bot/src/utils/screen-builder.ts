@@ -293,7 +293,8 @@ export function buildPreviewScreen(data: PreviewScreenData): string {
 
   // ── Details: category (+ legacy accountHint if no accountBlock) ──
   const details: string[] = [];
-  if (data.categoryHint) details.push(`📁 ${data.categoryHint}`);
+  // Transfers have no meaningful category — intent IS the classification (Revolut/Monzo/YNAB pattern)
+  if (data.categoryHint && data.intent !== 'transfer') details.push(`📁 ${data.categoryHint}`);
   // accountHint shown only when accountBlock is absent (backward compat)
   if (!data.accountBlock && data.accountHint) details.push(`🏦 ${data.accountHint}`);
   if (details.length > 0) {
@@ -418,7 +419,8 @@ export function buildConfirmedScreen(data: ConfirmedScreenData): string {
 
   // ── Details: category only (account shown in balance block below) ──────────
   const details: string[] = [];
-  if (data.categoryName) details.push(`📁 ${data.categoryName}`);
+  // Transfers: skip category — intent IS the classification, category_id=NULL in DB is correct
+  if (data.categoryName && data.intent !== 'transfer') details.push(`📁 ${data.categoryName}`);
   // Account name shown inline only when no balance snapshot available
   if (data.accountName && data.balanceAfter == null) details.push(`🏦 ${data.accountName}`);
   if (details.length > 0) {
@@ -498,12 +500,14 @@ export function formatTxDetailCard(card: {
     : `${formatAmount(card.base_amount)} ${card.base_currency || card.currency}`;
   const dt = new Date(card.transaction_time);
   const dateStr = `${String(dt.getDate()).padStart(2, '0')}.${String(dt.getMonth() + 1).padStart(2, '0')}.${dt.getFullYear()}`;
+  const isTransferDetail = card.transaction_intent === 'transfer';
   return [
     '📋 <b>Транзакция</b>',
     '',
     `${intentEmoji(card.transaction_intent)} ${intentLabel(card.transaction_intent)}`,
     `💰 Сумма: <b>${amount}</b>`,
-    `📁 Категория: ${card.category_name}`,
+    // Transfers: omit category row — movement between own accounts needs no category
+    ...(isTransferDetail ? [] : [`📁 Категория: ${card.category_name}`]),
     `🏦 Счёт: ${card.account_name}`,
     `📅 Дата: ${dateStr}`,
   ].join('\n');
@@ -534,7 +538,8 @@ export function formatRestoredSuccessCard(
     intent: card.transaction_intent,
     amount: formatAmount(card.original_amount), // strip trailing .00
     currency: card.currency,
-    categoryName: card.category_name,
+    // Transfers: suppress category — category_id=NULL in DB, fallback 'Другое' must not show
+    categoryName: card.transaction_intent !== 'transfer' ? card.category_name : null,
     accountName: card.account_name,
     itemName: card.item_name ?? null,
     transactionTime: card.transaction_time,
@@ -698,7 +703,8 @@ function buildDraftSummaryBlock(data: GateDraftData): string {
     lines.push(`<blockquote>${data.itemName}</blockquote>`);
   }
 
-  if (data.parsedCategoryHint) {
+  // Transfers: skip category in gate/reminder summary — intent IS the classification
+  if (data.parsedCategoryHint && data.parsedIntent !== 'transfer') {
     lines.push(`\n📁 ${data.parsedCategoryHint}`);
   }
 

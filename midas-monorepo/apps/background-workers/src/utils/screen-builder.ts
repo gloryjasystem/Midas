@@ -271,7 +271,8 @@ export function buildPreviewScreen(data: PreviewScreenData): string {
 
   // ── Details: category · account (middle dot — U+00B7) ────────
   const details: string[] = [];
-  if (data.categoryHint) details.push(`📁 ${escapeHtml(data.categoryHint)}`);
+  // Transfers have no meaningful category — intent IS the classification (Revolut/Monzo/YNAB pattern)
+  if (data.categoryHint && data.intent !== 'transfer') details.push(`📁 ${escapeHtml(data.categoryHint)}`);
   // accountHint shown only when accountBlock is absent (backward compat)
   if (!data.accountBlock && data.accountHint)  details.push(`🏦 ${escapeHtml(data.accountHint)}`);
   if (details.length > 0) {
@@ -339,7 +340,8 @@ export function buildConfirmedScreen(data: ConfirmedScreenData): string {
 
   // ── Details: category only (account shown in balance block below) ──────────
   const details: string[] = [];
-  if (data.categoryName) details.push(`\ud83d\udcc1 ${escapeHtml(data.categoryName)}`);
+  // Transfers: skip category — intent IS the classification, category_id=NULL in DB is correct
+  if (data.categoryName && data.intent !== 'transfer') details.push(`\ud83d\udcc1 ${escapeHtml(data.categoryName)}`);
   // Account name shown inline only when no balance snapshot available
   if (data.accountName && data.balanceAfter == null) details.push(`\ud83c\udfe6 ${escapeHtml(data.accountName)}`);
   if (details.length > 0) {
@@ -492,7 +494,8 @@ function buildDraftSummaryBlock(data: GateDraftData): string {
     lines.push(`<blockquote>${escapeHtml(data.itemName)}</blockquote>`);
   }
 
-  if (data.parsedCategoryHint) {
+  // Transfers: skip category in gate/reminder summary — intent IS the classification
+  if (data.parsedCategoryHint && data.parsedIntent !== 'transfer') {
     lines.push(`\n📁 ${escapeHtml(data.parsedCategoryHint)}`);
   }
 
