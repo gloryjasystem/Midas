@@ -2345,7 +2345,7 @@ function buildSheet3(wb: ExcelJS.Workbook, rows: TxRow[], usdRates: Map<string, 
         group: r.category_group, count: 0, expenseCount: 0,
         expenseUsd: 0, incomeUsd: 0,
         expenseByCur: new Map(), incomeByCur: new Map(),
-        uncovered: [],
+        uncovered: [] as string[],
       };
       cat.count++;
       if (r.transaction_intent === 'expense') {
@@ -2364,7 +2364,7 @@ function buildSheet3(wb: ExcelJS.Workbook, rows: TxRow[], usdRates: Map<string, 
       if (r.transaction_intent === 'transfer') {
         const isInternal = r.transfer_direction === 'inbound' || r.transfer_direction === 'outbound';
         const capKey = isInternal ? 'transfer_internal' : 'transfer_external';
-        const cap = capMap.get(capKey) ?? { count: 0, volumeUsd: 0, netUsd: 0, byCur: new Map(), uncov: [] };
+        const cap = capMap.get(capKey) ?? { count: 0, volumeUsd: 0, netUsd: 0, byCur: new Map(), uncov: [] as string[] };
         cap.count++;
         const sign = r.transfer_direction === 'inbound' ? 1 : -1;
         cap.netUsd    += sign * (usd ?? 0);
@@ -2375,7 +2375,7 @@ function buildSheet3(wb: ExcelJS.Workbook, rows: TxRow[], usdRates: Map<string, 
         if (unc) cap.uncov.push(unc);
         capMap.set(capKey, cap);
       } else {
-        const cap = capMap.get(r.transaction_intent) ?? { count: 0, volumeUsd: 0, netUsd: 0, byCur: new Map(), uncov: [] };
+        const cap = capMap.get(r.transaction_intent) ?? { count: 0, volumeUsd: 0, netUsd: 0, byCur: new Map(), uncov: [] as string[] };
         cap.count++;
         cap.netUsd    += usd ?? 0;
         cap.volumeUsd += usd ?? 0;
