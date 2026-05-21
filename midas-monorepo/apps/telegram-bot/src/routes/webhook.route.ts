@@ -4462,13 +4462,17 @@ Midas создан, чтобы сделать учет денег максима
                   out_acct: string; out_amt: string; out_cur: string;
                   in_acct: string;  in_amt: string;  in_cur: string;
                   inbound_tx_id: string;
+                  exchange_rate: string | null;
+                  tx_time: string;
                 }>(
                   `SELECT
                      src.name AS out_acct,
                      out.base_amount::text AS out_amt, out.base_currency AS out_cur,
                      tgt.name AS in_acct,
                      inp.base_amount::text AS in_amt, inp.base_currency AS in_cur,
-                     inp.id AS inbound_tx_id
+                     inp.id AS inbound_tx_id,
+                     inp.exchange_rate::text AS exchange_rate,
+                     out.transaction_time::text AS tx_time
                    FROM transactions out
                    JOIN account_sources src ON src.id = out.account_id
                    JOIN transactions inp
@@ -4486,22 +4490,26 @@ Midas создан, чтобы сделать учет денег максима
             if (!ptTxData) {
               void upsertBotMessage(telegramUserId, chatId, '⚠️ Перевод не найден или уже удалён.');
             } else {
-              const isXfx = ptTxData.out_cur !== ptTxData.in_cur;
-              const menuText = [
-                '✏️ <b>Что изменить?</b>',
-                '',
-                '🔄 Внутренний перевод',
-                `${escapeHtml(ptTxData.out_acct)} −${ptTxData.out_amt} ${ptTxData.out_cur}`,
-                `→ ${escapeHtml(ptTxData.in_acct)} +${ptTxData.in_amt} ${ptTxData.in_cur}`,
-              ].join('\n');
-              void upsertBotMessage(telegramUserId, chatId, menuText, {
-                inline_keyboard: [
-                  ...(isXfx ? [[{ text: '💱 Изменить курс конвертации', callback_data: `pt:rate:${ptTxId}` }]] : []),
-                  [{ text: '🗑️ Удалить перевод', callback_data: `pt:del:ask:${ptTxId}` }],
-                  // Cancel из меню → восстановить исходную карточку перевода
-                  [{ text: '✖️ Отмена',           callback_data: `pt:back:${ptTxId}` }],
-                ],
-              });
+              // Phase 3.1-UX: unified Transfer Rich Card (same as tx:v / ed:v)
+              const { buildTransferDetailCard, buildTransferViewKeyboard } = await import('../services/transaction-keyboard.service.js');
+              const syntheticPair = {
+                outbound_tx_id:   ptTxId,
+                transfer_group_id: ptTxId,
+                from_account:     ptTxData.out_acct,
+                from_amount:      ptTxData.out_amt,
+                from_currency:    ptTxData.out_cur,
+                to_account:       ptTxData.in_acct,
+                to_amount:        ptTxData.in_amt,
+                to_currency:      ptTxData.in_cur,
+                exchange_rate:    ptTxData.out_cur !== ptTxData.in_cur
+                  ? (ptTxData.exchange_rate ?? '0')
+                  : '1',
+                is_cross_currency: ptTxData.out_cur !== ptTxData.in_cur,
+                transaction_time:  ptTxData.tx_time,
+              };
+              const cardText = buildTransferDetailCard(syntheticPair);
+              const cardKb   = buildTransferViewKeyboard(ptTxId);
+              void upsertBotMessage(telegramUserId, chatId, cardText, cardKb);
             }
 
           // ── pt:rate — запросить новую сумму зачисления ───────────────────────
@@ -4645,7 +4653,6 @@ Midas создан, чтобы сделать учет денег максима
           // Вызывается Cancel из меню редактирования (pt:edit).
           // Перестраивает карточку Вариант 1Б и добавляет [✏️ Изменить запись].
           } else if (ptCmd === 'back') {
-            const { formatAmount, calcRate, formatPairedTime } = await import('../utils/screen-builder.js');
 
             const ptBackData = await withTenantTransaction(
               ptResolved.workspaceId, ptResolved.userId,
@@ -4654,13 +4661,15 @@ Midas создан, чтобы сделать учет денег максима
                   out_acct: string; out_amt: string; out_cur: string;
                   in_acct: string;  in_amt: string;  in_cur: string;
                   tx_time: string;
+                  exchange_rate: string | null;
                 }>(
                   `SELECT
                      src.name AS out_acct,
                      out.base_amount::text AS out_amt, out.base_currency AS out_cur,
                      tgt.name AS in_acct,
                      inp.base_amount::text AS in_amt, inp.base_currency AS in_cur,
-                     out.transaction_time::text AS tx_time
+                     out.transaction_time::text AS tx_time,
+                     inp.exchange_rate::text AS exchange_rate
                    FROM transactions out
                    JOIN account_sources src ON src.id = out.account_id
                    JOIN transactions inp
@@ -4678,26 +4687,26 @@ Midas создан, чтобы сделать учет денег максима
             if (!ptBackData) {
               void upsertBotMessage(telegramUserId, chatId, '⚠️ Перевод не найден или уже удалён.');
             } else {
-              const isXfx = ptBackData.out_cur !== ptBackData.in_cur;
-              const cardLines: string[] = [
-                '✅ <b>Перевод записан</b>',
-                '',
-                `<blockquote>🔄 − ${formatAmount(ptBackData.out_amt)} ${ptBackData.out_cur}</blockquote>`,
-                `🏦 <b>${escapeHtml(ptBackData.out_acct)}</b> · ${ptBackData.out_cur}`,
-                '',
-                `<blockquote>🔄 + ${formatAmount(ptBackData.in_amt)} ${ptBackData.in_cur}</blockquote>`,
-                `🏦 <b>${escapeHtml(ptBackData.in_acct)}</b> · ${ptBackData.in_cur}`,
-                ...(isXfx ? [
-                  '',
-                  `💱 ${calcRate(ptBackData.out_amt, ptBackData.in_amt) ?? '?'} ${ptBackData.in_cur}/${ptBackData.out_cur}`,
-                ] : []),
-                `⏰ ${formatPairedTime(ptBackData.tx_time)}`,
-              ];
-              void upsertBotMessage(telegramUserId, chatId, cardLines.join('\n'), {
-                inline_keyboard: [[
-                  { text: '✏️ Изменить запись', callback_data: `pt:edit:${ptTxId}` },
-                ]],
-              });
+              // Phase 3.1-UX: unified Transfer Rich Card on Cancel/Back
+              const { buildTransferDetailCard, buildTransferViewKeyboard } = await import('../services/transaction-keyboard.service.js');
+              const syntheticPair = {
+                outbound_tx_id:    ptTxId,
+                transfer_group_id: ptTxId,
+                from_account:      ptBackData.out_acct,
+                from_amount:       ptBackData.out_amt,
+                from_currency:     ptBackData.out_cur,
+                to_account:        ptBackData.in_acct,
+                to_amount:         ptBackData.in_amt,
+                to_currency:       ptBackData.in_cur,
+                exchange_rate:     ptBackData.out_cur !== ptBackData.in_cur
+                  ? (ptBackData.exchange_rate ?? '0')
+                  : '1',
+                is_cross_currency: ptBackData.out_cur !== ptBackData.in_cur,
+                transaction_time:  ptBackData.tx_time,
+              };
+              const cardText = buildTransferDetailCard(syntheticPair);
+              const cardKb   = buildTransferViewKeyboard(ptTxId);
+              void upsertBotMessage(telegramUserId, chatId, cardText, cardKb);
             }
             request.log.info({ msg: '[midas:pt:back] card restored', workspaceId: ptResolved.workspaceId });
 
