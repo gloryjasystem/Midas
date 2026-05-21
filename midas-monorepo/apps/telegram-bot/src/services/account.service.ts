@@ -37,7 +37,7 @@
 import { withTenantTransaction, type PoolClient } from '@midas/database';
 import { monotonicFactory } from 'ulid';
 import { escapeHtml } from '../utils/html-escape.js';
-import { classifyCurrency } from './account-currency-validator.service.js';
+
 
 // ─────────────────────────────────────────────────────────────
 // Types
@@ -1439,25 +1439,13 @@ export async function getWorkspaceAccountsWithBalances(
         isIncomeDefault:  Boolean(row.is_income_default),
       }));
 
-      // ── Currency-context filtering (Phase 2.5 picker) ──────────────────────
+      // ── Currency-context filtering (strict exact match) ─────────────────
       // parsedCurrency = null → no filter (backward-compatible fallback).
+      // parsedCurrency set → return ONLY accounts in that exact currency.
+      // "100 EUR" → only EUR accounts. "1000 USDT" → only USDT. No cross-currency.
       if (!parsedCurrency) return rawAccounts;
 
       const txCur = parsedCurrency.toUpperCase();
-      const txClass = classifyCurrency(txCur);
-
-      if (txClass === 'fiat') {
-        // Fiat: banks support auto-conversion → show ALL fiat accounts.
-        // Exact currency match appears first; other fiats follow.
-        const exact = rawAccounts.filter(a => a.currency.toUpperCase() === txCur);
-        const other = rawAccounts.filter(
-          a => a.currency.toUpperCase() !== txCur && classifyCurrency(a.currency) === 'fiat',
-        );
-        return [...exact, ...other];
-      }
-
-      // Stablecoin or crypto: no auto-conversion ever occurs → exact match only.
-      // e.g. USDT transaction → only USDT accounts; BTC → only BTC accounts.
       return rawAccounts.filter(a => a.currency.toUpperCase() === txCur);
     },
   );

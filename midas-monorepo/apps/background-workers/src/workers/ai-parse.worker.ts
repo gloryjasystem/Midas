@@ -141,49 +141,23 @@ function buildNonsenseKeyboard(): object {
 }
 
 // ─────────────────────────────────────────────────────────────
-// Currency-aware picker filtering — Phase 2.5
-// Mirrors account.service.ts logic for worker-side pickers.
+// Currency-aware picker filtering
 // ─────────────────────────────────────────────────────────────
 
-/** Stablecoins: never auto-convert — exact match only in picker */
-const PICKER_STABLECOINS = new Set([
-  'USDT', 'USDC', 'DAI', 'BUSD', 'TUSD', 'USDP', 'FDUSD', 'PYUSD', 'USDS', 'GUSD',
-]);
-
-/** Well-known crypto codes (non-stablecoin) — exact match only */
-const PICKER_KNOWN_CRYPTOS = new Set([
-  'BTC', 'ETH', 'BNB', 'SOL', 'ADA', 'XRP', 'DOGE', 'DOT', 'AVAX', 'MATIC',
-  'LINK', 'LTC', 'TRX', 'XMR', 'ETC', 'XLM', 'ATOM', 'FIL', 'NEAR', 'APT',
-  'ARB', 'OP', 'INJ', 'TON', 'NOT', 'DOGS', 'HMSTR', 'CATI',
-]);
-
-function classifyPickerCcy(code: string): 'fiat' | 'stablecoin' | 'crypto' {
-  const upper = code.toUpperCase();
-  if (PICKER_STABLECOINS.has(upper)) return 'stablecoin';
-  if (PICKER_KNOWN_CRYPTOS.has(upper)) return 'crypto';
-  // Pure alpha 2-5 chars → fiat (covers ISO 4217 codes not in the crypto list above)
-  return /^[A-Z]{2,5}$/.test(upper) ? 'fiat' : 'crypto';
-}
-
 /**
- * Filter picker accounts by transaction currency.
- *   - fiat tx: exact-currency accounts first, then other fiat (no stablecoins/crypto)
- *   - stablecoin/crypto tx: exact match only — cross-asset auto-conversion never occurs
+ * Filter picker accounts by transaction currency — STRICT exact match.
+ * "100 EUR" → only EUR accounts. "1000 USDT" → only USDT accounts.
+ * "0.5 BTC" → only BTC accounts. "5000 UAH" → only UAH accounts.
+ *
+ * No cross-currency fallback: if the user has no accounts in the
+ * transaction currency, the picker shows an empty-state with a
+ * "Create account" button instead of irrelevant accounts.
  */
 function filterPickerAccounts(
   accounts: WorkspaceAccountEntry[],
   txCurrency: string,
 ): WorkspaceAccountEntry[] {
   const txCur = txCurrency.toUpperCase();
-  const txClass = classifyPickerCcy(txCur);
-  if (txClass === 'fiat') {
-    const exact = accounts.filter((a) => a.currency.toUpperCase() === txCur);
-    const other = accounts.filter(
-      (a) => a.currency.toUpperCase() !== txCur && classifyPickerCcy(a.currency) === 'fiat',
-    );
-    return [...exact, ...other];
-  }
-  // Stablecoin or crypto: exact match only
   return accounts.filter((a) => a.currency.toUpperCase() === txCur);
 }
 
@@ -725,10 +699,12 @@ async function processAiParse(job: Job<AiParseJobPayload>): Promise<void> {
       }
     } else {
       // No account_hint from AI — show account picker if workspace has accounts.
-      // Phase 2.5: filtered by tx currency (stablecoin/crypto → exact only; fiat → fiat pool).
+      // Strict currency filter: exact match only (EUR → only EUR accounts).
       let pickerAccounts: WorkspaceAccountEntry[] = [];
+      let totalAccountCount = 0; // total accounts in workspace (before currency filter)
       try {
         const allPickerAccounts = await getWorkspaceAccountsForPicker(workspaceId);
+        totalAccountCount = allPickerAccounts.length;
         const txCur = aiData?.currency ?? null;
         pickerAccounts = txCur
           ? filterPickerAccounts(allPickerAccounts, txCur)
@@ -738,7 +714,7 @@ async function processAiParse(job: Job<AiParseJobPayload>): Promise<void> {
       }
 
       if (pickerAccounts.length > 0) {
-        // Build picker: one row per account + "Без счёта" last row
+        // Build picker: one row per account + "Создать счёт" + "Отмена"
         const intent = aiData?.intent ?? null;
         const pickerHeader = (intent === 'income' || intent === 'debt_received')
           ? '\uD83C\uDFE6 <b>\u041D\u0430 \u043A\u0430\u043A\u043E\u0439 \u0441\u0447\u0451\u0442 \u0437\u0430\u0447\u0438\u0441\u043B\u0438\u0442\u044C?</b>'
@@ -760,25 +736,43 @@ async function processAiParse(job: Job<AiParseJobPayload>): Promise<void> {
           workspaceId, draftId, accountCount: pickerAccounts.length,
         });
       } else {
-        // No accounts in workspace yet (fresh user / after reset).
-        // Do NOT show plain confirm keyboard — that looks like "old buttons" and allows
-        // confirming without any account context.
-        // Instead: prompt to create the first account.
-        const intentNoAcc = aiData?.intent ?? null;
-        const noAcctHeader = (intentNoAcc === 'income' || intentNoAcc === 'debt_received')
-          ? '\uD83C\uDFE6 <b>\u041D\u0430 \u043A\u0430\u043A\u043E\u0439 \u0441\u0447\u0451\u0442 \u0437\u0430\u0447\u0438\u0441\u043B\u0438\u0442\u044C?</b>'
-          : '\uD83C\uDFE6 <b>\u0421 \u043A\u0430\u043A\u043E\u0433\u043E \u0441\u0447\u0451\u0442\u0430 \u0441\u043F\u0438\u0441\u0430\u0442\u044C?</b>';
-        inlineKeyboard = {
-          inline_keyboard: [
-            [{ text: '\u2795 \u0421\u043E\u0437\u0434\u0430\u0442\u044C \u0441\u0447\u0451\u0442', callback_data: `ia:newac:${draftId}` }],
-            [{ text: '\u2716\uFE0F \u041E\u0442\u043C\u0435\u043D\u0430', callback_data: `ia:cancel:${draftId}` }],
-          ],
-        };
-        previewMsg = richPreview + '\n\n' + noAcctHeader
-          + '\n\n<i>\u0423 \u0432\u0430\u0441 \u043F\u043E\u043A\u0430 \u043D\u0435\u0442 \u0441\u0447\u0435\u0442\u043E\u0432. \u0421\u043E\u0437\u0434\u0430\u0439\u0442\u0435 \u043F\u0435\u0440\u0432\u044B\u0439 \u0441\u0447\u0451\u0442, \u0447\u0442\u043E\u0431\u044B \u0437\u0430\u043F\u0438\u0441\u0430\u0442\u044C \u0442\u0440\u0430\u043D\u0437\u0430\u043A\u0446\u0438\u044E.</i>';
-        console.log('[midas:ai-parse-worker] No accounts in workspace \u2014 showing create-account prompt', {
-          workspaceId, draftId,
-        });
+        // No matching accounts — distinguish "no accounts at all" vs "none in currency"
+        const txCurDisplay = (aiData?.currency ?? '').toUpperCase() || null;
+        const hasAccountsButWrongCurrency = totalAccountCount > 0 && !!txCurDisplay;
+
+        if (hasAccountsButWrongCurrency) {
+          // Accounts exist but NONE match the transaction currency
+          // → "💱 У вас нет счетов в EUR" + "Создать счёт в EUR"
+          inlineKeyboard = {
+            inline_keyboard: [
+              [{ text: `➕ Создать счёт в ${txCurDisplay}`, callback_data: `ia:newac:${draftId}` }],
+              [{ text: '✖️ Отмена', callback_data: `ia:cancel:${draftId}` }],
+            ],
+          };
+          previewMsg = richPreview + '\n\n' +
+            `💱 <b>У вас нет счетов в ${escapeHtml(txCurDisplay)}</b>\n\n` +
+            `<i>Для записи этой транзакции создайте счёт в ${escapeHtml(txCurDisplay)}.</i>`;
+          console.log('[midas:ai-parse-worker] No accounts in currency — showing create prompt', {
+            workspaceId, draftId, currency: txCurDisplay,
+          });
+        } else {
+          // No accounts at all (fresh user / after reset)
+          const intentNoAcc = aiData?.intent ?? null;
+          const noAcctHeader = (intentNoAcc === 'income' || intentNoAcc === 'debt_received')
+            ? '\uD83C\uDFE6 <b>\u041D\u0430 \u043A\u0430\u043A\u043E\u0439 \u0441\u0447\u0451\u0442 \u0437\u0430\u0447\u0438\u0441\u043B\u0438\u0442\u044C?</b>'
+            : '\uD83C\uDFE6 <b>\u0421 \u043A\u0430\u043A\u043E\u0433\u043E \u0441\u0447\u0451\u0442\u0430 \u0441\u043F\u0438\u0441\u0430\u0442\u044C?</b>';
+          inlineKeyboard = {
+            inline_keyboard: [
+              [{ text: '\u2795 \u0421\u043E\u0437\u0434\u0430\u0442\u044C \u0441\u0447\u0451\u0442', callback_data: `ia:newac:${draftId}` }],
+              [{ text: '\u2716\uFE0F \u041E\u0442\u043C\u0435\u043D\u0430', callback_data: `ia:cancel:${draftId}` }],
+            ],
+          };
+          previewMsg = richPreview + '\n\n' + noAcctHeader
+            + '\n\n<i>\u0423 \u0432\u0430\u0441 \u043F\u043E\u043A\u0430 \u043D\u0435\u0442 \u0441\u0447\u0435\u0442\u043E\u0432. \u0421\u043E\u0437\u0434\u0430\u0439\u0442\u0435 \u043F\u0435\u0440\u0432\u044B\u0439 \u0441\u0447\u0451\u0442, \u0447\u0442\u043E\u0431\u044B \u0437\u0430\u043F\u0438\u0441\u0430\u0442\u044C \u0442\u0440\u0430\u043D\u0437\u0430\u043A\u0446\u0438\u044E.</i>';
+          console.log('[midas:ai-parse-worker] No accounts in workspace \u2014 showing create-account prompt', {
+            workspaceId, draftId,
+          });
+        }
       }
     }
 
