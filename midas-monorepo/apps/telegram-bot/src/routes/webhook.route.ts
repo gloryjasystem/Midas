@@ -4662,6 +4662,8 @@ Midas создан, чтобы сделать учет денег максима
                   in_acct: string;  in_amt: string;  in_cur: string;
                   tx_time: string;
                   exchange_rate: string | null;
+                  out_balance: string | null;
+                  in_balance: string | null;
                 }>(
                   `SELECT
                      src.name AS out_acct,
@@ -4669,7 +4671,9 @@ Midas создан, чтобы сделать учет денег максима
                      tgt.name AS in_acct,
                      inp.base_amount::text AS in_amt, inp.base_currency AS in_cur,
                      out.transaction_time::text AS tx_time,
-                     inp.exchange_rate::text AS exchange_rate
+                     inp.exchange_rate::text AS exchange_rate,
+                     src.balance::text AS out_balance,
+                     tgt.balance::text AS in_balance
                    FROM transactions out
                    JOIN account_sources src ON src.id = out.account_id
                    JOIN transactions inp
@@ -4697,9 +4701,15 @@ Midas создан, чтобы сделать учет денег максима
                 '',
                 `<blockquote>🔄 − ${formatAmount(ptBackData.out_amt)} ${ptBackData.out_cur}</blockquote>`,
                 `🏦 <b>${escapeHtml(ptBackData.out_acct)}</b> · ${ptBackData.out_cur}`,
+                ...(ptBackData.out_balance
+                  ? [`   Остаток: ${formatAmount(ptBackData.out_balance)} ${ptBackData.out_cur}`]
+                  : []),
                 '',
                 `<blockquote>🔄 + ${formatAmount(ptBackData.in_amt)} ${ptBackData.in_cur}</blockquote>`,
                 `🏦 <b>${escapeHtml(ptBackData.in_acct)}</b> · ${ptBackData.in_cur}`,
+                ...(ptBackData.in_balance
+                  ? [`   Остаток: ${formatAmount(ptBackData.in_balance)} ${ptBackData.in_cur}`]
+                  : []),
                 ...(isXfx ? [
                   '',
                   `💱 ${calcRate(ptBackData.out_amt, ptBackData.in_amt) ?? '?'} ${ptBackData.in_cur}/${ptBackData.out_cur}`,
@@ -7202,13 +7212,17 @@ Midas создан, чтобы сделать учет денег максима
                   out_acct: string; out_amt: string; out_cur: string;
                   in_acct: string;  in_amt: string;  in_cur: string;
                   tx_time: string;
+                  out_balance: string | null;
+                  in_balance: string | null;
                 }>(
                   `SELECT
                      src.name AS out_acct,
                      out.base_amount::text AS out_amt, out.base_currency AS out_cur,
                      tgt.name AS in_acct,
                      inp.base_amount::text AS in_amt, inp.base_currency AS in_cur,
-                     out.transaction_time::text AS tx_time
+                     out.transaction_time::text AS tx_time,
+                     src.balance::text AS out_balance,
+                     tgt.balance::text AS in_balance
                    FROM transactions out
                    JOIN account_sources src ON src.id = out.account_id
                    JOIN transactions inp
@@ -7229,9 +7243,15 @@ Midas создан, чтобы сделать учет денег максима
                   '',
                   `<blockquote>🔄 − ${formatAmount(fullCard.out_amt)} ${fullCard.out_cur}</blockquote>`,
                   `🏦 <b>${escapeHtml(fullCard.out_acct)}</b> · ${fullCard.out_cur}`,
+                  ...(fullCard.out_balance
+                    ? [`   Остаток: ${formatAmount(fullCard.out_balance)} ${fullCard.out_cur}`]
+                    : []),
                   '',
                   `<blockquote>🔄 + ${formatAmount(fullCard.in_amt)} ${fullCard.in_cur}</blockquote>`,
                   `🏦 <b>${escapeHtml(fullCard.in_acct)}</b> · ${fullCard.in_cur}`,
+                  ...(fullCard.in_balance
+                    ? [`   Остаток: ${formatAmount(fullCard.in_balance)} ${fullCard.in_cur}`]
+                    : []),
                   ...(isXfxCard ? [
                     '',
                     `💱 ${calcRate(fullCard.out_amt, fullCard.in_amt) ?? '?'} ${fullCard.in_cur}/${fullCard.out_cur}`,
