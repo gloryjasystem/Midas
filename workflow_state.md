@@ -1,7 +1,7 @@
 # WORKFLOW_STATE.MD — Диспетчер задач ИИ-агента Midas
 
 > **Тип:** MUTABLE — кратковременная память агента. Обновляется на каждом шаге работы.
-> **Обновлён:** 2026-05-20 16:15 (UTC+3)
+> **Обновлён:** 2026-05-21 23:14 (UTC+3)
 
 ---
 
@@ -9,15 +9,15 @@
 
 | Параметр | Значение |
 |---|---|
-| **PHASE** | Phase 3.1+ DB Bugfixes ✅ |
-| **STEP** | Сессия 2026-05-20 13:00–16:15 (UTC+3). Три критических DB-фикса: (1) `transfer_group_id UUID→TEXT` — устранён DatabaseError при внутреннем переводе; (2) колонка `current_screen` добавлена — устранено падение CRON-воркера каждые 5 мин; (3) `migrate.ts` — авто-миграции при деплое. |
-| **AGENT STATUS** | tsc 0 errors. Commits: `00ce130` (remove ::UUID), `136ca35` (migrate.ts), `2b96fe6` (final migrate.ts), `36adbe4` (docs). Миграции применены вручную через public proxy URL. |
-| **DEPLOYMENT** | Railway (spirited-happiness) — Midas Online, background-workers Online. Health: https://midas-production-f4f1.up.railway.app/health > ok |
-| **DB STATE** | `transfer_group_id`: TEXT ✅ \| `current_screen`: TEXT ✅ \| Все 5 миграций (1780000000000–1780400000000) применены ✅ |
+| **PHASE** | Phase 3.2 — Excel Export Professional Polish ✅ DEPLOYED |
+| **STEP** | Сессия 2026-05-21. Профессиональный редизайн 3 листов Excel-экспорта (Sheet3/4/5). Исправлены: кодировка CP1251→UTF-8, TS2345 (never[] тип), логика переводов (объём вместо нетто), Savings Rate edge-cases, переименованы все англ/жаргонные колонки, убраны красные нули. |
+| **AGENT STATUS** | tsc 0 errors (после фикса TS2345). Commits: `e9e5681` (sheet3), `ff1be7f` (sheet4), `25f767e` (sheet5), `7e7a573` (UTF-8 fix), `97d1c51` (TS2345 fix). |
+| **DEPLOYMENT** | Railway (spirited-happiness) — ✅ DEPLOYED коммит `97d1c51`. Health: https://midas-production-f4f1.up.railway.app/health > ok |
+| **DB STATE** | Без изменений. `transfer_group_id`: TEXT ✅ \| `current_screen`: TEXT ✅ |
 | **DATABASE_URL (public)** | `postgresql://postgres:PLLSqArtPUoQsAYmvrpsmavfQMewgTRh@hopper.proxy.rlwy.net:46284/railway` |
-| **LAST COMPLETED** | (1) Миграция `1780400000000`: transfer_group_id UUID→TEXT. (2) Миграция `1780200000000`: добавлена `current_screen TEXT` (была пропущена при деплое). (3) Миграция `1780100000000`: обновлена функция reminder. (4) `draft-confirmation.service.ts`: убраны `::UUID` касты от `$9` и `$8`. (5) `migrate.ts`: авто-миграции Step 0 перед CRON/воркерами. |
+| **LAST COMPLETED** | Excel Sheet3 (Категории): исходные валюты, Ср. чек, ДВИЖЕНИЕ КАПИТАЛА секция, прочерки вместо 0. Sheet4 (По месяцам): Норма сбережений, Тренд расходов, Объём переводов, Итог нарастающий. Sheet5 (По дням): дата по центру, Активность расходов вместо Burn Rate, footnote с объяснениями. Критический фикс кодировки: все замены теперь через Node.js (UTF-8). |
 | **BLOCKER** | None. |
-| **NEXT ACTION** | 1. E2E тест внутреннего перевода (DatabaseError должен быть устранён). 2. Phase 3.0 DB Schema (`account_type`/`wallet_subtype` → миграция `1780500000000`). 3. Phase 3.2 Report 3.0 (топ-5 + категории). |
+| **NEXT ACTION** | 1. E2E тест внутреннего перевода. 2. Phase 3.0 DB Schema (`account_type`/`wallet_subtype`). 3. Голосовые команды (следующий этап по roadmap). 4. Обновить workflow_state.md после каждой сессии. |
 
 
 
@@ -88,6 +88,7 @@
 | Balance Phase B-2 — Hierarchical UI | ? DEPLOYED | `balance.service.ts` (MODIFY): `PER_ACCOUNT_SQL` + `parent_account_id`; `AccountBalanceRow` + `parentAccountId`; `getBalanceData()` builds childrenMap, renders +/L ladder for parent>children, leaf accounts unchanged. `balance-keyboard.service.ts` (MODIFY): `BalanceAccountRow` + `parentAccountId?`+`childCount?`; `BalanceCallbackCmd` + `add_currency`; `parseBalanceCallback` handles `bl:ac:{id}`; `pluralizeCurrency()` RU plural; `buildBalanceListKeyboard()` — parent aggregation (N валют) + indented child rows (L CURRENCY · balance) + ? Добавить валюту (bl:ac:{parentId} ?32 bytes). tsc 0 errors. Commit `d04bcba`. |
 | 2.10+ Gate Fix — Frozen UI on Concurrent Input | ? DEPLOYED | **Проблема:** пользователь пишет TX1 (пикер счёта открыт), TX2 > step-7 удаляет пикер до того как gate установит `gate_sent` > gate присылает новую карточку. TX3 > step-7 снова удаляет gate-карточку (gate_sent НЕ проверялся) > ai-parse молчит (gate_sent установлен) > UI зависает. **Фикс 1:** `webhook.route.ts` step-7 строки 5446–5458 — `EXISTS midas:gate_sent:` перед deleteMessage; если активен — карточка и `midas:am:` не трогаются. **Фикс 2:** `webhook.route.ts` ia:pk: строка 1539 — `DEL midas:gate_sent:` после выбора счёта > нормальный flow восстанавливается. **Фикс 3:** `ai-parse.worker.ts` — gate реконструирует полный пикер счетов когда `accountId = null`. **Жизненный цикл gate_sent:** SET в ai-parse > DEL при ia:cancel (строка 1432, до фикса) / ia:pk: (строка 1539, НОВОЕ) / approve/reject в confirmation.worker (строка 268, до фикса) / TTL 1h. Commit `8d25ec1`. tsc 0 ошибок. Railway ? оба сервиса Online. |
 
+| Phase 3.2 Excel Professional Polish | ✅ DEPLOYED | **Сессия 2026-05-21.** Sheet3 (Категории): `expenseByCur`/`incomeByCur` — исходные валюты по каждой категории; `fmtCurBreakdown()` — читаемая строка «UAH 20 000 · USDT 500»; «Ø чек» → «Ср. чек»; «Примечание» → «Исходные валюты» (всегда заполнено); 0.00 красным → «—» серым; секция ДВИЖЕНИЕ КАПИТАЛА полностью переписана (объём вместо нетто, plain-Russian labels, sub-hint строки). Sheet4 (По месяцам): «Savings Rate» → «Норма сбережений» (только при наличии дохода, cap ±999%); «Δ Расходов» → «Тренд расходов» (▲/▼); «Переводы нетто» → «Объём переводов» (`transferVolume`); «Кумул.» → «Итог нарастающий»; прочерки вместо нулей. Sheet5 (По дням): дата по центру; «Burn Rate» → «Активность расходов» (×1.0/×2.0/↑↑, «без расходов»); avg USD/день в ИТОГО; подробный footnote по-русски. **Критический фикс:** все операции с файлом через Node.js (UTF-8), не PowerShell (CP1251). Фикс TS2345: `[] as string[]` для `uncovered`/`uncov`. Commits: `e9e5681`, `ff1be7f`, `25f767e`, `7e7a573`, `97d1c51`. |
 | Phase 3.1+ DB Bugfixes | ✅ DEPLOYED | **Сессия 2026-05-20 13:00–16:00.** (1) Миграция `1780400000000_transfer-group-id-text`: `transfer_group_id UUID→TEXT` + пересоздан индекс. Применена вручную через public proxy URL. (2) Миграция `1780200000000_draft-current-screen`: добавлена колонка `current_screen TEXT` в `transaction_drafts` (была пропущена при деплое). (3) Миграция `1780100000000_reminder-fn-add-account`: обновлена функция reminder. (4) `draft-confirmation.service.ts`: убраны `::UUID` касты от `$9` и `$8`. (5) `apps/background-workers/src/migrate.ts`: авто-миграции при старте background-workers (Step 0 перед CRON). **DB проверено:** transfer_group_id=text ✅ current_screen=text ✅. PUBLIC DATABASE_URL: `postgresql://postgres:PLLSqArtPUoQsAYmvrpsmavfQMewgTRh@hopper.proxy.rlwy.net:46284/railway` |
 
 ---
