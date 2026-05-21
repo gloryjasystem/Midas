@@ -975,9 +975,10 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
             // Called from buildAfterCreateKeyboard «➕ Добавить ещё счёт».
             // Clear the active message pointer first so upsertBotMessage sends
             // a FRESH inline picker (not tries to edit the old success card).
+            // Use NEW_ACCOUNT_TEXT (not ACCOUNTS_EMPTY_TEXT — user already has accounts).
             await clearActiveMessageId(telegramUserId, chatId);
             await redisConnection.set(acKey, JSON.stringify({ step: 'type_pick' }), 'EX', ONBOARD_STATE_TTL_SEC);
-            void upsertBotMessage(telegramUserId, chatId, ACCOUNTS_EMPTY_TEXT, buildAccountTypeKeyboard());
+            void upsertBotMessage(telegramUserId, chatId, NEW_ACCOUNT_TEXT, buildAccountTypeKeyboard());
 
           } else if (acCmd.cmd === 'cus_ok') {
             // Phase 2.3: user confirmed the fuzzy-matched name suggestion.
