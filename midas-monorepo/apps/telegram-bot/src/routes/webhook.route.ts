@@ -971,12 +971,14 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
             }
 
           } else if (acCmd.cmd === 'more') {
-            // Phase AC-DUP fix: open the account type picker (same as ac:open).
+            // Phase AC-DUP fix: open the account type picker.
             // Called from buildAfterCreateKeyboard «➕ Добавить ещё счёт».
-            // Clear the active message pointer first so upsertBotMessage sends
-            // a FRESH inline picker (not tries to edit the old success card).
-            // Use NEW_ACCOUNT_TEXT (not ACCOUNTS_EMPTY_TEXT — user already has accounts).
+            // Step 1: delete the old message (rename error card / success card)
+            // before sending the fresh picker — otherwise the old card stays visible.
+            const oldMoreMsgId = await getActiveMessageId(telegramUserId, chatId);
+            if (oldMoreMsgId) void deleteMessage(chatId, oldMoreMsgId);
             await clearActiveMessageId(telegramUserId, chatId);
+            // Step 2: set FSM state + send fresh inline picker
             await redisConnection.set(acKey, JSON.stringify({ step: 'type_pick' }), 'EX', ONBOARD_STATE_TTL_SEC);
             void upsertBotMessage(telegramUserId, chatId, NEW_ACCOUNT_TEXT, buildAccountTypeKeyboard());
 
