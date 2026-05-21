@@ -146,12 +146,14 @@ function buildNonsenseKeyboard(): object {
 
 /**
  * Filter picker accounts by transaction currency — STRICT exact match.
- * "100 EUR" → only EUR accounts. "1000 USDT" → only USDT accounts.
- * "0.5 BTC" → only BTC accounts. "5000 UAH" → only UAH accounts.
+ * Used ONLY for transfer intent (both source and target accounts must
+ * match the respective currency side).
  *
- * No cross-currency fallback: if the user has no accounts in the
- * transaction currency, the picker shows an empty-state with a
- * "Create account" button instead of irrelevant accounts.
+ * For expense/income/debt intents — cross-currency is valid (e.g. pay
+ * USD price with a EUR card) and is handled by the XFX flow. Do NOT
+ * call this function for those intents.
+ *
+ * "100 EUR" → only EUR accounts. "1000 USDT" → only USDT accounts.
  */
 function filterPickerAccounts(
   accounts: WorkspaceAccountEntry[],
@@ -159,6 +161,18 @@ function filterPickerAccounts(
 ): WorkspaceAccountEntry[] {
   const txCur = txCurrency.toUpperCase();
   return accounts.filter((a) => a.currency.toUpperCase() === txCur);
+}
+
+/**
+ * Returns true if the account picker should be filtered strictly by
+ * transaction currency.
+ *
+ * Rule: strict filtering only for `transfer` intent.
+ * For expense / income / debt_given / debt_received — show all accounts;
+ * cross-currency payment is a valid real-world scenario (XFX flow).
+ */
+function shouldFilterByCurrency(intent: string | null | undefined): boolean {
+  return intent === 'transfer';
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -318,7 +332,9 @@ async function processAiParse(job: Job<AiParseJobPayload>): Promise<void> {
         try {
           const allGateAccounts = await getWorkspaceAccountsForPicker(workspaceId);
           const gateCur = pendingDraft.parsedCurrency ?? null;
-          pickerAccountsGate = gateCur
+          // Strict currency filter ONLY for transfer intent (SEC: cross-currency
+          // expense/income/debt is valid — handled by XFX flow, not blocked here).
+          pickerAccountsGate = (gateCur && shouldFilterByCurrency(pendingDraft.parsedIntent))
             ? filterPickerAccounts(allGateAccounts, gateCur)
             : allGateAccounts;
         } catch {
@@ -699,14 +715,17 @@ async function processAiParse(job: Job<AiParseJobPayload>): Promise<void> {
       }
     } else {
       // No account_hint from AI — show account picker if workspace has accounts.
-      // Strict currency filter: exact match only (EUR → only EUR accounts).
+      // Strict currency filter: ONLY for transfer intent.
+      // For expense/income/debt — show ALL accounts (cross-currency purchase is valid,
+      // handled via XFX flow when account currency ≠ transaction currency).
       let pickerAccounts: WorkspaceAccountEntry[] = [];
-      let totalAccountCount = 0; // total accounts in workspace (before currency filter)
+      let totalAccountCount = 0; // total accounts in workspace (before any filter)
       try {
         const allPickerAccounts = await getWorkspaceAccountsForPicker(workspaceId);
         totalAccountCount = allPickerAccounts.length;
         const txCur = aiData?.currency ?? null;
-        pickerAccounts = txCur
+        const isTransfer = shouldFilterByCurrency(aiData?.intent);
+        pickerAccounts = (txCur && isTransfer)
           ? filterPickerAccounts(allPickerAccounts, txCur)
           : allPickerAccounts;
       } catch {
@@ -738,10 +757,14 @@ async function processAiParse(job: Job<AiParseJobPayload>): Promise<void> {
       } else {
         // No matching accounts — distinguish "no accounts at all" vs "none in currency"
         const txCurDisplay = (aiData?.currency ?? '').toUpperCase() || null;
-        const hasAccountsButWrongCurrency = totalAccountCount > 0 && !!txCurDisplay;
+        // Show "no accounts in currency" prompt ONLY for transfer intent.
+        // For expense/income/debt — if no accounts at all it's a new user; otherwise
+        // all accounts are shown (they just get XFX mode).
+        const isTransferIntent = shouldFilterByCurrency(aiData?.intent);
+        const hasAccountsButWrongCurrency = totalAccountCount > 0 && !!txCurDisplay && isTransferIntent;
 
         if (hasAccountsButWrongCurrency) {
-          // Accounts exist but NONE match the transaction currency
+          // Transfer: accounts exist but NONE match the transaction currency
           // → "💱 У вас нет счетов в EUR" + "Создать счёт в EUR"
           inlineKeyboard = {
             inline_keyboard: [
@@ -751,8 +774,8 @@ async function processAiParse(job: Job<AiParseJobPayload>): Promise<void> {
           };
           previewMsg = richPreview + '\n\n' +
             `💱 <b>У вас нет счетов в ${escapeHtml(txCurDisplay)}</b>\n\n` +
-            `<i>Для записи этой транзакции создайте счёт в ${escapeHtml(txCurDisplay)}.</i>`;
-          console.log('[midas:ai-parse-worker] No accounts in currency — showing create prompt', {
+            `<i>Для записи этого перевода создайте счёт в ${escapeHtml(txCurDisplay)}.</i>`;
+          console.log('[midas:ai-parse-worker] Transfer: no accounts in currency — showing create prompt', {
             workspaceId, draftId, currency: txCurDisplay,
           });
         } else {

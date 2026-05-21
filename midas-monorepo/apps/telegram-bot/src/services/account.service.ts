@@ -1479,11 +1479,17 @@ export async function getWorkspaceAccountsWithBalances(
         isIncomeDefault:  Boolean(row.is_income_default),
       }));
 
-      // ── Currency-context filtering (strict exact match) ─────────────────
-      // parsedCurrency = null → no filter (backward-compatible fallback).
-      // parsedCurrency set → return ONLY accounts in that exact currency.
-      // "100 EUR" → only EUR accounts. "1000 USDT" → only USDT. No cross-currency.
-      if (!parsedCurrency) return rawAccounts;
+      // ── Currency-context filtering ──────────────────────────────────────
+      // Strict currency filter applies ONLY for transfer intent.
+      // For expense / income / debt_given / debt_received — cross-currency
+      // payment is a valid real-world scenario (e.g. paying USD price with
+      // a EUR card). The XFX flow handles the conversion on the confirmation
+      // card. Filtering here would incorrectly hide valid accounts.
+      //
+      // parsedCurrency = null OR intent ≠ 'transfer' → return all accounts.
+      // parsedCurrency set AND intent === 'transfer'  → exact-match filter.
+      const isTransfer = intent === 'transfer';
+      if (!parsedCurrency || !isTransfer) return rawAccounts;
 
       const txCur = parsedCurrency.toUpperCase();
       return rawAccounts.filter(a => a.currency.toUpperCase() === txCur);

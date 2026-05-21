@@ -1862,9 +1862,12 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
             }));
 
             if (iaMsgId) {
+              // Only pass parsedCurrency for transfer intent — currency hint is misleading
+              // for expense/income/debt where cross-currency is valid (XFX flow).
+              const delinkPickerCurrency = delinkIntent === 'transfer' ? delinkDraftCurrency : null;
               const pickerText = fullPickerEntries.length > 0
-                ? getPickerScreenText(delinkIntent, delinkDraftCurrency)
-                : getPickerEmptyText(delinkDraftCurrency);
+                ? getPickerScreenText(delinkIntent, delinkPickerCurrency)
+                : getPickerEmptyText(delinkPickerCurrency);
               void editMessageText(
                 chatId, iaMsgId,
                 pickerText,
@@ -2002,9 +2005,12 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
               balance:  acc.balance,
             }));
             if (iaMsgId) {
+              // Only pass parsedCurrency for transfer intent — currency hint is misleading
+              // for expense/income/debt where cross-currency is valid (XFX flow).
+              const showPickerDisplayCurrency = showPickerIntent === 'transfer' ? showPickerCurrency : null;
               const pickerText = showPickerEntries.length > 0
-                ? getPickerScreenText(showPickerIntent, showPickerCurrency)
-                : getPickerEmptyText(showPickerCurrency);
+                ? getPickerScreenText(showPickerIntent, showPickerDisplayCurrency)
+                : getPickerEmptyText(showPickerDisplayCurrency);
               void editMessageText(
                 chatId, iaMsgId,
                 pickerText,
