@@ -526,19 +526,32 @@ function buildSheet0Summary(
   // Separate signed transfer accumulator: outbound=negative, inbound=positive
   // This ensures paired internal transfers net to 0
   const transferSigned = new Map<string, number>(); // by currency, signed
+  // Track seen transfer groups to count paired transfers as 1 operation (not 2)
+  const seenTransferGroups = new Set<string>();
   for (const row of rows) {
     const key = row.transaction_intent as IntentKey;
     if (!(key in im)) continue;
-    im[key].count++;
-    const amt = parseFloat(row.original_amount);
 
     if (key === 'transfer') {
+      // Count: paired transfers count as 1 op (enterprise standard)
+      if (row.transfer_group_id && row.transfer_direction) {
+        if (!seenTransferGroups.has(row.transfer_group_id)) {
+          seenTransferGroups.add(row.transfer_group_id);
+          im[key].count++;
+        }
+      } else {
+        // Unpaired transfer — count normally
+        im[key].count++;
+      }
+      const amt = parseFloat(row.original_amount);
       // For the display row, we still accumulate absolute amounts
       im[key].byCur.set(row.currency, (im[key].byCur.get(row.currency) ?? 0) + amt);
       // For the NET calc, accumulate signed (outbound=−, inbound=+, unpaired=−)
       const sign = row.transfer_direction === 'inbound' ? 1 : -1;
       transferSigned.set(row.currency, (transferSigned.get(row.currency) ?? 0) + sign * amt);
     } else {
+      im[key].count++;
+      const amt = parseFloat(row.original_amount);
       im[key].byCur.set(row.currency, (im[key].byCur.get(row.currency) ?? 0) + amt);
     }
   }
@@ -1289,6 +1302,63 @@ function buildSheet0Summary(
 // ─────────────────────────────────────────────────────────────
 
 function buildSheet1(wb: ExcelJS.Workbook, rows: TxRow[], from: Date, to: Date, usdRates: Map<string, number>): void {
+  // ── Pre-process: merge paired transfers into single display rows ──────
+  // Enterprise standard (Revolut/Wise/YNAB/Tinkoff): one transfer = one row.
+  // Paired transfers (linked by transfer_group_id) are collapsed into a single
+  // row showing: source → target account, amount, and cross-currency conversion.
+  type DisplayRow = TxRow & {
+    _merged?: boolean;
+    _targetAccount?: string;
+    _targetCurrency?: string;
+    _targetAmount?: number;
+    _targetBalanceAfter?: string;
+  };
+
+  const transferPairs = new Map<string, { outbound?: TxRow; inbound?: TxRow }>();
+  const nonTransferRows: DisplayRow[] = [];
+
+  for (const row of rows) {
+    if (row.transfer_group_id && row.transfer_direction) {
+      const gid = row.transfer_group_id;
+      if (!transferPairs.has(gid)) transferPairs.set(gid, {});
+      const pair = transferPairs.get(gid)!;
+      if (row.transfer_direction === 'outbound') pair.outbound = row;
+      else if (row.transfer_direction === 'inbound') pair.inbound = row;
+    } else {
+      nonTransferRows.push(row);
+    }
+  }
+
+  const mergedTransfers: DisplayRow[] = [];
+  const unpairedTransfers: DisplayRow[] = [];
+
+  for (const [, pair] of transferPairs) {
+    if (pair.outbound && pair.inbound) {
+      // Full pair — merge into single row based on outbound leg
+      const merged: DisplayRow = {
+        ...pair.outbound,
+        _merged: true,
+        _targetAccount: pair.inbound.account_name,
+        _targetCurrency: pair.inbound.account_currency,
+        _targetAmount: parseFloat(pair.inbound.account_debit_amount ?? pair.inbound.original_amount),
+        _targetBalanceAfter: pair.inbound.balance_after,
+        transfer_direction: null, // plain "Перевод" label (no direction)
+      };
+      mergedTransfers.push(merged);
+    } else {
+      // Unpaired (orphaned leg) — keep as-is
+      if (pair.outbound) unpairedTransfers.push(pair.outbound);
+      if (pair.inbound) unpairedTransfers.push(pair.inbound);
+    }
+  }
+
+  // Combine all rows and re-sort by transaction_time DESC (same as SQL)
+  const displayRows: DisplayRow[] = [
+    ...nonTransferRows,
+    ...mergedTransfers,
+    ...unpairedTransfers,
+  ].sort((a, b) => new Date(b.transaction_time).getTime() - new Date(a.transaction_time).getTime());
+
   const ws = wb.addWorksheet('Транзакции');
 
   // ── Row 1: Title banner ──────────────────────────────────────
@@ -1305,7 +1375,7 @@ function buildSheet1(wb: ExcelJS.Workbook, rows: TxRow[], from: Date, to: Date, 
   const metaRow = 2;
   ws.mergeCells(metaRow, 1, metaRow, 16);
   const metaCell = ws.getCell(metaRow, 1);
-  metaCell.value = `${rows.length} операций  ·  Сгенерировано: ${fmtDate(new Date())} ${fmtTime(new Date())}`;
+  metaCell.value = `${displayRows.length} операций  ·  Сгенерировано: ${fmtDate(new Date())} ${fmtTime(new Date())}`;
   metaCell.font  = { size: 9, name: 'Calibri', italic: true, color: { argb: 'FFB0C8E0' } };
   metaCell.fill  = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_HEADER_BG}` } };
   metaCell.alignment = { horizontal: 'center', vertical: 'middle' };
@@ -1360,7 +1430,7 @@ function buildSheet1(wb: ExcelJS.Workbook, rows: TxRow[], from: Date, to: Date, 
   let hasUncoveredUsd = false;
   const DATA_START = HDR_ROW + 1;  // = 5
 
-  rows.forEach((row, idx) => {
+  displayRows.forEach((row, idx) => {
     const rNum = DATA_START + idx;
     const wsRow = ws.getRow(rNum);
     wsRow.height = 18;
@@ -1405,23 +1475,45 @@ function buildSheet1(wb: ExcelJS.Workbook, rows: TxRow[], from: Date, to: Date, 
       return signed ? `${p};-#,##0.${prec} "${cur}"` : p;
     };
 
-    // «Комментарий»: for paired transfers, show "→ TargetAccount" / "← SourceAccount"
+    // «Комментарий»: display varies by transfer type
     let comment = row.item_name ?? '';
-    if (row.transaction_intent === 'transfer' && row.paired_account_name) {
+    if (row._merged) {
+      // Merged transfer: show cross-currency conversion if applicable
+      if (row._targetCurrency && row._targetCurrency !== row.account_currency) {
+        const srcAmt = debitAbs;
+        const tgtAmt = row._targetAmount ?? 0;
+        const srcFmt = srcAmt % 1 === 0 ? String(srcAmt) : srcAmt.toFixed(2);
+        const tgtFmt = tgtAmt % 1 === 0 ? String(tgtAmt) : tgtAmt.toFixed(2);
+        const xfxNote = `${srcFmt} ${row.currency} → ${tgtFmt} ${row._targetCurrency}`;
+        comment = comment ? `${xfxNote}  |  ${comment}` : xfxNote;
+      }
+    } else if (row.transaction_intent === 'transfer' && row.paired_account_name) {
       const arrow = row.transfer_direction === 'outbound' ? '→' : '←';
       const pairedLabel = `${arrow} ${row.paired_account_name}`;
       comment = comment ? `${pairedLabel}  |  ${comment}` : pairedLabel;
     }
 
+    // ── Display values: merged transfer overrides ──
+    const displayOp = row._merged
+      ? '🔄 Перевод'
+      : localiseIntentWithDir(row.transaction_intent, row.transfer_direction);
+    const displayAccount = row._merged
+      ? `${row.account_name} → ${row._targetAccount}`
+      : row.account_name;
+    const displayCurrency = row._merged && row._targetCurrency && row._targetCurrency !== row.account_currency
+      ? `${row.account_currency} → ${row._targetCurrency}`
+      : row.account_currency;
+    const displayAmount = row._merged ? debitAbs : debitSigned;
+
     const cellValues: (string | number | null)[] = [
       idx + 1,                              // ci=0  A=1  №
       fmtDate(txDate),                      // ci=1  B=2  Дата
       fmtTime(txDate),                      // ci=2  C=3  Время
-      localiseIntentWithDir(row.transaction_intent, row.transfer_direction), // ci=3  D=4  Операция
+      displayOp,                            // ci=3  D=4  Операция
       executor || '—',                      // ci=4  E=5  Исполнитель
-      row.account_name,                     // ci=5  F=6  Счёт
-      row.account_currency,                 // ci=6  G=7  Вал.
-      debitSigned,                          // ci=7  H=8  Сумма (сигнед; заменяет Сумма+Выплачено)
+      displayAccount,                       // ci=5  F=6  Счёт (merged: "Visa → Binance")
+      displayCurrency,                      // ci=6  G=7  Вал. (merged cross-ccy: "USD → USDT")
+      displayAmount,                        // ci=7  H=8  Сумма (merged: absolute; others: signed)
       null,                                 // ci=8  I=9  Курс к USD — rendered separately
       null,                                 // ci=9  J=10 ≈ USD — rendered separately
       row.category_name,                    // ci=10 K=11 Категория
@@ -1454,12 +1546,18 @@ function buildSheet1(wb: ExcelJS.Workbook, rows: TxRow[], from: Date, to: Date, 
       if (ci === 3) {
         cell.font = { size: 9, name: 'Calibri', color: { argb: `FF${colour}` }, bold: true };
       }
-      // H=8 (ci=7): Сумма — signed, color by sign, numFmt with currency suffix
+      // H=8 (ci=7): Сумма — color-coded by intent
       if (ci === 7) {
         const sv = val as number;
-        cell.numFmt = fmtCur(row.currency, true);
-        cell.font = { size: 9, name: 'Calibri',
-          color: { argb: sv >= 0 ? `FF${C_INCOME}` : `FF${C_EXPENSE}` } };
+        if (row._merged) {
+          // Merged transfer: absolute amount, neutral purple — not income nor expense
+          cell.numFmt = fmtCur(row.currency, false);
+          cell.font = { size: 9, name: 'Calibri', color: { argb: 'FF7B68EE' } };
+        } else {
+          cell.numFmt = fmtCur(row.currency, true);
+          cell.font = { size: 9, name: 'Calibri',
+            color: { argb: sv >= 0 ? `FF${C_INCOME}` : `FF${C_EXPENSE}` } };
+        }
       }
       // I=9 (ci=8) and J=10 (ci=9): null placeholders — rendered separately below
       if (ci === 8 || ci === 9) { /* skip */ }
@@ -1493,18 +1591,24 @@ function buildSheet1(wb: ExcelJS.Workbook, rows: TxRow[], from: Date, to: Date, 
       kursCel.font  = { size: 8, name: 'Calibri', italic: true, color: { argb: 'FFE67E22' } };
     }
 
-    // Col J=10: «≈ USD» — numeric USD equivalent of this transaction (narrow, center-aligned)
-    const usdVal = usdRate !== null ? debitSigned * usdRate : null;
-    if (usdVal !== null) usdGrandTotal += usdVal; else hasUncoveredUsd = true;
+    // Col J=10: «≈ USD» — numeric USD equivalent of this transaction
     const usdCel = ws.getCell(rNum, 10);
-    if (usdVal !== null) {
-      usdCel.value  = usdVal;
-      usdCel.numFmt = '+#,##0.00;-#,##0.00';
-      usdCel.font   = { size: 9, name: 'Calibri',
-        color: { argb: usdVal >= 0 ? `FF${C_INCOME}` : `FF${C_EXPENSE}` } };
-    } else {
+    if (row._merged) {
+      // Internal transfer: net USD impact = 0 — show dash, skip grand total
       usdCel.value = '—';
       usdCel.font  = { size: 8, name: 'Calibri', italic: true, color: { argb: 'FFBBBBBB' } };
+    } else {
+      const usdVal = usdRate !== null ? debitSigned * usdRate : null;
+      if (usdVal !== null) usdGrandTotal += usdVal; else hasUncoveredUsd = true;
+      if (usdVal !== null) {
+        usdCel.value  = usdVal;
+        usdCel.numFmt = '+#,##0.00;-#,##0.00';
+        usdCel.font   = { size: 9, name: 'Calibri',
+          color: { argb: usdVal >= 0 ? `FF${C_INCOME}` : `FF${C_EXPENSE}` } };
+      } else {
+        usdCel.value = '—';
+        usdCel.font  = { size: 8, name: 'Calibri', italic: true, color: { argb: 'FFBBBBBB' } };
+      }
     }
     usdCel.fill      = { type: 'pattern', pattern: 'solid', fgColor: { argb: bgColor } };
     usdCel.border    = dataBorder;
@@ -1528,8 +1632,8 @@ function buildSheet1(wb: ExcelJS.Workbook, rows: TxRow[], from: Date, to: Date, 
   });
 
   // ── ИТОГО в USD: navy footer row integrated into the ledger ────────────
-  if (rows.length > 0) {
-    const footerRow = DATA_START + rows.length;
+  if (displayRows.length > 0) {
+    const footerRow = DATA_START + displayRows.length;
     ws.getRow(footerRow).height = 24;
     const grandFill   = { type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb: `FF${C_GRAND_BG}` } };
     const grandBorder = {
@@ -1558,8 +1662,8 @@ function buildSheet1(wb: ExcelJS.Workbook, rows: TxRow[], from: Date, to: Date, 
   }
 
   // ── Premium Closing Balances Widget ──────────────────────────
-  if (rows.length > 0) {
-    const gapRow  = DATA_START + rows.length + 1;  // after ИТОГО footer row
+  if (displayRows.length > 0) {
+    const gapRow  = DATA_START + displayRows.length + 1;  // after ИТОГО footer row
     const wStart  = gapRow + 1; // spacer row above widget
     ws.getRow(gapRow).height = 6;
 
