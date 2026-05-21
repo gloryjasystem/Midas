@@ -7000,10 +7000,18 @@ Midas создан, чтобы сделать учет денег максима
               const pair = await getTransferPair(tfTxId, resolved.workspaceId, resolved.userId);
               if (pair && tfMsgId) {
                 const { buildTransferDetailCard, buildTransferViewKeyboard } = await import('../services/transaction-keyboard.service.js');
-                const { editMessageText: editMsg, deleteMessage } = await import('../services/telegram-api.js');
+                const { deleteMessage } = await import('../services/telegram-api.js');
                 const cardText = buildTransferDetailCard(pair);
                 const kb = buildTransferViewKeyboard(pair.outbound_tx_id, tfFrom);
-                void editMsg(chatId, tfMsgId, `✅ Курс обновлён.\n\n${cardText}`, kb);
+                const fullText = `✅ Курс обновлён.\n\n${cardText}`;
+                if (tfFrom === 'pt') {
+                  // pt context: use upsertBotMessage so midas:am:{chatId} stays in sync.
+                  // pt:back relies on this key to find the message to edit.
+                  void upsertBotMessage(telegramUserId, chatId, fullText, kb);
+                } else {
+                  const { editMessageText: editMsg } = await import('../services/telegram-api.js');
+                  void editMsg(chatId, tfMsgId, fullText, kb);
+                }
                 void deleteMessage(chatId, String(message.message_id));
               } else {
                 void upsertBotMessage(telegramUserId, chatId, '✅ Курс обновлён.');
