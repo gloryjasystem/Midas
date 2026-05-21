@@ -29,15 +29,15 @@
 
 | Параметр | Значение |
 |---|---|
-| **PHASE** | Phase 3.1-UX: Transfer UI Fixes |
-| **STEP** | Сессия 2026-05-21 11:37–11:43 (UTC+3). Transfer Picker First: при transfer с суммой — сразу source account picker (минуя preview card). |
-| **AGENT STATUS** | tsc 0 errors (bg-workers + telegram-bot). Commit: 2d0d8dd. Pushed to main. Railway auto-deploy triggered. |
+| **PHASE** | Phase 2: Account Onboarding — Duplicate Name Handling (AC-DUP) |
+| **STEP** | Сессия 2026-05-21 13:20–16:55 (UTC+3). Реализован Variant 4 авто-суффикса дублирующих имён счетов + серия UX-фиксов ac:more. Тестирование завершено. |
+| **AGENT STATUS** | tsc 0 errors (bg-workers + telegram-bot). Commits: fe7f577 → 2f042df → 32efd0d → 557ff67. Pushed to main. Railway auto-deploy triggered. |
 | **DEPLOYMENT** | Railway (spirited-happiness) — Midas Online, background-workers Online. Health: https://midas-production-f4f1.up.railway.app/health > ok |
-| **DB STATE** | Без изменений. Все миграции применены ✅. account_sources НЕ имеет колонки balance — баланс вычисляется CTE из transactions. |
+| **DB STATE** | Без изменений. Все миграции применены ✅. account_sources НЕ имеет колонки balance — баланс вычисляется CTE из transactions. UNIQUE(workspace_id, name) constraint активен. |
 | **DATABASE_URL (public)** | `postgresql://postgres:PLLSqArtPUoQsAYmvrpsmavfQMewgTRh@hopper.proxy.rlwy.net:46284/railway` |
-| **LAST COMPLETED** | feat: Transfer Picker First (commit 2d0d8dd). При intent=transfer с суммой — сразу source account picker («🔄 Перевод · {amount} {currency} → С какого счёта?»), без preview card. Скрыта кнопка «Создать счёт» в source picker для transfer. Gate path — аналогично. tsc 0 errors. |
+| **LAST COMPLETED** | Phase 2 AC-DUP: (1) findNextAvailableName + auto-suffix в account.service.ts. (2) buildSuffixedSuccessKeyboard + ren/ren_ok/ren_input flow. (3) ac:more — открывает type_pick пикер. (4) ac:more — использует NEW_ACCOUNT_TEXT. (5) ac:more — удаляет старое сообщение перед новым пикером. Commits: fe7f577 → 557ff67. |
 | **BLOCKER** | None. |
-| **NEXT ACTION** | 1. Phase 3.1 — расширение словаря детектора категорий. 2. Phase 3.2 — Report 3.0 (категорийная аналитика). |
+| **NEXT ACTION** | 1. Продолжить тестирование Phase 2 (тесты 6-8 из testing_plan). 2. Phase 3.1 — расширение словаря детектора категорий. 3. Phase 3.2 — Report 3.0 (категорийная аналитика). |
 
 
 
@@ -112,6 +112,7 @@
 | Phase 3.1-Refactor: Transfer internal-only | ✅ DEPLOYED | **Сессия 2026-05-20 18:26–20:30 (UTC+3). Commit: 0c23097.** Полный рефакторинг transfer flow: удалён промежуточный экран «Куда уходят деньги?» и весь Branch B (внешние переводы). Transfer теперь только между своими счетами. Удалены 12 функций + Redis-ключ midas:tp_ext_rcpt + text interceptor. ia:pk и ia:back при intent=transfer теперь сразу показывают buildTargetAccountKeyboard. |
 | Phase 3.1-UX Transfer Picker First | ✅ DEPLOYED | **Сессия 2026-05-21 11:37–11:43 (UTC+3). Commit: 2d0d8dd.** i-parse.worker.ts: при intent=transfer с parsed_amount — сразу source account picker («🔄 Перевод · {amount} {currency} → С какого счёта?»). Скрыта кнопка «Создать счёт». Gate path: аналогично. richPreview не показывается — picker header IS the screen. ia:pk handler уже маршрутизировал transfer → target picker (без изменений). tsc 0 errors оба пакета. |
 | Phase 3.1-UX Transfer UI Fixes | ✅ DEPLOYED | **Сессия 2026-05-21 10:21–10:55 (UTC+3). Commits: ae45bae → f3de3a9 → 3229455 → ccc6b79.** **(1)** `webhook.route.ts` pt:back + pt:rate SQL: баланс теперь вычисляется через CTE (`WITH bal AS (...)`). `account_sources` НЕ имеет колонки `balance` — без CTE SQL бросал ошибку «column does not exist». **(2)** `webhook.route.ts` tx:tf:rate: при `tfFrom==='pt'` карточка после обновления курса показывается через `upsertBotMessage` (не `editMsg`), чтобы Redis `midas:am:{chatId}` оставался в sync — иначе кнопка Отмена «не нажималась». **(3)** Success Card теперь включает `Остаток: X CUR` для обоих счетов (src + tgt). **(4)** `screen-builder.ts` (обе копии): `buildClarificationScreen` — добавлено условие `data.intent !== 'transfer'` перед строкой «Категория: ...»; для переводов категория не показывается. **Transfer Rich Card nav flow:** Success Card → pt:edit → Transfer Rich Card → [📈 Изм.курс → ввод → ✅ Курс обновлён + Rich Card] → Отмена → Success Card. |
+| Phase 2 AC-DUP: Авто-суффикс дублирующих имён счетов | ✅ DEPLOYED | **Сессия 2026-05-21 13:20–16:55 (UTC+3). Commits: fe7f577 → 2f042df → 32efd0d → 557ff67.** Variant 4 «Автосуффикс + уведомление». **(1)** `account.service.ts`: `findNextAvailableName()` — находит первое свободное имя «Монобанк 2», «Монобанк 3» внутри транзакции; `addAccountReturningId` — никогда не возвращает `duplicate`. **(2)** `account-onboard-keyboard.service.ts`: `buildSuffixedSuccessKeyboard()` — кнопки «✏️ Переименовать» / «✅ OK»; `ren_input` шаг FSM. **(3)** `webhook.route.ts`: callbacks `ac:ren`, `ac:ren_ok`; text-handler `ren_input`; валидация rename (длина + дубликат). **(4)** `ac:more` fix: открывает type_pick пикер вместо SETUP_COMPLETE_TEXT. **(5)** `ac:more` fix: использует NEW_ACCOUNT_TEXT (не ACCOUNTS_EMPTY_TEXT). **(6)** `ac:more` fix: `getActiveMessageId` → `deleteMessage` → `clearActiveMessageId` → новый пикер — старая карточка удаляется. |
 
 ---
 
@@ -1345,7 +1346,45 @@ ALTER TABLE account_sources
 
 ---
 
-### ?? Phase 4.0 — Telegram Mini App (Frontend)
+### 🔮 Phase 5.0 — Ghost State Resilience (Intent Gate) — ДАЛЁКОЕ БУДУЩЕЕ
+
+> **Приоритет: ЗАПЛАНИРОВАНО НА БУДУЩЕЕ.** Реализовывать только по явной команде владельца.
+> Подробный план зафиксирован в артефактах агента: `ghost_state_plan.md`.
+> **Не начинать до завершения Phase 3 + Phase 4.**
+
+**Проблема:**
+Пользователь удаляет сообщение бота во время flow создания счёта (FSM активен в Redis),
+уходит, возвращается и пишет транзакцию — например, «кофе 150».
+На шагах `name_input` / `cur_search` / `ren_input` бот принимает «кофе 150»
+как название счёта и создаёт счёт «кофе 150» — критический UX-баг.
+
+**Три уровня защиты (реализовать последовательно):**
+
+1. **TTL (уже есть)** — Redis-ключ с ONBOARD_STATE_TTL_SEC.
+
+2. **Intent Gate / Smart Escape (главное):**
+   - Добавить функцию `looksLikeTransaction(text)` в `webhook.route.ts`
+   - Правило: цифра + буква = транзакция → сброс wizard → AI-парсер (seamless, без уведомлений)
+   - Исключение: чистое число НЕ escape для `bal_input`
+   - Шаги: `name_input`, `cur_search`, `ren_input`
+
+3. **Re-send при Ghost State:**
+   - Если `editMessageText` упал (сообщение удалено) — переотправить тот же пикер
+   - Шаги: `type_pick`, `cur_pick` (callback-ветки)
+
+**Приоритизация задач внутри фазы:**
+- 🔴 КРИТИЧНО: Intent Gate для `name_input` / `cur_search` / `ren_input` (сложность: низкая)
+- 🟡 ВАЖНО: Re-send промпта при ghost state (сложность: средняя)
+- 🟢 ХОРОШО: Per-step TTL — name=5min, bal=15min, type=30min (сложность: низкая)
+
+**Что НЕ делать:**
+- Не показывать «wizard сброшен» — seamless escape без уведомлений
+- Не блокировать транзакции из-за незаконченного wizard'а
+- Не хранить wizard-состояние дольше 30 минут без активности
+
+---
+
+### 🔮 Phase 4.0 — Telegram Mini App (Frontend)
 
 > **Приоритет: НИЗКИЙ / БУДУЩЕЕ.** React 19 + Vite 8.
 > Визуальный дашборд баланса, диаграммы расходов по категориям, история транзакций.
