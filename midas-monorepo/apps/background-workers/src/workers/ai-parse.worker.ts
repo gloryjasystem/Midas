@@ -164,13 +164,16 @@ function classifyPickerCcy(code: string): 'fiat' | 'stablecoin' | 'crypto' {
 /**
  * Filter/sort picker accounts by transaction currency.
  *
- * @param strict - when true (transfer intent), always exact-match only.
- *                 when false (fiat expense/income/debt), show all fiat sorted.
+ * @param strict - when true (transfer or crypto intent), exact-match only.
+ *                 when false (fiat expense/income/debt), sort by relevance:
+ *                 exact-currency first, then other fiat, then crypto last.
  *
  * Rules:
- *   - strict=true OR crypto/stablecoin: STRICT exact match only.
- *   - strict=false + fiat: exact-currency first, then other fiat accounts.
- *     Cross-currency fiat payment (e.g. USD price on EUR card) is valid (XFX flow).
+ *   - strict=true OR crypto/stablecoin currency: exact match only.
+ *   - strict=false + fiat: all accounts shown, sorted:
+ *       1. Accounts in exact transaction currency  (e.g. UAH)
+ *       2. Other fiat accounts                     (e.g. USD, PLN)
+ *       3. Crypto/stablecoin accounts              (e.g. USDT, BTC)
  */
 function filterPickerAccounts(
   accounts: WorkspaceAccountEntry[],
@@ -179,12 +182,13 @@ function filterPickerAccounts(
 ): WorkspaceAccountEntry[] {
   const txCur = txCurrency.toUpperCase();
   if (!strict && classifyPickerCcy(txCur) === 'fiat') {
-    // Fiat non-transfer: show all fiat accounts, exact match first
-    const exact = accounts.filter(a => a.currency.toUpperCase() === txCur);
-    const other = accounts.filter(
+    // Fiat non-transfer: sort by relevance, show ALL accounts
+    const exact     = accounts.filter(a => a.currency.toUpperCase() === txCur);
+    const otherFiat = accounts.filter(
       a => a.currency.toUpperCase() !== txCur && classifyPickerCcy(a.currency) === 'fiat',
     );
-    return [...exact, ...other];
+    const crypto    = accounts.filter(a => classifyPickerCcy(a.currency) !== 'fiat');
+    return [...exact, ...otherFiat, ...crypto];
   }
   // Strict (transfer) or crypto/stablecoin: exact match only
   return accounts.filter(a => a.currency.toUpperCase() === txCur);
@@ -365,7 +369,8 @@ async function processAiParse(job: Job<AiParseJobPayload>): Promise<void> {
           // Strict filter for transfer intent AND crypto/stablecoin currencies.
           // Fiat cross-currency (e.g. USD expense on EUR card) is valid — XFX flow.
           const gateStrict = shouldFilterByCurrency(pendingDraft.parsedIntent, gateCur);
-          pickerAccountsGate = (gateCur && gateStrict)
+          // Always sort/filter when currency is known — fiat sorting puts exact match first.
+          pickerAccountsGate = gateCur
             ? filterPickerAccounts(allGateAccounts, gateCur, gateStrict)
             : allGateAccounts;
         } catch {
@@ -756,7 +761,9 @@ async function processAiParse(job: Job<AiParseJobPayload>): Promise<void> {
         totalAccountCount = allPickerAccounts.length;
         const txCur = aiData?.currency ?? null;
         const isStrict = shouldFilterByCurrency(aiData?.intent, txCur);
-        pickerAccounts = (txCur && isStrict)
+        // Always sort/filter when currency is known — even for fiat non-strict,
+        // so exact-currency accounts appear first in the picker.
+        pickerAccounts = txCur
           ? filterPickerAccounts(allPickerAccounts, txCur, isStrict)
           : allPickerAccounts;
       } catch {
