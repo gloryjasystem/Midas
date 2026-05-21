@@ -724,28 +724,36 @@ function confirmKbForDraft(draftId: string, res: ConfirmPreviewResult) {
     : null;
   return confirmKb(draftId, res.account, xfx);
 }
-
 /**
- * Phase 3.1-FIX: Return to draft flow after creating a new account.
+ * Phase 3.1-FIX v2: Return to draft flow after creating a new account.
  *
  * Called from bal_skip, bal_input, and cur_input handlers when onboarding
  * was triggered from a draft picker (linkedDraftId is set).
  *
- * Steps:
- *   1. Link the new account to the draft (setDraftAccountId)
- *   2. Update draft currency to match the new account's currency (patchDraftCurrency)
- *   3. Soft-delete placeholder account
- *   4. Route based on intent:
- *      - transfer → show target account picker (not confirm preview!)
- *      - all others → show confirm preview card
+ * Route based on intent:
  *
- * @param workspaceId     - workspace ULID
- * @param userId          - internal user ULID
- * @param telegramUserId  - Telegram user ID string (for Redis keys)
- * @param chatId          - Telegram chat ID string
- * @param linkedDraftId   - draft to link the new account to
- * @param newAccountId    - newly created account ULID
- * @param newAccountCurrency - currency of the new account (e.g. 'USDT')
+ *   TRANSFER:
+ *     1. patchDraftCurrency → update draft currency to match new account
+ *     2. patchDraftAccount(null) → do NOT auto-link (user must pick explicitly)
+ *     3. softDeletePlaceholderAccount
+ *     4. Show SOURCE picker (not target picker!) with:
+ *        - Currency-filtered accounts
+ *        - New account FIRST in the list
+ *        - Rich preview header above picker
+ *
+ *   NON-TRANSFER (expense/income/debt):
+ *     1. setDraftAccountId → link new account to draft
+ *     2. patchDraftCurrency → update draft currency to match new account
+ *     3. softDeletePlaceholderAccount
+ *     4. Show confirm preview card
+ *
+ * @param workspaceId          - workspace ULID
+ * @param userId               - internal user ULID
+ * @param telegramUserId       - Telegram user ID string (for Redis keys)
+ * @param chatId               - Telegram chat ID string
+ * @param linkedDraftId        - draft to link the new account to
+ * @param newAccountId         - newly created account ULID
+ * @param newAccountCurrency   - currency of the new account (e.g. 'USDT')
  */
 async function showDraftAfterAccountCreation(
   workspaceId: string,
@@ -756,22 +764,17 @@ async function showDraftAfterAccountCreation(
   newAccountId: string,
   newAccountCurrency: string,
 ): Promise<void> {
-  // 1. Link account to draft
-  try {
-    await setDraftAccountId(workspaceId, userId, linkedDraftId, newAccountId);
-  } catch { /* non-fatal */ }
-
-  // 2. Update draft currency to match account currency
+  // Common: update draft currency to match the new account's currency
   try {
     await patchDraftCurrency(workspaceId, userId, linkedDraftId, newAccountCurrency);
   } catch { /* non-fatal */ }
 
-  // 3. Soft-delete onboarding placeholder
+  // Common: soft-delete onboarding placeholder
   try {
     await softDeletePlaceholderAccount(workspaceId, userId);
   } catch { /* non-fatal */ }
 
-  // 4. Fetch the updated draft to check intent
+  // Fetch draft to check intent
   const linkedDraft = await getDraftFields(workspaceId, userId, linkedDraftId);
   const msgId = await getActiveMessageId(telegramUserId, chatId);
   await clearActiveMessageId(telegramUserId, chatId);
@@ -779,32 +782,56 @@ async function showDraftAfterAccountCreation(
   let finalMsgId: string | null | undefined = msgId;
 
   if (linkedDraft?.parsed_intent === 'transfer') {
-    // Transfer intent → show target account picker (skip confirm preview)
-    const tpState = await getDraftTransferState(linkedDraftId, workspaceId, userId);
-    if (tpState?.sourceAccountId) {
-      const tpTargets = await getAvailableTargetAccounts(
-        workspaceId, userId, tpState.sourceAccountId,
-      );
-      const tpPickerText = buildTargetPickerScreen(
-        tpState.amount, tpState.currency, tpState.sourceAccountName,
-      );
-      const tpKb = buildTargetAccountKeyboard(tpTargets, linkedDraftId);
+    // ── TRANSFER: return to SOURCE picker (user must pick explicitly) ───────
+    // Do NOT auto-link the account — delink any previous assignment
+    try {
+      await patchDraftAccount(workspaceId, userId, linkedDraftId, null);
+    } catch { /* non-fatal */ }
+
+    // Fetch accounts filtered by the new currency (e.g. only USDT accounts)
+    const accounts = await getWorkspaceAccountsWithBalances(
+      workspaceId, userId, linkedDraft.parsed_intent, newAccountCurrency,
+    );
+
+    if (accounts.length > 0) {
+      // Sort: newly created account FIRST, then rest by original order
+      const sortedAccounts = [
+        ...accounts.filter(a => a.id === newAccountId),
+        ...accounts.filter(a => a.id !== newAccountId),
+      ];
+
+      const pickerEntries = toAccountPickerEntries(sortedAccounts).map((e) => ({
+        ...e,
+        name: escapeHtml(e.name),
+      }));
+
+      // Build rich preview header + picker
+      const richPreviewRes = await confirmPreviewFull(workspaceId, userId, linkedDraftId);
+      const pickerHeader = getPickerV2Text(linkedDraft.parsed_intent);
+      const pickerText = `${richPreviewRes.text}\n\n${pickerHeader}`;
+      const pickerKb = buildAccountPickerV2Keyboard(pickerEntries, linkedDraftId);
+
       if (msgId) {
-        void editMessageText(chatId, msgId, tpPickerText, tpKb);
+        void editMessageText(chatId, msgId, pickerText, pickerKb);
       } else {
-        finalMsgId = await upsertBotMessage(telegramUserId, chatId, tpPickerText, tpKb);
+        finalMsgId = await upsertBotMessage(telegramUserId, chatId, pickerText, pickerKb);
       }
     } else {
-      // Fallback: transfer state not found — show standard preview
-      const previewRes = await confirmPreviewFull(workspaceId, userId, linkedDraftId);
+      // No accounts matching the currency — show empty picker
+      const emptyText = getPickerEmptyText(newAccountCurrency);
+      const emptyKb = buildAccountPickerV2Keyboard([], linkedDraftId);
       if (msgId) {
-        void editMessageText(chatId, msgId, previewRes.text, confirmKbForDraft(linkedDraftId, previewRes));
+        void editMessageText(chatId, msgId, emptyText, emptyKb);
       } else {
-        finalMsgId = await upsertBotMessage(telegramUserId, chatId, previewRes.text, confirmKbForDraft(linkedDraftId, previewRes));
+        finalMsgId = await upsertBotMessage(telegramUserId, chatId, emptyText, emptyKb);
       }
     }
   } else {
-    // Non-transfer intent → standard confirm preview card
+    // ── NON-TRANSFER: auto-link account + show confirm preview ─────────────
+    try {
+      await setDraftAccountId(workspaceId, userId, linkedDraftId, newAccountId);
+    } catch { /* non-fatal */ }
+
     const previewRes = await confirmPreviewFull(workspaceId, userId, linkedDraftId);
     if (msgId) {
       void editMessageText(chatId, msgId, previewRes.text, confirmKbForDraft(linkedDraftId, previewRes));
@@ -813,7 +840,7 @@ async function showDraftAfterAccountCreation(
     }
   }
 
-  // Store preview msg for confirmation worker
+  // Store msg ID for confirmation worker / ia:pk handler
   try {
     if (finalMsgId) {
       await redisConnection.set(`midas:preview:${linkedDraftId}`, finalMsgId, 'EX', 3600);
