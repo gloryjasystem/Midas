@@ -4665,15 +4665,37 @@ Midas создан, чтобы сделать учет денег максима
                   out_balance: string | null;
                   in_balance: string | null;
                 }>(
-                  `SELECT
+                  `WITH bal AS (
+                     SELECT
+                       a.id,
+                       (
+                         COALESCE(a.initial_balance, 0)
+                         + COALESCE(SUM(CASE WHEN t.transaction_intent IN ('income','debt_received')
+                                               AND t.base_currency = a.currency THEN t.base_amount END), 0)
+                         - COALESCE(SUM(CASE WHEN t.transaction_intent IN ('expense','debt_given')
+                                               AND t.base_currency = a.currency THEN t.base_amount END), 0)
+                         + COALESCE(SUM(CASE WHEN t.transaction_intent = 'transfer'
+                                               AND t.transfer_direction = 'inbound'
+                                               AND t.base_currency = a.currency THEN t.base_amount END), 0)
+                         - COALESCE(SUM(CASE WHEN t.transaction_intent = 'transfer'
+                                               AND (t.transfer_direction = 'outbound' OR t.transfer_direction IS NULL)
+                                               AND t.base_currency = a.currency THEN t.base_amount END), 0)
+                       )::text AS balance
+                     FROM account_sources a
+                     LEFT JOIN transactions t
+                       ON t.account_id = a.id AND t.workspace_id = $2 AND t.deleted_at IS NULL
+                     WHERE a.workspace_id = $2
+                     GROUP BY a.id, a.initial_balance
+                   )
+                   SELECT
                      src.name AS out_acct,
                      out.base_amount::text AS out_amt, out.base_currency AS out_cur,
                      tgt.name AS in_acct,
                      inp.base_amount::text AS in_amt, inp.base_currency AS in_cur,
                      out.transaction_time::text AS tx_time,
                      inp.exchange_rate::text AS exchange_rate,
-                     src.balance::text AS out_balance,
-                     tgt.balance::text AS in_balance
+                     src_bal.balance AS out_balance,
+                     tgt_bal.balance AS in_balance
                    FROM transactions out
                    JOIN account_sources src ON src.id = out.account_id
                    JOIN transactions inp
@@ -4681,6 +4703,8 @@ Midas создан, чтобы сделать учет денег максима
                     AND inp.transfer_direction = 'inbound'
                     AND inp.workspace_id = $2
                    JOIN account_sources tgt ON tgt.id = inp.account_id
+                   LEFT JOIN bal src_bal ON src_bal.id = src.id
+                   LEFT JOIN bal tgt_bal ON tgt_bal.id = tgt.id
                    WHERE out.id = $1 AND out.workspace_id = $2 AND out.deleted_at IS NULL`,
                   [ptTxId, ptResolved.workspaceId],
                 );
@@ -7223,14 +7247,36 @@ Midas создан, чтобы сделать учет денег максима
                   out_balance: string | null;
                   in_balance: string | null;
                 }>(
-                  `SELECT
+                  `WITH bal AS (
+                     SELECT
+                       a.id,
+                       (
+                         COALESCE(a.initial_balance, 0)
+                         + COALESCE(SUM(CASE WHEN t.transaction_intent IN ('income','debt_received')
+                                               AND t.base_currency = a.currency THEN t.base_amount END), 0)
+                         - COALESCE(SUM(CASE WHEN t.transaction_intent IN ('expense','debt_given')
+                                               AND t.base_currency = a.currency THEN t.base_amount END), 0)
+                         + COALESCE(SUM(CASE WHEN t.transaction_intent = 'transfer'
+                                               AND t.transfer_direction = 'inbound'
+                                               AND t.base_currency = a.currency THEN t.base_amount END), 0)
+                         - COALESCE(SUM(CASE WHEN t.transaction_intent = 'transfer'
+                                               AND (t.transfer_direction = 'outbound' OR t.transfer_direction IS NULL)
+                                               AND t.base_currency = a.currency THEN t.base_amount END), 0)
+                       )::text AS balance
+                     FROM account_sources a
+                     LEFT JOIN transactions t
+                       ON t.account_id = a.id AND t.workspace_id = $2 AND t.deleted_at IS NULL
+                     WHERE a.workspace_id = $2
+                     GROUP BY a.id, a.initial_balance
+                   )
+                   SELECT
                      src.name AS out_acct,
                      out.base_amount::text AS out_amt, out.base_currency AS out_cur,
                      tgt.name AS in_acct,
                      inp.base_amount::text AS in_amt, inp.base_currency AS in_cur,
                      out.transaction_time::text AS tx_time,
-                     src.balance::text AS out_balance,
-                     tgt.balance::text AS in_balance
+                     src_bal.balance AS out_balance,
+                     tgt_bal.balance AS in_balance
                    FROM transactions out
                    JOIN account_sources src ON src.id = out.account_id
                    JOIN transactions inp
@@ -7238,6 +7284,8 @@ Midas создан, чтобы сделать учет денег максима
                     AND inp.transfer_direction = 'inbound'
                     AND inp.workspace_id = $2
                    JOIN account_sources tgt ON tgt.id = inp.account_id
+                   LEFT JOIN bal src_bal ON src_bal.id = src.id
+                   LEFT JOIN bal tgt_bal ON tgt_bal.id = tgt.id
                    WHERE out.id = $1 AND out.workspace_id = $2 AND out.deleted_at IS NULL`,
                   [rOutId, rWsId],
                 );
