@@ -275,43 +275,73 @@ export function buildSearchResultsKeyboard(
 
 /**
  * Build the HTML text for a Transfer Rich Card (detail view).
+ *
+ * Design spec (Phase 3.1-UX):
+ *   💱 Перевод
+ *
+ *   🏦 Из:  Сбербанк  ·  −1 000.00 $
+ *   🏦 В:   Монобанк  ·  +43 000.00 ₴
+ *
+ *   📈 Курс: 1 $ = 43 ₴        ← cross-currency only
+ *   📅 21 мая 2026, 06:36
+ *
+ * SEC-02: all amounts are pre-formatted NUMERIC strings — no parseFloat.
  */
 export function buildTransferDetailCard(pair: TransferPairRow): string {
   const fromAmt = formatAmountStr(pair.from_amount);
-  const fromCur = fmtCurrency(pair.from_currency);
   const toAmt   = formatAmountStr(pair.to_amount);
+  // Use currency symbol for fiat, ISO code for crypto (e.g. USDT, BTC)
+  const fromCur = fmtCurrency(pair.from_currency);
   const toCur   = fmtCurrency(pair.to_currency);
 
-  const MONTHS_RU_GEN = [
-    '\u044F\u043D\u0432\u0430\u0440\u044F', '\u0444\u0435\u0432\u0440\u0430\u043B\u044F', '\u043C\u0430\u0440\u0442\u0430', '\u0430\u043F\u0440\u0435\u043B\u044F', '\u043C\u0430\u044F', '\u0438\u044E\u043D\u044F',
-    '\u0438\u044E\u043B\u044F', '\u0430\u0432\u0433\u0443\u0441\u0442\u0430', '\u0441\u0435\u043D\u0442\u044F\u0431\u0440\u044F', '\u043E\u043A\u0442\u044F\u0431\u0440\u044F', '\u043D\u043E\u044F\u0431\u0440\u044F', '\u0434\u0435\u043A\u0430\u0431\u0440\u044F',
+  // Date: "21 мая 2026, 06:36" (full month genitive, no abbrev)
+  const MONTHS_RU = [
+    'января', 'февраля', 'марта', 'апреля', 'мая', 'июня',
+    'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря',
   ];
   const d   = new Date(pair.transaction_time);
   const day = d.getDate();
-  const mon = MONTHS_RU_GEN[d.getMonth()] ?? '';
+  const mon = MONTHS_RU[d.getMonth()] ?? '';
   const yr  = d.getFullYear();
   const hh  = String(d.getHours()).padStart(2, '0');
   const mm  = String(d.getMinutes()).padStart(2, '0');
-  const dateStr = `${String(day)} ${mon} ${String(yr)}, ${hh}:${mm}`;
+  // Show year only if not current year
+  const currentYear = new Date().getFullYear();
+  const dateStr = yr !== currentYear
+    ? `${String(day)} ${mon} ${String(yr)}, ${hh}:${mm}`
+    : `${String(day)} ${mon}, ${hh}:${mm}`;
 
-  const lines = [
-    '\uD83D\uDCB1 <b>\u041F\u0435\u0440\u0435\u0432\u043E\u0434</b>',
+  const lines: string[] = [
+    '💱 <b>Перевод</b>',
     '',
-    `\uD83C\uDFE6 \u0418\u0437:  <b>${escapeHtml(pair.from_account)}</b>  \u00b7  \u2212<code>${fromAmt} ${fromCur}</code>`,
-    `\uD83C\uDFE6 \u0412:   <b>${escapeHtml(pair.to_account)}</b>  \u00b7  +<code>${toAmt} ${toCur}</code>`,
+    `🏦 Из:  <b>${escapeHtml(pair.from_account)}</b>  ·  −<code>${fromAmt} ${fromCur}</code>`,
+    `🏦 В:   <b>${escapeHtml(pair.to_account)}</b>  ·  +<code>${toAmt} ${toCur}</code>`,
+    '',
   ];
 
+  // Exchange rate — only for cross-currency
   if (pair.is_cross_currency) {
-    const rateClean = pair.exchange_rate.replace(/\.?(\d*?)0+$/, (_, d) => d ? `.${d as string}` : '');
-    lines.push('', `\uD83D\uDCC8 \u041A\u0443\u0440\u0441: <code>1 ${fromCur} = ${rateClean} ${toCur}</code>`);
+    // Strip trailing zeros: "0.999000000000" → "0.999", "43.000000000000" → "43"
+    const rateClean = pair.exchange_rate
+      .replace(/(\.\d*?)0+$/, '$1')
+      .replace(/\.$/, '');
+    lines.push(`📈 Курс: <code>1 ${fromCur} = ${rateClean} ${toCur}</code>`);
   }
 
-  lines.push(`\uD83D\uDCC5 ${dateStr}`);
+  lines.push(`📅 <i>${dateStr}</i>`);
   return lines.join('\n');
 }
 
 /**
  * Build the inline keyboard for a Transfer Rich Card.
+ *
+ * Layout:
+ *   [📈 Изменить курс конвертации]
+ *   [🗑 Удалить перевод]
+ *   [✖️ Отмена]
+ *
+ * "Отмена" restores the success card when from === 's',
+ * otherwise closes the keyboard.
  */
 export function buildTransferViewKeyboard(
   outboundTxId: string,
@@ -320,12 +350,13 @@ export function buildTransferViewKeyboard(
   const sf = from ? `:${from}` : '';
   return {
     inline_keyboard: [
-      [{ text: '\uD83D\uDCC8 \u0418\u0437\u043C\u0435\u043D\u0438\u0442\u044C \u043A\u0443\u0440\u0441', callback_data: `tx:tf:rate:${outboundTxId}${sf}` }],
-      [{ text: '\uD83D\uDDD1\uFE0F \u0423\u0434\u0430\u043B\u0438\u0442\u044C \u043F\u0435\u0440\u0435\u0432\u043E\u0434', callback_data: `tx:tf:del:${outboundTxId}${sf}` }],
-      [{ text: '\u2716\uFE0F \u041E\u0442\u043C\u0435\u043D\u0430', callback_data: from === 's' ? `tx:done:${outboundTxId}` : 'tx:close' }],
+      [{ text: '📈 Изменить курс конвертации', callback_data: `tx:tf:rate:${outboundTxId}${sf}` }],
+      [{ text: '🗑 Удалить перевод',           callback_data: `tx:tf:del:${outboundTxId}${sf}` }],
+      [{ text: '✖️ Отмена',                    callback_data: from === 's' ? `tx:done:${outboundTxId}` : 'tx:close' }],
     ],
   };
 }
+
 
 // ─────────────────────────────────────────────────────────────
 // Formatting

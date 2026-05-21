@@ -2455,16 +2455,34 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
             } else if (aliasCmd.cmd === 'view') {
               const card = await getTransactionCard(aliasCmd.txId, txResolved.workspaceId, txResolved.userId);
               if (card) {
-                const { formatTxDetailCard } = await import('../utils/screen-builder.js');
-                const text = formatTxDetailCard(card);
-                const rows: { text: string; callback_data: string }[][] = [];
-                if (!card.is_cross_currency) rows.push([{ text: '\u270F\uFE0F \u0418\u0437\u043C\u0435\u043D\u0438\u0442\u044C \u0441\u0443\u043C\u043C\u0443', callback_data: `tx:f:amt:${aliasCmd.txId}:s` }]);
-                rows.push([{ text: '\uD83D\uDCC1 \u0418\u0437\u043C\u0435\u043D\u0438\u0442\u044C \u043A\u0430\u0442\u0435\u0433\u043E\u0440\u0438\u044E', callback_data: `tx:f:cat:${aliasCmd.txId}:0:s` }]);
-                rows.push([{ text: '\uD83C\uDFE6 \u0418\u0437\u043C\u0435\u043D\u0438\u0442\u044C \u0441\u0447\u0451\u0442', callback_data: `tx:f:acc:${aliasCmd.txId}:s` }]);
-                rows.push([{ text: '\uD83D\uDD04 \u0418\u0437\u043C\u0435\u043D\u0438\u0442\u044C \u0442\u0438\u043F', callback_data: `tx:f:int:${aliasCmd.txId}:s` }]);
-                rows.push([{ text: '\uD83D\uDDD1\uFE0F \u0423\u0434\u0430\u043B\u0438\u0442\u044C', callback_data: `tx:d:ask:${aliasCmd.txId}:s` }]);
-                rows.push([{ text: '\u2716\uFE0F \u0417\u0430\u043A\u0440\u044B\u0442\u044C', callback_data: `tx:done:${aliasCmd.txId}` }]);
-                if (txMsgId) void editMessageText(chatId, txMsgId, text, { inline_keyboard: rows });
+                // Phase 3.1-UX: Transfer Rich Card — same as tx:v
+                if (card.transaction_intent === 'transfer' && card.transfer_group_id) {
+                  const { getTransferPair } = await import('../services/edit.service.js');
+                  const { buildTransferDetailCard, buildTransferViewKeyboard } = await import('../services/transaction-keyboard.service.js');
+                  const pair = await getTransferPair(aliasCmd.txId, txResolved.workspaceId, txResolved.userId);
+                  if (pair) {
+                    const text = buildTransferDetailCard(pair);
+                    const kb   = buildTransferViewKeyboard(pair.outbound_tx_id, 's');
+                    if (txMsgId) void editMessageText(chatId, txMsgId, text, kb);
+                  } else {
+                    // Orphaned — standard fallback
+                    const { formatTxDetailCard } = await import('../utils/screen-builder.js');
+                    const text = formatTxDetailCard(card);
+                    if (txMsgId) void editMessageText(chatId, txMsgId, text, { inline_keyboard: [[{ text: '\u2716\uFE0F \u0417\u0430\u043A\u0440\u044B\u0442\u044C', callback_data: `tx:done:${aliasCmd.txId}` }]] });
+                  }
+                } else {
+                  // Standard card (non-transfer)
+                  const { formatTxDetailCard } = await import('../utils/screen-builder.js');
+                  const text = formatTxDetailCard(card);
+                  const rows: { text: string; callback_data: string }[][] = [];
+                  if (!card.is_cross_currency) rows.push([{ text: '\u270F\uFE0F \u0418\u0437\u043C\u0435\u043D\u0438\u0442\u044C \u0441\u0443\u043C\u043C\u0443', callback_data: `tx:f:amt:${aliasCmd.txId}:s` }]);
+                  rows.push([{ text: '\uD83D\uDCC1 \u0418\u0437\u043C\u0435\u043D\u0438\u0442\u044C \u043A\u0430\u0442\u0435\u0433\u043E\u0440\u0438\u044E', callback_data: `tx:f:cat:${aliasCmd.txId}:0:s` }]);
+                  rows.push([{ text: '\uD83C\uDFE6 \u0418\u0437\u043C\u0435\u043D\u0438\u0442\u044C \u0441\u0447\u0451\u0442', callback_data: `tx:f:acc:${aliasCmd.txId}:s` }]);
+                  rows.push([{ text: '\uD83D\uDD04 \u0418\u0437\u043C\u0435\u043D\u0438\u0442\u044C \u0442\u0438\u043F', callback_data: `tx:f:int:${aliasCmd.txId}:s` }]);
+                  rows.push([{ text: '\uD83D\uDDD1\uFE0F \u0423\u0434\u0430\u043B\u0438\u0442\u044C', callback_data: `tx:d:ask:${aliasCmd.txId}:s` }]);
+                  rows.push([{ text: '\u2716\uFE0F \u0417\u0430\u043A\u0440\u044B\u0442\u044C', callback_data: `tx:done:${aliasCmd.txId}` }]);
+                  if (txMsgId) void editMessageText(chatId, txMsgId, text, { inline_keyboard: rows });
+                }
               } else {
                 if (txMsgId) void editMessageText(chatId, txMsgId, '\u26A0\uFE0F \u0422\u0440\u0430\u043D\u0437\u0430\u043A\u0446\u0438\u044F \u043D\u0435 \u043D\u0430\u0439\u0434\u0435\u043D\u0430.', { inline_keyboard: [[{ text: '\u25C0\uFE0F \u041D\u0430\u0437\u0430\u0434', callback_data: 'tx:l:0:a' }]] });
               }
