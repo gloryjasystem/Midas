@@ -971,12 +971,13 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
             }
 
           } else if (acCmd.cmd === 'more') {
-            // Phase 2.3: backward compat — old [+Добавить ещё счёт] button in old messages.
-            // Redirect to ac:fin flow (clean finish).
-            await redisConnection.del(acKey);
-            if (acMsgId) void deleteMessage(chatId, acMsgId);
+            // Phase AC-DUP fix: open the account type picker (same as ac:open).
+            // Called from buildAfterCreateKeyboard «➕ Добавить ещё счёт».
+            // Clear the active message pointer first so upsertBotMessage sends
+            // a FRESH inline picker (not tries to edit the old success card).
             await clearActiveMessageId(telegramUserId, chatId);
-            void sendMessageWithReplyKeyboard(chatId, SETUP_COMPLETE_TEXT, buildMainMenuKeyboard());
+            await redisConnection.set(acKey, JSON.stringify({ step: 'type_pick' }), 'EX', ONBOARD_STATE_TTL_SEC);
+            void upsertBotMessage(telegramUserId, chatId, ACCOUNTS_EMPTY_TEXT, buildAccountTypeKeyboard());
 
           } else if (acCmd.cmd === 'cus_ok') {
             // Phase 2.3: user confirmed the fuzzy-matched name suggestion.
