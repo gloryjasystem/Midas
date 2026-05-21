@@ -1,7 +1,7 @@
-# WORKFLOW_STATE.MD — Диспетчер задач ИИ-агента Midas
+﻿# WORKFLOW_STATE.MD — Диспетчер задач ИИ-агента Midas
 
 > **Тип:** MUTABLE — кратковременная память агента. Обновляется на каждом шаге работы.
-> **Обновлён:** 2026-05-21 10:55 (UTC+3)
+> **Обновлён:** 2026-05-21 11:43 (UTC+3)
 
 ---
 
@@ -30,14 +30,14 @@
 | Параметр | Значение |
 |---|---|
 | **PHASE** | Phase 3.1-UX: Transfer UI Fixes |
-| **STEP** | Сессия 2026-05-21 10:21–10:55 (UTC+3). Исправление Transfer Rich Card навигации, отображения баланса на Success Card, кнопки Отмена, и карточки уточнения для переводов. |
-| **AGENT STATUS** | tsc 0 errors. Commits: ae45bae → f3de3a9 → 3229455 → ccc6b79. Pushed to main. Railway auto-deploy triggered. |
+| **STEP** | Сессия 2026-05-21 11:37–11:43 (UTC+3). Transfer Picker First: при transfer с суммой — сразу source account picker (минуя preview card). |
+| **AGENT STATUS** | tsc 0 errors (bg-workers + telegram-bot). Commit: 2d0d8dd. Pushed to main. Railway auto-deploy triggered. |
 | **DEPLOYMENT** | Railway (spirited-happiness) — Midas Online, background-workers Online. Health: https://midas-production-f4f1.up.railway.app/health > ok |
 | **DB STATE** | Без изменений. Все миграции применены ✅. account_sources НЕ имеет колонки balance — баланс вычисляется CTE из transactions. |
 | **DATABASE_URL (public)** | `postgresql://postgres:PLLSqArtPUoQsAYmvrpsmavfQMewgTRh@hopper.proxy.rlwy.net:46284/railway` |
-| **LAST COMPLETED** | (1) fix: Остаток на Success Card в pt:back и pt:rate — SQL CTE JOIN account_sources+transactions. (2) fix: Кнопка Отмена после tx:tf:rate — upsertBotMessage вместо editMsg при from='pt' (Redis midas:am sync). (3) fix: SQL-ошибка pt:back — src.balance::text → CTE bal (колонки balance нет). (4) fix: Clarification card — скрыта «Категория: Другое» для intent=transfer в обоих screen-builder. |
+| **LAST COMPLETED** | feat: Transfer Picker First (commit 2d0d8dd). При intent=transfer с суммой — сразу source account picker («🔄 Перевод · {amount} {currency} → С какого счёта?»), без preview card. Скрыта кнопка «Создать счёт» в source picker для transfer. Gate path — аналогично. tsc 0 errors. |
 | **BLOCKER** | None. |
-| **NEXT ACTION** | 1. Показывать пикер счёта-получателя сразу после распознавания transfer с суммой (вместо стандартной preview-карточки). 2. Phase 3.1 — расширение словаря детектора категорий. 3. Phase 3.2 — Report 3.0 (категорийная аналитика). |
+| **NEXT ACTION** | 1. Phase 3.1 — расширение словаря детектора категорий. 2. Phase 3.2 — Report 3.0 (категорийная аналитика). |
 
 
 
@@ -110,6 +110,7 @@
 
 | Phase 3.1+ DB Bugfixes | ✅ DEPLOYED | **Сессия 2026-05-20 13:00–16:00.** (1) Миграция `1780400000000_transfer-group-id-text`: `transfer_group_id UUID→TEXT` + пересоздан индекс. Применена вручную через public proxy URL. (2) Миграция `1780200000000_draft-current-screen`: добавлена колонка `current_screen TEXT` в `transaction_drafts` (была пропущена при деплое). (3) Миграция `1780100000000_reminder-fn-add-account`: обновлена функция reminder. (4) `draft-confirmation.service.ts`: убраны `::UUID` касты от `$9` и `$8`. (5) `apps/background-workers/src/migrate.ts`: авто-миграции при старте background-workers (Step 0 перед CRON). **DB проверено:** transfer_group_id=text ✅ current_screen=text ✅. PUBLIC DATABASE_URL: `postgresql://postgres:PLLSqArtPUoQsAYmvrpsmavfQMewgTRh@hopper.proxy.rlwy.net:46284/railway` |
 | Phase 3.1-Refactor: Transfer internal-only | ✅ DEPLOYED | **Сессия 2026-05-20 18:26–20:30 (UTC+3). Commit: 0c23097.** Полный рефакторинг transfer flow: удалён промежуточный экран «Куда уходят деньги?» и весь Branch B (внешние переводы). Transfer теперь только между своими счетами. Удалены 12 функций + Redis-ключ midas:tp_ext_rcpt + text interceptor. ia:pk и ia:back при intent=transfer теперь сразу показывают buildTargetAccountKeyboard. |
+| Phase 3.1-UX Transfer Picker First | ✅ DEPLOYED | **Сессия 2026-05-21 11:37–11:43 (UTC+3). Commit: 2d0d8dd.** i-parse.worker.ts: при intent=transfer с parsed_amount — сразу source account picker («🔄 Перевод · {amount} {currency} → С какого счёта?»). Скрыта кнопка «Создать счёт». Gate path: аналогично. richPreview не показывается — picker header IS the screen. ia:pk handler уже маршрутизировал transfer → target picker (без изменений). tsc 0 errors оба пакета. |
 | Phase 3.1-UX Transfer UI Fixes | ✅ DEPLOYED | **Сессия 2026-05-21 10:21–10:55 (UTC+3). Commits: ae45bae → f3de3a9 → 3229455 → ccc6b79.** **(1)** `webhook.route.ts` pt:back + pt:rate SQL: баланс теперь вычисляется через CTE (`WITH bal AS (...)`). `account_sources` НЕ имеет колонки `balance` — без CTE SQL бросал ошибку «column does not exist». **(2)** `webhook.route.ts` tx:tf:rate: при `tfFrom==='pt'` карточка после обновления курса показывается через `upsertBotMessage` (не `editMsg`), чтобы Redis `midas:am:{chatId}` оставался в sync — иначе кнопка Отмена «не нажималась». **(3)** Success Card теперь включает `Остаток: X CUR` для обоих счетов (src + tgt). **(4)** `screen-builder.ts` (обе копии): `buildClarificationScreen` — добавлено условие `data.intent !== 'transfer'` перед строкой «Категория: ...»; для переводов категория не показывается. **Transfer Rich Card nav flow:** Success Card → pt:edit → Transfer Rich Card → [📈 Изм.курс → ввод → ✅ Курс обновлён + Rich Card] → Отмена → Success Card. |
 
 ---
@@ -273,7 +274,7 @@ WITH bal AS (
 
 ### Следующие задачи
 
-1. **Transfer Picker First:** При распознавании transfer с суммой — сразу показывать target account picker (минуя preview card)
+1. ~~**Transfer Picker First:**~~ ✅ DONE (commit 2d0d8dd) — source picker сразу показывается при transfer с суммой
 2. **Phase 3.1:** Расширение словаря детектора категорий
 3. **Phase 3.2:** Report 3.0 — категорийная аналитика
 ---
