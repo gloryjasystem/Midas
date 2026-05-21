@@ -774,6 +774,165 @@ function buildSheet0Summary(
   r++; // spacer
 
 
+  // ── КЛЮЧЕВЫЕ ПОКАЗАТЕЛИ ─────────────────────────────────────
+  {
+    sectionHdr('КЛЮЧЕВЫЕ ПОКАЗАТЕЛИ');
+
+    // Compute KPIs from raw rows
+    let totalExpenseUsd = 0;
+    let totalIncomeUsd  = 0;
+    let expenseCount    = 0;
+    const dailyExpUsd   = new Map<string, number>();
+
+    type ExpenseRecord = { usd: number; name: string; date: Date; amount: number; currency: string; category: string };
+    const expenseRecords: ExpenseRecord[] = [];
+
+    for (const row of rows) {
+      const amt  = parseFloat(row.original_amount);
+      const cur  = row.currency.toUpperCase();
+      const rate = usdRates.get(cur) ?? null;
+      const usd  = rate !== null ? amt * rate : 0;
+      const txDate = new Date(row.transaction_time);
+      const dateKey = fmtDate(txDate);
+
+      if (row.transaction_intent === 'expense') {
+        totalExpenseUsd += usd;
+        expenseCount++;
+        dailyExpUsd.set(dateKey, (dailyExpUsd.get(dateKey) ?? 0) + usd);
+        if (rate !== null) {
+          expenseRecords.push({ usd, name: row.item_name ?? row.category_name, date: txDate, amount: amt, currency: row.currency, category: row.category_name });
+        }
+      } else if (row.transaction_intent === 'income') {
+        totalIncomeUsd += usd;
+      }
+    }
+
+    const burnRate    = days > 0 ? totalExpenseUsd / days : 0;
+    const savingsRate = totalIncomeUsd > 0 ? ((totalIncomeUsd - totalExpenseUsd) / totalIncomeUsd) * 100 : 0;
+    const avgCheck    = expenseCount > 0 ? totalExpenseUsd / expenseCount : 0;
+    const totalOps    = rows.length;
+    const opsPerDay   = days > 0 ? totalOps / days : 0;
+
+    expenseRecords.sort((a, b) => b.usd - a.usd);
+    const largestExp = expenseRecords[0] ?? null;
+
+    let maxDayKey  = '';
+    let maxDayUsd  = 0;
+    for (const [dk, dUsd] of dailyExpUsd) {
+      if (dUsd > maxDayUsd) { maxDayUsd = dUsd; maxDayKey = dk; }
+    }
+
+    const kpiFill = { type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb: `FF${C_GREY_BG}` } };
+    const kpiBorder = { bottom: { style: 'thin' as const, color: { argb: `FF${C_TBL_BORDER}` } } };
+    const renderKpi = (icon: string, label: string, value: string, valueColor: string) => {
+      const cA = ws.getCell(r, 1);
+      cA.value = `${icon}  ${label}`;
+      cA.font  = { size: 9, name: 'Calibri', color: { argb: 'FF444444' } };
+      cA.fill  = kpiFill; cA.border = kpiBorder;
+      cA.alignment = { horizontal: 'left', vertical: 'middle' };
+      ws.mergeCells(r, 2, r, 5);
+      const cB = ws.getCell(r, 2);
+      cB.value = value;
+      cB.font  = { bold: true, size: 10, name: 'Calibri', color: { argb: valueColor } };
+      cB.fill  = kpiFill; cB.border = kpiBorder;
+      cB.alignment = { horizontal: 'left', vertical: 'middle' };
+      ws.getRow(r).height = 22;
+      r++;
+    };
+
+    renderKpi('\uD83D\uDD25', 'Расход в день (burn rate)',
+      `\u2248 ${fmtAmtSigned(-burnRate)} USD / день`,
+      burnRate > 100 ? `FF${C_EXPENSE}` : 'FF888888');
+
+    const srClr = savingsRate >= 20 ? `FF${C_INCOME}` : savingsRate >= 0 ? 'FFD4AC0D' : `FF${C_EXPENSE}`;
+    renderKpi('\uD83D\uDCB0', 'Savings Rate',
+      totalIncomeUsd > 0 ? `${savingsRate.toFixed(1)}%  (\u0441\u043e\u0445\u0440\u0430\u043d\u0435\u043d\u043e \u043e\u0442 \u0434\u043e\u0445\u043e\u0434\u0430)` : '\u2014 \u043d\u0435\u0442 \u0434\u043e\u0445\u043e\u0434\u043e\u0432 \u0437\u0430 \u043f\u0435\u0440\u0438\u043e\u0434',
+      srClr);
+
+    renderKpi('\uD83D\uDCCA', '\u0421\u0440\u0435\u0434\u043d\u0438\u0439 \u0447\u0435\u043a (\u0440\u0430\u0441\u0445\u043e\u0434\u044b)',
+      expenseCount > 0 ? `\u2248 ${fmtAmtSigned(-avgCheck)} USD  (${String(expenseCount)} \u043e\u043f.)` : '\u2014 \u043d\u0435\u0442 \u0440\u0430\u0441\u0445\u043e\u0434\u043e\u0432',
+      'FF888888');
+
+    renderKpi('\uD83D\uDCC8', '\u041a\u0440\u0443\u043f\u043d\u0435\u0439\u0448\u0438\u0439 \u0440\u0430\u0441\u0445\u043e\u0434',
+      largestExp
+        ? `${fmtAmtSigned(-largestExp.usd)} USD  \u00b7  ${largestExp.name}  \u00b7  ${fmtDate(largestExp.date)}`
+        : '\u2014 \u043d\u0435\u0442 \u0440\u0430\u0441\u0445\u043e\u0434\u043e\u0432',
+      largestExp ? `FF${C_EXPENSE}` : 'FF888888');
+
+    renderKpi('\uD83D\uDCC9', '\u0421\u0430\u043c\u044b\u0439 \u0434\u043e\u0440\u043e\u0433\u043e\u0439 \u0434\u0435\u043d\u044c',
+      maxDayKey
+        ? `${maxDayKey}  \u00b7  \u2248 ${fmtAmtSigned(-maxDayUsd)} USD`
+        : '\u2014 \u043d\u0435\u0442 \u0440\u0430\u0441\u0445\u043e\u0434\u043e\u0432',
+      maxDayKey ? `FF${C_EXPENSE}` : 'FF888888');
+
+    renderKpi('\uD83D\uDD04', '\u0427\u0430\u0441\u0442\u043e\u0442\u0430 \u043e\u043f\u0435\u0440\u0430\u0446\u0438\u0439',
+      `${opsPerDay.toFixed(1)} \u043e\u043f./\u0434\u0435\u043d\u044c  \u00b7  ${String(totalOps)} \u0437\u0430 ${String(days)} \u0434\u043d.`,
+      'FF2D6A9F');
+
+    r++; // spacer
+
+    // ── ТОП-5 КРУПНЕЙШИХ РАСХОДОВ ──────────────────────────────
+    const top5 = expenseRecords.slice(0, 5);
+
+    if (top5.length > 0) {
+      sectionHdr('\u0422\u041e\u041f-5 \u041a\u0420\u0423\u041f\u041d\u0415\u0419\u0428\u0418\u0425 \u0420\u0410\u0421\u0425\u041e\u0414\u041e\u0412');
+
+      const topHdrs = ['#', '\u0414\u0430\u0442\u0430', '\u0421\u0443\u043c\u043c\u0430 \u2248 USD', '\u041a\u0430\u0442\u0435\u0433\u043e\u0440\u0438\u044f', '\u041e\u043f\u0438\u0441\u0430\u043d\u0438\u0435'];
+      topHdrs.forEach((h, i) => {
+        const c = ws.getCell(r, i + 1);
+        c.value = h;
+        c.font = { bold: true, size: 8, name: 'Calibri', color: { argb: 'FF2D6A9F' } };
+        c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_GREY_BG}` } };
+        c.alignment = { horizontal: i === 0 ? 'center' : i === 2 ? 'right' : 'left', vertical: 'middle' };
+        c.border = { bottom: { style: 'thin', color: { argb: `FF${C_TBL_BORDER}` } } };
+      });
+      ws.getRow(r).height = 16;
+      r++;
+
+      const topFill = { type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb: `FF${C_GREY_BG}` } };
+      const topBorder = { bottom: { style: 'thin' as const, color: { argb: `FF${C_TBL_BORDER}` } } };
+
+      for (const [i, exp] of top5.entries()) {
+        const c1 = ws.getCell(r, 1);
+        c1.value = `${String(i + 1)}.`;
+        c1.font  = { bold: true, size: 10, name: 'Calibri', color: { argb: 'FF444444' } };
+        c1.fill  = topFill; c1.border = topBorder;
+        c1.alignment = { horizontal: 'center', vertical: 'middle' };
+
+        const c2 = ws.getCell(r, 2);
+        c2.value = fmtDate(exp.date);
+        c2.font  = { size: 9, name: 'Calibri', color: { argb: 'FF666666' } };
+        c2.fill  = topFill; c2.border = topBorder;
+        c2.alignment = { horizontal: 'left', vertical: 'middle' };
+
+        const c3 = ws.getCell(r, 3);
+        c3.value = `${fmtAmtSigned(-exp.usd)} USD`;
+        c3.font  = { bold: true, size: 9, name: 'Calibri', color: { argb: `FF${C_EXPENSE}` } };
+        c3.fill  = topFill; c3.border = topBorder;
+        c3.alignment = { horizontal: 'right', vertical: 'middle' };
+
+        const c4 = ws.getCell(r, 4);
+        c4.value = exp.category;
+        c4.font  = { size: 8, name: 'Calibri', italic: true, color: { argb: 'FF888888' } };
+        c4.fill  = topFill; c4.border = topBorder;
+        c4.alignment = { horizontal: 'left', vertical: 'middle' };
+
+        const c5 = ws.getCell(r, 5);
+        const origStr = exp.currency.toUpperCase() !== 'USD'
+          ? `${exp.name}  (${exp.amount % 1 === 0 ? String(exp.amount) : exp.amount.toFixed(2)} ${exp.currency})`
+          : exp.name;
+        c5.value = origStr;
+        c5.font  = { size: 8, name: 'Calibri', color: { argb: 'FF555555' } };
+        c5.fill  = topFill; c5.border = topBorder;
+        c5.alignment = { horizontal: 'left', vertical: 'middle' };
+
+        ws.getRow(r).height = 18;
+        r++;
+      }
+    }
+
+    r++; // spacer
+  }
 
 
   // ── СОСТОЯНИЕ СЧЕТОВ ──────────────────────────────────────
