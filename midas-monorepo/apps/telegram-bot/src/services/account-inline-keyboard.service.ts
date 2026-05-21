@@ -356,23 +356,11 @@ export function buildAccountPickerV2Keyboard(
   const rows = accounts.slice(0, 8).map((acc) => {
     // Strip trailing zeros from balance for display: 15400.0000 → 15400
     const balDisplay = stripTrailingZeros(acc.balance);
-    // Phase 2.5: use currency-aware emoji
+    // Phase 2.5: use currency-aware emoji (💎 = crypto/stablecoin, 🏦 = fiat)
     const isCrypto = classifyCurrency(acc.currency) !== 'fiat';
     const icon = isCrypto ? '💎' : '🏦';
-    // ⚠️ badge: only when the account NAME suggests a fiat bank but currency is crypto.
-    // Since V2 entry has no type field, we use the heuristic: name contains none of
-    // the common crypto-account markers (exchange / wallet / крипто) AND currency is crypto.
-    const nameHint = acc.name.toLowerCase();
-    const looksLikeBank = isCrypto &&
-      !nameHint.includes('exchange') &&
-      !nameHint.includes('биржа') &&
-      !nameHint.includes('кошелёк') &&
-      !nameHint.includes('кошелек') &&
-      !nameHint.includes('wallet') &&
-      !nameHint.includes('crypto');
-    const badge = looksLikeBank ? '⚠️ ' : '';
     return [{
-      text: `${badge}${icon} ${acc.name} · ${balDisplay} ${acc.currency}`,
+      text: `${icon} ${acc.name} · ${balDisplay} ${acc.currency}`,
       callback_data: `ia:pk:${acc.id}:${draftId}`,
     }];
   });
