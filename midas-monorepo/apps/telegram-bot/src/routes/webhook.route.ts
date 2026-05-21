@@ -1552,7 +1552,12 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
 
         } catch (err: unknown) {
           const errorClass = err instanceof Error ? err.constructor.name : 'UnknownError';
-          request.log.error({ msg: '[midas:bot:webhook] ac: callback failed', callbackId: cq.id, errorClass });
+          const errorMsg   = err instanceof Error ? err.message : String(err);
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const dbCode     = (err as any)?.code ?? null; // PostgreSQL error code (e.g. 23505)
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const dbDetail   = (err as any)?.detail ?? null;
+          request.log.error({ msg: '[midas:bot:webhook] ac: callback failed', callbackId: cq.id, errorClass, errorMsg, dbCode, dbDetail });
         }
 
         await answerCallbackQuery(cq.id);
