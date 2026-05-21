@@ -2294,39 +2294,43 @@ function buildSheet3(wb: ExcelJS.Workbook, rows: TxRow[], usdRates: Map<string, 
   // ─ Row 2: Column headers
   const HDR_ROW = 2;
   const colDefs: Array<[string, number]> = [
-    ['Группа',          16],
-    ['Категория',       24],
-    ['Операций',      10],
-    ['Расходы ≈ USD',    18],
-    ['Доля %',          13],
-    ['Доходы ≈ USD',     18],
-    ['Чистый итог ≈ USD', 18],
-    ['Ø чек ≈ USD',       14],
-    ['Примечание',      22],
+    ['Группа',            16],
+    ['Категория',         24],
+    ['Операций',          10],
+    ['Расходы ≈ USD',     18],
+    ['Доля %',            13],
+    ['Доходы ≈ USD',      18],
+    ['Итог ≈ USD',        18],
+    ['Ср. чек\n≈ USD',   14],
+    ['Исходные\nвалюты',  30],
   ];
   colDefs.forEach(([text, width], i) => hdr(ws, i + 1, HDR_ROW, text, width));
-  ws.getRow(HDR_ROW).height = 28;
+  ws.getRow(HDR_ROW).height = 30;
 
-  // ─ Aggregate: P&L intents (income + expense) vs capital movements (debt + transfer)
+  // ─ Types
   type CatEntry = {
-    group:          string;
-    count:          number;
-    expenseCount:   number;
-    expenseUsd:     number;
-    incomeUsd:      number;
-    uncovered:      string[];   // "50 TRX" for missing rates
+    group:        string;
+    count:        number;
+    expenseCount: number;
+    expenseUsd:   number;
+    incomeUsd:    number;
+    expenseByCur: Map<string, number>;
+    incomeByCur:  Map<string, number>;
+    uncovered:    string[];
   };
   type CapEntry = {
-    count:    number;
-    totalUsd: number;
-    uncov:    string[];
+    count:     number;
+    volumeUsd: number;
+    netUsd:    number;
+    byCur:     Map<string, number>;
+    uncov:     string[];
   };
 
-  const PL_INTENTS    = new Set(['income', 'expense']);
-  const CAP_INTENTS   = new Set(['debt_given', 'debt_received', 'transfer']);
+  const PL_INTENTS  = new Set(['income', 'expense']);
+  const CAP_INTENTS = new Set(['debt_given', 'debt_received', 'transfer']);
 
-  const catMap  = new Map<string, CatEntry>();
-  const capMap  = new Map<string, CapEntry>();   // key = intent
+  const catMap = new Map<string, CatEntry>();
+  const capMap = new Map<string, CapEntry>();
 
   for (const r of rows) {
     const amt  = parseFloat(r.original_amount);
@@ -2337,48 +2341,67 @@ function buildSheet3(wb: ExcelJS.Workbook, rows: TxRow[], usdRates: Map<string, 
 
     if (PL_INTENTS.has(r.transaction_intent)) {
       const key = r.category_name;
-      const cat = catMap.get(key) ?? { group: r.category_group, count: 0, expenseCount: 0, expenseUsd: 0, incomeUsd: 0, uncovered: [] };
+      const cat = catMap.get(key) ?? {
+        group: r.category_group, count: 0, expenseCount: 0,
+        expenseUsd: 0, incomeUsd: 0,
+        expenseByCur: new Map(), incomeByCur: new Map(),
+        uncovered: [],
+      };
       cat.count++;
       if (r.transaction_intent === 'expense') {
         cat.expenseCount++;
         cat.expenseUsd += usd ?? 0;
+        cat.expenseByCur.set(cur, (cat.expenseByCur.get(cur) ?? 0) + amt);
         if (unc) cat.uncovered.push(unc);
       } else {
-        cat.incomeUsd  += usd ?? 0;
+        cat.incomeUsd += usd ?? 0;
+        cat.incomeByCur.set(cur, (cat.incomeByCur.get(cur) ?? 0) + amt);
         if (unc) cat.uncovered.push(unc);
       }
       catMap.set(key, cat);
+
     } else if (CAP_INTENTS.has(r.transaction_intent)) {
       if (r.transaction_intent === 'transfer') {
-        // Split: internal (paired, has direction) vs external (unpaired, no direction)
-        if (r.transfer_direction === 'inbound' || r.transfer_direction === 'outbound') {
-          const cap = capMap.get('transfer_internal') ?? { count: 0, totalUsd: 0, uncov: [] };
-          cap.count++;
-          // For internal, outbound is negative, inbound is positive → nets to 0
-          const sign = r.transfer_direction === 'inbound' ? 1 : -1;
-          cap.totalUsd += sign * (usd ?? 0);
-          if (unc) cap.uncov.push(unc);
-          capMap.set('transfer_internal', cap);
-        } else {
-          // External (unpaired) transfer — treated as expense
-          const cap = capMap.get('transfer_external') ?? { count: 0, totalUsd: 0, uncov: [] };
-          cap.count++;
-          cap.totalUsd += usd ?? 0;
-          if (unc) cap.uncov.push(unc);
-          capMap.set('transfer_external', cap);
-        }
-      } else {
-        const cap = capMap.get(r.transaction_intent) ?? { count: 0, totalUsd: 0, uncov: [] };
+        const isInternal = r.transfer_direction === 'inbound' || r.transfer_direction === 'outbound';
+        const capKey = isInternal ? 'transfer_internal' : 'transfer_external';
+        const cap = capMap.get(capKey) ?? { count: 0, volumeUsd: 0, netUsd: 0, byCur: new Map(), uncov: [] };
         cap.count++;
-        cap.totalUsd += usd ?? 0;
+        const sign = r.transfer_direction === 'inbound' ? 1 : -1;
+        cap.netUsd    += sign * (usd ?? 0);
+        cap.volumeUsd += (usd ?? 0);
+        if (r.transfer_direction !== 'inbound') {
+          cap.byCur.set(cur, (cap.byCur.get(cur) ?? 0) + amt);
+        }
+        if (unc) cap.uncov.push(unc);
+        capMap.set(capKey, cap);
+      } else {
+        const cap = capMap.get(r.transaction_intent) ?? { count: 0, volumeUsd: 0, netUsd: 0, byCur: new Map(), uncov: [] };
+        cap.count++;
+        cap.netUsd    += usd ?? 0;
+        cap.volumeUsd += usd ?? 0;
+        cap.byCur.set(cur, (cap.byCur.get(cur) ?? 0) + amt);
         if (unc) cap.uncov.push(unc);
         capMap.set(r.transaction_intent, cap);
       }
     }
   }
 
-  // Sort by expenseUsd DESC (biggest burn rate first)
-  const sorted = [...catMap.entries()].sort((a, b) => b[1].expenseUsd - a[1].expenseUsd);
+  // Helper: "UAH 40 000 · USDT 1 000" or "USD 22 000" or "UAH 20 000 · ещё 2 вал."
+  const fmtCurBreakdown = (byCur: Map<string, number>, maxShow = 2): string => {
+    const entries = [...byCur.entries()].sort((a, b) => b[1] - a[1]);
+    if (entries.length === 0) return '';
+    const shown = entries.slice(0, maxShow).map(([c, a]) => {
+      const abs = Math.abs(a);
+      return `${c} ${abs >= 1000
+        ? abs.toLocaleString('ru', { maximumFractionDigits: 0 })
+        : abs.toLocaleString('ru', { maximumFractionDigits: 2 })}`;
+    });
+    const rest = entries.length - maxShow;
+    if (rest > 0) shown.push(`ещё ${rest} вал.`);
+    return shown.join(' · ');
+  };
+
+  const sorted     = [...catMap.entries()].sort((a, b) => b[1].expenseUsd - a[1].expenseUsd);
   const grandExpUsd = sorted.reduce((s, [, c]) => s + c.expenseUsd, 0);
   const grandIncUsd = sorted.reduce((s, [, c]) => s + c.incomeUsd, 0);
   const grandOps    = sorted.reduce((s, [, c]) => s + c.count, 0);
@@ -2401,13 +2424,13 @@ function buildSheet3(wb: ExcelJS.Workbook, rows: TxRow[], usdRates: Map<string, 
     const fillBg = { type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb: bgArgb } };
     ws.getRow(rn).height = 18;
 
-    const setCell = (col: number, val: ExcelJS.CellValue, opts: {
+    const sc = (col: number, val: ExcelJS.CellValue, opts: {
       bold?: boolean; numFmt?: string; color?: string;
-      align?: 'left'|'center'|'right'; fill?: ExcelJS.Fill;
+      align?: 'left'|'center'|'right'; fill?: ExcelJS.Fill; italic?: boolean; size?: number;
     } = {}) => {
       const c = ws.getCell(rn, col);
       c.value  = val;
-      c.font   = { size: 9, name: 'Calibri', bold: opts.bold,
+      c.font   = { size: opts.size ?? 9, name: 'Calibri', bold: opts.bold, italic: opts.italic,
         color: opts.color ? { argb: opts.color } : undefined };
       c.fill   = opts.fill ?? fillBg;
       c.border = thinB;
@@ -2415,30 +2438,51 @@ function buildSheet3(wb: ExcelJS.Workbook, rows: TxRow[], usdRates: Map<string, 
       if (opts.numFmt) c.numFmt = opts.numFmt;
     };
 
-    setCell(1, cat.group,       { align: 'left',   color: 'FF555555' });
-    setCell(2, name,            { bold: true, color: 'FF1A3C5E' });
-    setCell(3, cat.count,       { align: 'center' });
-    setCell(4, cat.expenseUsd,  { align: 'right',  numFmt: '#,##0.00',
-      color: cat.expenseUsd > 0 ? `FF${C_EXPENSE}` : 'FF888888' });
-    setCell(5, parseFloat(pct.toFixed(2)), { align: 'right', numFmt: '0.00"%"',
-      color: 'FF2D6A9F' });
-    setCell(6, cat.incomeUsd,   { align: 'right',  numFmt: '#,##0.00',
-      color: cat.incomeUsd > 0 ? `FF${C_INCOME}` : 'FF888888' });
-    setCell(7, net, { align: 'right', numFmt: '#,##0.00', bold: true,
+    sc(1, cat.group, { align: 'left', color: 'FF555555' });
+    sc(2, name,      { bold: true, color: 'FF1A3C5E' });
+    sc(3, cat.count, { align: 'center' });
+
+    // Расходы — показываем "—" вместо красного нуля
+    if (cat.expenseUsd > 0) {
+      sc(4, cat.expenseUsd, { align: 'right', numFmt: '#,##0.00', color: `FF${C_EXPENSE}` });
+    } else {
+      sc(4, '—', { align: 'center', color: 'FFBBBBBB' });
+    }
+
+    sc(5, parseFloat(pct.toFixed(2)), { align: 'right', numFmt: '0.00"%"', color: 'FF2D6A9F' });
+
+    // Доходы — показываем "—" вместо красного нуля
+    if (cat.incomeUsd > 0) {
+      sc(6, cat.incomeUsd, { align: 'right', numFmt: '#,##0.00', color: `FF${C_INCOME}` });
+    } else {
+      sc(6, '—', { align: 'center', color: 'FFBBBBBB' });
+    }
+
+    // Итог — цветной фон
+    sc(7, net, { align: 'right', numFmt: '#,##0.00', bold: true,
       color: net >= 0 ? `FF${C_INCOME}` : `FF${C_EXPENSE}`,
       fill: { type: 'pattern', pattern: 'solid',
         fgColor: { argb: net >= 0 ? 'FFE8F8F5' : 'FFFDEDEC' } } });
-    // Avg check per category (expense only)
+
+    // Ср. чек (только по расходам)
     const avgChk = cat.expenseCount > 0 ? cat.expenseUsd / cat.expenseCount : 0;
-    setCell(8, avgChk > 0 ? avgChk : '', { align: 'right', numFmt: '#,##0.00', color: 'FF888888' });
-    setCell(9, cat.uncovered.length > 0 ? `+ ${cat.uncovered.slice(0, 3).join(', ')} (н/д)` : '',
-      { align: 'left', color: 'FFAAAAAA' });
-    ws.getCell(rn, 9).font = { size: 7, italic: true, name: 'Calibri', color: { argb: 'FFAAAAAA' } };
+    if (avgChk > 0) {
+      sc(8, avgChk, { align: 'right', numFmt: '#,##0.00', color: 'FF888888' });
+    } else {
+      sc(8, '—', { align: 'center', color: 'FFBBBBBB' });
+    }
+
+    // Исходные валюты — всегда заполнено
+    const allByCur = new Map<string, number>();
+    for (const [c, a] of cat.expenseByCur) allByCur.set(c, (allByCur.get(c) ?? 0) + a);
+    for (const [c, a] of cat.incomeByCur)  allByCur.set(c, (allByCur.get(c) ?? 0) + a);
+    const curStr = fmtCurBreakdown(allByCur, 3);
+    sc(9, curStr || '—', { align: 'left', color: 'FF666666', italic: true, size: 8 });
 
     rn++;
   }
 
-  // ─ Data Bar on Доля % column
+  // Data Bar on Доля %
   if (rn > DATA_START) {
     ws.addConditionalFormatting({
       ref: `E${DATA_START}:E${rn - 1}`,
@@ -2451,10 +2495,10 @@ function buildSheet3(wb: ExcelJS.Workbook, rows: TxRow[], usdRates: Map<string, 
     });
   }
 
-  // ─ Grand Total row (navy footer)
+  // Grand Total row
   const gtFill   = { type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb: `FF${C_GRAND_BG}` } };
   const gtBorder = {
-    top: { style: 'medium' as const, color: { argb: 'FF0D2840' } },
+    top:    { style: 'medium' as const, color: { argb: 'FF0D2840' } },
     bottom: { style: 'medium' as const, color: { argb: 'FF0D2840' } },
     left:   { style: 'thin'   as const, color: { argb: `FF${C_TBL_BORDER}` } },
     right:  { style: 'thin'   as const, color: { argb: `FF${C_TBL_BORDER}` } },
@@ -2467,91 +2511,108 @@ function buildSheet3(wb: ExcelJS.Workbook, rows: TxRow[], usdRates: Map<string, 
   }
   ws.mergeCells(gtRow, 1, gtRow, 2);
   const gt1 = ws.getCell(gtRow, 1);
-  gt1.value = 'ИТОГО P&L';
-  gt1.font  = { bold: true, size: 10, name: 'Calibri', color: { argb: 'FFB0C8E0' } };
-  gt1.fill  = gtFill;
-  gt1.alignment = { horizontal: 'right', vertical: 'middle' };
+  gt1.value = 'ИТОГО P&L'; gt1.font = { bold: true, size: 10, name: 'Calibri', color: { argb: 'FFB0C8E0' } };
+  gt1.fill = gtFill; gt1.alignment = { horizontal: 'right', vertical: 'middle' };
 
   const gt3 = ws.getCell(gtRow, 3);
   gt3.value = grandOps; gt3.font = { bold: true, size: 9, name: 'Calibri', color: { argb: 'FFB0C8E0' } };
   gt3.fill = gtFill; gt3.alignment = { horizontal: 'center', vertical: 'middle' };
 
-  const expClr = grandExpUsd > 0 ? 'FFE57373' : 'FF7DCEA0';
   const gt4 = ws.getCell(gtRow, 4);
   gt4.value = grandExpUsd; gt4.numFmt = '#,##0.00';
-  gt4.font  = { bold: true, size: 10, name: 'Calibri', color: { argb: expClr } };
+  gt4.font  = { bold: true, size: 10, name: 'Calibri', color: { argb: grandExpUsd > 0 ? 'FFE57373' : 'FF7DCEA0' } };
   gt4.fill  = gtFill; gt4.alignment = { horizontal: 'right', vertical: 'middle' };
 
   const gt5 = ws.getCell(gtRow, 5);
   gt5.value = '100%'; gt5.font = { bold: true, size: 9, name: 'Calibri', color: { argb: 'FFB0C8E0' } };
   gt5.fill = gtFill; gt5.alignment = { horizontal: 'right', vertical: 'middle' };
 
-  const incClr = grandIncUsd > 0 ? 'FF7DCEA0' : 'FFE57373';
   const gt6 = ws.getCell(gtRow, 6);
   gt6.value = grandIncUsd; gt6.numFmt = '#,##0.00';
-  gt6.font  = { bold: true, size: 10, name: 'Calibri', color: { argb: incClr } };
+  gt6.font  = { bold: true, size: 10, name: 'Calibri', color: { argb: grandIncUsd > 0 ? 'FF7DCEA0' : 'FFE57373' } };
   gt6.fill  = gtFill; gt6.alignment = { horizontal: 'right', vertical: 'middle' };
 
   const grandNet = grandIncUsd - grandExpUsd;
-  const netClr   = grandNet >= 0 ? 'FF7DCEA0' : 'FFE57373';
   const gt7 = ws.getCell(gtRow, 7);
   gt7.value = grandNet; gt7.numFmt = '#,##0.00';
-  gt7.font  = { bold: true, size: 10, name: 'Calibri', color: { argb: netClr } };
+  gt7.font  = { bold: true, size: 10, name: 'Calibri', color: { argb: grandNet >= 0 ? 'FF7DCEA0' : 'FFE57373' } };
   gt7.fill  = gtFill; gt7.alignment = { horizontal: 'right', vertical: 'middle' };
 
-  // Ø чек grand total
   const grandAvgChk = grandExpOps > 0 ? grandExpUsd / grandExpOps : 0;
   const gt8 = ws.getCell(gtRow, 8);
-  gt8.value = grandAvgChk > 0 ? grandAvgChk : '';
-  gt8.numFmt = '#,##0.00';
+  gt8.value = grandAvgChk > 0 ? grandAvgChk : ''; gt8.numFmt = '#,##0.00';
   gt8.font  = { bold: true, size: 9, name: 'Calibri', color: { argb: 'FFB0C8E0' } };
   gt8.fill  = gtFill; gt8.alignment = { horizontal: 'right', vertical: 'middle' };
   rn = gtRow + 1;
 
-  // ─ Capital Movements section (GAAP: not included in P&L)
+  // ─ Capital Movements — redesigned
   if (capMap.size > 0) {
-    rn++; // spacer
+    rn++;
     ws.mergeCells(rn, 1, rn, TOTAL_COLS);
     const capHdr = ws.getCell(rn, 1);
-    capHdr.value = 'ДВИЖЕНИЕ КАПИТАЛА (НЕ включено в P&L)';
+    capHdr.value = 'ДВИЖЕНИЕ КАПИТАЛА — деньги остались внутри вашего портфеля, в P&L не входят';
     capHdr.font  = { bold: true, size: 9, name: 'Calibri', color: { argb: `FF${C_COL_HDR_FG}` } };
     capHdr.fill  = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_COL_HDR_BG}` } };
     capHdr.alignment = { horizontal: 'center', vertical: 'middle' };
     ws.getRow(rn).height = 20;
     rn++;
 
-    const capLabels: Record<string, string> = {
-      debt_given:         'Долг (дал) — актив',
-      debt_received:      'Долг (взял) — обязательство',
-      transfer_internal:  'Внутренние переводы (нетто ≈ 0)',
-      transfer_external:  'Переводы другим (расход)',
-      transfer:           'Переводы',  // fallback for legacy
+    const capDefs: Record<string, { label: string; hint: string }> = {
+      debt_given:        { label: 'Дал в долг', hint: 'вы дали деньги — они у вас в активах как долг' },
+      debt_received:     { label: 'Взял в долг', hint: 'вы получили деньги — они у вас как обязательство' },
+      transfer_internal: { label: 'Переводы между вашими счетами', hint: 'деньги перемещены, но не потрачены' },
+      transfer_external: { label: 'Переводы другим людям', hint: 'деньги ушли без категории' },
+      transfer:          { label: 'Переводы', hint: '' },
     };
-    for (const [intent, cap] of capMap) {
-      const bgArgb = rn % 2 === 0 ? 'FFFFF9F0' : 'FFFFFFFA';
-      const fillWarm = { type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb: bgArgb } };
-      ws.getRow(rn).height = 18;
 
-      const setC = (col: number, val: ExcelJS.CellValue, align: 'left'|'center'|'right' = 'left', bold = false, numFmt?: string) => {
+    for (const [intent, cap] of capMap) {
+      const def      = capDefs[intent] ?? { label: intent, hint: '' };
+      const bgArgb   = rn % 2 === 0 ? 'FFFFF9F0' : 'FFFFFFFA';
+      const fillWarm = { type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb: bgArgb } };
+      ws.getRow(rn).height = 20;
+
+      const setC = (col: number, val: ExcelJS.CellValue,
+        align: 'left'|'center'|'right' = 'left', bold = false,
+        color = 'FF555555', numFmt?: string, italic = true) => {
         const c = ws.getCell(rn, col);
         c.value = val; c.fill = fillWarm; c.border = thinB;
-        c.font  = { size: 9, name: 'Calibri', bold, italic: true, color: { argb: 'FF666666' } };
+        c.font  = { size: 9, name: 'Calibri', bold, italic, color: { argb: color } };
         c.alignment = { vertical: 'middle', horizontal: align };
         if (numFmt) c.numFmt = numFmt;
       };
 
       ws.mergeCells(rn, 1, rn, 2);
-      setC(1, capLabels[intent] ?? intent, 'left', true);
+      setC(1, def.label, 'left', true, 'FF1A3C5E', undefined, false);
       setC(3, cap.count, 'center');
-      setC(4, cap.totalUsd, 'right', false, '#,##0.00');
-      if (cap.uncov.length > 0) setC(8, `+ ${cap.uncov.slice(0, 2).join(', ')} (н/д)`);
+
+      // Для внутренних переводов показываем объём (не нетто) — понятнее
+      if (intent === 'transfer_internal') {
+        setC(4, cap.volumeUsd > 0 ? cap.volumeUsd : 0, 'right', false, 'FF2D6A9F', '#,##0.00');
+      } else {
+        setC(4, cap.netUsd, 'right', false, 'FF555555', '#,##0.00');
+      }
+
+      // Исходные валюты для движения капитала
+      const curStr = fmtCurBreakdown(cap.byCur, 3);
+      if (curStr) setC(9, curStr, 'left', false, 'FF888888', undefined, true);
+
+      // Подсказка-хинт под строкой
+      if (def.hint) {
+        rn++;
+        ws.mergeCells(rn, 1, rn, TOTAL_COLS);
+        const hintCell = ws.getCell(rn, 1);
+        hintCell.value = `   ${def.hint}`;
+        hintCell.font  = { size: 7, italic: true, name: 'Calibri', color: { argb: 'FFAAAAAA' } };
+        hintCell.fill  = fillWarm;
+        hintCell.alignment = { horizontal: 'left', vertical: 'middle' };
+        ws.getRow(rn).height = 12;
+      }
       rn++;
     }
 
-    // Footnote
     ws.mergeCells(rn, 1, rn, TOTAL_COLS);
     const fn = ws.getCell(rn, 1);
-    fn.value = 'Курс на дату экспорта · open.er-api.com (fiat) · mexc.com (crypto) · Долги и переводы исключены из P&L в соответствии с GAAP';
+    fn.value = 'Курс на дату экспорта · open.er-api.com (fiat) · mexc.com (crypto) · Исходные валюты — суммы до конвертации · Движение капитала в P&L не включается';
     fn.font  = { size: 7, italic: true, name: 'Calibri', color: { argb: 'FFAAAAAA' } };
     fn.fill  = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_GREY_BG}` } };
     fn.border = { top: { style: 'thin', color: { argb: `FF${C_TBL_BORDER}` } } };
@@ -2562,13 +2623,8 @@ function buildSheet3(wb: ExcelJS.Workbook, rows: TxRow[], usdRates: Map<string, 
     state: 'frozen', ySplit: HDR_ROW, xSplit: 0,
     activeCell: `A${DATA_START}`, showGridLines: false,
   }];
-  ws.properties.tabColor = { argb: `FF${C_EXPENSE}` }; // red tab — expense analytics
+  ws.properties.tabColor = { argb: `FF${C_EXPENSE}` };
 }
-
-// ─────────────────────────────────────────────────────────────
-// Sheet 4: По месяцам
-// ─────────────────────────────────────────────────────────────
-
 function buildSheet4(
   wb: ExcelJS.Workbook, rows: TxRow[],
   _from: Date, _to: Date, usdRates: Map<string, number>,
