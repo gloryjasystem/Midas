@@ -1190,7 +1190,8 @@ function buildSheet0Summary(
           c.value = h;
           c.font  = { bold: true, size: 8, name: 'Calibri', color: { argb: 'FF4A148C' } };
           c.fill  = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE1BEE7' } };
-          c.alignment = { horizontal: i === 0 ? 'center' : 'left', vertical: 'middle' };
+          // col 1 (№) and col 4 (Списано) — center; rest — left
+          c.alignment = { horizontal: (i === 0 || i === 3) ? 'center' : 'left', vertical: 'middle' };
           c.border = { bottom: { style: 'thin', color: { argb: 'FFD1C4E9' } } };
         });
         ws.getRow(r).height = 16;
@@ -1226,7 +1227,7 @@ function buildSheet0Summary(
 
           const p4 = ws.getCell(r, 4);
           p4.value = `\u2212 ${outAmt.toFixed(2)} ${outCur}`; p4.font = { size: 9, bold: true, name: 'Calibri', color: { argb: `FF${C_EXPENSE}` } };
-          p4.fill = bg; p4.border = pBorder; p4.alignment = { horizontal: 'right', vertical: 'middle' };
+          p4.fill = bg; p4.border = pBorder; p4.alignment = { horizontal: 'center', vertical: 'middle' };
 
           const p5 = ws.getCell(r, 5);
           p5.value = isCross
