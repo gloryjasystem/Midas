@@ -1583,31 +1583,108 @@ function buildSheet1(wb: ExcelJS.Workbook, rows: TxRow[], from: Date, to: Date, 
             { font: { size: 7, italic: true }, text: 'Пример: 10 000 UAH ÷ 8 ч = 1 250 UAH/ч' }],
   };
 
-  // ── Rows 11+: Data ───────────────────────────────────────────
-  // USD accumulators for ИТОГО в USD footer row
+  // ── Rows: Data ──────────────────────────────────────────────
   let usdGrandTotal = 0;
   let hasUncoveredUsd = false;
   const DATA_START = HDR_ROW + 1;  // = 5
 
-  displayRows.forEach((row, idx) => {
-    const rNum = DATA_START + idx;
-    const wsRow = ws.getRow(rNum);
-    wsRow.height = 18;
+  // ── Anomaly detection: compute expense median for outlier highlighting ──
+  const expenseAmountsUsd: number[] = [];
+  for (const dr of displayRows) {
+    if (dr.transaction_intent === 'expense') {
+      const amt = parseFloat(dr.original_amount);
+      const cur = dr.currency.toUpperCase();
+      const rate = usdRates.get(cur) ?? null;
+      if (rate !== null) expenseAmountsUsd.push(amt * rate);
+    }
+  }
+  expenseAmountsUsd.sort((a, b) => a - b);
+  const expenseMedian = expenseAmountsUsd.length >= 10
+    ? (expenseAmountsUsd[Math.floor(expenseAmountsUsd.length / 2)]!)
+    : Infinity; // disable anomaly detection if < 10 expenses
+  const anomalyThreshold = expenseMedian * 3;
 
-    // Row background: income → light green, expense → light red, transfer → light purple, else alternate stripes
+  // ── Day-tracking state for separators & subtotals ──
+  let rNum = DATA_START;
+  let prevDateStr = '';
+  let dayIncUsd = 0;
+  let dayExpUsd = 0;
+  let dayOps   = 0;
+
+  /** Render a daily subtotal row */
+  const renderDaySubtotal = (dateStr: string) => {
+    if (dayOps === 0) return;
+    const dayNet = dayIncUsd - dayExpUsd;
+    const stFill = { type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb: `FF${C_TOTAL_HDR}` } };
+    const stBorder = {
+      top:    { style: 'thin' as const, color: { argb: `FF${C_TBL_BORDER}` } },
+      bottom: { style: 'medium' as const, color: { argb: `FF${C_TBL_BORDER}` } },
+    };
+    ws.getRow(rNum).height = 16;
+    // Merge A-G for label
+    ws.mergeCells(rNum, 1, rNum, 7);
+    const lbl = ws.getCell(rNum, 1);
+    lbl.value = `Итого ${dateStr}:`;
+    lbl.font  = { bold: true, size: 8, name: 'Calibri', italic: true, color: { argb: 'FF2D6A9F' } };
+    lbl.fill  = stFill; lbl.border = stBorder;
+    lbl.alignment = { horizontal: 'right', vertical: 'middle' };
+    // H: amounts summary
+    const hCell = ws.getCell(rNum, 8);
+    const parts: string[] = [];
+    if (dayIncUsd > 0) parts.push(`+${dayIncUsd.toFixed(0)}`);
+    if (dayExpUsd > 0) parts.push(`-${dayExpUsd.toFixed(0)}`);
+    hCell.value = parts.length > 0 ? parts.join(' / ') + ' USD' : '—';
+    hCell.font  = { size: 8, name: 'Calibri', italic: true, color: { argb: 'FF666666' } };
+    hCell.fill  = stFill; hCell.border = stBorder;
+    hCell.alignment = { horizontal: 'center', vertical: 'middle' };
+    // J: net USD
+    const jCell = ws.getCell(rNum, 10);
+    jCell.value = dayNet;
+    jCell.numFmt = '+#,##0.00;-#,##0.00';
+    jCell.font  = { bold: true, size: 8, name: 'Calibri', italic: true,
+      color: { argb: dayNet >= 0 ? `FF${C_INCOME}` : `FF${C_EXPENSE}` } };
+    jCell.fill  = stFill; jCell.border = stBorder;
+    jCell.alignment = { horizontal: 'center', vertical: 'middle' };
+    // Fill remaining cols
+    for (const ci of [9, 11, 12, 13, 14, 15, 16]) {
+      const c = ws.getCell(rNum, ci);
+      c.fill = stFill; c.border = stBorder;
+    }
+    rNum++;
+    dayIncUsd = 0; dayExpUsd = 0; dayOps = 0;
+  };
+
+  for (let idx = 0; idx < displayRows.length; idx++) {
+    const row = displayRows[idx]!;
+    const txDate = new Date(row.transaction_time);
+    const dateStr = fmtDate(txDate);
+
+    // ── Day change: subtotal for previous day + separator ──
+    if (dateStr !== prevDateStr && prevDateStr !== '') {
+      renderDaySubtotal(prevDateStr);
+    }
+    prevDateStr = dateStr;
+
+    ws.getRow(rNum).height = 18;
+
+    // Row background: income → light green, expense → light red, transfer → light purple, else stripes
     let bgColor: string;
     if (row.transaction_intent === 'income' || row.transaction_intent === 'debt_received') {
-      bgColor = 'FFEAFAF1'; // light green
+      bgColor = 'FFEAFAF1';
     } else if (row.transaction_intent === 'expense') {
-      bgColor = 'FFFDEDEC'; // light red
+      bgColor = 'FFFDEDEC';
     } else if (row.transaction_intent === 'transfer') {
-      bgColor = 'FFEDE7F6'; // light purple for transfers
+      bgColor = 'FFEDE7F6';
     } else {
-      const isOdd = idx % 2 === 0;
-      bgColor = isOdd ? 'FFFFFFFF' : `FF${C_ROW_ODD}`;
+      bgColor = idx % 2 === 0 ? 'FFFFFFFF' : `FF${C_ROW_ODD}`;
     }
 
-    const txDate   = new Date(row.transaction_time);
+    // Anomaly highlight: expense > 3× median → amber alert background
+    if (row.transaction_intent === 'expense' && anomalyThreshold < Infinity) {
+      const expUsd = parseFloat(row.original_amount) * (usdRates.get(row.currency.toUpperCase()) ?? 0);
+      if (expUsd > anomalyThreshold) bgColor = 'FFFFF3CD'; // amber alert
+    }
+
     const colour   = intentColour(row.transaction_intent);
 
     // «Сумма» = фактическое движение по счёту (signed):
@@ -1665,7 +1742,7 @@ function buildSheet1(wb: ExcelJS.Workbook, rows: TxRow[], from: Date, to: Date, 
     const displayAmount = row._merged ? debitAbs : debitSigned;
 
     const cellValues: (string | number | null)[] = [
-      idx + 1,                              // ci=0  A=1  №
+      idx + 1,                              // ci=0  A=1  № (display idx, not rNum)
       fmtDate(txDate),                      // ci=1  B=2  Дата
       fmtTime(txDate),                      // ci=2  C=3  Время
       displayOp,                            // ci=3  D=4  Операция
@@ -1788,11 +1865,25 @@ function buildSheet1(wb: ExcelJS.Workbook, rows: TxRow[], from: Date, to: Date, 
     rateFCell.fill   = { type: 'pattern', pattern: 'solid', fgColor: { argb: bgColor } };
     rateFCell.border = dataBorder;
     rateFCell.alignment = { vertical: 'middle', horizontal: 'right' };
-  });
+    // Accumulate daily totals for subtotal
+    if (!row._merged) {
+      const rowUsdRate = usdRates.get(row.currency.toUpperCase()) ?? 0;
+      const rowAmtUsd = parseFloat(row.original_amount) * rowUsdRate;
+      if (row.transaction_intent === 'income' || row.transaction_intent === 'debt_received') {
+        dayIncUsd += rowAmtUsd;
+      } else if (row.transaction_intent === 'expense') {
+        dayExpUsd += rowAmtUsd;
+      }
+    }
+    dayOps++;
+    rNum++;
+  }
+  // Final day subtotal
+  if (prevDateStr) renderDaySubtotal(prevDateStr);
 
   // ── ИТОГО в USD: navy footer row integrated into the ledger ────────────
   if (displayRows.length > 0) {
-    const footerRow = DATA_START + displayRows.length;
+    const footerRow = rNum;
     ws.getRow(footerRow).height = 24;
     const grandFill   = { type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb: `FF${C_GRAND_BG}` } };
     const grandBorder = {
@@ -1818,11 +1909,12 @@ function buildSheet1(wb: ExcelJS.Workbook, rows: TxRow[], from: Date, to: Date, 
     gtJ.font   = { bold: true, size: 11, name: 'Calibri', color: { argb: usdClr } };
     gtJ.fill   = grandFill;
     gtJ.alignment = { horizontal: 'right', vertical: 'middle' };
+    rNum++; // advance past footer row for widget positioning
   }
 
   // ── Premium Closing Balances Widget ──────────────────────────
   if (displayRows.length > 0) {
-    const gapRow  = DATA_START + displayRows.length + 1;  // after ИТОГО footer row
+    const gapRow  = rNum + 1;  // after ИТОГО footer row (rNum was bumped by footer)
     const wStart  = gapRow + 1; // spacer row above widget
     ws.getRow(gapRow).height = 6;
 
@@ -2293,7 +2385,7 @@ function buildSheet2(wb: ExcelJS.Workbook, rows: TxRow[], usdRates: Map<string, 
 
 function buildSheet3(wb: ExcelJS.Workbook, rows: TxRow[], usdRates: Map<string, number>): void {
   const ws = wb.addWorksheet('Категории');
-  const TOTAL_COLS = 8;
+  const TOTAL_COLS = 9;
 
   // ─ Row 1: Title
   ws.mergeCells(1, 1, 1, TOTAL_COLS);
@@ -2314,6 +2406,7 @@ function buildSheet3(wb: ExcelJS.Workbook, rows: TxRow[], usdRates: Map<string, 
     ['Доля %',          13],
     ['Доходы ≈ USD',     18],
     ['Чистый итог ≈ USD', 18],
+    ['Ø чек ≈ USD',       14],
     ['Примечание',      22],
   ];
   colDefs.forEach(([text, width], i) => hdr(ws, i + 1, HDR_ROW, text, width));
@@ -2437,9 +2530,12 @@ function buildSheet3(wb: ExcelJS.Workbook, rows: TxRow[], usdRates: Map<string, 
       color: net >= 0 ? `FF${C_INCOME}` : `FF${C_EXPENSE}`,
       fill: { type: 'pattern', pattern: 'solid',
         fgColor: { argb: net >= 0 ? 'FFE8F8F5' : 'FFFDEDEC' } } });
-    setCell(8, cat.uncovered.length > 0 ? `+ ${cat.uncovered.slice(0, 3).join(', ')} (н/д)` : '',
+    // Avg check per category
+    const avgChk = cat.count > 0 ? cat.expenseUsd / cat.count : 0;
+    setCell(8, avgChk > 0 ? avgChk : '', { align: 'right', numFmt: '#,##0.00', color: 'FF888888' });
+    setCell(9, cat.uncovered.length > 0 ? `+ ${cat.uncovered.slice(0, 3).join(', ')} (н/д)` : '',
       { align: 'left', color: 'FFAAAAAA' });
-    ws.getCell(rn, 8).font = { size: 7, italic: true, name: 'Calibri', color: { argb: 'FFAAAAAA' } };
+    ws.getCell(rn, 9).font = { size: 7, italic: true, name: 'Calibri', color: { argb: 'FFAAAAAA' } };
 
     rn++;
   }
@@ -2504,6 +2600,14 @@ function buildSheet3(wb: ExcelJS.Workbook, rows: TxRow[], usdRates: Map<string, 
   gt7.value = grandNet; gt7.numFmt = '#,##0.00';
   gt7.font  = { bold: true, size: 10, name: 'Calibri', color: { argb: netClr } };
   gt7.fill  = gtFill; gt7.alignment = { horizontal: 'right', vertical: 'middle' };
+
+  // Ø чек grand total
+  const grandAvgChk = grandOps > 0 ? grandExpUsd / grandOps : 0;
+  const gt8 = ws.getCell(gtRow, 8);
+  gt8.value = grandAvgChk > 0 ? grandAvgChk : '';
+  gt8.numFmt = '#,##0.00';
+  gt8.font  = { bold: true, size: 9, name: 'Calibri', color: { argb: 'FFB0C8E0' } };
+  gt8.fill  = gtFill; gt8.alignment = { horizontal: 'right', vertical: 'middle' };
   rn = gtRow + 1;
 
   // ─ Capital Movements section (GAAP: not included in P&L)
@@ -2639,7 +2743,7 @@ function buildSheet4(
   // ── Build worksheet ─────────────────────────────────────────
   const granLabel = useWeeks ? 'по неделям' : 'по месяцам';
   const ws = wb.addWorksheet('По месяцам');
-  const TOTAL_COLS = 9;
+  const TOTAL_COLS = 10;
 
   // Row 1: Title
   ws.mergeCells(1, 1, 1, TOTAL_COLS);
@@ -2663,6 +2767,7 @@ function buildSheet4(
     ['Δ Расходов',         13],
     ['Переводы\n≈ USD',    14],
     ['Долги нетто\n≈ USD', 14],
+    ['Кумул.\n≈ USD',       16],
   ];
   colDefs.forEach(([text, width], i) => hdr(ws, i + 1, HDR_ROW, text, width));
   ws.getRow(HDR_ROW).height = 30;
@@ -2679,6 +2784,7 @@ function buildSheet4(
   let rn = DATA_START;
   let prevExpUsd = 0;
   let grandInc = 0, grandExp = 0, grandOps = 0, grandTfr = 0, grandDebt = 0;
+  let cumulativeNet = 0;
 
   for (let si = 0; si < sorted.length; si++) {
     const [, b] = sorted[si]!;
@@ -2747,6 +2853,10 @@ function buildSheet4(
     // I — Debts net USD (secondary)
     sc(9, b.debtUsd, { align: 'right', numFmt: '+#,##0.00;-#,##0.00', italic: true,
       color: b.debtUsd >= 0 ? 'FF888888' : `FF${C_EXPENSE}` });
+    // J — Cumulative Net Worth
+    cumulativeNet += net;
+    sc(10, cumulativeNet, { align: 'right', numFmt: '#,##0.00', bold: true,
+      color: cumulativeNet >= 0 ? `FF${C_INCOME}` : `FF${C_EXPENSE}` });
 
     prevExpUsd = b.expenseUsd;
     rn++;
@@ -2805,6 +2915,11 @@ function buildSheet4(
   const g9 = ws.getCell(gtRow, 9);
   g9.value = grandDebt; g9.numFmt = '+#,##0.00;-#,##0.00';
   g9.font = gtFont('FFB0C8E0'); g9.fill = gtFill; g9.alignment = gtAlign();
+
+  const g10 = ws.getCell(gtRow, 10);
+  g10.value = cumulativeNet; g10.numFmt = '#,##0.00';
+  g10.font  = gtFont(cumulativeNet >= 0 ? 'FF7DCEA0' : 'FFE57373', 10);
+  g10.fill  = gtFill; g10.alignment = gtAlign();
 
   // ── Footnote ────────────────────────────────────────────────
   const fnRow = gtRow + 1;
