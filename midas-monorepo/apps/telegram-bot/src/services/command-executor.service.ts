@@ -141,7 +141,7 @@ function formatCancelCard(tx: LastTransaction): string {
       return `${String(d.getDate()).padStart(2,'0')}.${String(d.getMonth()+1).padStart(2,'0')}.${d.getFullYear()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
     } catch { return tx.created_at; }
   })();
-  const amtClean = tx.original_amount.replace(/\.?0+$/, '');
+  const amtClean = String(tx.original_amount).replace(/\.?0+$/, '');
   return `${intent}${name}\n\uD83D\uDCB0 ${amtClean} ${tx.currency}\n\u23F0 ${dt}`;
 }
 
