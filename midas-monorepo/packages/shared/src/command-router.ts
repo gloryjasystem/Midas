@@ -57,13 +57,29 @@ const COMMAND_PATTERNS: CommandPattern[] = [
     checkNumber: false,
   },
   {
-    cmd: 'transactions',
-    patterns: [/транзакци/i, /истори[яю]/i, /(?:^|\s)операции(?:\s|$)/i],
+    cmd: 'cancel_last',
+    // MUST be before 'transactions' — "отмени последнюю транзакцию" contains "транзакци"
+    // which would match the transactions pattern if it came first.
+    patterns: [
+      /отмени.*последн/i,
+      /удали.*последн/i,
+      /отменить.*последн/i,
+      /удалить.*последн/i,
+      /отмени.*запись/i,
+      /удали.*запись/i,
+      /отменить.*запись/i,
+      /удалить.*запись/i,
+      /отмени.*транзакци/i,
+      /удали.*транзакци/i,
+      /отменить.*транзакци/i,
+      /удалить.*транзакци/i,
+      /последн[а-яё]*\s+(?:транзакци|запись|запис[а-яё])/i,
+    ],
     checkNumber: false,
   },
   {
-    cmd: 'cancel_last',
-    patterns: [/отмени.*последн/i, /удали.*последн/i],
+    cmd: 'transactions',
+    patterns: [/транзакци/i, /истори[яю]/i, /(?:^|\s)операции(?:\s|$)/i],
     checkNumber: false,
   },
 ];
