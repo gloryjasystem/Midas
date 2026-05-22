@@ -531,73 +531,9 @@ async function buildVoiceNavResponse(
       };
     }
 
-    case 'transactions': {
-      // Phase 2S2+: inline transaction list (Blindspot 4 — can't import from telegram-bot)
-      // Shows last 10 transactions; pagination not available in worker context.
-      const txRows = await withTenantTransaction(workspaceId, userId, async (client) => {
-        const r = await client.query<{
-          id: string;
-          original_amount: string;
-          currency: string;
-          transaction_intent: string;
-          item_name: string | null;
-          category_name: string | null;
-          created_at: string;
-        }>(
-          `SELECT t.id,
-                  t.original_amount,
-                  t.currency,
-                  t.transaction_intent,
-                  t.item_name,
-                  c.name AS category_name,
-                  t.created_at
-           FROM transactions t
-           LEFT JOIN categories c ON c.id = t.category_id
-           WHERE t.workspace_id = $1 AND t.deleted_at IS NULL
-           ORDER BY t.created_at DESC
-           LIMIT 10`,
-          [workspaceId],
-        );
-        return r.rows;
-      });
-
-      if (!txRows || txRows.length === 0) {
-        return {
-          text: '📋 <b>Транзакции</b>\n\nТранзакций пока нет.',
-          keyboard: { inline_keyboard: [] },
-        };
-      }
-
-      const intentEmojis: Record<string, string> = {
-        expense: '💸', income: '💰',
-        transfer: '🔄', debt_given: '📤', debt_received: '📥',
-      };
-      const months = ['янв','фев','мар','апр','мая','июн','июл','авг','сен','окт','ноя','дек'];
-
-      const lines: string[] = ['📋 <b>Последние транзакции</b>', ''];
-
-      for (const tx of txRows) {
-        const emoji = intentEmojis[tx.transaction_intent] ?? '📝';
-        const amount = tx.original_amount.replace(/\.?0+$/, '') || '0';
-        const label = tx.item_name
-          ? escapeHtmlSimple(tx.item_name)
-          : (tx.category_name ? escapeHtmlSimple(tx.category_name) : tx.transaction_intent);
-
-        let dateStr = '';
-        try {
-          const d = new Date(tx.created_at);
-          dateStr = `${String(d.getDate())} ${months[d.getMonth()] ?? ''} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
-        } catch { /* silent */ }
-
-        lines.push(`${emoji} <b>${amount} ${escapeHtmlSimple(tx.currency)}</b> · ${label}`);
-        if (dateStr) lines.push(`    <i>${dateStr}</i>`);
-      }
-
-      return {
-        text: lines.join('\n'),
-        keyboard: { inline_keyboard: [] },
-      };
-    }
+    case 'transactions':
+      // Transactions require pagination → can't build from worker
+      return null;
   }
 }
 
