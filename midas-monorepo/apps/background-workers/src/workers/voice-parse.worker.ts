@@ -506,19 +506,31 @@ async function buildVoiceNavResponse(
       // The "✅ Записано" card with [✏️ Изменить запись] should disappear
       // when the user initiates cancel, so the confirmation screen is clear.
       try {
-        const oldCardMsgId = await redisConnection.get(`midas:am:${telegramUserId}:${chatId}`);
+        const amKey = `midas:am:${telegramUserId}:${chatId}`;
+        const oldCardMsgId = await redisConnection.get(amKey);
+        console.log('[midas:voice-parse-worker] cancel_last: delete old card check', {
+          amKey, oldCardMsgId, hasToken: !!process.env.TELEGRAM_BOT_TOKEN,
+        });
         if (oldCardMsgId && oldCardMsgId !== '0') {
           const token = process.env.TELEGRAM_BOT_TOKEN;
           if (token) {
-            await fetch(`${TELEGRAM_API_BASE}/bot${token}/deleteMessage`, {
+            const delResp = await fetch(`${TELEGRAM_API_BASE}/bot${token}/deleteMessage`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ chat_id: chatId, message_id: parseInt(oldCardMsgId, 10) }),
             });
+            const delBody = await delResp.text();
+            console.log('[midas:voice-parse-worker] cancel_last: deleteMessage response', {
+              status: delResp.status, body: delBody.slice(0, 200),
+            });
           }
-          await redisConnection.del(`midas:am:${telegramUserId}:${chatId}`);
+          await redisConnection.del(amKey);
         }
-      } catch { /* non-fatal: worst case old card stays */ }
+      } catch (delErr) {
+        console.error('[midas:voice-parse-worker] cancel_last: delete old card FAILED', {
+          error: delErr instanceof Error ? delErr.message : 'unknown',
+        });
+      }
 
       return {
         text: lines.join('\n'),
