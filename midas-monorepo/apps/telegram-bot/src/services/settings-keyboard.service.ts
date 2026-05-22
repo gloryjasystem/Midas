@@ -300,7 +300,7 @@ export function parseSettingsCallback(data: string): SettingsCallbackCmd | null 
   const sub = parts[1] ?? '';
 
   if (sub === 'm') return { cmd: 'menu' };
-  if (sub === 'x' || sub === 'cancel') return { cmd: 'cancel' };
+  if (sub === 'x' || sub === 'cancel' || sub === 'fin') return { cmd: 'cancel' };
   if (sub === 'srch') return { cmd: 'search' };
   if (sub === 'back') return { cmd: 'back' };
 
