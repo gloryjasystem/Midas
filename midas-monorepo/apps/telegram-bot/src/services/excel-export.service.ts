@@ -898,7 +898,7 @@ function buildSheet0Summary(
     c.value = h;
     c.font  = { bold: true, size: 8, name: 'Calibri', color: { argb: 'FF2D6A9F' } };
     c.fill  = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_TOTAL_HDR}` } };
-    c.alignment = { horizontal: i === 4 ? 'right' : 'left', vertical: 'middle' };
+    c.alignment = { horizontal: i === 4 ? 'center' : 'left', vertical: 'middle' };
     c.border = { bottom: { style: 'thin', color: { argb: `FF${C_TBL_BORDER}` } } };
   });
   ws.getRow(r).height = 16;
