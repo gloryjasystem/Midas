@@ -1,7 +1,7 @@
 # WORKFLOW_STATE.MD — Диспетчер задач ИИ-агента Midas
 
 > **Тип:** MUTABLE — кратковременная память агента. Обновляется на каждом шаге работы.
-> **Обновлён:** 2026-05-22 10:44 (UTC+3)
+> **Обновлён:** 2026-05-22 11:00 (UTC+3)
 
 ---
 
@@ -9,15 +9,15 @@
 
 | Параметр | Значение |
 |---|---|
-| **PHASE** | Phase 3.3 — Excel Export Sheet0/Sheet1 Polish ✅ DEPLOYED |
-| **STEP** | Сессия 2026-05-22 09:52–10:44. Серия точечных исправлений листов «Сводка» (Sheet0) и «Транзакции» (Sheet1) по обратной связи пользователя. Все изменения через Node.js (UTF-8). |
-| **AGENT STATUS** | tsc 0 errors. Commits: `979ec20` (remove transfers from summary), `df41080` (narrow C/D cols), `e05c590` (income + sign, transfer balance purple), `c2251fb` (balance tooltip), `d081073` (left-align), `2f886f2` (Нетто center). Последний: `2f886f2`. |
+| **PHASE** | Phase 3.0 — DB Schema account_type/provider_key ✅ DEPLOYED |
+| **STEP** | Сессия 2026-05-22 10:47–11:00. Phase 3.0: применена миграция 1780500000000, исправлены два бага в migrate.ts и формате миграции. |
+| **AGENT STATUS** | tsc 0 errors. Commits: `75a5534` (fix migrate + ESM migration). Последний: `75a5534`. |
 | **DEPLOYMENT** | Railway (spirited-happiness) — ✅ DEPLOYED коммит `2f886f2`. Health: https://midas-production-f4f1.up.railway.app/health > ok |
-| **DB STATE** | Без изменений. `transfer_group_id`: TEXT ✅ \| `current_screen`: TEXT ✅ |
+| **DB STATE** | `transfer_group_id`: TEXT ✅ \| `current_screen`: TEXT ✅ \| `account_type`: TEXT nullable ✅ (migration 1780500000000) \| `provider_key`: TEXT nullable ✅ || `current_screen`: TEXT ✅ |
 | **DATABASE_URL (public)** | `postgresql://postgres:PLLSqArtPUoQsAYmvrpsmavfQMewgTRh@hopper.proxy.rlwy.net:46284/railway` |
-| **LAST COMPLETED** | **Sheet0 (Сводка):** (1) Переводы убраны из СВОДКИ ЗА ПЕРИОД, ИТОГА и СВОДКИ ПО ВАЛЮТАМ — только доходы/расходы/долги влияют на P&L. (2) Колонки C и D в СВОДКЕ ПО ВАЛЮТАМ сужены (18+14 вместо 28+28). (3) «Нетто за период» — по левому краю; данные под ней — по левому с отступом; «Нетто» итог — по центру. **Sheet1 (Транзакции):** (4) Столбец «Сумма» — явный знак `+` для доходов (`+700 USD`). (5) «Остаток» для переводов: фиолетовый фон вместо красного. (6) Остаток на счету при переводе — теперь `Binance ↓ 1,024,458 USDT` (имя источника + стрелка); tooltip с обоими счетами (`Откуда: Binance / Куда: MonoBank`). |
+| **LAST COMPLETED** | **Phase 3.0 DB Schema (2026-05-22 10:47–11:00):** (1) `migrate.ts` — исправлен баг: `createRequire`/`require()` заменён на `await import('node-pg-migrate')` с использованием именованного экспорта `{ runner }` (node-pg-migrate@8 — ESM-only, `require()` возвращал объект без callable function). (2) Миграция `1780500000000`: переписана с CJS (`exports.up`) на ESM (`export const up = (pgm) =>`) — `packages/database` имеет `"type":"module"`, CJS-синтаксис вызывал `exports is not defined`. (3) Миграция применена к Railway DB вручную через public URL. Колонки `account_type` + `provider_key` добавлены в `account_sources`. Commit `75a5534`, push в main. |
 | **BLOCKER** | None. |
-| **NEXT ACTION** | 1. Phase 3.0 DB Schema (`account_type`/`wallet_subtype` — миграция `1780500000000`). 2. Голосовые команды (следующий крупный этап по roadmap). 3. E2E тест перевода: убедиться что внутренний перевод не ломает баланс. 4. Всегда писать изменения в workflow_state.md в конце сессии. |
+| **NEXT ACTION** | 1. Голосовые команды (следующий крупный этап по roadmap). 2. Использовать `account_type`/`sub_type` в `classifyAccountGroup()` вместо имяэвристики. 3. E2E тест перевода: убедиться что внутренний перевод не ломает баланс. 4. Всегда писать изменения в workflow_state.md в конце сессии. |
 
 
 
