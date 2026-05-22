@@ -4473,12 +4473,14 @@ Midas создан, чтобы сделать учет денег максима
 
           if (clAction === 'y') {
             // ── Да, удалить ─────────────────────────────────────────────────
-            // 1. Soft-delete the transaction (RLS-safe via pool.query with workspaceId filter)
-            await pool.query(
-              `UPDATE transactions SET deleted_at = NOW(), updated_at = NOW()
-               WHERE id = $1 AND workspace_id = $2 AND deleted_at IS NULL`,
-              [clTxId, clResolved.workspaceId],
-            );
+            // 1. Soft-delete the transaction (RLS requires tenant context via withTenantTransaction)
+            await withTenantTransaction(clResolved.workspaceId, clResolved.userId, async (client) => {
+              await client.query(
+                `UPDATE transactions SET deleted_at = NOW(), updated_at = NOW()
+                 WHERE id = $1 AND workspace_id = $2 AND deleted_at IS NULL`,
+                [clTxId, clResolved.workspaceId],
+              );
+            });
 
             // 2. Edit confirmation card → final state (no buttons)
             void editMessageText(
@@ -5549,14 +5551,14 @@ Midas создан, чтобы сделать учет денег максима
             try {
               const oldAmId = await getActiveMessageId(telegramUserId, chatId);
               if (oldAmId && oldAmId !== '0') {
-                void deleteMessage(chatId, oldAmId);
-                void clearActiveMessageId(telegramUserId, chatId);
+                await deleteMessage(chatId, oldAmId);
+                await clearActiveMessageId(telegramUserId, chatId);
               }
             } catch { /* non-fatal */ }
 
             const clResponse = await buildCommandResponse(navCmd, cmdCtx);
             const clKeyboard = clResponse.keyboard ?? { inline_keyboard: [] };
-            void sendMessageWithKeyboard(chatId, clResponse.text, clKeyboard);
+            await sendMessageWithKeyboard(chatId, clResponse.text, clKeyboard);
 
             request.log.info({ msg: '[midas:bot:webhook] nav:cancel_last (text)', telegramUserId, workspaceId: resolved.workspaceId });
             await reply.status(200).send({ ok: true });
