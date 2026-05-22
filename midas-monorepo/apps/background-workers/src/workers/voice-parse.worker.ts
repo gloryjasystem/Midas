@@ -147,20 +147,21 @@ async function buildVoiceNavResponse(
 ): Promise<VoiceNavResponse | null> {
   switch (cmd) {
     case 'balance': {
-      // Minimal balance query — correct table/column names from balance.service.ts
-      // Tables: account_sources (not accounts), workspaces (not settings)
-      // Columns: currency (not currency_code), initial_balance + tx sum (not current_balance)
+      // Full balance query — same SQL as balance.service.ts (PER_ACCOUNT_SQL)
+      // Also fetches 'type' column for classifyAccountGroup grouping
       const result = await withTenantTransaction(workspaceId, userId, async (client) => {
         const r = await client.query<{
           id: string;
           name: string;
-          balance: { toFixed: (dp: number) => string };
+          type: string;
           currency: string;
+          balance: { toFixed: (dp: number) => string };
           is_expense_default: boolean;
           is_income_default: boolean;
         }>(
           `SELECT a.id,
                   a.name,
+                  a.type,
                   a.currency,
                   a.initial_balance
                     + COALESCE(SUM(CASE WHEN t.transaction_intent = 'income'        AND t.base_currency = a.currency THEN t.base_amount END), 0)
@@ -179,7 +180,7 @@ async function buildVoiceNavResponse(
            WHERE a.workspace_id = $1
              AND a.deleted_at IS NULL
              AND a.parent_account_id IS NULL
-           GROUP BY a.id, a.name, a.currency, a.initial_balance,
+           GROUP BY a.id, a.name, a.type, a.currency, a.initial_balance,
                     w.default_expense_account_id, w.default_income_account_id
            ORDER BY a.name`,
           [workspaceId],
@@ -189,26 +190,117 @@ async function buildVoiceNavResponse(
 
       if (!result || result.length === 0) {
         return {
-          text: '📭 <b>Пока нет счетов</b>\n\nСоздайте первый счёт с помощью команды «добавь счёт»',
+          text: '💼 <b>Баланс по счетам:</b>\n\nСчетов пока нет.',
+          keyboard: {
+            inline_keyboard: [
+              [{ text: '➕ Добавить счёт', callback_data: 'bl:add' }],
+              [{ text: '✖️ Закрыть',       callback_data: 'bl:close' }],
+            ],
+          },
         };
       }
 
-      const lines = result.map((a) => {
+      // ── Inline replicas of balance-keyboard.service.ts helpers ──
+      // (cross-app import forbidden — Blindspot 4)
+      const CCY_SYM: Record<string, string> = {
+        RUB: '₽', USD: '$', EUR: '€', UAH: '₴', GBP: '£',
+        KZT: '₸', BYN: 'Br', GEL: '₾', PLN: 'zł', TRY: '₺',
+        CNY: '¥', JPY: '¥', HKD: 'HK$', SGD: 'S$', AUD: 'A$',
+        CAD: 'C$', CHF: 'Fr',
+      };
+      const sym = (code: string): string => CCY_SYM[code] ?? code;
+
+      // formatBalanceShort — exact replica from balance-keyboard.service.ts
+      const fmtBal = (numStr: string): string => {
+        const n = parseFloat(numStr);
+        if (isNaN(n)) return numStr;
+        return n.toLocaleString('ru-RU', {
+          minimumFractionDigits: n % 1 === 0 ? 0 : 2,
+          maximumFractionDigits: 6,
+        });
+      };
+
+      // classifyAccountGroup — exact replica from balance-keyboard.service.ts
+      // Stablecoins/crypto → exchange or wallet, fiat → bank, nalichnie → cash
+      const EXCHANGE_RE = /okx|okex|binance|bybit|kraken|huobi|kucoin|gate\.io|mexc|bitget|coinbase|биржа|exchange/i;
+      const CASH_RE     = /наличн|нал\b|кэш|кеш|cash|налик/i;
+      const CRYPTO_CURRENCIES = new Set([
+        'BTC','ETH','USDT','USDC','BNB','SOL','XRP','ADA','DOGE','TON',
+        'TRX','DOT','MATIC','LTC','SHIB','AVAX','UNI','LINK','ATOM','XLM',
+      ]);
+      const STABLE_CURRENCIES = new Set(['USDT','USDC','DAI','BUSD','TUSD','USDP','FRAX','LUSD']);
+      type GrpType = 'bank' | 'crypto_exchange' | 'crypto_wallet' | 'cash' | 'other';
+      const classifyGrp = (name: string, currency: string, type: string): GrpType => {
+        if (type === 'bank_sync')        return 'bank';
+        if (type === 'crypto_read_only') return 'crypto_exchange';
+        const isCrypto = CRYPTO_CURRENCIES.has(currency) || STABLE_CURRENCIES.has(currency);
+        if (isCrypto) return EXCHANGE_RE.test(name) ? 'crypto_exchange' : 'crypto_wallet';
+        return CASH_RE.test(name) ? 'cash' : 'bank';
+      };
+
+      const GRP_EMOJI: Record<GrpType, string> = {
+        bank:            '🏦',
+        crypto_exchange: '📈',
+        crypto_wallet:   '🔐',
+        cash:            '💵',
+        other:           '📂',
+      };
+      const GRP_ORDER: GrpType[] = ['bank', 'crypto_exchange', 'crypto_wallet', 'cash', 'other'];
+      const GRP_NAMES: Record<GrpType, string> = {
+        bank:            '🏦 Банки',
+        crypto_exchange: '📈 Биржи',
+        crypto_wallet:   '🔐 Крипто',
+        cash:            '💵 Наличные',
+        other:           '📂 Прочее',
+      };
+
+      // Group accounts by type
+      const grouped = new Map<GrpType, typeof result>();
+      const sortedResult = [...result].sort((a, b) => {
+        const ga = classifyGrp(a.name, a.currency, a.type);
+        const gb = classifyGrp(b.name, b.currency, b.type);
+        const diff = GRP_ORDER.indexOf(ga) - GRP_ORDER.indexOf(gb);
+        if (diff !== 0) return diff;
+        return a.name.localeCompare(b.name, 'ru');
+      });
+      for (const a of sortedResult) {
+        const g = classifyGrp(a.name, a.currency, a.type);
+        if (!grouped.has(g)) grouped.set(g, []);
+        grouped.get(g)!.push(a);
+      }
+
+      // ── Build text — same format as balance.service.ts ──
+      const textSections: string[] = [];
+      for (const grp of GRP_ORDER) {
+        const rows = grouped.get(grp);
+        if (!rows?.length) continue;
+        const lines = rows.map((a) => {
+          const isStar = Boolean(a.is_expense_default) && Boolean(a.is_income_default);
+          const star = isStar ? ' ⭐' : '';
+          const balStr = fmtBal(a.balance.toFixed(2));
+          return `▸ <b>${escapeHtmlSimple(a.name)}${star}</b> — <b>${balStr}\u00a0${sym(a.currency)}</b>`;
+        });
+        textSections.push(`${GRP_NAMES[grp]}\n${lines.join('\n')}`);
+      }
+
+      // ── Build keyboard — same format as buildBalanceListKeyboard ──
+      const accountRows = sortedResult.map((a) => {
+        const grp   = classifyGrp(a.name, a.currency, a.type);
+        const emoji = GRP_EMOJI[grp];
         const isStar = Boolean(a.is_expense_default) && Boolean(a.is_income_default);
-        const star = isStar ? ' ⭐' : '';
-        const bal = a.balance.toFixed(2);
-        return `▸ <b>${escapeHtmlSimple(a.name)}${star}</b> — <b>${formatAmount(bal)} ${a.currency}</b>`;
+        const star  = isStar ? ' ⭐' : '';
+        const balFmt = `${fmtBal(a.balance.toFixed(2))}\u00a0${sym(a.currency)}`;
+        return [{ text: `${emoji} ${a.name}${star}  ·  ${balFmt}`, callback_data: `bl:v:${a.id}` }];
       });
 
       return {
-        text: `💼 <b>Баланс</b>\n\n${lines.join('\n')}`,
+        text: `💼 <b>Баланс</b>\n\n${textSections.join('\n\n')}`,
         keyboard: {
-          inline_keyboard: result.map((a) => {
-            const isStar = Boolean(a.is_expense_default) && Boolean(a.is_income_default);
-            return [{ text: `${isStar ? '⭐ ' : ''}${a.name}`, callback_data: `bal:det:${a.id}` }];
-          }).concat([
-            [{ text: '➕ Добавить счёт', callback_data: 'ac:new' }],
-          ]),
+          inline_keyboard: [
+            [{ text: '➕ Добавить счёт', callback_data: 'bl:add' }],
+            ...accountRows,
+            [{ text: '✖️ Закрыть', callback_data: 'bl:close' }],
+          ],
         },
       };
     }
@@ -381,12 +473,6 @@ function escapeHtmlSimple(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-// Format amount with thousands separator
-function formatAmount(amount: string): string {
-  const num = parseFloat(amount);
-  if (isNaN(num)) return amount;
-  return num.toLocaleString('ru-RU', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
-}
 
 
 // ─────────────────────────────────────────────────────────────
