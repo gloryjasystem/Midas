@@ -1220,10 +1220,13 @@ async function _processVoiceParse(job: Job<VoiceParseJobPayload>): Promise<void>
   // Replaces old Phase 2.2 "Нажми кнопку" approach.
   // Now commands are executed inline — balance screen, settings, etc.
   const voiceCmd = detectCommand(transcript);
+  // Debug: log command detection result + transcript prefix for troubleshooting
+  // SEC-12: only prefix logged — no amounts, names, or financial data exposed
+  console.log('[midas:voice-parse-worker] Phase 2S2: detectCommand result', {
+    jobId: job.id, workspaceId, voiceCmd,
+    transcriptPrefix: transcript.slice(0, 40),
+  });
   if (voiceCmd) {
-    console.log('[midas:voice-parse-worker] Phase 2S2: voice command detected', {
-      jobId: job.id, workspaceId, voiceCmd,
-    });
 
     // ── Blindspot 2: Redis state collision check ──
     // If user is mid-flow (onboarding, clarification, etc.),
