@@ -1656,7 +1656,10 @@ function buildSheet1(wb: ExcelJS.Workbook, rows: TxRow[], from: Date, to: Date, 
           cell.numFmt = fmtCur(row.currency, false);
           cell.font = { size: 9, name: 'Calibri', color: { argb: 'FF7B68EE' } };
         } else {
-          cell.numFmt = fmtCur(row.currency, true);
+          // Explicit +/- sign format: positive shows '+', negative shows '-'
+          const prec2 = CRYPTO_SET.has(row.currency.toUpperCase()) ? '########' : '##';
+          const cur2  = row.currency;
+          cell.numFmt = `+#,##0.${prec2} "${cur2}";-#,##0.${prec2} "${cur2}"`;
           cell.font = { size: 9, name: 'Calibri',
             color: { argb: sv >= 0 ? `FF${C_INCOME}` : `FF${C_EXPENSE}` } };
         }
@@ -1667,10 +1670,17 @@ function buildSheet1(wb: ExcelJS.Workbook, rows: TxRow[], from: Date, to: Date, 
       if (ci === 13) {
         const bal = val as number;
         cell.numFmt = fmtCur(row.account_currency);
-        cell.font = { size: 9, name: 'Calibri', bold: true,
-          color: { argb: bal >= 0 ? `FF${C_INCOME}` : `FF${C_EXPENSE}` } };
-        cell.fill = { type: 'pattern', pattern: 'solid',
-          fgColor: { argb: bal >= 0 ? 'FFE8F8F5' : 'FFFDEDEC' } };
+        if (row._merged) {
+          // Internal transfer: balance_after = source account after debit.
+          // Show in neutral purple — it's a movement, not a loss.
+          cell.font = { size: 9, name: 'Calibri', bold: true, color: { argb: 'FF7B68EE' } };
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEDE7F6' } };
+        } else {
+          cell.font = { size: 9, name: 'Calibri', bold: true,
+            color: { argb: bal >= 0 ? `FF${C_INCOME}` : `FF${C_EXPENSE}` } };
+          cell.fill = { type: 'pattern', pattern: 'solid',
+            fgColor: { argb: bal >= 0 ? 'FFE8F8F5' : 'FFFDEDEC' } };
+        }
       }
     });
 
