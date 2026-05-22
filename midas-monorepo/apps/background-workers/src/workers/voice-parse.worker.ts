@@ -144,6 +144,8 @@ async function buildVoiceNavResponse(
   cmd: NavCommand,
   workspaceId: string,
   userId: string,
+  telegramUserId: string,
+  chatId: string,
 ): Promise<VoiceNavResponse | null> {
   switch (cmd) {
     case 'balance': {
@@ -408,20 +410,33 @@ async function buildVoiceNavResponse(
       };
 
     case 'cancel_last': {
-      // Phase 3.1: cancel_last — query last transaction + confirm card
+      // Phase 2S2+: Query last transaction with all display fields
       const lastTx = await withTenantTransaction(workspaceId, userId, async (client) => {
         const r = await client.query<{
           id: string;
           item_name: string | null;
-          base_amount: string;
-          base_currency: string;
+          original_amount: string;
+          currency: string;
           transaction_intent: string;
           created_at: string;
+          category_name: string | null;
+          account_name: string | null;
+          account_currency: string | null;
+          account_debit_amount: string | null;
+          account_debit_currency: string | null;
         }>(
-          `SELECT id, item_name, base_amount, base_currency, transaction_intent, created_at
-           FROM transactions
-           WHERE workspace_id = $1 AND deleted_at IS NULL
-           ORDER BY created_at DESC
+          `SELECT t.id, t.item_name, t.original_amount, t.currency,
+                  t.transaction_intent, t.created_at,
+                  c.name    AS category_name,
+                  a.name    AS account_name,
+                  a.currency AS account_currency,
+                  t.account_debit_amount,
+                  t.account_debit_currency
+           FROM transactions t
+           LEFT JOIN categories      c ON c.id = t.category_id
+           LEFT JOIN account_sources a ON a.id = t.account_id
+           WHERE t.workspace_id = $1 AND t.deleted_at IS NULL
+           ORDER BY t.created_at DESC
            LIMIT 1`,
           [workspaceId],
         );
@@ -432,30 +447,84 @@ async function buildVoiceNavResponse(
         return { text: '📭 Нет транзакций для отмены.' };
       }
 
+      // ── Format confirmation card ──────────────────────────────────────────
       const intentLabels: Record<string, string> = {
-        expense: '📉 Расход', income: '📈 Доход',
+        expense: '💸 Расход', income: '💰 Доход',
         transfer: '🔄 Перевод', debt_given: '📤 Долг (дал)',
         debt_received: '📥 Долг (взял)',
       };
-      const intent = intentLabels[lastTx.transaction_intent] ?? lastTx.transaction_intent;
-      const name = lastTx.item_name ? ` · ${escapeHtmlSimple(lastTx.item_name)}` : '';
+      const intentLabel = intentLabels[lastTx.transaction_intent] ?? lastTx.transaction_intent;
+      const name = lastTx.item_name ? escapeHtmlSimple(lastTx.item_name) : null;
+      const amountFmt = lastTx.original_amount.replace(/\.?0+$/, '') || '0';
+
       const dt = (() => {
         try {
           const d = new Date(lastTx.created_at);
-          return `${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth() + 1).padStart(2, '0')}.${d.getFullYear()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+          const months = ['янв','фев','мар','апр','мая','июн','июл','авг','сен','окт','ноя','дек'];
+          return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}, ${d.getDate()} ${months[d.getMonth()] ?? ''}`;
         } catch {
           return lastTx.created_at;
         }
       })();
-      const card = `${intent}${name}\n💰 ${lastTx.base_amount} ${lastTx.base_currency}\n⏰ ${dt}`;
+
+      // Build blockquote body: amount + item name
+      const amountLine = `<b>${amountFmt} ${escapeHtmlSimple(lastTx.currency)}</b>`;
+      const blockContent = name ? `${amountLine}\n${name}` : amountLine;
+      const blockquote = `<blockquote>${blockContent}</blockquote>`;
+
+      const lines: string[] = [
+        `🗑 <b>Удалить эту транзакцию?</b>`,
+        '',
+        `${intentLabel}`,
+        blockquote,
+        '',
+        ...(lastTx.category_name ? [`📁 ${escapeHtmlSimple(lastTx.category_name)}`] : []),
+        `⏰ <i>${dt}</i>`,
+        '',
+        'Транзакция будет скрыта из всех отчётов и баланс пересчитается.',
+      ];
+
+      // ── Save full data to Redis for cl:n (restore) ───────────────────────
+      const clDataKey = `midas:cl:data:${lastTx.id}`;
+      const clData = {
+        intent:          lastTx.transaction_intent,
+        amount:          String(lastTx.original_amount),
+        currency:        lastTx.currency,
+        itemName:        lastTx.item_name ?? null,
+        categoryName:    lastTx.category_name ?? null,
+        accountName:     lastTx.account_name ?? null,
+        transactionTime: lastTx.created_at,
+        accountCurrency: lastTx.account_currency ?? null,
+        debitAmount:     lastTx.account_debit_amount ? String(lastTx.account_debit_amount) : null,
+        debitCurrency:   lastTx.account_debit_currency ?? null,
+      };
+      void redisConnection.set(clDataKey, JSON.stringify(clData), 'EX', 600);
+
+      // ── Delete the old confirmed card (midas:am:) ─────────────────────────
+      // The "✅ Записано" card with [✏️ Изменить запись] should disappear
+      // when the user initiates cancel, so the confirmation screen is clear.
+      try {
+        const oldCardMsgId = await redisConnection.get(`midas:am:${telegramUserId}:${chatId}`);
+        if (oldCardMsgId) {
+          const token = process.env.TELEGRAM_BOT_TOKEN;
+          if (token) {
+            void fetch(`${TELEGRAM_API_BASE}/bot${token}/deleteMessage`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ chat_id: chatId, message_id: parseInt(oldCardMsgId, 10) }),
+            });
+          }
+          void redisConnection.del(`midas:am:${telegramUserId}:${chatId}`);
+        }
+      } catch { /* non-fatal: worst case old card stays */ }
 
       return {
-        text: `🗑 <b>Удалить эту транзакцию?</b>\n\n${card}\n\nТранзакция будет скрыта из всех отчётов и баланс пересчитается.`,
+        text: lines.join('\n'),
         keyboard: {
           inline_keyboard: [
             [
-              { text: '✅ Да, удалить', callback_data: `ed:del:y:${lastTx.id}` },
-              { text: '❌ Нет',         callback_data: `ed:del:n:${lastTx.id}` },
+              { text: '✅ Да, удалить', callback_data: `cl:y:${lastTx.id}` },
+              { text: '❌ Нет, оставить', callback_data: `cl:n:${lastTx.id}` },
             ],
           ],
         },
@@ -984,7 +1053,7 @@ async function _processVoiceParse(job: Job<VoiceParseJobPayload>): Promise<void>
       // ── Direct execution: build nav screen inline ──
       // Blindspot 4: Can't import from telegram-bot — minimal SQL queries inlined.
       try {
-        const navResult = await buildVoiceNavResponse(voiceCmd, workspaceId, userId);
+        const navResult = await buildVoiceNavResponse(voiceCmd, workspaceId, userId, telegramUserId, chatId);
         if (navResult) {
           // Replace "⏳ Распознаю..." with the actual nav screen
           await editStatusMessage(chatId, statusMessageId, navResult.text, navResult.keyboard);

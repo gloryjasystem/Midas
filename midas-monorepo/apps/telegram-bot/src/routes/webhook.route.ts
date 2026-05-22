@@ -105,6 +105,7 @@ import {
   editMessageText,
   answerCallbackQuery,
   sendMessage,                   // Phase 2.1: needed for voice status message
+  sendMessageWithKeyboard,       // cl:n: restore confirmed card with edit button
   sendMessageWithReplyKeyboard,  // Phase 1.36-UX: persistent bottom nav keyboard
   deleteMessage,                 // Phase 1.37-UX: clean chat — delete stale bot messages
 } from '../services/telegram-api.js';
@@ -281,6 +282,8 @@ import {
   NAV_BTN_SETTINGS,                // Phase 1.36-UX
   NAV_BTN_TRANSACTIONS,            // Phase 2.0
   buildRejectedScreen,             // ia:cancel handler
+  buildConfirmedScreen,            // cl:n — restore confirmed card
+  buildPostConfirmKeyboard,        // cl:n — [✏️ Изменить запись] button
 } from '../utils/screen-builder.js'; // Phase 1.35
 import {
   getTransactionList,
@@ -1000,7 +1003,8 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
           callbackData.startsWith('ia:') ||
           callbackData.startsWith('clar:') ||
           callbackData.startsWith('ed:') ||
-          callbackData.startsWith('tp:');
+          callbackData.startsWith('tp:') ||
+          callbackData.startsWith('cl:');   // cancel_last confirm — floating
 
         if (!isFloatingCard) {
           void setActiveMessageId(telegramUserId, chatId, String(cq.message.message_id));
@@ -4448,6 +4452,172 @@ Midas создан, чтобы сделать учет денег максима
         return;
       }
 
+      // ── Phase 2S2+: cancel_last confirmation callbacks (prefix "cl:") ───
+      // callback_data formats:
+      //   cl:y:{txId}  — user confirmed deletion (soft-delete)
+      //   cl:n:{txId}  — user chose to keep (restore the confirmed card)
+      if (callbackData.startsWith('cl:')) {
+        const clParts = callbackData.split(':');
+        const clAction = clParts[1];   // 'y' | 'n'
+        const clTxId   = clParts[2];   // transaction ULID
+        const clMsgId  = cq.message ? String(cq.message.message_id) : null;
+
+        if (!clTxId || !clMsgId) {
+          await answerCallbackQuery(cq.id, '⚠️ Неверный запрос');
+          await reply.status(200).send({ ok: true });
+          return;
+        }
+
+        try {
+          const clResolved = await resolveWorkspace(telegramUserId, chatId);
+
+          if (clAction === 'y') {
+            // ── Да, удалить ─────────────────────────────────────────────────
+            // 1. Soft-delete the transaction (RLS-safe via pool.query with workspaceId filter)
+            await pool.query(
+              `UPDATE transactions SET deleted_at = NOW(), updated_at = NOW()
+               WHERE id = $1 AND workspace_id = $2 AND deleted_at IS NULL`,
+              [clTxId, clResolved.workspaceId],
+            );
+
+            // 2. Edit confirmation card → final state (no buttons)
+            void editMessageText(
+              chatId, clMsgId,
+              '🗑 <b>Запись удалена.</b>',
+              { inline_keyboard: [] },
+            );
+
+            // 3. Cleanup Redis cache
+            void redisConnection.del(`midas:cl:data:${clTxId}`);
+
+            void answerCallbackQuery(cq.id, '🗑 Транзакция удалена');
+            request.log.info({ msg: '[midas:bot:webhook] cl:y transaction soft-deleted', telegramUserId, workspaceId: clResolved.workspaceId });
+
+          } else if (clAction === 'n') {
+            // ── Нет, оставить ─────────────────────────────────────────────
+            // 1. Edit confirmation card → brief closure message
+            void editMessageText(
+              chatId, clMsgId,
+              '✅ <b>Запись оставлена.</b>',
+              { inline_keyboard: [] },
+            );
+
+            // 2. Restore confirmed card using cached data from Redis
+            const clRawData = await redisConnection.get(`midas:cl:data:${clTxId}`);
+            if (clRawData) {
+              try {
+                const clData = JSON.parse(clRawData) as {
+                  intent: string | null;
+                  amount: string;
+                  currency: string;
+                  itemName: string | null;
+                  categoryName: string | null;
+                  accountName: string | null;
+                  transactionTime: string | null;
+                  accountCurrency: string | null;
+                  debitAmount: string | null;
+                  debitCurrency: string | null;
+                };
+
+                // Re-compute live balance snapshot (accurate even if other txs changed balance)
+                const BALANCE_SQL = `
+                  SELECT (
+                    COALESCE(a.initial_balance, 0)
+                    + COALESCE(SUM(CASE WHEN t.transaction_intent = 'income'        AND t.base_currency = a.currency THEN t.base_amount END), 0)
+                    + COALESCE(SUM(CASE WHEN t.transaction_intent = 'debt_received' AND t.base_currency = a.currency THEN t.base_amount END), 0)
+                    + COALESCE(SUM(CASE WHEN t.transaction_intent = 'transfer' AND t.transfer_direction = 'inbound' AND t.base_currency = a.currency THEN t.base_amount END), 0)
+                    - COALESCE(SUM(CASE WHEN t.transaction_intent = 'expense'       AND t.base_currency = a.currency THEN t.base_amount END), 0)
+                    - COALESCE(SUM(CASE WHEN t.transaction_intent = 'debt_given'    AND t.base_currency = a.currency THEN t.base_amount END), 0)
+                    - COALESCE(SUM(CASE WHEN t.transaction_intent = 'transfer' AND (t.transfer_direction = 'outbound' OR t.transfer_direction IS NULL) AND t.base_currency = a.currency THEN t.base_amount END), 0)
+                  )::TEXT AS balance
+                  FROM account_sources a
+                  LEFT JOIN transactions t
+                    ON t.account_id = a.id AND t.workspace_id = $1 AND t.deleted_at IS NULL
+                  WHERE a.id = (SELECT id FROM account_sources WHERE workspace_id = $1 AND name = $2 LIMIT 1)
+                    AND a.workspace_id = $1
+                  GROUP BY a.id, a.initial_balance`;
+
+                let balanceAfterRaw: string | null = null;
+                let balanceBeforeRaw: string | null = null;
+
+                if (clData.accountName) {
+                  try {
+                    const balSnap = await pool.query<{ balance: string }>(
+                      BALANCE_SQL,
+                      [clResolved.workspaceId, clData.accountName],
+                    );
+                    balanceAfterRaw = balSnap.rows[0]?.balance ?? null;
+
+                    // Reverse-compute balanceBefore using BigInt arithmetic
+                    if (balanceAfterRaw !== null) {
+                      const isIncome = clData.intent === 'income' || clData.intent === 'debt_received';
+                      const debitForMath = clData.debitAmount ?? clData.amount;
+                      // numericReverse inline (can't import from background-workers)
+                      const toFixed4 = (s: string): string => {
+                        const neg = s.startsWith('-');
+                        const abs2 = neg ? s.slice(1) : s;
+                        const [int2 = '0', dec2 = ''] = abs2.split('.');
+                        return `${neg ? '-' : ''}${int2}.${dec2.padEnd(4, '0').slice(0, 4)}`;
+                      };
+                      const parseScaled = (s: string): bigint => {
+                        const neg = s.startsWith('-');
+                        const abs2 = neg ? s.slice(1) : s;
+                        const [int2 = '0', dec2 = ''] = toFixed4(abs2).split('.');
+                        return neg ? -BigInt(`${int2}${dec2}`) : BigInt(`${int2}${dec2}`);
+                      };
+                      const afterScaled = parseScaled(balanceAfterRaw);
+                      const debitScaled = parseScaled(debitForMath);
+                      const beforeScaled = isIncome ? afterScaled - debitScaled : afterScaled + debitScaled;
+                      const sign2 = beforeScaled < 0n ? '-' : '';
+                      const absV = beforeScaled < 0n ? -beforeScaled : beforeScaled;
+                      const absStr2 = absV.toString().padStart(5, '0');
+                      const intP = absStr2.slice(0, -4) || '0';
+                      const decP = absStr2.slice(-4).replace(/0+$/, '');
+                      balanceBeforeRaw = decP ? `${sign2}${intP}.${decP}` : `${sign2}${intP}`;
+                    }
+                  } catch { /* non-fatal: card shows without Итог block */ }
+                }
+
+                const restoredText = buildConfirmedScreen({
+                  intent:          clData.intent,
+                  amount:          clData.amount,
+                  currency:        clData.currency,
+                  categoryName:    clData.categoryName,
+                  accountName:     clData.accountName,
+                  itemName:        clData.itemName,
+                  transactionTime: clData.transactionTime,
+                  accountCurrency: clData.accountCurrency,
+                  balanceBefore:   balanceBeforeRaw,
+                  balanceAfter:    balanceAfterRaw,
+                  debitAmount:     clData.debitAmount,
+                  debitCurrency:   clData.debitCurrency,
+                });
+                const restoredKb = buildPostConfirmKeyboard(clTxId);
+
+                const newMsgId = await sendMessageWithKeyboard(chatId, restoredText, restoredKb);
+                if (newMsgId) {
+                  void setActiveMessageId(telegramUserId, chatId, String(newMsgId));
+                }
+              } catch (clNErr: unknown) {
+                const errClass = clNErr instanceof Error ? clNErr.constructor.name : 'UnknownError';
+                request.log.error({ msg: '[midas:bot:webhook] cl:n restore failed', telegramUserId, errClass });
+                // Non-fatal: card stays as "✅ Запись оставлена." which is acceptable
+              }
+            }
+
+            void answerCallbackQuery(cq.id, '✅ Запись оставлена');
+            request.log.info({ msg: '[midas:bot:webhook] cl:n transaction kept', telegramUserId, workspaceId: clResolved.workspaceId });
+          }
+        } catch (clErr: unknown) {
+          const clErrClass = clErr instanceof Error ? clErr.constructor.name : 'UnknownError';
+          request.log.error({ msg: '[midas:bot:webhook] cl: callback failed', callbackId: cq.id, clErrClass });
+          void answerCallbackQuery(cq.id, '⚠️ Ошибка, попробуйте ещё раз');
+        }
+
+        await reply.status(200).send({ ok: true });
+        return;
+      }
+
       // ── Phase 3.0: transfer pairing callbacks (prefix "tp:") ───
       // Callback data formats:
       //   tp:type:internal:{draftId}      — user chose internal transfer
@@ -5344,7 +5514,34 @@ Midas создан, чтобы сделать учет денег максима
 
           // Handle sentinel values (complex commands)
           if (navCmd === 'transactions') {
-            // Fall through to NAV_BTN_TRANSACTIONS handler below
+            // ── Transactions: run handler inline (same as NAV_BTN_TRANSACTIONS below) ───
+            const oldNavIdTx = await getNavMessageId(telegramUserId, chatId);
+            if (oldNavIdTx) {
+              void deleteMessage(chatId, oldNavIdTx);
+              void clearNavMessageId(telegramUserId, chatId);
+            }
+            const { getTransactionList, countFilteredTransactions, getMonthMiniStats } = await import('../services/transaction-hub.service.js');
+            const { buildTxListKeyboard, formatTxListHeader } = await import('../services/transaction-keyboard.service.js');
+            const [txItems, txTotal, txStats] = await Promise.all([
+              getTransactionList(resolved.workspaceId, resolved.userId, 0, 'a'),
+              countFilteredTransactions(resolved.workspaceId, resolved.userId, 'a'),
+              getMonthMiniStats(resolved.workspaceId, resolved.userId),
+            ]);
+            if (txTotal === 0) {
+              const emptyMsgId = await sendNavMessage(telegramUserId, chatId,
+                '📋 <b>Транзакции</b>\n\nТранзакций пока нет.', { inline_keyboard: [] });
+              if (emptyMsgId) {
+                await redisConnection.set(`midas:empty_tx_msg:${chatId}`, emptyMsgId, 'EX', 86400);
+              }
+            } else {
+              const txTotalPages = Math.max(1, Math.ceil(txTotal / TX_PAGE_SIZE));
+              const txHeader = formatTxListHeader(txStats, 'a');
+              const txKeyboard = buildTxListKeyboard(txItems, 0, txTotalPages, 'a');
+              void sendNavMessage(telegramUserId, chatId, txHeader, txKeyboard);
+            }
+            request.log.info({ msg: '[midas:bot:webhook] nav:transactions (cmd-router)', telegramUserId, workspaceId: resolved.workspaceId });
+            await reply.status(200).send({ ok: true });
+            return;
           } else {
             // Clear old nav message (same logic as NAV_BTN handlers)
             const oldNavId = await getNavMessageId(telegramUserId, chatId);
