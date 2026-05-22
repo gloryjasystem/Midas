@@ -12,6 +12,11 @@
  * This avoids full outage if migrate.ts has a path issue.
  *
  * SEC-03: Uses DATABASE_URL directly (midas_migrator role).
+ *
+ * NOTE: node-pg-migrate@8 is ESM-only. We must use dynamic import() to
+ * properly resolve the named 'runner' export. Using require() via
+ * createRequire returns an object without a callable function, causing
+ * the "no callable export found" error. Dynamic import() is the fix.
  */
 
 import { createRequire } from 'module';
@@ -55,7 +60,7 @@ function findMigrationsDir(): string | null {
   for (const candidate of candidates) {
     if (!candidate) continue;
     const exists = fs.existsSync(candidate);
-    console.log(`[midas:migrate]  ${exists ? '✓' : '✗'} ${candidate}`);
+    console.log(`[midas:migrate]  ${exists ? '\u2713' : '\u2717'} ${candidate}`);
     if (exists) return candidate;
   }
 
@@ -78,12 +83,10 @@ export async function runMigrations(): Promise<void> {
   console.log('[midas:migrate] Running migrations from:', migrationsDir);
 
   try {
-    const pgMigrate = require('node-pg-migrate');
-    const runner = typeof pgMigrate === 'function' ? pgMigrate : pgMigrate.default;
-
-    if (typeof runner !== 'function') {
-      throw new Error('node-pg-migrate: no callable export found');
-    }
+    // node-pg-migrate@8 is ESM-only — must use dynamic import() to get named exports.
+    // The 'runner' named export is the migration function (NOT the default export).
+    // Using require() via createRequire fails to resolve ESM named exports in Node 22+.
+    const { runner } = await import('node-pg-migrate');
 
     await runner({
       databaseUrl,

@@ -5,13 +5,20 @@
  *   - account_type: card, cash, exchange, wallet, custom
  *   - provider_key: freeform text for specific provider (e.g. 'binance', 'monobank')
  *
- * Note: exchange_rate column already exists in transactions (added in MVP schema).
- *       No changes to transactions table needed.
+ * Design decisions:
+ *   - Both columns are nullable (NULL = not set / unclassified)
+ *   - account_type has a CHECK constraint (allowlist)
+ *   - provider_key is freeform text (no constraint)
+ *   - IF NOT EXISTS / IF EXISTS guards — idempotent, safe to re-run
+ *
+ * ESM format (matches packages/database "type": "module").
+ * SEC-03: DDL migration — no tenant context needed.
  */
 
-/** @param {import('pg').PoolClient} client */
-exports.up = async (client) => {
-  await client.query(`
+export const shorthands = undefined;
+
+export const up = (pgm) => {
+  pgm.sql(`
     ALTER TABLE account_sources
       ADD COLUMN IF NOT EXISTS account_type TEXT
         CHECK (account_type IN ('card', 'cash', 'exchange', 'wallet', 'custom')),
@@ -19,9 +26,8 @@ exports.up = async (client) => {
   `);
 };
 
-/** @param {import('pg').PoolClient} client */
-exports.down = async (client) => {
-  await client.query(`
+export const down = (pgm) => {
+  pgm.sql(`
     ALTER TABLE account_sources
       DROP COLUMN IF EXISTS provider_key,
       DROP COLUMN IF EXISTS account_type;
