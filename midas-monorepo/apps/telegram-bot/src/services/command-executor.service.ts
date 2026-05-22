@@ -18,6 +18,7 @@ import { formatSettingsMenuText, buildSettingsMainKeyboard } from './settings-ke
 import { buildStartOnboardKeyboard } from './account-onboard-keyboard.service.js';
 import { getSettings } from './settings.service.js';
 import { withTenantTransaction } from '@midas/database';
+import { redisConnection } from '../queues/redis.js';
 
 // ─────────────────────────────────────────────────────────────
 // Types
@@ -93,19 +94,29 @@ const CMD_HELP_TEXT =
 interface LastTransaction {
   id: string;
   item_name: string | null;
-  base_amount: string;
-  base_currency: string;
+  original_amount: string;
+  currency: string;
   transaction_intent: string;
   created_at: string;
+  category_name: string | null;
+  account_name: string | null;
+  account_currency: string | null;
 }
 
 async function getLastTransaction(workspaceId: string, userId: string): Promise<LastTransaction | null> {
   const result = await withTenantTransaction(workspaceId, userId, async (client) => {
     const r = await client.query<LastTransaction>(
-      `SELECT id, item_name, base_amount, base_currency, transaction_intent, created_at
-       FROM transactions
-       WHERE workspace_id = $1 AND deleted_at IS NULL
-       ORDER BY created_at DESC
+      `SELECT t.id, t.item_name, t.original_amount, t.currency,
+              t.transaction_intent, t.created_at,
+              c.name AS category_name,
+              a.name AS account_name,
+              a.currency AS account_currency
+       FROM transactions t
+       LEFT JOIN categories c ON c.id = t.category_id
+       LEFT JOIN account_sources a ON a.id = t.account_id
+       WHERE t.workspace_id = $1 AND t.deleted_at IS NULL
+         AND (t.transfer_direction IS DISTINCT FROM 'inbound')
+       ORDER BY t.created_at DESC
        LIMIT 1`,
       [workspaceId],
     );
@@ -116,23 +127,22 @@ async function getLastTransaction(workspaceId: string, userId: string): Promise<
 
 function formatCancelCard(tx: LastTransaction): string {
   const intentLabels: Record<string, string> = {
-    expense: '📉 Расход',
-    income: '📈 Доход',
-    transfer: '🔄 Перевод',
-    debt_given: '📤 Долг (дал)',
-    debt_received: '📥 Долг (взял)',
+    expense: '\uD83D\uDCE5 Расход',
+    income: '\uD83D\uDCE4 Доход',
+    transfer: '\uD83D\uDD04 Перевод',
+    debt_given: '\uD83D\uDCE4 Долг (дал)',
+    debt_received: '\uD83D\uDCE5 Долг (взял)',
   };
   const intent = intentLabels[tx.transaction_intent] ?? tx.transaction_intent;
   const name = tx.item_name ? ` · ${tx.item_name}` : '';
   const dt = (() => {
     try {
       const d = new Date(tx.created_at);
-      return `${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth() + 1).padStart(2, '0')}.${d.getFullYear()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
-    } catch {
-      return tx.created_at;
-    }
+      return `${String(d.getDate()).padStart(2,'0')}.${String(d.getMonth()+1).padStart(2,'0')}.${d.getFullYear()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+    } catch { return tx.created_at; }
   })();
-  return `${intent}${name}\n💰 ${tx.base_amount} ${tx.base_currency}\n⏰ ${dt}`;
+  const amtClean = tx.original_amount.replace(/\.?0+$/, '');
+  return `${intent}${name}\n\uD83D\uDCB0 ${amtClean} ${tx.currency}\n\u23F0 ${dt}`;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -185,19 +195,37 @@ export async function buildCommandResponse(
       // Transactions require complex query + pagination → delegate to inline handler
       return { text: '__DELEGATE_TX__' }; // sentinel — webhook handles inline
     case 'cancel_last': {
-      // Phase 3.1: cancel_last implementation
+      // Phase 2S2: cancel_last — show confirmation card with cl:y/cl:n callbacks
+      // Saves full tx data to Redis so cl:n can restore the confirmed card.
       const lastTx = await getLastTransaction(ctx.workspaceId, ctx.userId);
       if (!lastTx) {
-        return { text: '📭 Нет транзакций для отмены.' };
+        return { text: '\uD83D\uDCED \u041D\u0435\u0442 \u0442\u0440\u0430\u043D\u0437\u0430\u043A\u0446\u0438\u0439 \u0434\u043B\u044F \u043E\u0442\u043C\u0435\u043D\u044B.' };
       }
+
+      // Save full data to Redis for cl:n restore (same as voice worker)
+      const clDataKey = `midas:cl:data:${lastTx.id}`;
+      const clRedisData = {
+        intent:          lastTx.transaction_intent,
+        amount:          String(lastTx.original_amount),
+        currency:        lastTx.currency,
+        itemName:        lastTx.item_name ?? null,
+        categoryName:    lastTx.category_name ?? null,
+        accountName:     lastTx.account_name ?? null,
+        transactionTime: lastTx.created_at,
+        accountCurrency: lastTx.account_currency ?? null,
+        debitAmount:     null,
+        debitCurrency:   null,
+      };
+      void redisConnection.set(clDataKey, JSON.stringify(clRedisData), 'EX', 600);
+
       const card = formatCancelCard(lastTx);
       return {
-        text: `🗑 <b>Удалить эту транзакцию?</b>\n\n${card}\n\nТранзакция будет скрыта из всех отчётов и баланс пересчитается.`,
+        text: `\uD83D\uDDD1 <b>\u0423\u0434\u0430\u043B\u0438\u0442\u044C \u044D\u0442\u0443 \u0442\u0440\u0430\u043D\u0437\u0430\u043A\u0446\u0438\u044E?</b>\n\n${card}\n\n\u0422\u0440\u0430\u043D\u0437\u0430\u043A\u0446\u0438\u044F \u0431\u0443\u0434\u0435\u0442 \u0441\u043A\u0440\u044B\u0442\u0430 \u0438\u0437 \u0432\u0441\u0435\u0445 \u043E\u0442\u0447\u0451\u0442\u043E\u0432 \u0438 \u0431\u0430\u043B\u0430\u043D\u0441 \u043F\u0435\u0440\u0435\u0441\u0447\u0438\u0442\u0430\u0435\u0442\u0441\u044F.`,
         keyboard: {
           inline_keyboard: [
             [
-              { text: '✅ Да, удалить', callback_data: `ed:del:y:${lastTx.id}` },
-              { text: '❌ Нет',         callback_data: `ed:del:n:${lastTx.id}` },
+              { text: '\uD83D\uDDD1 \u0414\u0430, \u0443\u0434\u0430\u043B\u0438\u0442\u044C', callback_data: `cl:y:${lastTx.id}` },
+              { text: '\u25C4\uFE0F \u041E\u0442\u043C\u0435\u043D\u0430',                    callback_data: `cl:n:${lastTx.id}` },
             ],
           ],
         },

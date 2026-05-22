@@ -5542,6 +5542,24 @@ Midas создан, чтобы сделать учет денег максима
             request.log.info({ msg: '[midas:bot:webhook] nav:transactions (cmd-router)', telegramUserId, workspaceId: resolved.workspaceId });
             await reply.status(200).send({ ok: true });
             return;
+          } else if (navCmd === 'cancel_last') {
+            // ── cancel_last: DO NOT use sendNavMessage (would overwrite nav pointer) ──
+            // Delete old confirmed card (midas:am:) if exists, then send cancel confirm.
+            try {
+              const oldAmId = await getActiveMessageId(telegramUserId, chatId);
+              if (oldAmId && oldAmId !== '0') {
+                void deleteMessage(chatId, oldAmId);
+                void clearActiveMessageId(telegramUserId, chatId);
+              }
+            } catch { /* non-fatal */ }
+
+            const clResponse = await buildCommandResponse(navCmd, cmdCtx);
+            const clKeyboard = clResponse.keyboard ?? { inline_keyboard: [] };
+            void sendMessageWithKeyboard(chatId, clResponse.text, clKeyboard);
+
+            request.log.info({ msg: '[midas:bot:webhook] nav:cancel_last (text)', telegramUserId, workspaceId: resolved.workspaceId });
+            await reply.status(200).send({ ok: true });
+            return;
           } else {
             // Clear old nav message (same logic as NAV_BTN handlers)
             const oldNavId = await getNavMessageId(telegramUserId, chatId);
