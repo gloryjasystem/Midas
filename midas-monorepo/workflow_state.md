@@ -1,7 +1,7 @@
-﻿# WORKFLOW_STATE.MD — Диспетчер задач ИИ-агента Midas
+# WORKFLOW_STATE.MD — Диспетчер задач ИИ-агента Midas
 
 > **Тип:** MUTABLE — кратковременная память агента. Обновляется на каждом шаге работы.
-> **Обновлён:** 2026-05-21 21:24 (UTC+3)
+> **Обновлён:** 2026-05-22 21:28 (UTC+3)
 
 ---
 
@@ -9,15 +9,15 @@
 
 | Параметр | Значение |
 |---|---|
-| **PHASE** | Excel Export 2.0 — Sheet 0 Overhaul ✅ |
-| **STEP** | Сессия 2026-05-21 18:00–21:24 (UTC+3). Sheet 0 полностью переработан: smart period, движение капитала per-pair, удалён лист Контрагенты. Все изменения запушены. |
-| **AGENT STATUS** | tsc 0 errors. Commits: fdf21fc → 54f0d8c → afb08fa. Pushed to main. Railway auto-deploy triggered. |
+| **PHASE** | Phase 2S2 — Voice Command Pipeline (cancel_last fix + edit_last) ✅ |
+| **STEP** | Сессия 2026-05-22 13:00–21:28 (UTC+3). cancel_last полностью починен (midas:last_confirmed ключ). edit_last — новая голосовая/текстовая команда для редактирования последней транзакции. |
+| **AGENT STATUS** | tsc 0 errors. Commits: b16410e → dfa168f → 7c21f33. Pushed to main. Railway auto-deploy triggered. |
 | **DEPLOYMENT** | Railway (spirited-happiness) — Midas Online, background-workers Online. Health: https://midas-production-f4f1.up.railway.app/health > ok |
-| **DB STATE** | `transfer_group_id`: TEXT ✅ \| `current_screen`: TEXT ✅ \| Все 5 миграций (1780000000000–1780400000000) применены ✅ |
+| **DB STATE** | `transfer_group_id`: TEXT ✅ \| `current_screen`: TEXT ✅ \| Все 5 миграций (1780000000000–1780400000000) применены ✅ \| Нет новых миграций в этой сессии. |
 | **DATABASE_URL (public)** | `postgresql://postgres:PLLSqArtPUoQsAYmvrpsmavfQMewgTRh@hopper.proxy.rlwy.net:46284/railway` |
-| **LAST COMPLETED** | Excel Sheet 0 overhaul + удалён Sheet 6 Контрагенты. Commits: fdf21fc, 54f0d8c, afb08fa. |
+| **LAST COMPLETED** | Phase 2S2: cancel_last fix (midas:last_confirmed) + edit_last (voice+text). Commits: dfa168f, 7c21f33. |
 | **BLOCKER** | None. |
-| **NEXT ACTION** | 1. Phase 3.1 — расширение словаря item-category-detector.service.ts (500+ записей). 2. Phase 3.2 — Report 3.0 (категорийная аналитика). |
+| **NEXT ACTION** | 1. Phase 3.1 — расширение словаря item-category-detector.service.ts (500+ записей). 2. Phase 3.2 — Report 3.0 (категорийная аналитика). 3. Тестирование edit_last + cancel_last в production. |
 
 
 
@@ -101,6 +101,11 @@
 | **Excel Export 2.0 — Remove Sheet 6 Контрагенты** | ✅ DEPLOYED | **Commit: 54f0d8c.** Лист «Контрагенты» (buildSheet6PayeeAnalytics) удалён полностью — всегда был пустым, т.к. поле `person_name` никогда не заполняется через бота. Удалены: вызов функции + сама функция (188 строк). tsc 0 ошибок. |
 
 | **Excel Export 2.0 — Column D Center Alignment** | ✅ DEPLOYED | **Commit: afb08fa.** В секции «ДВИЖЕНИЕ КАПИТАЛА» (Sheet 0): заголовок «Списано» (col 4) и значения (`−X.XX CUR`) выровнены по центру (`horizontal: center`). Ранее было `right`. |
+
+| **Phase 2S2 — cancel_last Fix (midas:last_confirmed)** | ✅ DEPLOYED | **Сессия 2026-05-22 13:00–18:15 (UTC+3). Commit: dfa168f.** Корневая причина: `notifications.worker.ts` намеренно DEL'ил `midas:am:` для `isSuccessCard=true` карточек (чтобы step-7 не удалял «✅ Записано»). Это ломало cancel_last — `oldCardMsgId` всегда = null. **Фикс:** (1) `notifications.worker.ts` — при `isSuccessCard` записывает `midas:last_confirmed:{uid}:{cid}` (TTL 24h) с msgId подтверждённой карточки. (2) `voice-parse.worker.ts` cancel_last — читает `midas:last_confirmed:` первым, fallback на `midas:am:`. (3) `webhook.route.ts` text cancel_last — та же логика. **Доп. фиксы из этой сессии:** `lastTx.original_amount.replace is not a function` — regex `.replace` на NUMERIC поле; SQL `updated_at` → несуществующая колонка; `withTenantTransaction` вместо `pool.query` для RLS; trailing zeros regex `/\.?0+$/` bug ("100"→"1") — заменён на `includes('.') ? replace : identity`. |
+
+| **Phase 2S2 — edit_last (Voice + Text Command)** | ✅ DEPLOYED | **Сессия 2026-05-22 18:17–18:25 (UTC+3). Commit: 7c21f33.** Новая голосовая и текстовая команда для редактирования последней транзакции. **(1) `command-router.ts`:** `NavCommand` расширен: `'edit_last'`. 9 regex паттернов (измени/изменить/редактир + последн/запись/транзакци). Размещены ДО `cancel_last` (приоритет: «изменить» ≠ «удалить»). **(2) `command-executor.service.ts`:** case `'edit_last'` — `getLastTransaction()` → `getTransactionCard(txId)` → `formatTxDetailCard(card)` + 6 кнопок (tx:f:amt/cat/acc/int + tx:d:ask + tx:done). `is_cross_currency` check для кнопки суммы. **(3) `webhook.route.ts`:** `else if (navCmd === 'edit_last')` — `buildCommandResponse` + `sendMessageWithKeyboard`. **(4) `voice-parse.worker.ts`:** `case 'edit_last'` — inline SQL (base_amount, base_currency, is_cross_currency, transaction_time) + inline card format (mirrors formatTxDetailCard) + keyboard (tx: callbacks). Все 4 callback_data формата уже обработаны existing ed:/tx: handlers. **Shared rebuild:** `npx turbo run build --filter=@midas/shared`. tsc 0 ошибок для обоих проектов. |
+
 ---
 
 ## 3. ПРИНЯТЫЕ АРХИТЕКТУРНЫЕ РЕШЕНИЯ
@@ -150,6 +155,7 @@
     - `midas:dead_card:{chatId}` — message_id карточки "? Отменено" или "? Черновик истёк", TTL 24h. Записывается confirmation.worker (reject/expired) и draft-expiration.worker (CRON expire). Читается и удаляется ai-parse.worker при отправке следующей preview — карточка автоматически удаляется из чата. (Phase 1.40)
      - `midas:am:{userId}:{chatId}` — Phase 2.10: pointer на текущее активное сообщение (черновики, пикеры счётов, clarification). TTL 24h. При approve транзакции — DEL (не SET, чтобы success card не удалялась). Step-7 в webhook.route.ts проверяет `midas:success_card:{amId}` перед удалением.
      - `midas:success_card:{msgId}` — Phase 2.10: sentinel key, TTL 30 дней. Записывается `notifications.worker` при `isSuccessCard=true` (после approve). Читается step-7 в `webhook.route.ts` — если EXISTS, сообщение НЕ удаляется при вводе следующей транзакции. Двойная блокировка вместе с DEL `midas:am:`.
+     - `midas:last_confirmed:{userId}:{chatId}` — Phase 2S2: msgId подтверждённой «✅ Записано» карточки, TTL 24h. Записывается `notifications.worker` при `isSuccessCard=true`. Читается cancel_last и edit_last (voice-parse.worker + webhook.route.ts) для удаления старой карточки. Решает проблему что `midas:am:` = null для success cards.
     - `bl:state:{telegramUserId}:{chatId}` — Phase 2.1: state для текстовых intercepts баланс-менеджмента. Хранит `{action, accountId}`. Actions: `rename`, `set_balance`, `currency_input`. TTL 300s.
     - `bl:source:{telegramUserId}:{chatId}` — Phase 2.1: флаг что добавление счёта инициировано из баланса. При `ac:done` возвращает в balance dashboard вместо setup complete.
      - `midas:tx:sr:ctx:{telegramUserId}:{chatId}` — Phase 2.3: поисковый контекст для пагинации. Хранит JSON `{t: 'name'|'amount'|'category'|'date', q?: string, f?: string, to?: string, lb?: string}` TTL 600s. Создаётся при первом поиске, читается при навигации по страницам (tx:sr:p:{page}). При устаревании — дружелюбное сообщение «поиск заново».
