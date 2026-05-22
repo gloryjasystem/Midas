@@ -5549,9 +5549,14 @@ Midas создан, чтобы сделать учет денег максима
             // ── cancel_last: DO NOT use sendNavMessage (would overwrite nav pointer) ──
             // Delete old confirmed card (midas:am:) if exists, then send cancel confirm.
             try {
-              const oldAmId = await getActiveMessageId(telegramUserId, chatId);
+              // Try midas:last_confirmed (set by notifications worker for success cards)
+              // Fallback to midas:am: (for non-success edits)
+              const lcKey = `midas:last_confirmed:${telegramUserId}:${chatId}`;
+              const oldAmId = await redisConnection.get(lcKey)
+                ?? await getActiveMessageId(telegramUserId, chatId);
               if (oldAmId && oldAmId !== '0') {
                 await deleteMessage(chatId, oldAmId);
+                await redisConnection.del(lcKey);
                 await clearActiveMessageId(telegramUserId, chatId);
               }
             } catch { /* non-fatal */ }

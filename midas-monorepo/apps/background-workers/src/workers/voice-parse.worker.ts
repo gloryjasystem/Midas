@@ -506,10 +506,14 @@ async function buildVoiceNavResponse(
       // The "✅ Записано" card with [✏️ Изменить запись] should disappear
       // when the user initiates cancel, so the confirmation screen is clear.
       try {
+        // Try midas:last_confirmed first (set by notifications worker for success cards),
+        // fallback to midas:am: (set by webhook for non-success edits).
+        // Notifications worker DEL's midas:am: for success cards to protect from step-7 cleanup.
+        const lcKey = `midas:last_confirmed:${telegramUserId}:${chatId}`;
         const amKey = `midas:am:${telegramUserId}:${chatId}`;
-        const oldCardMsgId = await redisConnection.get(amKey);
+        const oldCardMsgId = await redisConnection.get(lcKey) ?? await redisConnection.get(amKey);
         console.log('[midas:voice-parse-worker] cancel_last: delete old card check', {
-          amKey, oldCardMsgId, hasToken: !!process.env.TELEGRAM_BOT_TOKEN,
+          lcKey, amKey, oldCardMsgId, hasToken: !!process.env.TELEGRAM_BOT_TOKEN,
         });
         if (oldCardMsgId && oldCardMsgId !== '0') {
           const token = process.env.TELEGRAM_BOT_TOKEN;
@@ -524,6 +528,8 @@ async function buildVoiceNavResponse(
               status: delResp.status, body: delBody.slice(0, 200),
             });
           }
+          // Clean up both keys
+          await redisConnection.del(lcKey);
           await redisConnection.del(amKey);
         }
       } catch (delErr) {
