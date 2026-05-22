@@ -571,7 +571,6 @@ function buildSheet0Summary(
   const intentDefs: [string, IntentKey, 1 | -1][] = [
     ['💰 Доходы',       'income',        1],
     ['💸 Расходы',      'expense',       -1],
-    ['🔄 Переводы',     'transfer',      -1],
     ['🤝 Долги (дал)',  'debt_given',    -1],
     ['🤲 Долги (взял)', 'debt_received',  1],
   ];
@@ -645,8 +644,7 @@ function buildSheet0Summary(
     const net =
       (im.income.byCur.get(cur) ?? 0) +
       (im.debt_received.byCur.get(cur) ?? 0) -
-      (im.expense.byCur.get(cur) ?? 0) +
-      (transferSigned.get(cur) ?? 0) -
+      (im.expense.byCur.get(cur) ?? 0) -
       (im.debt_given.byCur.get(cur) ?? 0);
     const rate   = usdRates.get(cur.toUpperCase()) ?? null;
     const source = (rateSources.get(cur.toUpperCase()) ?? 'uncovered') as RateSource | 'uncovered';
@@ -929,7 +927,7 @@ function buildSheet0Summary(
   };
 
   for (const [cur, t] of byCur) {
-    const net    = t.income + t.debtReceived - t.expense - t.transfer - t.debtGiven;
+    const net    = t.income + t.debtReceived - t.expense - t.debtGiven;
     const netClr = net >= 0 ? `FF${C_INCOME}` : `FF${C_EXPENSE}`;
     const fillBg = { type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb: `FF${C_TOTAL_BG}` } };
 
@@ -945,7 +943,6 @@ function buildSheet0Summary(
     if (t.income       > 0) parts.push(`💰 +${fmtAmtSigned(t.income).replace('+ ', '')}`);
     if (t.debtReceived > 0) parts.push(`🤲 +${fmtAmtSigned(t.debtReceived).replace('+ ', '')}`);
     if (t.expense      > 0) parts.push(`💸 ${fmtAmtSigned(-t.expense)}`);
-    if (t.transfer     > 0) parts.push(`🔄 ${fmtAmtSigned(-t.transfer)}`);
     if (t.debtGiven    > 0) parts.push(`🤝 ${fmtAmtSigned(-t.debtGiven)}`);
 
     ws.mergeCells(r, 3, r, 4);
@@ -998,7 +995,7 @@ function buildSheet0Summary(
   type CatSummary = { totalUsd: number; originals: Map<string, number>; uncovered: Map<string, number>; count: number };
   const catMap = new Map<string, CatSummary>();
 
-  const OUT_INTENTS = new Set(['expense', 'transfer', 'debt', 'debt_given']);
+  const OUT_INTENTS = new Set(['expense', 'debt', 'debt_given']);
   for (const row of rows) {
     if (!OUT_INTENTS.has(row.transaction_intent)) continue;
     const name = row.category_name;
