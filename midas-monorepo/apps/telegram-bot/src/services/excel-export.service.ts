@@ -17,6 +17,7 @@
 
 import ExcelJS from 'exceljs';
 import { withTenantTransaction } from '@midas/database';
+import { getCategoryEmoji } from '../utils/category-emoji.js'; // Phase 4.0-F
 
 // ─────────────────────────────────────────────────────────────
 // Brand colours
@@ -241,6 +242,7 @@ interface TxRow {
   account_debit_currency: string | null;
   exchange_rate: string;
   category_name: string;
+  category_icon: string | null;  // Phase 4.0-F: custom category emoji from DB
   category_group: string;
   account_name: string;
   account_currency: string;
@@ -332,6 +334,7 @@ export async function exportTransactionsExcel(
          wb.account_debit_currency,
          wb.exchange_rate::text,
          COALESCE(c.name, '—')        AS category_name,
+         c.icon                        AS category_icon,
          COALESCE(c.group::text, '—') AS category_group,
          COALESCE(a.name, '—')        AS account_name,
          COALESCE(a.currency, '—')    AS account_currency,
@@ -960,36 +963,15 @@ function buildSheet0Summary(
   r++; // spacer
 
   // ── ТОП РАСХОДОВ ПО КАТЕГОРИЯМ (USD) ──────────────────────────────────────
-  function categoryIcon(name: string): string {
-    const n = name.toLowerCase();
-    if (n.includes('продукт'))            return '🛒';
-    if (n.includes('кафе') || n.includes('ресторан')) return '🍽️';
-    if (n.includes('транспорт'))          return '🚗';
-    if (n.includes('жиль') || n.includes('аренд'))   return '🏠';
-    if (n.includes('здоров'))             return '💊';
-    if (n.includes('одежда') || n.includes('одежд')) return '👗';
-    if (n.includes('красота'))            return '💅';
-    if (n.includes('развлечени'))         return '🎮';
-    if (n.includes('подписк'))            return '📱';
-    if (n.includes('связь'))              return '📡';
-    if (n.includes('образовани'))         return '📚';
-    if (n.includes('спорт'))              return '🏋️';
-    if (n.includes('путешест'))           return '✈️';
-    if (n.includes('подарок') || n.includes('подарки')) return '🎁';
-    if (n.includes('дети'))               return '👶';
-    if (n.includes('зарплат') || n.includes('выплат')) return '💼';
-    if (n.includes('фриланс'))            return '💻';
-    if (n.includes('реклам'))             return '📣';
-    if (n.includes('софт') || n.includes('сервис'))   return '⚙️';
-    if (n.includes('оборудован'))         return '🖥️';
-    if (n.includes('офис'))               return '🏢';
-    if (n.includes('налог'))              return '🏦';
-    if (n.includes('комисси'))            return '💳';
-    if (n.includes('крипто'))             return '₿';
-    if (n.includes('подрядчик'))          return '👷';
-    if (n.includes('продажи'))            return '📈';
-    if (n.includes('инвестиц'))           return '💹';
-    return '📂';
+  // Phase 4.0-F: categoryIcon() removed — using getCategoryEmoji() from utility
+  // Custom categories use c.icon from DB, standard use hardcoded lookup, fallback 📂
+
+  // Build icon lookup from rows (category_name → category_icon)
+  const catIconLookup = new Map<string, string>();
+  for (const row of rows) {
+    if (row.category_icon && !catIconLookup.has(row.category_name)) {
+      catIconLookup.set(row.category_name, row.category_icon);
+    }
   }
 
   type CatSummary = { totalUsd: number; originals: Map<string, number>; uncovered: Map<string, number>; count: number };
@@ -1061,7 +1043,7 @@ function buildSheet0Summary(
 
     for (const [idx, [name, cs]] of mainTopList.entries()) {
       const pct  = lrPcts[idx];
-      const icon = categoryIcon(name);
+      const icon = getCategoryEmoji(name, catIconLookup.get(name) ?? null);
 
       const rc1 = ws.getCell(r, 1);
       rc1.value = `${idx + 1}.`;
@@ -1116,7 +1098,7 @@ function buildSheet0Summary(
       r++;
 
       for (const [name, cs] of uncoveredOnlyList) {
-        const icon  = categoryIcon(name);
+        const icon  = getCategoryEmoji(name, catIconLookup.get(name) ?? null);
         const parts: string[] = [];
         for (const [cur, amt] of cs.uncovered) parts.push(`${fmtAmtSigned(-amt)} ${cur}`);
         const uc1 = ws.getCell(r, 1); uc1.value = '—'; uc1.font = { size: 9, name: 'Calibri', color: { argb: 'FFAAAAAA' } };

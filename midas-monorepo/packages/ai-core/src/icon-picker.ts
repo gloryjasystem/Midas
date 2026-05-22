@@ -40,21 +40,62 @@ const API_TIMEOUT_MS = 5_000;
  * Combined with max_tokens=5, even a successful injection attempt
  * can only produce ~1-2 tokens of text, which fails isEmoji() validation.
  */
+/**
+ * System prompt: strict but rich in examples for better icon selection.
+ * Claude outputs ONLY one emoji. max_tokens=5 physically caps output.
+ */
 const ICON_SYSTEM_PROMPT =
-  `You are an emoji picker for a personal finance app. ` +
-  `Given a category name in any language, output EXACTLY ONE emoji character. ` +
+  `You are an expert emoji picker for a personal finance app. ` +
+  `Given a category name in ANY language, output EXACTLY ONE emoji character that BEST represents it. ` +
   `No text, no JSON, no explanation — just the emoji.\n\n` +
-  `Rules:\n` +
-  `- Dog/pet names → 🐕\n` +
-  `- Car/auto → 🚗\n` +
-  `- Home/apartment/rent → 🏠\n` +
-  `- People names → 👤\n` +
-  `- Companies/brands → industry emoji (Netflix→🎬, Spotify→🎵)\n` +
-  `- Food/groceries → 🛒\n` +
-  `- Coffee/restaurants → ☕\n` +
-  `- Medicine/health → 💊\n` +
-  `- Travel → ✈️\n` +
-  `- Children/kids → 👶\n` +
+  `CRITICAL RULES:\n` +
+  `- Output MUST be a single emoji character\n` +
+  `- Be SPECIFIC, not generic. Pick the most precise emoji possible.\n` +
+  `- For Russian words: understand the meaning and pick accordingly\n\n` +
+  `EXAMPLES (learn the pattern):\n` +
+  `- Стройка/ремонт/строительство → 🏗️\n` +
+  `- Рекс/Барсик/питомец/собака → 🐕\n` +
+  `- Кот/кошка/котёнок → 🐱\n` +
+  `- Авто/машина/бензин/парковка → 🚗\n` +
+  `- Дом/квартира/аренда/ипотека → 🏠\n` +
+  `- Уборка/клининг/чистота → 🧹\n` +
+  `- Маша/Саша/Дима (person names) → 👤\n` +
+  `- Мама/папа/родители → 👨‍👩‍👧\n` +
+  `- Дети/ребёнок/школа → 👶\n` +
+  `- Сад/огород/дача/растения → 🌱\n` +
+  `- Спортзал/фитнес/тренировки → 💪\n` +
+  `- Бег/марафон → 🏃\n` +
+  `- Йога/медитация → 🧘\n` +
+  `- Велосипед → 🚴\n` +
+  `- Кофе/кофейня → ☕\n` +
+  `- Бар/алкоголь/вино → 🍷\n` +
+  `- Пицца/фастфуд → 🍕\n` +
+  `- Суши/японская еда → 🍣\n` +
+  `- Книги/чтение → 📖\n` +
+  `- Музыка/концерты → 🎵\n` +
+  `- Кино/фильмы/Netflix → 🎬\n` +
+  `- Игры/gaming → 🎮\n` +
+  `- Фото/камера → 📸\n` +
+  `- Цветы/букет → 💐\n` +
+  `- Парикмахер/стрижка/барбер → 💇\n` +
+  `- Маникюр/ногти → 💅\n` +
+  `- Стоматолог/зубы → 🦷\n` +
+  `- Аптека/лекарства/витамины → 💊\n` +
+  `- Психолог/терапия → 🧠\n` +
+  `- Самолёт/перелёт → ✈️\n` +
+  `- Отель/гостиница → 🏨\n` +
+  `- Такси/Uber → 🚕\n` +
+  `- Метро/электричка → 🚇\n` +
+  `- Телефон/смартфон → 📱\n` +
+  `- Интернет/WiFi → 🌐\n` +
+  `- Страховка → 🛡️\n` +
+  `- Благотворительность/донат → ❤️\n` +
+  `- Курсы/обучение/учёба → 🎓\n` +
+  `- Хобби/творчество → 🎨\n` +
+  `- Рыбалка → 🎣\n` +
+  `- Охота → 🏹\n` +
+  `- Путешествие/отпуск → 🏖️\n` +
+  `- Netflix/Spotify/YouTube (brands) → industry emoji\n` +
   `- If unclear or abstract → 🏷️`;
 
 // ─────────────────────────────────────────────────────────────
@@ -156,7 +197,7 @@ export async function pickCategoryIcon(categoryName: string): Promise<string> {
         {
           model: 'claude-haiku-4-5-20250609',
           max_tokens: 5,         // D2: physically cap output length
-          temperature: 0.3,      // Slight variety but mostly deterministic
+          temperature: 0.5,      // Creative but stable picks
           system: ICON_SYSTEM_PROMPT,
           messages: [{ role: 'user', content: truncatedName }],
         },
