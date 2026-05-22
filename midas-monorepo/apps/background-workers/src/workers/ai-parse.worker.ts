@@ -130,15 +130,6 @@ function buildCategoryClarKeyboard(
   return { inline_keyboard: rows };
 }
 
-/**
- * Build the nonsense keyboard.
- * Phase 1.37-UX: No inline buttons — AI should determine intent from context.
- * Returns an empty keyboard which clears any previously displayed buttons
- * when the message is edited (e.g., 2nd unrecognised message edits the 1st).
- */
-function buildNonsenseKeyboard(): object {
-  return { inline_keyboard: [] };
-}
 
 // ─────────────────────────────────────────────────────────────
 // Currency classification + picker filtering
@@ -949,8 +940,12 @@ async function processAiParse(job: Job<AiParseJobPayload>): Promise<void> {
           categoryHint: partialData?.category_hint ?? null,
         });
       }
-      // No keyboard for amount — user types a number
-      clarKeyboard = { inline_keyboard: [] };
+      // Amount clarification — user types a number, but can also cancel
+      clarKeyboard = {
+        inline_keyboard: [
+          [{ text: '✖️ Отмена', callback_data: `ia:cancel:${draftId}` }],
+        ],
+      };
 
     } else if (clarificationField === 'intent') {
       // Unclear intent — show intent picker
@@ -962,6 +957,10 @@ async function processAiParse(job: Job<AiParseJobPayload>): Promise<void> {
         categoryHint: partialData?.category_hint ?? null,
       });
       clarKeyboard = buildIntentClarKeyboard(draftId, partialData?.intent ?? null);
+      // Append cancel row
+      (clarKeyboard as { inline_keyboard: object[][] }).inline_keyboard.push(
+        [{ text: '✖️ Отмена', callback_data: `ia:cancel:${draftId}` }],
+      );
 
     } else if (clarificationField === 'category') {
       // Missing category — show category picker
@@ -974,7 +973,7 @@ async function processAiParse(job: Job<AiParseJobPayload>): Promise<void> {
       if (categories.length === 0) {
         // No categories — fall back to nonsense keyboard (category clarification impossible)
         clarMsg = buildNonsenseScreen();
-        clarKeyboard = buildNonsenseKeyboard();
+        clarKeyboard = { inline_keyboard: [[{ text: '✖️ Отмена', callback_data: `ia:cancel:${draftId}` }]] };
       } else {
         clarMsg = buildClarificationScreen({
           field: 'category',
@@ -984,12 +983,19 @@ async function processAiParse(job: Job<AiParseJobPayload>): Promise<void> {
           categoryHint: null,
         });
         clarKeyboard = buildCategoryClarKeyboard(categories, draftId);
+        // Append cancel row
+        (clarKeyboard as { inline_keyboard: object[][] }).inline_keyboard.push(
+          [{ text: '✖️ Отмена', callback_data: `ia:cancel:${draftId}` }],
+        );
       }
-
     } else {
       // No clarificationField — nonsense (confidence < 0.3)
       clarMsg = buildNonsenseScreen();
-      clarKeyboard = buildNonsenseKeyboard();
+      clarKeyboard = {
+        inline_keyboard: [
+          [{ text: '✖️ Отмена', callback_data: `ia:cancel:${draftId}` }],
+        ],
+      };
     }
 
     // Phase 1.37-UX: Read previous clarification message ID from Redis.
