@@ -5568,6 +5568,15 @@ Midas создан, чтобы сделать учет денег максима
             request.log.info({ msg: '[midas:bot:webhook] nav:cancel_last (text)', telegramUserId, workspaceId: resolved.workspaceId });
             await reply.status(200).send({ ok: true });
             return;
+          } else if (navCmd === 'edit_last') {
+            // ── edit_last: open full edit card for last transaction ──
+            const elResponse = await buildCommandResponse(navCmd, cmdCtx);
+            const elKeyboard = elResponse.keyboard ?? { inline_keyboard: [] };
+            await sendMessageWithKeyboard(chatId, elResponse.text, elKeyboard);
+
+            request.log.info({ msg: '[midas:bot:webhook] nav:edit_last (text)', telegramUserId, workspaceId: resolved.workspaceId });
+            await reply.status(200).send({ ok: true });
+            return;
           } else {
             // Clear old nav message (same logic as NAV_BTN handlers)
             const oldNavId = await getNavMessageId(telegramUserId, chatId);

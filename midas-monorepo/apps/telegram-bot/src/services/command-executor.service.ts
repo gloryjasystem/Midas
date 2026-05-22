@@ -17,6 +17,8 @@ import { buildBalanceListKeyboard, type BalanceAccountRow } from './balance-keyb
 import { formatSettingsMenuText, buildSettingsMainKeyboard } from './settings-keyboard.service.js';
 import { buildStartOnboardKeyboard } from './account-onboard-keyboard.service.js';
 import { getSettings } from './settings.service.js';
+import { getTransactionCard } from './edit.service.js';
+import { formatTxDetailCard } from '../utils/screen-builder.js';
 import { withTenantTransaction } from '@midas/database';
 import { redisConnection } from '../queues/redis.js';
 
@@ -234,6 +236,33 @@ export async function buildCommandResponse(
           ],
         },
       };
+    }
+    case 'edit_last': {
+      // Phase 2S2: edit_last — show full transaction card with edit buttons
+      // Uses the same tx: callback_data as the existing edit flow (ed: → tx: remap)
+      const lastTx = await getLastTransaction(ctx.workspaceId, ctx.userId);
+      if (!lastTx) {
+        return { text: '\uD83D\uDCED \u041D\u0435\u0442 \u0442\u0440\u0430\u043D\u0437\u0430\u043A\u0446\u0438\u0439 \u0434\u043B\u044F \u0440\u0435\u0434\u0430\u043A\u0442\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u044F.' };
+      }
+
+      // Fetch full card with is_cross_currency, base_amount, etc.
+      const card = await getTransactionCard(lastTx.id, ctx.workspaceId, ctx.userId);
+      if (!card) {
+        return { text: '\u26A0\uFE0F \u0422\u0440\u0430\u043D\u0437\u0430\u043A\u0446\u0438\u044F \u043D\u0435 \u043D\u0430\u0439\u0434\u0435\u043D\u0430.' };
+      }
+
+      const text = formatTxDetailCard(card);
+      const rows: { text: string; callback_data: string }[][] = [];
+      if (!card.is_cross_currency) {
+        rows.push([{ text: '\u270F\uFE0F \u0418\u0437\u043C\u0435\u043D\u0438\u0442\u044C \u0441\u0443\u043C\u043C\u0443', callback_data: `tx:f:amt:${lastTx.id}:s` }]);
+      }
+      rows.push([{ text: '\uD83D\uDCC1 \u0418\u0437\u043C\u0435\u043D\u0438\u0442\u044C \u043A\u0430\u0442\u0435\u0433\u043E\u0440\u0438\u044E', callback_data: `tx:f:cat:${lastTx.id}:0:s` }]);
+      rows.push([{ text: '\uD83C\uDFE6 \u0418\u0437\u043C\u0435\u043D\u0438\u0442\u044C \u0441\u0447\u0451\u0442', callback_data: `tx:f:acc:${lastTx.id}:s` }]);
+      rows.push([{ text: '\uD83D\uDD04 \u0418\u0437\u043C\u0435\u043D\u0438\u0442\u044C \u0442\u0438\u043F', callback_data: `tx:f:int:${lastTx.id}:s` }]);
+      rows.push([{ text: '\uD83D\uDDD1\uFE0F \u0423\u0434\u0430\u043B\u0438\u0442\u044C', callback_data: `tx:d:ask:${lastTx.id}:s` }]);
+      rows.push([{ text: '\u2716\uFE0F \u0417\u0430\u043A\u0440\u044B\u0442\u044C', callback_data: `tx:done:${lastTx.id}` }]);
+
+      return { text, keyboard: { inline_keyboard: rows } };
     }
   }
 }

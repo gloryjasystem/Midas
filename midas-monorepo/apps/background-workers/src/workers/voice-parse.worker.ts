@@ -551,6 +551,104 @@ async function buildVoiceNavResponse(
       };
     }
 
+    case 'edit_last': {
+      // ── Phase 2S2: edit_last — show full transaction card with edit buttons ──
+      // SQL mirrors getLastTransaction + getTransactionCard (can't import from telegram-bot).
+      const editTx = await withTenantTransaction(workspaceId, userId, async (client) => {
+        const r = await client.query<{
+          id: string;
+          item_name: string | null;
+          original_amount: string;
+          base_amount: string;
+          currency: string;
+          base_currency: string;
+          transaction_intent: string;
+          transaction_time: string;
+          category_name: string;
+          account_name: string;
+          is_cross_currency: boolean;
+        }>(
+          `SELECT t.id, t.item_name,
+                  ROUND(t.original_amount, 2)::text  AS original_amount,
+                  ROUND(t.base_amount, 2)::text       AS base_amount,
+                  t.currency,
+                  t.base_currency,
+                  t.transaction_intent,
+                  t.transaction_time::text,
+                  COALESCE(c.name, '—')  AS category_name,
+                  COALESCE(a.name, '—')  AS account_name,
+                  (t.exchange_rate != 1.000000000000) AS is_cross_currency
+           FROM transactions t
+           LEFT JOIN categories      c ON c.id = t.category_id
+           LEFT JOIN account_sources a ON a.id = t.account_id
+           WHERE t.workspace_id = $1 AND t.deleted_at IS NULL
+             AND (t.transfer_direction IS DISTINCT FROM 'inbound')
+           ORDER BY t.created_at DESC
+           LIMIT 1`,
+          [workspaceId],
+        );
+        return r.rows[0] ?? null;
+      });
+
+      if (!editTx) {
+        return { text: '📭 Нет транзакций для редактирования.' };
+      }
+
+      // ── Format card (mirrors formatTxDetailCard from screen-builder.ts) ──
+      const intentEmojis: Record<string, string> = {
+        expense: '💸', income: '💰', transfer: '🔄',
+        debt_given: '🤝', debt_received: '🤲',
+      };
+      const intentNames: Record<string, string> = {
+        expense: 'Расход', income: 'Доход', transfer: 'Перевод',
+        debt_given: 'Долг (дал)', debt_received: 'Долг (взял)',
+      };
+      const emoji = intentEmojis[editTx.transaction_intent] ?? '';
+      const label = intentNames[editTx.transaction_intent] ?? editTx.transaction_intent;
+
+      // Amount: use base_amount for same-currency, original for cross-currency
+      const amtRaw = editTx.is_cross_currency ? editTx.original_amount : editTx.base_amount;
+      const amtCur = editTx.is_cross_currency ? editTx.currency : (editTx.base_currency || editTx.currency);
+      // Format amount: strip trailing .00 but keep meaningful decimals
+      const fmtAmt = (() => {
+        const dot = amtRaw.indexOf('.');
+        if (dot === -1) return `${amtRaw}.00`;
+        const int = amtRaw.slice(0, dot);
+        const frac = amtRaw.slice(dot + 1).padEnd(2, '0').slice(0, 2);
+        return `${int}.${frac}`;
+      })();
+
+      const dtObj = new Date(editTx.transaction_time);
+      const dateStr = `${String(dtObj.getDate()).padStart(2, '0')}.${String(dtObj.getMonth() + 1).padStart(2, '0')}.${dtObj.getFullYear()}`;
+
+      const isTransfer = editTx.transaction_intent === 'transfer';
+      const cardLines = [
+        '📋 <b>Транзакция</b>',
+        '',
+        `${emoji} ${label}`,
+        `💰 Сумма: <b>${fmtAmt} ${escapeHtmlSimple(amtCur)}</b>`,
+        ...(isTransfer ? [] : [`📁 Категория: ${escapeHtmlSimple(editTx.category_name)}`]),
+        `🏦 Счёт: ${escapeHtmlSimple(editTx.account_name)}`,
+        `📅 Дата: ${dateStr}`,
+      ];
+
+      // ── Build keyboard (same callback_data as existing tx: handlers) ──
+      const kbRows: { text: string; callback_data: string }[][] = [];
+      if (!editTx.is_cross_currency) {
+        kbRows.push([{ text: '✏️ Изменить сумму', callback_data: `tx:f:amt:${editTx.id}:s` }]);
+      }
+      kbRows.push([{ text: '📁 Изменить категорию', callback_data: `tx:f:cat:${editTx.id}:0:s` }]);
+      kbRows.push([{ text: '🏦 Изменить счёт', callback_data: `tx:f:acc:${editTx.id}:s` }]);
+      kbRows.push([{ text: '🔄 Изменить тип', callback_data: `tx:f:int:${editTx.id}:s` }]);
+      kbRows.push([{ text: '🗑️ Удалить', callback_data: `tx:d:ask:${editTx.id}:s` }]);
+      kbRows.push([{ text: '✖️ Закрыть', callback_data: `tx:done:${editTx.id}` }]);
+
+      return {
+        text: cardLines.join('\n'),
+        keyboard: { inline_keyboard: kbRows },
+      };
+    }
+
     case 'transactions': {
       // Phase 2S2+: Full Transaction Hub inline (Blindspot 4 — duplicated from transaction-hub.service.ts
       // and transaction-keyboard.service.ts; can't cross-import from telegram-bot).

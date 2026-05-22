@@ -16,7 +16,7 @@
 
 export type NavCommand =
   | 'balance' | 'settings' | 'export' | 'add_account'
-  | 'help' | 'report' | 'transactions' | 'cancel_last';
+  | 'help' | 'report' | 'transactions' | 'cancel_last' | 'edit_last';
 
 interface CommandPattern {
   cmd: NavCommand;
@@ -54,6 +54,23 @@ const COMMAND_PATTERNS: CommandPattern[] = [
   {
     cmd: 'help',
     patterns: [/помощь/i, /справк/i, /что ты умеешь/i, /как пользоваться/i],
+    checkNumber: false,
+  },
+  {
+    cmd: 'edit_last',
+    // MUST be before cancel_last — "изменить последнюю запись" contains "запись"
+    // which would match cancel_last patterns if it came first.
+    patterns: [
+      /измени.*последн/i,     // "измени последнюю запись"
+      /изменить.*последн/i,   // "изменить последнюю транзакцию"
+      /редактир.*последн/i,   // "редактировать последнюю"
+      /измени.*запись/i,      // "измени запись"
+      /изменить.*запись/i,    // "изменить запись"
+      /редактир.*запись/i,    // "редактировать запись"
+      /измени.*транзакци/i,   // "измени транзакцию"
+      /изменить.*транзакци/i, // "изменить транзакцию"
+      /редактир.*транзакци/i, // "редактировать транзакцию"
+    ],
     checkNumber: false,
   },
   {
