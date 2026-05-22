@@ -456,7 +456,8 @@ async function buildVoiceNavResponse(
       };
       const intentLabel = intentLabels[lastTx.transaction_intent] ?? lastTx.transaction_intent;
       const name = lastTx.item_name ? escapeHtmlSimple(lastTx.item_name) : null;
-      const amountFmt = String(lastTx.original_amount).replace(/\.?0+$/, '') || '0';
+      const amtStr = String(lastTx.original_amount);
+      const amountFmt = (amtStr.includes('.') ? amtStr.replace(/\.?0+$/, '') : amtStr) || '0';
 
       const dt = (() => {
         try {

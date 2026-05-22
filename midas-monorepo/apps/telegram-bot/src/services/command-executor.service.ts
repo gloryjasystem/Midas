@@ -144,7 +144,8 @@ function formatCancelCard(tx: LastTransaction): string {
       return `${hh}:${mm}, ${d.getDate()} ${months[d.getMonth()] ?? ''}`;
     } catch { return tx.created_at; }
   })();
-  const amtClean = String(tx.original_amount).replace(/\.?0+$/, '');
+  const amtStr = String(tx.original_amount);
+  const amtClean = amtStr.includes('.') ? amtStr.replace(/\.?0+$/, '') : amtStr;
   return `${intent}${name}\n\uD83D\uDCB0 ${amtClean} ${tx.currency}\n\u23F0 ${dt}`;
 }
 

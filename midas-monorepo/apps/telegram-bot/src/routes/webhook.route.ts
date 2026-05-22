@@ -4476,7 +4476,7 @@ Midas создан, чтобы сделать учет денег максима
             // 1. Soft-delete the transaction (RLS requires tenant context via withTenantTransaction)
             await withTenantTransaction(clResolved.workspaceId, clResolved.userId, async (client) => {
               await client.query(
-                `UPDATE transactions SET deleted_at = NOW(), updated_at = NOW()
+                `UPDATE transactions SET deleted_at = NOW()
                  WHERE id = $1 AND workspace_id = $2 AND deleted_at IS NULL`,
                 [clTxId, clResolved.workspaceId],
               );
