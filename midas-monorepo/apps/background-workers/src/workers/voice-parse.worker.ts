@@ -147,23 +147,41 @@ async function buildVoiceNavResponse(
 ): Promise<VoiceNavResponse | null> {
   switch (cmd) {
     case 'balance': {
-      // Minimal balance query — duplicated from balance.service.ts
+      // Minimal balance query — correct table/column names from balance.service.ts
+      // Tables: account_sources (not accounts), workspaces (not settings)
+      // Columns: currency (not currency_code), initial_balance + tx sum (not current_balance)
       const result = await withTenantTransaction(workspaceId, userId, async (client) => {
         const r = await client.query<{
           id: string;
           name: string;
-          balance: string;
-          currency_code: string;
-          is_default: boolean;
+          balance: { toFixed: (dp: number) => string };
+          currency: string;
+          is_expense_default: boolean;
+          is_income_default: boolean;
         }>(
-          `SELECT a.id, a.name,
-                  COALESCE(a.current_balance, 0) AS balance,
-                  a.currency_code,
-                  COALESCE(s.default_account_id = a.id, false) AS is_default
-           FROM accounts a
-           LEFT JOIN settings s ON s.workspace_id = a.workspace_id
-           WHERE a.workspace_id = $1 AND a.deleted_at IS NULL
-           ORDER BY a.created_at ASC`,
+          `SELECT a.id,
+                  a.name,
+                  a.currency,
+                  a.initial_balance
+                    + COALESCE(SUM(CASE WHEN t.transaction_intent = 'income'        AND t.base_currency = a.currency THEN t.base_amount END), 0)
+                    + COALESCE(SUM(CASE WHEN t.transaction_intent = 'debt_received' AND t.base_currency = a.currency THEN t.base_amount END), 0)
+                    - COALESCE(SUM(CASE WHEN t.transaction_intent = 'expense'       AND t.base_currency = a.currency THEN t.base_amount END), 0)
+                    - COALESCE(SUM(CASE WHEN t.transaction_intent = 'debt_given'    AND t.base_currency = a.currency THEN t.base_amount END), 0)
+                    + COALESCE(SUM(CASE WHEN t.transaction_intent = 'transfer' AND t.transfer_direction = 'inbound'                                    AND t.base_currency = a.currency THEN t.base_amount END), 0)
+                    - COALESCE(SUM(CASE WHEN t.transaction_intent = 'transfer' AND (t.transfer_direction = 'outbound' OR t.transfer_direction IS NULL) AND t.base_currency = a.currency THEN t.base_amount END), 0)
+                    AS balance,
+                  (a.id = w.default_expense_account_id) AS is_expense_default,
+                  (a.id = w.default_income_account_id)  AS is_income_default
+           FROM account_sources a
+           LEFT JOIN workspaces w ON w.id = a.workspace_id
+           LEFT JOIN transactions t
+             ON t.account_id = a.id AND t.workspace_id = $1 AND t.deleted_at IS NULL
+           WHERE a.workspace_id = $1
+             AND a.deleted_at IS NULL
+             AND a.parent_account_id IS NULL
+           GROUP BY a.id, a.name, a.currency, a.initial_balance,
+                    w.default_expense_account_id, w.default_income_account_id
+           ORDER BY a.name`,
           [workspaceId],
         );
         return r.rows;
@@ -175,18 +193,20 @@ async function buildVoiceNavResponse(
         };
       }
 
-      // Format balance list
       const lines = result.map((a) => {
-        const star = a.is_default ? '⭐ ' : '';
-        return `${star}<b>${escapeHtmlSimple(a.name)}</b>: ${formatAmount(a.balance)} ${a.currency_code}`;
+        const isStar = Boolean(a.is_expense_default) && Boolean(a.is_income_default);
+        const star = isStar ? ' ⭐' : '';
+        const bal = a.balance.toFixed(2);
+        return `▸ <b>${escapeHtmlSimple(a.name)}${star}</b> — <b>${formatAmount(bal)} ${a.currency}</b>`;
       });
 
       return {
-        text: `🏦 <b>Баланс</b>\n\n${lines.join('\n')}`,
+        text: `💼 <b>Баланс</b>\n\n${lines.join('\n')}`,
         keyboard: {
-          inline_keyboard: result.map((a) => ([
-            { text: `${a.is_default ? '⭐ ' : ''}${a.name}`, callback_data: `bal:det:${a.id}` },
-          ])).concat([
+          inline_keyboard: result.map((a) => {
+            const isStar = Boolean(a.is_expense_default) && Boolean(a.is_income_default);
+            return [{ text: `${isStar ? '⭐ ' : ''}${a.name}`, callback_data: `bal:det:${a.id}` }];
+          }).concat([
             [{ text: '➕ Добавить счёт', callback_data: 'ac:new' }],
           ]),
         },
@@ -194,26 +214,32 @@ async function buildVoiceNavResponse(
     }
 
     case 'settings': {
+      // Settings are in 'workspaces' table, not 'settings'
       const result = await withTenantTransaction(workspaceId, userId, async (client) => {
         const r = await client.query<{
           default_currency: string;
           timezone: string;
+          main_account_name: string | null;
         }>(
-          `SELECT default_currency, timezone FROM settings WHERE workspace_id = $1`,
+          `SELECT w.default_currency, w.timezone, ea.name AS main_account_name
+           FROM workspaces w
+           LEFT JOIN account_sources ea ON ea.id = w.default_expense_account_id
+           WHERE w.id = $1`,
           [workspaceId],
         );
         return r.rows[0] ?? null;
       });
 
-      const currency = result?.default_currency ?? 'USDT';
       const tz = result?.timezone ?? 'UTC';
+      const mainAcct = result?.main_account_name
+        ? escapeHtmlSimple(result.main_account_name)
+        : '<i>не задан</i>';
 
       return {
-        text: `⚙️ <b>Настройки</b>\n\n💱 Валюта: <b>${currency}</b>\n🕐 Часовой пояс: <b>${tz}</b>`,
+        text: `⚙️ <b>Настройки Midas</b>\n\n🏦 Основной счёт: ${mainAcct}\n🕒 Часовой пояс: <b>${escapeHtmlSimple(tz)}</b>`,
         keyboard: {
           inline_keyboard: [
             [
-              { text: '💱 Валюта', callback_data: 'st:cur' },
               { text: '🕐 Часовой пояс', callback_data: 'st:tz' },
             ],
             [{ text: '📤 Экспорт', callback_data: 'st:exp' }],
@@ -235,7 +261,7 @@ async function buildVoiceNavResponse(
               { text: '📅 3 месяца',      callback_data: 'st:exp:p:3m' },
               { text: '📅 Весь период',    callback_data: 'st:exp:p:yr' },
             ],
-            [{ text: '← Назад', callback_data: 'st:back' }],
+            [{ text: '✖️ Закрыть', callback_data: 'st:fin' }],
           ],
         },
       };
