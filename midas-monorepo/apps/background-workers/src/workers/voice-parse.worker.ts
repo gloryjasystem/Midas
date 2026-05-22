@@ -307,34 +307,29 @@ async function buildVoiceNavResponse(
 
     case 'settings': {
       // Settings are in 'workspaces' table, not 'settings'
+      // Text: only timezone — matches formatSettingsMenuText() from settings-keyboard.service.ts
+      // Keyboard: full replica of buildSettingsMainKeyboard() (cross-app import forbidden — Blindspot 4)
       const result = await withTenantTransaction(workspaceId, userId, async (client) => {
         const r = await client.query<{
-          default_currency: string;
           timezone: string;
-          main_account_name: string | null;
         }>(
-          `SELECT w.default_currency, w.timezone, ea.name AS main_account_name
-           FROM workspaces w
-           LEFT JOIN account_sources ea ON ea.id = w.default_expense_account_id
-           WHERE w.id = $1`,
+          `SELECT w.timezone FROM workspaces w WHERE w.id = $1`,
           [workspaceId],
         );
         return r.rows[0] ?? null;
       });
 
       const tz = result?.timezone ?? 'UTC';
-      const mainAcct = result?.main_account_name
-        ? escapeHtmlSimple(result.main_account_name)
-        : '<i>не задан</i>';
 
       return {
-        text: `⚙️ <b>Настройки Midas</b>\n\n🏦 Основной счёт: ${mainAcct}\n🕒 Часовой пояс: <b>${escapeHtmlSimple(tz)}</b>`,
+        text: `⚙️ <b>Настройки Midas</b>\n\n🕒 Часовой пояс: <b>${escapeHtmlSimple(tz)}</b>`,
         keyboard: {
           inline_keyboard: [
-            [
-              { text: '🕐 Часовой пояс', callback_data: 'st:tz' },
-            ],
-            [{ text: '📤 Экспорт', callback_data: 'st:exp' }],
+            [{ text: '🕒 Часовой пояс',  callback_data: 'st:tz' }],
+            [{ text: '🔔 Уведомления',   callback_data: 'st:ntf' }],
+            [{ text: '📤 Экспорт',       callback_data: 'st:exp' }],
+            [{ text: '💬 Поддержка',     url: 'https://t.me/midas_support' }],
+            [{ text: '✖️ Закрыть',       callback_data: 'st:cancel' }],
           ],
         },
       };
