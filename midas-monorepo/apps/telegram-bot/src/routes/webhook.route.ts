@@ -49,11 +49,13 @@ import { z } from 'zod';
 import {
   IdempotencyKeyBuilder,
   QUEUE_NAMES,
+  detectCommand,
   type TelegramUpdate,
   type WebhookIngestionJobPayload,
   type CallbackConfirmJobPayload,
   type VoiceParseJobPayload,
 } from '@midas/shared';
+import { buildCommandResponse, type CommandContext } from '../services/command-executor.service.js';
 import { withTenantTransaction } from '@midas/database';
 import { webhookIngestionQueue } from '../queues/webhook-queue.js';
 import { voiceParseQueue } from '../queues/voice-queue.js';
@@ -415,6 +417,9 @@ const HELP_TEXT =
   '<i>Изменить: 🏦 Баланс → выберите счёт → Сделать основным</i>\n\n' +
   '🎤 <b>ГОЛОСОВЫЕ СООБЩЕНИЯ</b>\n' +
   'Запишите голосовое — бот транскрибирует и создаст транзакцию.\n\n' +
+  '🎤 <b>ГОЛОСОВЫЕ КОМАНДЫ</b>\n' +
+  '«Покажи баланс» · «Настройки» · «Экспорт»\n' +
+  '«Добавь счёт» · «Отмени последнюю» · «Помощь»\n\n' +
   '📊 <b>ОТЧЁТЫ</b>\n' +
   'Нажмите 📊 Отчёт и выберите нужный период.\n\n' +
   '⚙️ <b>НАСТРОЙКИ</b>\n' +
@@ -5207,9 +5212,11 @@ Midas создан, чтобы сделать учет денег максима
 
       // ── Resolve workspace (SEC-03: from trusted backend source) ──
       let vWorkspaceId: string;
+      let vUserId_internal: string; // Phase 2S2: internal user ID (ULID) for RLS queries
       try {
         const vResolved = await resolveWorkspace(vUserId, vChatId);
         vWorkspaceId = vResolved.workspaceId;
+        vUserId_internal = vResolved.userId;
       } catch {
         request.log.warn({ msg: '[midas:bot:webhook] Phase 2.1: workspace resolution failed for voice', vUserId });
         await reply.status(200).send({ ok: true });
@@ -5252,6 +5259,7 @@ Midas создан, чтобы сделать учет денег максима
         messageId: vMessageId,
         telegramUserId: vUserId,
         workspaceId: vWorkspaceId, // SEC-03: trusted backend source
+        userId: vUserId_internal, // Phase 2S2: internal ULID for RLS queries
         fileId: vFileId,
         duration,
         statusMessageId: statusMsgId ?? '0', // '0' = no status msg (worker handles gracefully)
@@ -5319,10 +5327,55 @@ Midas создан, чтобы сделать учет денег максима
     // Runs for ALL text messages (commands and free-text) before any processing.
     tryDeleteUserMessage(chatId, messageId);
 
+    // ── Phase 2S2: Free-text command router ════════════════════════════
+    // Intercepts "баланс", "настройки", "экспорт" etc. BEFORE NAV_BTN handlers.
+    // NAV_BTN handlers remain as fallback for exact emoji-button text.
+    const navText = message.text.trim();
+    if (!commandToken) {  // Skip if it's a slash command
+      const navCmd = detectCommand(navText);
+      if (navCmd) {
+        try {
+          const resolved = await resolveWorkspace(telegramUserId, chatId);
+          const cmdCtx: CommandContext = {
+            telegramUserId, chatId,
+            workspaceId: resolved.workspaceId,
+            userId: resolved.userId,
+          };
+
+          // Handle sentinel values (complex commands)
+          if (navCmd === 'transactions') {
+            // Fall through to NAV_BTN_TRANSACTIONS handler below
+          } else {
+            // Clear old nav message (same logic as NAV_BTN handlers)
+            const oldNavId = await getNavMessageId(telegramUserId, chatId);
+            if (oldNavId) {
+              void deleteMessage(chatId, oldNavId);
+              void clearNavMessageId(telegramUserId, chatId);
+            }
+
+            const response = await buildCommandResponse(navCmd, cmdCtx);
+            void sendNavMessage(telegramUserId, chatId, response.text, response.keyboard);
+
+            // Clear export Redis state (same as export entry in settings callback)
+            if (navCmd === 'export') {
+              void redisConnection.del(`midas:exp:params:${telegramUserId}:${chatId}`);
+            }
+
+            request.log.info({ msg: '[midas:bot:webhook] nav:command-router', telegramUserId, cmd: navCmd });
+            await reply.status(200).send({ ok: true });
+            return;
+          }
+        } catch (err: unknown) {
+          const errorClass = err instanceof Error ? err.constructor.name : 'UnknownError';
+          request.log.error({ msg: '[midas:bot:webhook] command-router failed', telegramUserId, errorClass });
+          // Fall through to existing handlers — graceful degradation
+        }
+      }
+    }
+
     // ── Phase 1.36-UX: Reply Keyboard button shortcuts ──────────────────
     // Reply Keyboard buttons send their label text as a plain message.
     // Intercept here — before AI parse — and route to the correct handler.
-    const navText = message.text.trim();
     
     // Phase 2.11: If the user presses ANY Reply Keyboard button, the chat advances.
     // We MUST clear the nav pointer so the bot sends a fresh panel at the bottom

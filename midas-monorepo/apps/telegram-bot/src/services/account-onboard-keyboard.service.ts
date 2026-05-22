@@ -964,6 +964,7 @@ export function buildStartOnboardKeyboard(): InlineKeyboardMarkup {
         { text: '🔐 Кошелёк',           callback_data: 'ac:type:wallet' },
       ],
       [{ text: '✏️ Своё название', callback_data: 'ac:type:custom' }],
+      [{ text: '✖️ Отмена', callback_data: 'ac:fin' }],
     ],
   };
 }

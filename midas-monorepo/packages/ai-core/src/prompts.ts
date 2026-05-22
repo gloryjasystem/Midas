@@ -437,7 +437,29 @@ User: "купив каву 80 гривень"
 Output: {"intent":"expense","amount":"80","currency":"UAH","item_hint":"кава","category_hint":"Кафе и рестораны","confidence":0.9}
 
 User: "заплатив за таксі 150 UAH"
-Output: {"intent":"expense","amount":"150","currency":"UAH","item_hint":"таксі","category_hint":"Транспорт","confidence":0.9}`;
+Output: {"intent":"expense","amount":"150","currency":"UAH","item_hint":"таксі","category_hint":"Транспорт","confidence":0.9}
+
+-- STT voice-specific examples (Phase 2S2 — transcribed speech patterns) --
+User: "ну это купил кофе за 350 рублей"
+Output: {"intent":"expense","amount":"350","currency":"RUB","item_hint":"кофе","category_hint":"Кафе и рестораны","confidence":0.9}
+
+User: "короче потратил на обед 500"
+Output: {"intent":"expense","amount":"500","item_hint":"обед","category_hint":"Кафе и рестораны","confidence":0.9}
+
+User: "значит перевёл тысячу долларов"
+Output: {"intent":"transfer","amount":"1000","currency":"USD","item_hint":"перевод","category_hint":"Другое","confidence":0.9}
+
+User: "так перевел маме пять тысяч рублей"
+Output: {"intent":"transfer","amount":"5000","currency":"RUB","person_hint":"мама","item_hint":"перевод маме","category_hint":"Другое","confidence":0.9}
+
+User: "ээ заплатил за подписку Нетфликс 699 рублей"
+Output: {"intent":"expense","amount":"699","currency":"RUB","item_hint":"Netflix","category_hint":"Подписки","confidence":0.9}
+
+User: "дал Серёге в долг три тысячи"
+Output: {"intent":"debt_given","amount":"3000","person_hint":"Серёга","item_hint":"долг Серёге","category_hint":"Другое","confidence":0.9}
+
+User: "ну типа взял у Димы двадцать тысяч в долг"
+Output: {"intent":"debt_received","amount":"20000","person_hint":"Дима","item_hint":"долг от Димы","category_hint":"Другое","confidence":0.9}`;
 
 // ─────────────────────────────────────────────────────────────
 // Build user message from raw_text

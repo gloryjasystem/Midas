@@ -23,10 +23,11 @@
  */
 
 import { Worker, type Job } from 'bullmq';
-import { QUEUE_NAMES, type VoiceParseJobPayload, type AiParseJobPayload, IdempotencyKeyBuilder } from '@midas/shared';
+import { QUEUE_NAMES, type VoiceParseJobPayload, type AiParseJobPayload, detectCommand, type NavCommand } from '@midas/shared';
+import { withTenantTransaction } from '@midas/database';
 import { transcribeVoice } from '@midas/ai-core';
 import { redisConnection } from '../queues/redis.js';
-import { aiParseQueue, notificationsQueue } from '../queues/queue-definitions.js';
+import { aiParseQueue } from '../queues/queue-definitions.js';
 import { ulid } from 'ulid';
 
 // ─────────────────────────────────────────────────────────────
@@ -126,26 +127,241 @@ async function editStatusMessage(
 }
 
 // ─────────────────────────────────────────────────────────────
-// Phase 2.2: Voice command router
-// Detects navigation commands in transcript before creating a draft.
+// Phase 2S2: Voice nav response builder (Blindspot 4: inline queries)
+//
+// The worker (background-workers) CANNOT import from telegram-bot services
+// due to cross-app import boundaries. We duplicate minimal SQL queries
+// here. This will be refactored in Phase 3 when @midas/database gets
+// a shared service layer.
 // ─────────────────────────────────────────────────────────────
 
-type VoiceCommand = 'balance' | 'report' | 'transactions' | 'settings' | null;
-
-const VOICE_COMMAND_PATTERNS: Array<{ re: RegExp; cmd: VoiceCommand }> = [
-  { re: /\b(покажи?\s+баланс|какой\s+баланс|мой\s+баланс|баланс)/i, cmd: 'balance' },
-  { re: /\b(покажи?\s+отч[её]т|какой\s+отч[её]т|отч[её]т\s+за)/i, cmd: 'report' },
-  { re: /\b(покажи?\s+транзакции|мои\s+транзакции|список\s+транзакций)/i, cmd: 'transactions' },
-  { re: /\b(откро[йи]\s+настройки|настройки|мои\s+настройки)/i, cmd: 'settings' },
-];
-
-function detectVoiceCommand(text: string): VoiceCommand {
-  const lower = text.toLowerCase();
-  for (const { re, cmd } of VOICE_COMMAND_PATTERNS) {
-    if (re.test(lower)) return cmd;
-  }
-  return null;
+interface VoiceNavResponse {
+  text: string;
+  keyboard?: object;
 }
+
+async function buildVoiceNavResponse(
+  cmd: NavCommand,
+  workspaceId: string,
+  userId: string,
+): Promise<VoiceNavResponse | null> {
+  switch (cmd) {
+    case 'balance': {
+      // Minimal balance query — duplicated from balance.service.ts
+      const result = await withTenantTransaction(workspaceId, userId, async (client) => {
+        const r = await client.query<{
+          id: string;
+          name: string;
+          balance: string;
+          currency_code: string;
+          is_default: boolean;
+        }>(
+          `SELECT a.id, a.name,
+                  COALESCE(a.current_balance, 0) AS balance,
+                  a.currency_code,
+                  COALESCE(s.default_account_id = a.id, false) AS is_default
+           FROM accounts a
+           LEFT JOIN settings s ON s.workspace_id = a.workspace_id
+           WHERE a.workspace_id = $1 AND a.deleted_at IS NULL
+           ORDER BY a.created_at ASC`,
+          [workspaceId],
+        );
+        return r.rows;
+      });
+
+      if (!result || result.length === 0) {
+        return {
+          text: '📭 <b>Пока нет счетов</b>\n\nСоздайте первый счёт с помощью команды «добавь счёт»',
+        };
+      }
+
+      // Format balance list
+      const lines = result.map((a) => {
+        const star = a.is_default ? '⭐ ' : '';
+        return `${star}<b>${escapeHtmlSimple(a.name)}</b>: ${formatAmount(a.balance)} ${a.currency_code}`;
+      });
+
+      return {
+        text: `🏦 <b>Баланс</b>\n\n${lines.join('\n')}`,
+        keyboard: {
+          inline_keyboard: result.map((a) => ([
+            { text: `${a.is_default ? '⭐ ' : ''}${a.name}`, callback_data: `bal:det:${a.id}` },
+          ])).concat([
+            [{ text: '➕ Добавить счёт', callback_data: 'ac:new' }],
+          ]),
+        },
+      };
+    }
+
+    case 'settings': {
+      const result = await withTenantTransaction(workspaceId, userId, async (client) => {
+        const r = await client.query<{
+          default_currency: string;
+          timezone: string;
+        }>(
+          `SELECT default_currency, timezone FROM settings WHERE workspace_id = $1`,
+          [workspaceId],
+        );
+        return r.rows[0] ?? null;
+      });
+
+      const currency = result?.default_currency ?? 'USDT';
+      const tz = result?.timezone ?? 'UTC';
+
+      return {
+        text: `⚙️ <b>Настройки</b>\n\n💱 Валюта: <b>${currency}</b>\n🕐 Часовой пояс: <b>${tz}</b>`,
+        keyboard: {
+          inline_keyboard: [
+            [
+              { text: '💱 Валюта', callback_data: 'st:cur' },
+              { text: '🕐 Часовой пояс', callback_data: 'st:tz' },
+            ],
+            [{ text: '📤 Экспорт', callback_data: 'st:exp' }],
+          ],
+        },
+      };
+    }
+
+    case 'export':
+      return {
+        text: '📤 <b>Экспорт данных</b>\n\nШаг 1 из 3 — выберите <b>период</b>:',
+        keyboard: {
+          inline_keyboard: [
+            [
+              { text: '📅 Этот месяц',    callback_data: 'st:exp:p:tm' },
+              { text: '📅 Прошлый месяц', callback_data: 'st:exp:p:lm' },
+            ],
+            [
+              { text: '📅 3 месяца',      callback_data: 'st:exp:p:3m' },
+              { text: '📅 Весь период',    callback_data: 'st:exp:p:yr' },
+            ],
+            [{ text: '← Назад', callback_data: 'st:back' }],
+          ],
+        },
+      };
+
+    case 'add_account':
+      return {
+        text: '➕ <b>Новый счёт</b>\n\nВыберите тип счёта:',
+        keyboard: {
+          inline_keyboard: [
+            [
+              { text: '🏦 Банковский счёт', callback_data: 'ac:type:bank' },
+              { text: '💳 Карта',           callback_data: 'ac:type:card' },
+            ],
+            [
+              { text: '💵 Наличные',        callback_data: 'ac:type:cash' },
+              { text: '🔐 Кошелёк',         callback_data: 'ac:type:wallet' },
+            ],
+            [{ text: '✏️ Своё название', callback_data: 'ac:type:custom' }],
+            [{ text: '✖️ Отмена', callback_data: 'ac:fin' }],
+          ],
+        },
+      };
+
+    case 'help':
+      return {
+        text:
+          '🏦 <b>Midas — справочник</b>\n\n' +
+          '📝 <b>КАК ЗАПИСАТЬ ОПЕРАЦИЮ</b>\n' +
+          'Просто напишите в чат или запишите голосовое:\n' +
+          '<blockquote>кофе 350 RUB\nNetflix 15 USDT\nзарплата 95 000 RUB</blockquote>\n\n' +
+          '🎤 <b>ГОЛОСОВЫЕ КОМАНДЫ</b>\n' +
+          '«Покажи баланс» · «Настройки» · «Экспорт»\n' +
+          '«Добавь счёт» · «Отмени последнюю» · «Помощь»\n\n' +
+          '❓ Вопросы → @midas_support',
+      };
+
+    case 'report':
+      return {
+        text: '📊 <b>Отчёты</b>\n\nВыбери период:',
+        keyboard: {
+          inline_keyboard: [
+            [
+              { text: '📅 Этот месяц', callback_data: 'rpt:tm' },
+              { text: '📅 Прошлый',    callback_data: 'rpt:lm' },
+            ],
+            [
+              { text: '📅 Квартал',    callback_data: 'rpt:3m' },
+              { text: '📅 Год',        callback_data: 'rpt:yr' },
+            ],
+          ],
+        },
+      };
+
+    case 'cancel_last': {
+      // Phase 3.1: cancel_last — query last transaction + confirm card
+      const lastTx = await withTenantTransaction(workspaceId, userId, async (client) => {
+        const r = await client.query<{
+          id: string;
+          item_name: string | null;
+          base_amount: string;
+          base_currency: string;
+          transaction_intent: string;
+          created_at: string;
+        }>(
+          `SELECT id, item_name, base_amount, base_currency, transaction_intent, created_at
+           FROM transactions
+           WHERE workspace_id = $1 AND deleted_at IS NULL
+           ORDER BY created_at DESC
+           LIMIT 1`,
+          [workspaceId],
+        );
+        return r.rows[0] ?? null;
+      });
+
+      if (!lastTx) {
+        return { text: '📭 Нет транзакций для отмены.' };
+      }
+
+      const intentLabels: Record<string, string> = {
+        expense: '📉 Расход', income: '📈 Доход',
+        transfer: '🔄 Перевод', debt_given: '📤 Долг (дал)',
+        debt_received: '📥 Долг (взял)',
+      };
+      const intent = intentLabels[lastTx.transaction_intent] ?? lastTx.transaction_intent;
+      const name = lastTx.item_name ? ` · ${escapeHtmlSimple(lastTx.item_name)}` : '';
+      const dt = (() => {
+        try {
+          const d = new Date(lastTx.created_at);
+          return `${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth() + 1).padStart(2, '0')}.${d.getFullYear()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+        } catch {
+          return lastTx.created_at;
+        }
+      })();
+      const card = `${intent}${name}\n💰 ${lastTx.base_amount} ${lastTx.base_currency}\n⏰ ${dt}`;
+
+      return {
+        text: `🗑 <b>Удалить эту транзакцию?</b>\n\n${card}\n\nТранзакция будет скрыта из всех отчётов и баланс пересчитается.`,
+        keyboard: {
+          inline_keyboard: [
+            [
+              { text: '✅ Да, удалить', callback_data: `ed:del:y:${lastTx.id}` },
+              { text: '❌ Нет',         callback_data: `ed:del:n:${lastTx.id}` },
+            ],
+          ],
+        },
+      };
+    }
+
+    case 'transactions':
+      // Transactions require pagination → can't build from worker
+      return null;
+  }
+}
+
+// Minimal HTML escape for user-generated content in worker context
+function escapeHtmlSimple(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+// Format amount with thousands separator
+function formatAmount(amount: string): string {
+  const num = parseFloat(amount);
+  if (isNaN(num)) return amount;
+  return num.toLocaleString('ru-RU', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+}
+
 
 // ─────────────────────────────────────────────────────────────
 // Phase 2.3: STT transcript normalizer — crypto ticker fix
@@ -508,13 +724,14 @@ async function processVoiceParse(job: Job<VoiceParseJobPayload>): Promise<void> 
 }
 
 async function _processVoiceParse(job: Job<VoiceParseJobPayload>): Promise<void> {
-  const { botId, chatId, messageId, telegramUserId, workspaceId, fileId, duration, statusMessageId } = job.data;
+  const { botId, chatId, messageId, telegramUserId, workspaceId, userId, fileId, duration, statusMessageId } = job.data;
 
   console.log('[midas:voice-parse-worker] Processing job', {
     jobId: job.id,
     workspaceId,
     telegramUserId,
     duration,
+    hasUserId: !!userId, // Phase 2S2: userId is used in Phase 2.1 voice command execution
     // fileId and statusMessageId are operational metadata — safe to log (no user text)
   });
 
@@ -596,40 +813,81 @@ async function _processVoiceParse(job: Job<VoiceParseJobPayload>): Promise<void>
   // e.g. "купил куртку за 300 юзд" → "купил куртку за 300 USDT"
   const transcript = normalizeSttTranscript(sttResult.text);
 
-  // ── Phase 2.2: Voice command detection ───────────────────
-  const voiceCmd = detectVoiceCommand(transcript);
+  // ── Phase 2S2: Voice command detection + DIRECT execution ──
+  // Replaces old Phase 2.2 "Нажми кнопку" approach.
+  // Now commands are executed inline — balance screen, settings, etc.
+  const voiceCmd = detectCommand(transcript);
   if (voiceCmd) {
-    console.log('[midas:voice-parse-worker] Phase 2.2: voice command detected', {
+    console.log('[midas:voice-parse-worker] Phase 2S2: voice command detected', {
       jobId: job.id, workspaceId, voiceCmd,
     });
 
-    // Map command to callback_data that the webhook route already handles
-    const cmdMap: Record<NonNullable<VoiceCommand>, string> = {
-      balance:      '📊 Баланс',
-      report:       '📋 Отчёт',
-      transactions: '📋 Транзакции',
-      settings:     '⚙️ Настройки',
-    };
+    // ── Blindspot 2: Redis state collision check ──
+    // If user is mid-flow (onboarding, clarification, etc.),
+    // skip nav command → fall through to AI parse.
+    const stateKeys = [
+      `midas:ac:${telegramUserId}:${chatId}`,        // account onboarding
+      `midas:clar:${telegramUserId}:${chatId}`,       // AI clarification
+      `midas:edit:${telegramUserId}:${chatId}`,       // edit-amount waiting
+      `midas:settings:search:${telegramUserId}:${chatId}`, // settings search
+      `midas:xfx:ptr:${telegramUserId}:${chatId}`,    // cross-currency exchange
+    ];
+    let hasActiveState = false;
+    try {
+      const pipeline = redisConnection.pipeline();
+      for (const key of stateKeys) pipeline.exists(key);
+      const results = await pipeline.exec();
+      if (results) {
+        hasActiveState = results.some(([err, val]) => !err && val === 1);
+      }
+    } catch {
+      // Non-fatal: if Redis fails, proceed with nav (better UX)
+    }
 
-    // Send a notification that triggers the command result
-    // We reuse the notifications queue + send a message with the command result
-    // The simplest approach: send a plain message telling user to tap the nav button,
-    // or we could directly trigger the relevant data. For now we show a helpful prompt.
-    const cmdText = `🎤 <b>Распознал команду:</b> «${cmdMap[voiceCmd]}»\n\nНажми кнопку в меню ниже 👇`;
-    const alertId = ulid();
-    await notificationsQueue.add(
-      QUEUE_NAMES.NOTIFICATIONS,
-      {
-        alertId,
-        workspaceId,
-        chatId,
-        message: cmdText,
-        activeMessageId: statusMessageId,
-        telegramUserId,
-      },
-      { jobId: IdempotencyKeyBuilder.notification(workspaceId, alertId) },
-    );
-    return;
+    if (hasActiveState) {
+      console.log('[midas:voice-parse-worker] Phase 2S2: active state detected, skipping nav', {
+        jobId: job.id, workspaceId, voiceCmd,
+      });
+      // Fall through to AI parse path below
+    } else {
+      // ── Blindspot 3: Nav dedup (2s TTL) ──
+      const dedupKey = `midas:nav:dedup:${telegramUserId}:${chatId}`;
+      let isDuplicate = false;
+      try {
+        const set = await redisConnection.set(dedupKey, '1', 'EX', 2, 'NX');
+        isDuplicate = set === null; // NX returns null if key already exists
+      } catch {
+        // Non-fatal: proceed without dedup
+      }
+
+      if (isDuplicate) {
+        console.log('[midas:voice-parse-worker] Phase 2S2: nav dedup — duplicate within 2s', {
+          jobId: job.id, workspaceId, voiceCmd,
+        });
+        // Just delete the status message and bail
+        await editStatusMessage(chatId, statusMessageId, '✅ Готово');
+        return;
+      }
+
+      // ── Direct execution: build nav screen inline ──
+      // Blindspot 4: Can't import from telegram-bot — minimal SQL queries inlined.
+      try {
+        const navResult = await buildVoiceNavResponse(voiceCmd, workspaceId, userId);
+        if (navResult) {
+          // Replace "⏳ Распознаю..." with the actual nav screen
+          await editStatusMessage(chatId, statusMessageId, navResult.text, navResult.keyboard);
+          return;
+        }
+        // navResult === null means we can't handle this command (e.g. 'transactions')
+        // Fall through to AI parse
+      } catch (err) {
+        console.error('[midas:voice-parse-worker] Phase 2S2: nav execution failed', {
+          jobId: job.id, workspaceId, voiceCmd,
+          error: err instanceof Error ? err.message : 'unknown',
+        });
+        // Fall through to AI parse — graceful degradation
+      }
+    }
   }
 
   // ── Step 5: Store status msgId → ai-parse will delete it ──

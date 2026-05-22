@@ -110,6 +110,8 @@ export interface VoiceParseJobPayload {
   telegramUserId: string;
   /** Internal workspace ID (ULID) — from trusted backend (SEC-03) */
   workspaceId: string;
+  /** Internal user ID (ULID) — Phase 2S2: needed for RLS queries in command executor */
+  userId: string;
   /** Telegram file_id — used to call getFile API */
   fileId: string;
   /** Duration in seconds (pre-validated ≥ 1 at webhook layer) */
@@ -375,3 +377,9 @@ export interface TelegramCallbackQuery {
   message?: TelegramMessage;
   data?: string; // The button's callback_data value
 }
+
+// ─────────────────────────────────────────────────────────────
+// Phase 2S2: Command Router — free-text navigation detection
+// ─────────────────────────────────────────────────────────────
+
+export { detectCommand, type NavCommand } from './command-router.js';
