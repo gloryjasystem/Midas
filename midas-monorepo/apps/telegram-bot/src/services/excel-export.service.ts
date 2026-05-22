@@ -1669,13 +1669,38 @@ function buildSheet1(wb: ExcelJS.Workbook, rows: TxRow[], from: Date, to: Date, 
       // N=14 (ci=13): Остаток — bold, colour by sign, numFmt with currency suffix
       if (ci === 13) {
         const bal = val as number;
-        cell.numFmt = fmtCur(row.account_currency);
         if (row._merged) {
-          // Internal transfer: balance_after = source account after debit.
-          // Show in neutral purple — it's a movement, not a loss.
-          cell.font = { size: 9, name: 'Calibri', bold: true, color: { argb: 'FF7B68EE' } };
-          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEDE7F6' } };
+          // ── Merged transfer: show "Binance ↓ 1,024,458 USDT" + tooltip with both balances ──
+          const fmtBalText = (n: number, cur: string): string => {
+            const abs = Math.abs(n);
+            const str = abs >= 1000
+              ? abs.toLocaleString('ru', { maximumFractionDigits: 2 })
+              : abs.toFixed(2);
+            return `${str} ${cur}`;
+          };
+          const srcName = row.account_name;
+          const srcBal  = bal;
+          const srcCur  = row.account_currency;
+          const tgtName = row._targetAccount ?? '';
+          const tgtBal  = row._targetBalanceAfter !== undefined && row._targetBalanceAfter !== null
+            ? parseFloat(row._targetBalanceAfter)
+            : null;
+          const tgtCur  = row._targetCurrency ?? srcCur;
+
+          // Main cell: source account name + arrow + remaining balance
+          cell.value  = `${srcName} ↓ ${fmtBalText(srcBal, srcCur)}`;
+          cell.numFmt = '@';  // plain text
+          cell.font   = { size: 8, name: 'Calibri', bold: false, italic: true, color: { argb: 'FF7B68EE' } };
+          cell.fill   = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEDE7F6' } };
+
+          // Tooltip: both account balances
+          const noteLines = [`Откуда: ${srcName} — ${fmtBalText(srcBal, srcCur)}`];
+          if (tgtBal !== null && tgtName) {
+            noteLines.push(`Куда: ${tgtName} — ${fmtBalText(tgtBal, tgtCur)}`);
+          }
+          cell.note = noteLines.join('\n');
         } else {
+          cell.numFmt = fmtCur(row.account_currency);
           cell.font = { size: 9, name: 'Calibri', bold: true,
             color: { argb: bal >= 0 ? `FF${C_INCOME}` : `FF${C_EXPENSE}` } };
           cell.fill = { type: 'pattern', pattern: 'solid',
