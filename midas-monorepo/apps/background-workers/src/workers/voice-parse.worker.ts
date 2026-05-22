@@ -523,8 +523,8 @@ async function buildVoiceNavResponse(
         keyboard: {
           inline_keyboard: [
             [
-              { text: '✅ Да, удалить', callback_data: `cl:y:${lastTx.id}` },
-              { text: '❌ Нет, оставить', callback_data: `cl:n:${lastTx.id}` },
+              { text: '🗑 Да, удалить', callback_data: `cl:y:${lastTx.id}` },
+              { text: '◄️ Отмена',      callback_data: `cl:n:${lastTx.id}` },
             ],
           ],
         },

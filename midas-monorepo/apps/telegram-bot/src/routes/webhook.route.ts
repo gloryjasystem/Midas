@@ -4498,7 +4498,7 @@ Midas создан, чтобы сделать учет денег максима
             // 1. Edit confirmation card → brief closure message
             void editMessageText(
               chatId, clMsgId,
-              '✅ <b>Запись оставлена.</b>',
+              '◄️ <b>Удаление отменено.</b>',
               { inline_keyboard: [] },
             );
 
@@ -4605,7 +4605,7 @@ Midas создан, чтобы сделать учет денег максима
               }
             }
 
-            void answerCallbackQuery(cq.id, '✅ Запись оставлена');
+            void answerCallbackQuery(cq.id, '◄️ Удаление отменено');
             request.log.info({ msg: '[midas:bot:webhook] cl:n transaction kept', telegramUserId, workspaceId: clResolved.workspaceId });
           }
         } catch (clErr: unknown) {
