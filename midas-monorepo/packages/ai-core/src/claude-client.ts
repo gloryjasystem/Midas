@@ -35,7 +35,7 @@ import {
   MIN_CONFIDENCE_THRESHOLD,
   PARTIAL_CONFIDENCE_THRESHOLD,
 } from './schemas.js';
-import { SYSTEM_PROMPT, buildUserMessage, type ClarificationContext } from './prompts.js';
+import { SYSTEM_PROMPT, buildUserMessage, type ClarificationContext, type CustomCategoryRule } from './prompts.js';
 
 
 // ─────────────────────────────────────────────────────────────
@@ -250,12 +250,19 @@ function postProcessIntentRecovery(
  * @param accountNames - Optional list of workspace account names (names only, no IDs).
  *   Injected as KNOWN ACCOUNTS context so Claude can recognise custom account
  *   names (e.g. "Влада Калина") without requiring explicit prepositions.
+ * @param clarCtx - Optional clarification context from a prior partial parse.
+ * @param customCategories - Phase 4.0: custom category rules for prompt injection
+ *   (only categories WITH semantic_rule). Injected into user message.
+ * @param customCategoryNames - Phase 4.0: ALL custom category names (including
+ *   those without rules) for ALLOWED_CATEGORIES validation extension (BUG-2 fix).
  * @returns ParseResult discriminated union.
  */
 export async function parseTransaction(
   rawText: string,
   accountNames?: string[],
   clarCtx?: ClarificationContext,
+  customCategories?: CustomCategoryRule[],
+  customCategoryNames?: string[],
 ): Promise<ParseResult> {
   const client = getClient();
 
@@ -269,7 +276,7 @@ export async function parseTransaction(
       messages: [
         {
           role: 'user',
-          content: buildUserMessage(rawText, accountNames, clarCtx),
+          content: buildUserMessage(rawText, accountNames, clarCtx, customCategories),
         },
       ],
     });
@@ -336,10 +343,17 @@ export async function parseTransaction(
 
   const aiData: AiOutput = result.data;
 
-  // ── Category validation + default (Phase 1.37/1.38) ────────
-  // Invalid or missing category_hint → silently default to 'Другое'.
-  // Never block or ask the user about category.
-  if (!aiData.category_hint || !ALLOWED_CATEGORIES.has(aiData.category_hint)) {
+  // ── Category validation + default (Phase 1.37/1.38 + Phase 4.0) ────
+  // Phase 4.0 (BUG-2 fix): dynamicAllowed = static 30 + ALL custom names.
+  // Custom names without rules are still valid for category_hint validation,
+  // even though they weren't injected into the prompt.
+  const dynamicAllowed = new Set(ALLOWED_CATEGORIES);
+  if (customCategoryNames) {
+    for (const name of customCategoryNames) {
+      dynamicAllowed.add(name);
+    }
+  }
+  if (!aiData.category_hint || !dynamicAllowed.has(aiData.category_hint)) {
     aiData.category_hint = 'Другое';
   }
 

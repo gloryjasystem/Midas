@@ -155,10 +155,13 @@ export function buildCategoryPickerKeyboard(
   const rows: InlineKeyboardButton[][] = [];
 
   // Category buttons — 2 per row
+  // Phase 4.0: prefix custom categories with their DB icon
   for (let i = 0; i < items.length; i += CAT_COLS) {
     rows.push(
       items.slice(i, i + CAT_COLS).map((cat) => ({
-        text: escapeHtml(cat.name),
+        text: cat.is_custom && cat.icon
+          ? `${cat.icon} ${escapeHtml(cat.name)}`
+          : escapeHtml(cat.name),
         callback_data: `ed:c:cat:${txId}:${cat.id}`,
       })),
     );
@@ -177,6 +180,8 @@ export function buildCategoryPickerKeyboard(
   }
   if (navRow.length > 0) rows.push(navRow);
 
+  // Phase 4.0: Create new custom category button (Byte: cc:new:tx:{26}:{1-3} ≤ 42 ✓)
+  rows.push([{ text: '✏️ Создать', callback_data: `cc:new:tx:${txId}:0` }]);
   rows.push([{ text: '◀️ Назад', callback_data: `ed:v:${txId}` }]);
 
   return { inline_keyboard: rows };

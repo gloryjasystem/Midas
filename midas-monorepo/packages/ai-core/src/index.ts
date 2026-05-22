@@ -26,4 +26,7 @@ export {
 } from './schemas.js';
 /** Phase 2.1: xAI Grok STT — transcribes voice messages */
 export { transcribeVoice, type TranscribeResult } from './groq-stt.js';
-
+/** Phase 4.0: AI Icon Picker — single emoji for user-defined categories */
+export { pickCategoryIcon } from './icon-picker.js';
+/** Phase 4.0: Custom category rule type for prompt injection */
+export { type CustomCategoryRule } from './prompts.js';

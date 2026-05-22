@@ -26,6 +26,7 @@
 
 import { withTenantTransaction } from '@midas/database';
 import { escapeHtml } from '../utils/html-escape.js';
+import { getCategoryEmoji } from '../utils/category-emoji.js'; // Phase 4.0-F
 
 // ─────────────────────────────────────────────────────────────
 // Constants
@@ -99,6 +100,7 @@ export interface TransactionListItem {
   transaction_intent: string;
   transaction_time: string;
   category_name: string;
+  category_icon: string | null;  // Phase 4.0: custom category icon
   account_name: string;
 }
 
@@ -166,6 +168,7 @@ export async function getRecentTransactions(
          t.transaction_intent,
          t.transaction_time::text,
          COALESCE(c.name, '—')  AS category_name,
+         c.icon                  AS category_icon,
          COALESCE(a.name, '—')  AS account_name
        FROM transactions t
        LEFT JOIN categories     c ON c.id = t.category_id
@@ -222,6 +225,7 @@ export async function getTransactionCard(
          t.transaction_intent,
          t.transaction_time::text,
          COALESCE(c.name, '—')  AS category_name,
+         c.icon                  AS category_icon,
          COALESCE(a.name, '—')  AS account_name,
          t.account_id,
          t.item_name,
@@ -531,17 +535,28 @@ export async function updateTransactionIntent(
 // Workspace helpers for picker lists
 // ─────────────────────────────────────────────────────────────
 
-export interface CategoryItem { id: string; name: string; group: string; }
+export interface CategoryItem {
+  id: string;
+  name: string;
+  group: string;
+  icon: string | null;     // Phase 4.0: DB emoji for custom categories (null for standard)
+  is_custom: boolean;       // Phase 4.0: true = user-created via FSM
+}
 export interface AccountItem  { id: string; name: string; currency: string; balance: string; /* NUMERIC string (SEC-02) */ }
 
-/** Fetch all categories for this workspace (for category picker). */
+/** Fetch all categories for this workspace (for category picker).
+ *  Phase 4.0: includes icon + is_custom; sorts standard (false=0) before custom (true=1).
+ */
 export async function getWorkspaceCategories(
   workspaceId: string,
   userId: string,
 ): Promise<CategoryItem[]> {
   const result = await withTenantTransaction(workspaceId, userId, async (client) => {
     const r = await client.query<CategoryItem>(
-      `SELECT id, name, "group" FROM categories WHERE workspace_id = $1 ORDER BY "group", name`,
+      `SELECT id, name, "group", icon, is_custom
+       FROM categories
+       WHERE workspace_id = $1
+       ORDER BY is_custom, "group", name`,
       [workspaceId],
     );
     return r.rows;
@@ -710,7 +725,7 @@ export function formatTransactionListLine(tx: TransactionListItem, index: number
 
   const amount = formatAmountStr(tx.base_amount);
 
-  return `${String(index + 1)}. ${intent} — ${escapeHtml(tx.category_name)} — <b>${amount} ${escapeHtml(tx.base_currency)}</b>   ${dateLabel}`;
+  return `${String(index + 1)}. ${intent} — ${getCategoryEmoji(tx.category_name, tx.category_icon)} ${escapeHtml(tx.category_name)} — <b>${amount} ${escapeHtml(tx.base_currency)}</b>   ${dateLabel}`;
 }
 
 /**
@@ -744,7 +759,7 @@ export function formatTransactionCard(card: TransactionCard): string {
     `📝 <b>Транзакция</b>\n\n` +
     `${intent}\n` +
     `💰 Сумма:     <b>${amount} ${escapeHtml(card.base_currency)}</b>\n` +
-    `📁 Категория: <b>${escapeHtml(card.category_name)}</b>\n` +
+    `📁 Категория: <b>${getCategoryEmoji(card.category_name, card.category_icon)} ${escapeHtml(card.category_name)}</b>\n` +
     // Archived account: keep name visible (audit trail) but add a subtle badge.
     `🏦 Счёт:      <b>${escapeHtml(card.account_name)}</b>${card.account_deleted ? ' · <i>архив</i>' : ''}\n` +
     `📅 Дата:      ${date}\n`;

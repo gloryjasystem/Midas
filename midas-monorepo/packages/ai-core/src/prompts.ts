@@ -65,7 +65,9 @@ ITEM_HINT vs CATEGORY_HINT (critical — Phase 1.35):
   Example: item "кофе Starbucks" → category "Кафе и рестораны" (NOT "Кофе")
   Example: item "Netflix" → category "Подписки" (NOT "Netflix")
 
-ALLOWED CATEGORIES (use ONLY these names in category_hint):
+ALLOWED CATEGORIES (use ONLY these names in category_hint, UNLESS
+USER'S CUSTOM CATEGORIES section is present in the user message below —
+those category names are ALSO valid and take HIGHEST PRIORITY):
 Personal: Продукты, Кафе и рестораны, Транспорт, Жильё, Здоровье, Одежда, Красота, Развлечения, Подписки, Связь, Образование, Спорт, Путешествия, Подарки, Дети, Питомцы, Дом, Другое
 Business: Зарплаты и выплаты, Фриланс, Реклама, Софт и сервисы, Оборудование, Офис, Налоги, Комиссии, Крипто-комиссии, Подрядчики, Продажи, Инвестиции
 
@@ -494,10 +496,22 @@ export interface ClarificationContext {
  *   Injected so Claude can correctly merge the user's clarification answer
  *   (e.g. "100 грн") with the already-parsed fields (e.g. item_hint="куртка").
  */
+/**
+ * Phase 4.0: Custom category rule for dynamic prompt injection.
+ * Injected into the user message so Claude can route transactions
+ * to user-defined categories based on semantic descriptions.
+ */
+export interface CustomCategoryRule {
+  name: string;        // Category name, e.g. "Рекс"
+  icon: string;        // Emoji icon, e.g. "🐕"
+  semanticRule: string; // Description, e.g. "Расходы на мою собаку"
+}
+
 export function buildUserMessage(
   rawText: string,
   accountNames?: string[],
   clarCtx?: ClarificationContext,
+  customCategories?: CustomCategoryRule[],
 ): string {
   // Truncate to prevent prompt injection via extremely long messages
   const truncated = rawText.slice(0, 1000);
@@ -526,6 +540,21 @@ export function buildUserMessage(
       .join('\n');
     parts.push(
       `KNOWN ACCOUNTS (user's wallet/bank/account names — treat any match as account_hint):\n${accountList}`,
+    );
+    parts.push('');
+  }
+
+  // Phase 4.0: Custom categories with semantic rules — BEFORE raw text
+  // so Claude has category context when reading the user's message.
+  // Cap at 20 categories, 200 chars per rule (token budget ~1000 max).
+  if (customCategories && customCategories.length > 0) {
+    const rules = customCategories
+      .slice(0, 20)
+      .map(c => `- "${c.name}" (${c.icon}): ${c.semanticRule.slice(0, 200)}`)
+      .join('\n');
+    parts.push(
+      `USER'S CUSTOM CATEGORIES (HIGHEST PRIORITY — use these category_hint ` +
+      `names when the transaction matches the description):\n${rules}`,
     );
     parts.push('');
   }

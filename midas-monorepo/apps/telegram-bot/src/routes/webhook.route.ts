@@ -125,6 +125,7 @@ import {
   EMPTY_KEYBOARD,
 } from '../services/settings-keyboard.service.js';
 import { escapeHtml } from '../utils/html-escape.js';
+import { getCategoryEmoji } from '../utils/category-emoji.js'; // Phase 4.0-F
 import {
   getRecentTransactions,
   countTransactions,
@@ -260,6 +261,17 @@ import {
 } from '../services/clarification.service.js';
 import { detectCategoryFromItem } from '../services/item-category-detector.service.js'; // Phase 2.5
 import { validateAccountCurrency } from '../services/account-currency-validator.service.js'; // Phase 2.5
+import {                                         // Phase 4.0: Custom Category FSM
+  processCcText,
+  startCcFromDraft,
+  startCcFromTx,
+  handleCcOk,
+  handleCcReicon,
+  handleCcReiconBack,
+  handleCcSkip,
+  handleCcCancel,
+  clearCcState,
+} from '../services/cc-fsm.service.js';
 import {
   upsertBotMessage,                  // Phase 1.33
   sendNavMessage,                    // Phase 2.9: nav buttons never delete tx records
@@ -2045,18 +2057,7 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
       // tx:catg:back:{txId}[:{from}]  — rebuild Screen 1 (group tabs / flat list)
       // MUST be before tx: handler (parseTxCallback returns null for 'catg' sub)
       if (callbackData.startsWith('tx:catg:')) {
-        const CAT_EMOJI_TX: Record<string, string> = {
-          'Продукты': '🛒', 'Кафе и рестораны': '☕', 'Транспорт': '🚗',
-          'Жильё': '🏠', 'Здоровье': '💊', 'Одежда': '👗',
-          'Красота': '💄', 'Развлечения': '🎮', 'Подписки': '📱',
-          'Связь': '📡', 'Образование': '📚', 'Спорт': '🏋️',
-          'Путешествия': '✈️', 'Подарки': '🎁', 'Дети': '👶',
-          'Питомцы': '🐾', 'Дом': '🏡', 'Другое': '📦', 'Разное': '🗂️',
-          'Зарплаты и выплаты': '💰', 'Фриланс': '🤝', 'Реклама': '📣',
-          'Софт и сервисы': '💻', 'Оборудование': '🖥️', 'Офис': '🏢',
-          'Налоги': '🧾', 'Комиссии': '💸', 'Крипто-комиссии': '⛽',
-          'Подрядчики': '👷', 'Продажи': '📈', 'Инвестиции': '💹',
-        };
+        // Phase 4.0-F: CAT_EMOJI_TX removed — using getCategoryEmoji() utility
         // Parse: tx:catg:{sub}:{txId}[:{from}]
         const catgParts  = callbackData.split(':');
         const catgSub    = catgParts[2] ?? '';   // 'life' | 'biz' | 'back'
@@ -2086,14 +2087,14 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
             const backRows: { text: string; callback_data: string }[][] = [];
             // Current category shown in header text, not as a button
             const backHeaderText = currentCatBack
-              ? `📁 <b>Категория:</b> <i>${escapeHtml(CAT_EMOJI_TX[currentCatBack.name] ?? '📂')} ${escapeHtml(currentCatBack.name)}</i>\n\nВыберите новую категорию:`
+              ? `📁 <b>Категория:</b> <i>${escapeHtml(getCategoryEmoji(currentCatBack.name, currentCatBack.icon))} ${escapeHtml(currentCatBack.name)}</i>\n\nВыберите новую категорию:`
               : '📁 <b>Выберите категорию:</b>';
             if (useFlatBack) {
               for (let i = 0; i < allCatgTx.length; i += 2) {
                 const a = allCatgTx[i]!;
                 const b = allCatgTx[i + 1];
-                const btnA = { text: `${CAT_EMOJI_TX[a.name] ?? '📂'} ${a.name}`, callback_data: `tx:c:cat:${catgTxId}:${a.id}` };
-                backRows.push(b ? [btnA, { text: `${CAT_EMOJI_TX[b.name] ?? '📂'} ${b.name}`, callback_data: `tx:c:cat:${catgTxId}:${b.id}` }] : [btnA]);
+                const btnA = { text: `${getCategoryEmoji(a.name, a.icon)} ${a.name}`, callback_data: `tx:c:cat:${catgTxId}:${a.id}` };
+                backRows.push(b ? [btnA, { text: `${getCategoryEmoji(b.name, b.icon)} ${b.name}`, callback_data: `tx:c:cat:${catgTxId}:${b.id}` }] : [btnA]);
               }
             } else {
               backRows.push([
@@ -2115,8 +2116,8 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
               for (let i = 0; i < groupCats.length; i += 2) {
                 const a = groupCats[i]!;
                 const b = groupCats[i + 1];
-                const btnA = { text: `${CAT_EMOJI_TX[a.name] ?? '📂'} ${a.name}`, callback_data: `tx:c:cat:${catgTxId}:${a.id}` };
-                s2Rows.push(b ? [btnA, { text: `${CAT_EMOJI_TX[b.name] ?? '📂'} ${b.name}`, callback_data: `tx:c:cat:${catgTxId}:${b.id}` }] : [btnA]);
+                const btnA = { text: `${getCategoryEmoji(a.name, a.icon)} ${a.name}`, callback_data: `tx:c:cat:${catgTxId}:${a.id}` };
+                s2Rows.push(b ? [btnA, { text: `${getCategoryEmoji(b.name, b.icon)} ${b.name}`, callback_data: `tx:c:cat:${catgTxId}:${b.id}` }] : [btnA]);
               }
             }
             s2Rows.push([{ text: '◀️ К группам', callback_data: `tx:catg:back:${catgTxId}${catgSf}` }]);
@@ -2232,18 +2233,7 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
             }
           } else if (txCmd.cmd === 'field_cat') {
             // Phase ED-CAT: 2-level hierarchy (replaces old paginated flat list)
-            const CAT_EMOJI_FC: Record<string, string> = {
-              'Продукты': '🛒', 'Кафе и рестораны': '☕', 'Транспорт': '🚗',
-              'Жильё': '🏠', 'Здоровье': '💊', 'Одежда': '👗',
-              'Красота': '💄', 'Развлечения': '🎮', 'Подписки': '📱',
-              'Связь': '📡', 'Образование': '📚', 'Спорт': '🏋️',
-              'Путешествия': '✈️', 'Подарки': '🎁', 'Дети': '👶',
-              'Питомцы': '🐾', 'Дом': '🏡', 'Другое': '📦', 'Разное': '🗂️',
-              'Зарплаты и выплаты': '💰', 'Фриланс': '🤝', 'Реклама': '📣',
-              'Софт и сервисы': '💻', 'Оборудование': '🖥️', 'Офис': '🏢',
-              'Налоги': '🧾', 'Комиссии': '💸', 'Крипто-комиссии': '⛽',
-              'Подрядчики': '👷', 'Продажи': '📈', 'Инвестиции': '💹',
-            };
+            // Phase 4.0-F: CAT_EMOJI_FC removed — using getCategoryEmoji() utility
             const sf = txCmd.from ? `:${txCmd.from}` : '';
             const [allCatsFC, cardFC] = await Promise.all([
               getWorkspaceCategories(txResolved.workspaceId, txResolved.userId),
@@ -2259,14 +2249,14 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
               const fcRows: { text: string; callback_data: string }[][] = [];
               // Current category shown in header text, not as a button
               const fcHeaderText = currentCatFC
-                ? `📁 <b>Категория:</b> <i>${escapeHtml(CAT_EMOJI_FC[currentCatFC.name] ?? '📂')} ${escapeHtml(currentCatFC.name)}</i>\n\nВыберите новую категорию:`
+                ? `📁 <b>Категория:</b> <i>${escapeHtml(getCategoryEmoji(currentCatFC.name, currentCatFC.icon))} ${escapeHtml(currentCatFC.name)}</i>\n\nВыберите новую категорию:`
                 : '📁 <b>Выберите категорию:</b>';
               if (useFlatFC) {
                 for (let i = 0; i < allCatsFC.length; i += 2) {
                   const a = allCatsFC[i]!;
                   const b = allCatsFC[i + 1];
-                  const btnA = { text: `${CAT_EMOJI_FC[a.name] ?? '📂'} ${a.name}`, callback_data: `tx:c:cat:${txCmd.txId}:${a.id}` };
-                  fcRows.push(b ? [btnA, { text: `${CAT_EMOJI_FC[b.name] ?? '📂'} ${b.name}`, callback_data: `tx:c:cat:${txCmd.txId}:${b.id}` }] : [btnA]);
+                  const btnA = { text: `${getCategoryEmoji(a.name, a.icon)} ${a.name}`, callback_data: `tx:c:cat:${txCmd.txId}:${a.id}` };
+                  fcRows.push(b ? [btnA, { text: `${getCategoryEmoji(b.name, b.icon)} ${b.name}`, callback_data: `tx:c:cat:${txCmd.txId}:${b.id}` }] : [btnA]);
                 }
               } else {
                 fcRows.push([
@@ -3545,19 +3535,7 @@ Midas создан, чтобы сделать учет денег максима
             // Screen 2: rendered by draft:catg: handler below.
             // NOTE: getWorkspaceCategories is already statically imported at line 134.
 
-            // Shared emoji map (display only, never stored)
-            const CAT_EMOJI_S1: Record<string, string> = {
-              'Продукты': '🛒', 'Кафе и рестораны': '☕', 'Транспорт': '🚗',
-              'Жильё': '🏠', 'Здоровье': '💊', 'Одежда': '👗',
-              'Красота': '💄', 'Развлечения': '🎮', 'Подписки': '📱',
-              'Связь': '📡', 'Образование': '📚', 'Спорт': '🏋️',
-              'Путешествия': '✈️', 'Подарки': '🎁', 'Дети': '👶',
-              'Питомцы': '🐾', 'Дом': '🏡', 'Другое': '📦', 'Разное': '🗂️',
-              'Зарплаты и выплаты': '💰', 'Фриланс': '🤝', 'Реклама': '📣',
-              'Софт и сервисы': '💻', 'Оборудование': '🖥️', 'Офис': '🏢',
-              'Налоги': '🧾', 'Комиссии': '💸', 'Крипто-комиссии': '⛽',
-              'Подрядчики': '👷', 'Продажи': '📈', 'Инвестиции': '💹',
-            };
+            // Phase 4.0-F: CAT_EMOJI_S1 removed — using getCategoryEmoji() utility
 
             const allCats = await getWorkspaceCategories(dsResolved.workspaceId, dsResolved.userId);
             const draftForHint = await getDraftFields(dsResolved.workspaceId, dsResolved.userId, draftSubId);
@@ -3581,9 +3559,9 @@ Midas создан, чтобы сделать учет денег максима
               for (let i = 0; i < catsToShow.length; i += 2) {
                 const a = catsToShow[i]!;
                 const b = catsToShow[i + 1];
-                const btnA = { text: `${CAT_EMOJI_S1[a.name] ?? '📂'} ${a.name}`, callback_data: `clar:cat:${a.id}:${draftSubId}` };
+                const btnA = { text: `${getCategoryEmoji(a.name, a.icon)} ${a.name}`, callback_data: `clar:cat:${a.id}:${draftSubId}` };
                 s1Rows.push(b
-                  ? [btnA, { text: `${CAT_EMOJI_S1[b.name] ?? '📂'} ${b.name}`, callback_data: `clar:cat:${b.id}:${draftSubId}` }]
+                  ? [btnA, { text: `${getCategoryEmoji(b.name, b.icon)} ${b.name}`, callback_data: `clar:cat:${b.id}:${draftSubId}` }]
                   : [btnA],
                 );
               }
@@ -3594,6 +3572,16 @@ Midas создан, чтобы сделать учет денег максима
                 { text: '💼 Бизнес', callback_data: `draft:catg:biz:${draftSubId}` },
               ]);
             }
+
+            // Phase 4.0 (BUG-3 fix): Custom category buttons — separate from standard groups
+            const customCats = allCats.filter(c => c.is_custom === true);
+            if (customCats.length > 0) {
+              s1Rows.push([{
+                text: `⭐ Мои (${String(customCats.length)})`,
+                callback_data: `draft:catg:mine:${draftSubId}`,
+              }]);
+            }
+            s1Rows.push([{ text: '✏️ Создать', callback_data: `cc:new:${draftSubId}` }]);
 
             // Last row: back button only — no "Без категории" (every tx must have a category)
             s1Rows.push([{ text: '◀️ Назад', callback_data: `draft:back:${draftSubId}` }]);
@@ -3776,29 +3764,17 @@ Midas создан, чтобы сделать учет денег максима
         // Parse: draft:catg:{sub}:{draftId}
         const catgAfterPrefix = callbackData.slice('draft:catg:'.length); // e.g. "life:XYZ..."
         const catgColonIdx = catgAfterPrefix.indexOf(':');
-        const catgSub      = catgColonIdx >= 0 ? catgAfterPrefix.slice(0, catgColonIdx) : ''; // 'life'|'biz'|'back'
+        const catgSub      = catgColonIdx >= 0 ? catgAfterPrefix.slice(0, catgColonIdx) : ''; // 'life'|'biz'|'back'|'mine'
         const catgDraftId  = catgColonIdx >= 0 ? catgAfterPrefix.slice(catgColonIdx + 1) : '';
 
         // Validate draftId is a well-formed ULID (SEC-01)
-        if (!/^[0-9A-Z]{26}$/.test(catgDraftId) || !['life', 'biz', 'back'].includes(catgSub)) {
+        if (!/^[0-9A-Z]{26}$/.test(catgDraftId) || !['life', 'biz', 'back', 'mine'].includes(catgSub)) {
           await answerCallbackQuery(cq.id);
           await reply.status(200).send({ ok: true });
           return;
         }
 
-        // Emoji map — all default + legacy categories (display only, never stored)
-        const CAT_EMOJI: Record<string, string> = {
-          'Продукты': '🛒', 'Кафе и рестораны': '☕', 'Транспорт': '🚗',
-          'Жильё': '🏠', 'Здоровье': '💊', 'Одежда': '👗',
-          'Красота': '💄', 'Развлечения': '🎮', 'Подписки': '📱',
-          'Связь': '📡', 'Образование': '📚', 'Спорт': '🏋️',
-          'Путешествия': '✈️', 'Подарки': '🎁', 'Дети': '👶',
-          'Питомцы': '🐾', 'Дом': '🏡', 'Другое': '📦', 'Разное': '🗂️',
-          'Зарплаты и выплаты': '💰', 'Фриланс': '🤝', 'Реклама': '📣',
-          'Софт и сервисы': '💻', 'Оборудование': '🖥️', 'Офис': '🏢',
-          'Налоги': '🧾', 'Комиссии': '💸', 'Крипто-комиссии': '⛽',
-          'Подрядчики': '👷', 'Продажи': '📈', 'Инвестиции': '💹',
-        };
+        // Phase 4.0-F: CAT_EMOJI removed — using getCategoryEmoji() utility
 
         try {
           const catgResolved = await resolveWorkspace(telegramUserId, chatId);
@@ -3823,9 +3799,9 @@ Midas создан, чтобы сделать учет денег максима
               for (let i = 0; i < allCatg.length; i += 2) {
                 const a = allCatg[i]!;
                 const b = allCatg[i + 1];
-                const btnA = { text: `${CAT_EMOJI[a.name] ?? '📂'} ${a.name}`, callback_data: `clar:cat:${a.id}:${catgDraftId}` };
+                const btnA = { text: `${getCategoryEmoji(a.name, a.icon)} ${a.name}`, callback_data: `clar:cat:${a.id}:${catgDraftId}` };
                 backRows.push(b
-                  ? [btnA, { text: `${CAT_EMOJI[b.name] ?? '📂'} ${b.name}`, callback_data: `clar:cat:${b.id}:${catgDraftId}` }]
+                  ? [btnA, { text: `${getCategoryEmoji(b.name, b.icon)} ${b.name}`, callback_data: `clar:cat:${b.id}:${catgDraftId}` }]
                   : [btnA],
                 );
               }
@@ -3835,6 +3811,15 @@ Midas создан, чтобы сделать учет денег максима
                 { text: '💼 Бизнес', callback_data: `draft:catg:biz:${catgDraftId}` },
               ]);
             }
+            // Phase 4.0: custom category buttons on back-navigation
+            const backCustomCats = allCatg.filter(c => c.is_custom === true);
+            if (backCustomCats.length > 0) {
+              backRows.push([{
+                text: `⭐ Мои (${String(backCustomCats.length)})`,
+                callback_data: `draft:catg:mine:${catgDraftId}`,
+              }]);
+            }
+            backRows.push([{ text: '✏️ Создать', callback_data: `cc:new:${catgDraftId}` }]);
             backRows.push([{ text: '◀️ Назад', callback_data: `draft:back:${catgDraftId}` }]);
             void upsertBotMessage(
               telegramUserId, chatId,
@@ -3842,6 +3827,32 @@ Midas создан, чтобы сделать учет денег максима
               { inline_keyboard: backRows },
             );
 
+          } else if (catgSub === 'mine') {
+            // ── Phase 4.0 (BUG-3): Screen 2-mine: custom categories ────────────
+            const mineCats = allCatg.filter(c => c.is_custom === true);
+            const mineRows: { text: string; callback_data: string }[][] = [];
+            if (mineCats.length === 0) {
+              mineRows.push([{ text: '⚠️ Нет своих категорий', callback_data: `draft:catg:back:${catgDraftId}` }]);
+            } else {
+              for (let i = 0; i < mineCats.length; i += 2) {
+                const a = mineCats[i]!;
+                const b = mineCats[i + 1];
+                const iconA = a.icon ?? '⭐';
+                const iconB = b?.icon ?? '⭐';
+                const btnA = { text: `${iconA} ${a.name}`, callback_data: `clar:cat:${a.id}:${catgDraftId}` };
+                mineRows.push(b
+                  ? [btnA, { text: `${iconB} ${b.name}`, callback_data: `clar:cat:${b.id}:${catgDraftId}` }]
+                  : [btnA],
+                );
+              }
+            }
+            mineRows.push([{ text: '✏️ Создать', callback_data: `cc:new:${catgDraftId}` }]);
+            mineRows.push([{ text: '◀️ К группам', callback_data: `draft:catg:back:${catgDraftId}` }]);
+            void upsertBotMessage(
+              telegramUserId, chatId,
+              '<b>⭐ Мои категории:</b>',
+              { inline_keyboard: mineRows },
+            );
           } else {
             // ── Screen 2: all categories in selected group ──────────────────────
             // group value in DB: 'Жизнь' or 'Бизнес' (category_group enum)
@@ -3859,9 +3870,9 @@ Midas создан, чтобы сделать учет денег максима
               for (let i = 0; i < groupCats.length; i += 2) {
                 const a = groupCats[i]!;
                 const b = groupCats[i + 1];
-                const btnA = { text: `${CAT_EMOJI[a.name] ?? '📂'} ${a.name}`, callback_data: `clar:cat:${a.id}:${catgDraftId}` };
+                const btnA = { text: `${getCategoryEmoji(a.name, a.icon)} ${a.name}`, callback_data: `clar:cat:${a.id}:${catgDraftId}` };
                 s2Rows.push(b
-                  ? [btnA, { text: `${CAT_EMOJI[b.name] ?? '📂'} ${b.name}`, callback_data: `clar:cat:${b.id}:${catgDraftId}` }]
+                  ? [btnA, { text: `${getCategoryEmoji(b.name, b.icon)} ${b.name}`, callback_data: `clar:cat:${b.id}:${catgDraftId}` }]
                   : [btnA],
                 );
               }
@@ -3880,6 +3891,71 @@ Midas создан, чтобы сделать учет денег максима
         } catch (err: unknown) {
           const errorClass = err instanceof Error ? err.constructor.name : 'UnknownError';
           request.log.error({ msg: '[midas:bot:webhook] draft:catg: failed', callbackId: cq.id, errorClass });
+        }
+
+        await answerCallbackQuery(cq.id);
+        await reply.status(200).send({ ok: true });
+        return;
+      }
+      // ── Phase 4.0: Custom Category FSM callbacks (prefix "cc:") ─────
+      // Handles: cc:new:{draftId}, cc:new:tx:{txId}:{from},
+      //          cc:ok, cc:reicon, cc:reicon:back, cc:skip, cc:cancel
+      if (callbackData.startsWith('cc:')) {
+        try {
+          const resolved = await resolveWorkspace(telegramUserId, chatId);
+
+          if (callbackData.startsWith('cc:new:tx:')) {
+            // cc:new:tx:{txId}:{from} — start from transaction edit
+            const ccTxParts = callbackData.slice('cc:new:tx:'.length);
+            const ccTxColonIdx = ccTxParts.indexOf(':');
+            const ccTxId = ccTxColonIdx >= 0 ? ccTxParts.slice(0, ccTxColonIdx) : ccTxParts;
+            const ccTxFrom = ccTxColonIdx >= 0 ? ccTxParts.slice(ccTxColonIdx + 1) : '0';
+            if (/^[0-9A-Z]{26}$/.test(ccTxId)) {
+              const { text, keyboard } = await startCcFromTx(
+                telegramUserId, chatId, ccTxId, ccTxFrom,
+              );
+              void upsertBotMessage(telegramUserId, chatId, text, keyboard);
+            }
+          } else if (callbackData.startsWith('cc:new:')) {
+            // cc:new:{draftId} — start from draft category picker
+            const ccDraftId = callbackData.slice('cc:new:'.length);
+            if (/^[0-9A-Z]{26}$/.test(ccDraftId)) {
+              const { text, keyboard } = await startCcFromDraft(
+                telegramUserId, chatId, ccDraftId,
+              );
+              void upsertBotMessage(telegramUserId, chatId, text, keyboard);
+            }
+          } else if (callbackData === 'cc:ok') {
+            const result = await handleCcOk(telegramUserId, chatId);
+            if (result) {
+              void upsertBotMessage(telegramUserId, chatId, result.messageText, result.keyboard);
+            }
+          } else if (callbackData === 'cc:reicon:back') {
+            const result = await handleCcReiconBack(telegramUserId, chatId);
+            if (result) {
+              void upsertBotMessage(telegramUserId, chatId, result.text, result.keyboard);
+            }
+          } else if (callbackData === 'cc:reicon') {
+            const result = await handleCcReicon(telegramUserId, chatId);
+            if (result) {
+              void upsertBotMessage(telegramUserId, chatId, result.text, result.keyboard);
+            }
+          } else if (callbackData === 'cc:skip') {
+            const result = await handleCcSkip(
+              telegramUserId, chatId, resolved.workspaceId, resolved.userId,
+            );
+            if (result) {
+              void upsertBotMessage(
+                telegramUserId, chatId, result.messageText, result.keyboard,
+              );
+            }
+          } else if (callbackData === 'cc:cancel') {
+            const { text } = await handleCcCancel(telegramUserId, chatId);
+            void upsertBotMessage(telegramUserId, chatId, text);
+          }
+        } catch (err: unknown) {
+          const errorClass = err instanceof Error ? err.constructor.name : 'UnknownError';
+          request.log.error({ msg: '[midas:bot:webhook] cc: callback failed', callbackId: cq.id, errorClass });
         }
 
         await answerCallbackQuery(cq.id);
@@ -8118,6 +8194,36 @@ Midas создан, чтобы сделать учет денег максима
     }
 
     // ── Step 7: Build payload & enqueue (SEC-06) ─────────────
+
+    // ── Phase 4.0: Custom Category FSM text intercept ──────────
+    // If user is in the middle of creating a custom category (entered via
+    // cc:new: callback), intercept their text message BEFORE it goes to ai-parse.
+    // Redis key: midas:cc:{telegramUserId}:{chatId}
+    if (!commandToken && message.text) {
+      try {
+        const ccResult = await processCcText(
+          telegramUserId, chatId, message.text, workspaceId,
+          // userId not available here — resolve from workspace
+          // processCcText uses workspaceId+userId for DB calls
+          // We pass a placeholder; the service uses withTenantTransaction internally
+          // which needs userId. Let's resolve it:
+          (await resolveWorkspace(telegramUserId, chatId)).userId,
+        );
+        if (ccResult.handled) {
+          void upsertBotMessage(
+            telegramUserId, chatId,
+            ccResult.messageText,
+            ccResult.keyboard,
+          );
+          await reply.status(200).send({ ok: true });
+          return;
+        }
+      } catch {
+        // Non-fatal: if FSM check fails, proceed to ai-parse as normal.
+        // Also clean up stale state to prevent infinite intercept loop.
+        void clearCcState(telegramUserId, chatId);
+      }
+    }
     const idempotencyKey = IdempotencyKeyBuilder.webhookIngestion(BOT_ID, chatId, messageId);
 
     const payload: WebhookIngestionJobPayload = {

@@ -30,7 +30,7 @@
 
 import { Worker, type Job } from 'bullmq';
 import { QUEUE_NAMES, type AiParseJobPayload, IdempotencyKeyBuilder } from '@midas/shared';
-import { parseTransaction } from '@midas/ai-core';
+import { parseTransaction, type CustomCategoryRule } from '@midas/ai-core';
 import { redisConnection } from '../queues/redis.js';
 import { createDraft, resolveUserId, setDraftAccountId, getPendingDraftForUser, getAccountBalanceForPreview, getWorkspaceAccountNames, getWorkspaceAccountsForPicker, type WorkspaceAccountEntry } from '../services/draft.service.js';
 import { resolveAccountFromHint } from '../services/account-resolver.service.js'; // Phase 1.31
@@ -208,7 +208,7 @@ async function fetchWorkspaceCategories(
 ): Promise<{ id: string; name: string }[]> {
   const result = await pool.query<{ id: string; name: string }>(
     `SELECT id, name FROM categories
-     WHERE workspace_id = $1 AND deleted_at IS NULL
+     WHERE workspace_id = $1
      ORDER BY name ASC
      LIMIT 6`,
     [workspaceId],
@@ -473,7 +473,45 @@ async function processAiParse(job: Job<AiParseJobPayload>): Promise<void> {
     // Non-fatal: AI parses without account context, balance block shows after picker
     accountNames = [];
   }
-  const parseResult = await parseTransaction(job.data.raw_text, accountNames);
+
+  // ── Phase 4.0: Fetch custom categories for prompt injection + validation ──
+  // Query 1: categories WITH semantic rules → injected into user message
+  // Query 2: ALL custom category names → extends ALLOWED_CATEGORIES validation (BUG-2 fix)
+  // Both are non-fatal: if queries fail, parsing continues without custom categories.
+  let customRules: CustomCategoryRule[] = [];
+  let customCategoryNames: string[] = [];
+  try {
+    const [rulesRes, namesRes] = await Promise.all([
+      pool.query<{ name: string; icon: string; semantic_rule: string }>(
+        `SELECT name, icon, semantic_rule FROM categories
+         WHERE workspace_id = $1 AND is_custom = true AND semantic_rule IS NOT NULL`,
+        [workspaceId],
+      ),
+      pool.query<{ name: string }>(
+        `SELECT name FROM categories
+         WHERE workspace_id = $1 AND is_custom = true`,
+        [workspaceId],
+      ),
+    ]);
+    customRules = rulesRes.rows.map(r => ({
+      name: r.name,
+      icon: r.icon,
+      semanticRule: r.semantic_rule,
+    }));
+    customCategoryNames = namesRes.rows.map(r => r.name);
+  } catch {
+    // Non-fatal: AI parses without custom categories — standard taxonomy still works
+    customRules = [];
+    customCategoryNames = [];
+  }
+
+  const parseResult = await parseTransaction(
+    job.data.raw_text,
+    accountNames,
+    undefined,            // no clarCtx on fresh parse
+    customRules,          // Phase 4.0: rules for prompt injection
+    customCategoryNames,  // Phase 4.0: all names for validation
+  );
 
   console.log('[midas:ai-parse-worker] Parse result', {
     jobId: job.id,

@@ -30,6 +30,9 @@ interface CategoryRow {
   name: string;
   group: string;
   color: string | null;
+  icon: string | null;         // Phase 4.0: DB emoji for custom categories
+  is_custom: boolean;           // Phase 4.0: true = user-created
+  semantic_rule: string | null; // Phase 4.0: semantic rule text
 }
 
 /**
@@ -76,6 +79,7 @@ function groupSortKey(group: string): number {
 
 /**
  * Generate a read-only text list of categories for the current workspace.
+ * Phase 4.0: includes custom categories with icons and semantic rules.
  *
  * @param workspaceId - Internal workspace ULID (from trusted backend — SEC-03)
  * @param userId      - Internal user ULID (required by withTenantTransaction)
@@ -91,13 +95,11 @@ export async function getCategoryList(
     async (client) => {
       const result = await client.query<CategoryRow>(
         // Defense-in-depth: explicit WHERE workspace_id = $1 alongside RLS (SEC-03).
-        // RLS policy tenant_isolation_categories enforces workspace isolation at DB level.
-        // This explicit filter ensures correctness even if RLS is ever temporarily bypassed
-        // during maintenance or migration.
-        `SELECT name, "group", color
+        // Phase 4.0: fetch icon, is_custom, semantic_rule for display.
+        `SELECT name, "group", color, icon, is_custom, semantic_rule
          FROM categories
          WHERE workspace_id = $1
-         ORDER BY "group", name`,
+         ORDER BY is_custom, "group", name`,
         [workspaceId],
       );
       return result.rows;
@@ -113,11 +115,14 @@ export async function getCategoryList(
     );
   }
 
-  // ── Group categories ───────────────────────────────────────
-  // Build a map: group → sorted list of category names
+  // ── Separate standard and custom ──────────────────────────
+  const standardRows = rows.filter(r => !r.is_custom);
+  const customRows   = rows.filter(r => r.is_custom);
+
+  // ── Group standard categories ─────────────────────────────
   const groupMap = new Map<string, string[]>();
 
-  for (const row of rows) {
+  for (const row of standardRows) {
     const existing = groupMap.get(row.group);
     if (existing) {
       existing.push(row.name);
@@ -138,10 +143,24 @@ export async function getCategoryList(
 
   for (const group of sortedGroups) {
     const names = groupMap.get(group) ?? [];
-    // escapeHtml applied to category names (user-controlled) and group labels
-    // (enum-controlled but escaped for consistent defense-in-depth policy).
     const nameLines = names.map((n) => `• ${escapeHtml(n)}`).join('\n');
     sections.push(`<b>${escapeHtml(group)}:</b>\n${nameLines}`);
+  }
+
+  // Phase 4.0: Custom categories section
+  if (customRows.length > 0) {
+    const customLines = customRows.map(r => {
+      const icon = r.icon ?? '⭐';
+      let line = `• ${icon} ${escapeHtml(r.name)}`;
+      if (r.semantic_rule) {
+        const truncated = r.semantic_rule.length > 50
+          ? r.semantic_rule.slice(0, 50) + '…'
+          : r.semantic_rule;
+        line += ` — <i>«${escapeHtml(truncated)}»</i>`;
+      }
+      return line;
+    }).join('\n');
+    sections.push(`<b>⭐ Мои категории:</b>\n${customLines}`);
   }
 
   const totalCount = rows.length;
