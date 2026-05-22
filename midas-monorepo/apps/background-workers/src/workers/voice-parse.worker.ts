@@ -531,9 +531,231 @@ async function buildVoiceNavResponse(
       };
     }
 
-    case 'transactions':
-      // Transactions require pagination → can't build from worker
-      return null;
+    case 'transactions': {
+      // Phase 2S2+: Full Transaction Hub inline (Blindspot 4 — duplicated from transaction-hub.service.ts
+      // and transaction-keyboard.service.ts; can't cross-import from telegram-bot).
+      const TX_PAGE_SIZE_V = 5;
+      const filter = 'a'; // always open with "All" filter, same as Reply Keyboard button
+
+      // ── Step 1: Parallel queries ──────────────────────────────────────────
+      const [txItems, txTotal, txStats] = await withTenantTransaction(workspaceId, userId, async (client) => {
+        const [itemsRes, cntRes, statsRes, wsRes] = await Promise.all([
+          // Transaction list (page 0, filter 'a', with transfer enrichment)
+          client.query<{
+            id: string;
+            base_amount: string;
+            base_currency: string;
+            transaction_intent: string;
+            transaction_time: string;
+            category_name: string;
+            item_name: string | null;
+            transfer_direction: string | null;
+            from_account: string | null;
+            to_account: string | null;
+            to_amount: string | null;
+            to_currency: string | null;
+          }>(
+            `SELECT
+               t.id,
+               ROUND(t.base_amount, 2)::text AS base_amount,
+               t.base_currency,
+               t.transaction_intent,
+               t.transaction_time::text,
+               COALESCE(c.name, '—') AS category_name,
+               t.item_name,
+               t.transfer_direction,
+               COALESCE(a_src.name, NULL) AS from_account,
+               COALESCE(a_tgt.name, NULL) AS to_account,
+               ROUND(t_in.base_amount, 2)::text AS to_amount,
+               t_in.base_currency AS to_currency
+             FROM transactions t
+             LEFT JOIN categories c ON c.id = t.category_id
+             LEFT JOIN account_sources a_src ON a_src.id = t.account_id
+               AND t.transaction_intent = 'transfer'
+             LEFT JOIN transactions t_in
+               ON  t_in.transfer_group_id = t.transfer_group_id
+               AND t_in.transfer_direction = 'inbound'
+               AND t_in.deleted_at IS NULL
+               AND t.transaction_intent = 'transfer'
+               AND t.transfer_direction = 'outbound'
+             LEFT JOIN account_sources a_tgt ON a_tgt.id = t_in.account_id
+               AND t.transaction_intent = 'transfer'
+             WHERE t.workspace_id = $1
+               AND t.deleted_at IS NULL
+               AND (t.transfer_direction IS DISTINCT FROM 'inbound')
+             ORDER BY t.transaction_time DESC
+             LIMIT $2 OFFSET 0`,
+            [workspaceId, TX_PAGE_SIZE_V],
+          ),
+          // Total count
+          client.query<{ cnt: string }>(
+            `SELECT COUNT(*)::text AS cnt
+             FROM transactions
+             WHERE workspace_id = $1
+               AND deleted_at IS NULL
+               AND (transfer_direction IS DISTINCT FROM 'inbound')`,
+            [workspaceId],
+          ),
+          // Month mini stats
+          client.query<{
+            expense_count: string; income_count: string;
+            debt_given_count: string; debt_received_count: string;
+            transfer_count: string; expense_total: string; income_total: string;
+          }>(
+            `SELECT
+               COUNT(*) FILTER (WHERE transaction_intent = 'expense')::text AS expense_count,
+               COUNT(*) FILTER (WHERE transaction_intent = 'income')::text AS income_count,
+               COUNT(*) FILTER (WHERE transaction_intent = 'debt_given')::text    AS debt_given_count,
+               COUNT(*) FILTER (WHERE transaction_intent = 'debt_received')::text AS debt_received_count,
+               COUNT(*) FILTER (WHERE transaction_intent = 'transfer'
+                 AND (transfer_direction IS DISTINCT FROM 'inbound'))::text       AS transfer_count,
+               COALESCE(SUM(base_amount) FILTER (WHERE transaction_intent = 'expense'), 0)::text AS expense_total,
+               COALESCE(SUM(base_amount) FILTER (WHERE transaction_intent = 'income'), 0)::text  AS income_total
+             FROM transactions
+             WHERE workspace_id = $1
+               AND deleted_at IS NULL
+               AND transaction_time >= date_trunc('month', NOW())
+               AND transaction_time <  date_trunc('month', NOW()) + interval '1 month'`,
+            [workspaceId],
+          ),
+          // Workspace default currency for header
+          client.query<{ default_currency: string }>(
+            `SELECT default_currency FROM workspaces WHERE id = $1`,
+            [workspaceId],
+          ),
+        ]);
+
+        const statsRow = statsRes.rows[0];
+        const currency = wsRes.rows[0]?.default_currency ?? 'USDT';
+        return [
+          itemsRes.rows,
+          parseInt(cntRes.rows[0]?.cnt ?? '0', 10),
+          {
+            expense_count:       parseInt(statsRow?.expense_count       ?? '0', 10),
+            income_count:        parseInt(statsRow?.income_count        ?? '0', 10),
+            debt_given_count:    parseInt(statsRow?.debt_given_count    ?? '0', 10),
+            debt_received_count: parseInt(statsRow?.debt_received_count ?? '0', 10),
+            transfer_count:      parseInt(statsRow?.transfer_count      ?? '0', 10),
+            expense_total:  statsRow?.expense_total  ?? '0',
+            income_total:   statsRow?.income_total   ?? '0',
+            currency,
+          },
+        ] as const;
+      });
+
+      // ── Step 2: Build header text (mirrors formatTxListHeader) ──────────
+      const MONTH_NAMES_RU_V = ['январь','февраль','март','апрель','май','июнь',
+                                'июль','август','сентябрь','октябрь','ноябрь','декабрь'];
+      function pluralRuV(n: number): string {
+        const abs = Math.abs(n) % 100;
+        const last = abs % 10;
+        if (abs >= 11 && abs <= 19) return 'ов';
+        if (last === 1) return '';
+        if (last >= 2 && last <= 4) return 'а';
+        return 'ов';
+      }
+      const monthName = MONTH_NAMES_RU_V[new Date().getMonth()] ?? '';
+      const parts: string[] = [];
+      if (txStats.expense_count > 0)
+        parts.push(`${String(txStats.expense_count)} расход${pluralRuV(txStats.expense_count)}`);
+      if (txStats.income_count > 0)
+        parts.push(`${String(txStats.income_count)} доход${pluralRuV(txStats.income_count)}`);
+      const totalDebt = txStats.debt_given_count + txStats.debt_received_count;
+      if (totalDebt > 0) parts.push(`${String(totalDebt)} долг${pluralRuV(totalDebt)}`);
+      if (txStats.transfer_count > 0)
+        parts.push(`${String(txStats.transfer_count)} перевод${pluralRuV(txStats.transfer_count)}`);
+      const summary = parts.length > 0 ? parts.join(' · ') : 'нет транзакций';
+      const headerText = `<b>📋 Транзакции</b>\n\nЗа ${monthName}: ${summary}`;
+
+      // ── Step 3: Build keyboard (mirrors buildTxListKeyboard) ─────────────
+      const CCY_SYM_V: Record<string, string> = {
+        RUB: '₽', USD: '$', EUR: '€', UAH: '₴', GBP: '£',
+        KZT: '₸', BYN: 'Br', GEL: '₾', PLN: 'zł', TRY: '₺',
+        CNY: '¥', JPY: '¥', HKD: 'HK$', SGD: 'S$', AUD: 'A$',
+        CAD: 'C$', CHF: 'Fr',
+      };
+      function fmtCurV(code: string): string { return CCY_SYM_V[code] ?? code; }
+      function fmtAmtV(s: string): string {
+        const dot = s.indexOf('.');
+        if (dot === -1) return `${s}.00`;
+        const int2 = s.slice(0, dot).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+        const frac = s.slice(dot + 1).padEnd(2, '0').slice(0, 2);
+        return `${int2}.${frac}`;
+      }
+      function shortDateV(iso: string): string {
+        const d = new Date(iso);
+        return `${String(d.getDate()).padStart(2,'0')}.${String(d.getMonth()+1).padStart(2,'0')}`;
+      }
+      function intentEmojiV(intent: string): string {
+        switch (intent) {
+          case 'income': return '💰'; case 'expense': return '💸';
+          case 'debt_given': return '🤝'; case 'debt_received': return '🤲';
+          default: return '🔄';
+        }
+      }
+      function escV(s: string): string {
+        return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+      }
+
+      const FILTER_LABELS_V: Record<string, { text: string; active: string }> = {
+        e: { text: '💸',       active: '💸 ✓' },
+        i: { text: '💰',       active: '💰 ✓' },
+        d: { text: '🤝',       active: '🤝 ✓' },
+        t: { text: '🔄',       active: '🔄 ✓' },
+        a: { text: '📋 Все',   active: '📋 Все ✓' },
+      };
+
+      const kbRows: { text: string; callback_data: string }[][] = [];
+
+      // Filter row (all buttons, 'a' is active)
+      kbRows.push(['e','i','d','t','a'].map((f) => {
+        const isActive = f === filter;
+        const lbl = isActive ? (FILTER_LABELS_V[f]?.active ?? f) : (FILTER_LABELS_V[f]?.text ?? f);
+        const cbf = (isActive && f !== 'a') ? 'a' : f;
+        return { text: lbl, callback_data: `tx:l:0:${cbf}` };
+      }));
+
+      // Search button
+      kbRows.push([{ text: '🔍 Поиск', callback_data: 'tx:s' }]);
+
+      // Transaction rows
+      for (const tx of txItems) {
+        const emoji = intentEmojiV(tx.transaction_intent);
+        const amt   = fmtAmtV(tx.base_amount);
+        const cur   = fmtCurV(tx.base_currency);
+        const date  = shortDateV(tx.transaction_time);
+
+        if (tx.transaction_intent === 'transfer' && tx.from_account && tx.to_account && tx.to_amount && tx.to_currency) {
+          const toAmt = fmtAmtV(tx.to_amount);
+          const toCur = fmtCurV(tx.to_currency);
+          kbRows.push([{
+            text: `🔄 ${escV(tx.from_account)} → ${escV(tx.to_account)}  ${amt} ${cur} → ${toAmt} ${toCur}  ${date}`,
+            callback_data: `tx:v:${tx.id}`,
+          }]);
+          continue;
+        }
+
+        const label = tx.item_name ? escV(tx.item_name) : escV(tx.category_name);
+        kbRows.push([{ text: `${emoji} ${label}  ${amt} ${cur}  ${date}`, callback_data: `tx:v:${tx.id}` }]);
+      }
+
+      // Pagination row
+      const totalPages = Math.max(1, Math.ceil(txTotal / TX_PAGE_SIZE_V));
+      if (totalPages > 1) {
+        const navRow: { text: string; callback_data: string }[] = [];
+        navRow.push({ text: `📄 1 / ${String(totalPages)}`, callback_data: 'tx:x' });
+        navRow.push({ text: 'Раньше ➡️', callback_data: 'tx:l:1:a' });
+        kbRows.push(navRow);
+      }
+
+      // Close button
+      kbRows.push([{ text: '✖️ Закрыть', callback_data: 'tx:close' }]);
+
+      return {
+        text: headerText,
+        keyboard: { inline_keyboard: kbRows },
+      };
+    }
   }
 }
 
