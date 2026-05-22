@@ -898,7 +898,7 @@ function buildSheet0Summary(
     c.value = h;
     c.font  = { bold: true, size: 8, name: 'Calibri', color: { argb: 'FF2D6A9F' } };
     c.fill  = { type: 'pattern', pattern: 'solid', fgColor: { argb: `FF${C_TOTAL_HDR}` } };
-    c.alignment = { horizontal: i === 4 ? 'center' : i >= 2 ? 'right' : 'left', vertical: 'middle' };
+    c.alignment = { horizontal: i === 4 ? 'right' : 'left', vertical: 'middle' };
     c.border = { bottom: { style: 'thin', color: { argb: `FF${C_TBL_BORDER}` } } };
   });
   ws.getRow(r).height = 16;
@@ -948,7 +948,7 @@ function buildSheet0Summary(
     ws.mergeCells(r, 3, r, 4);
     const c3 = ws.getCell(r, 3);
     c3.value = parts.join('   '); c3.font = { size: 8, name: 'Calibri', color: { argb: 'FF444444' } };
-    c3.fill = fillBg; c3.border = thinB; c3.alignment = { horizontal: 'center', vertical: 'middle' };
+    c3.fill = fillBg; c3.border = thinB; c3.alignment = { horizontal: 'left', vertical: 'middle', indent: 1 };
 
     const c5 = ws.getCell(r, 5);
     c5.value = `${fmtAmtSigned(net)} ${cur}`; c5.font = { bold: true, size: 9, name: 'Calibri', color: { argb: netClr } };
