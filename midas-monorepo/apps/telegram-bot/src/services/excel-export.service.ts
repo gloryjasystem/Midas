@@ -454,8 +454,8 @@ function buildSheet0Summary(
 
   ws.getColumn(1).width = 22;
   ws.getColumn(2).width = 38;
-  ws.getColumn(3).width = 28;
-  ws.getColumn(4).width = 28; // widened for large USD amounts (millions in USDT)
+  ws.getColumn(3).width = 18;
+  ws.getColumn(4).width = 14;
   ws.getColumn(5).width = 44;
 
   let r = 1;
@@ -948,7 +948,7 @@ function buildSheet0Summary(
     ws.mergeCells(r, 3, r, 4);
     const c3 = ws.getCell(r, 3);
     c3.value = parts.join('   '); c3.font = { size: 8, name: 'Calibri', color: { argb: 'FF444444' } };
-    c3.fill = fillBg; c3.border = thinB; c3.alignment = { horizontal: 'left', vertical: 'middle' };
+    c3.fill = fillBg; c3.border = thinB; c3.alignment = { horizontal: 'center', vertical: 'middle' };
 
     const c5 = ws.getCell(r, 5);
     c5.value = `${fmtAmtSigned(net)} ${cur}`; c5.font = { bold: true, size: 9, name: 'Calibri', color: { argb: netClr } };
