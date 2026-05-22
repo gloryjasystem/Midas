@@ -138,7 +138,10 @@ function formatCancelCard(tx: LastTransaction): string {
   const dt = (() => {
     try {
       const d = new Date(tx.created_at);
-      return `${String(d.getDate()).padStart(2,'0')}.${String(d.getMonth()+1).padStart(2,'0')}.${d.getFullYear()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+      const hh = String(d.getHours()).padStart(2, '0');
+      const mm = String(d.getMinutes()).padStart(2, '0');
+      const months = ['янв','фев','мар','апр','мая','июн','июл','авг','сен','окт','ноя','дек'];
+      return `${hh}:${mm}, ${d.getDate()} ${months[d.getMonth()] ?? ''}`;
     } catch { return tx.created_at; }
   })();
   const amtClean = String(tx.original_amount).replace(/\.?0+$/, '');

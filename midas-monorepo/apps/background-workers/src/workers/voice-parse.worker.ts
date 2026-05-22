@@ -436,6 +436,7 @@ async function buildVoiceNavResponse(
            LEFT JOIN categories      c ON c.id = t.category_id
            LEFT JOIN account_sources a ON a.id = t.account_id
            WHERE t.workspace_id = $1 AND t.deleted_at IS NULL
+             AND (t.transfer_direction IS DISTINCT FROM 'inbound')
            ORDER BY t.created_at DESC
            LIMIT 1`,
           [workspaceId],
@@ -505,16 +506,16 @@ async function buildVoiceNavResponse(
       // when the user initiates cancel, so the confirmation screen is clear.
       try {
         const oldCardMsgId = await redisConnection.get(`midas:am:${telegramUserId}:${chatId}`);
-        if (oldCardMsgId) {
+        if (oldCardMsgId && oldCardMsgId !== '0') {
           const token = process.env.TELEGRAM_BOT_TOKEN;
           if (token) {
-            void fetch(`${TELEGRAM_API_BASE}/bot${token}/deleteMessage`, {
+            await fetch(`${TELEGRAM_API_BASE}/bot${token}/deleteMessage`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ chat_id: chatId, message_id: parseInt(oldCardMsgId, 10) }),
             });
           }
-          void redisConnection.del(`midas:am:${telegramUserId}:${chatId}`);
+          await redisConnection.del(`midas:am:${telegramUserId}:${chatId}`);
         }
       } catch { /* non-fatal: worst case old card stays */ }
 

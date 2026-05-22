@@ -4610,7 +4610,8 @@ Midas создан, чтобы сделать учет денег максима
           }
         } catch (clErr: unknown) {
           const clErrClass = clErr instanceof Error ? clErr.constructor.name : 'UnknownError';
-          request.log.error({ msg: '[midas:bot:webhook] cl: callback failed', callbackId: cq.id, clErrClass });
+          const clErrMsg   = clErr instanceof Error ? clErr.message : '';
+          request.log.error({ msg: '[midas:bot:webhook] cl: callback failed', callbackId: cq.id, clErrClass, clErrMsg });
           void answerCallbackQuery(cq.id, '⚠️ Ошибка, попробуйте ещё раз');
         }
 

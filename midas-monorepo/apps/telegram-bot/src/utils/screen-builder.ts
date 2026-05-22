@@ -785,10 +785,6 @@ export function buildPostConfirmKeyboard(transactionId: string): InlineKeyboard 
       [
         { text: '✏️ Изменить запись', callback_data: `ed:v:${transactionId}` },
       ],
-      [
-        { text: '💼 Баланс', callback_data: 'nav:balance' },
-        { text: '📊 Отчёт', callback_data: 'nav:report' },
-      ],
     ],
   };
 }
