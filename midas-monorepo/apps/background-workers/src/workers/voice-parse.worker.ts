@@ -383,6 +383,11 @@ async function buildVoiceNavResponse(
           '«Покажи баланс» · «Настройки» · «Экспорт»\n' +
           '«Добавь счёт» · «Отмени последнюю» · «Помощь»\n\n' +
           '❓ Вопросы → @midas_support',
+        keyboard: {
+          inline_keyboard: [
+            [{ text: '✖️ Закрыть справочник', callback_data: 'bl:close' }],
+          ],
+        },
       };
 
     case 'report':
@@ -983,6 +988,15 @@ async function _processVoiceParse(job: Job<VoiceParseJobPayload>): Promise<void>
         if (navResult) {
           // Replace "⏳ Распознаю..." with the actual nav screen
           await editStatusMessage(chatId, statusMessageId, navResult.text, navResult.keyboard);
+
+          // ── Phase 2S2+: Register nav pointer in midas:nav: ──
+          // upsertBotMessage (in active-message.service.ts) already auto-deletes
+          // the nav message when a new transaction appears — BUT only if the
+          // midas:nav:{uid}:{cid} key is set. Voice nav uses editStatusMessage
+          // (not sendNavMessage), so we must write the key manually here.
+          const navRedisKey = `midas:nav:${telegramUserId}:${chatId}`;
+          void redisConnection.set(navRedisKey, statusMessageId, 'EX', 86400);
+
           return;
         }
         // navResult === null means we can't handle this command (e.g. 'transactions')
@@ -995,6 +1009,35 @@ async function _processVoiceParse(job: Job<VoiceParseJobPayload>): Promise<void>
         // Fall through to AI parse — graceful degradation
       }
     }
+  }
+
+  // ── Phase 2S2+: Delete previous nav message before transaction card ──
+  // If the user had a nav panel open (balance, settings, help, etc. triggered
+  // by voice or text), delete it now so the transaction card appears cleanly.
+  // This mirrors the logic in upsertBotMessage (active-message.service.ts L213-218)
+  // which runs for TEXT transactions. For VOICE transactions we do it here because
+  // the voice worker bypasses the webhook route where that cleanup normally fires.
+  try {
+    const navRedisKey = `midas:nav:${telegramUserId}:${chatId}`;
+    const oldNavMsgId = await redisConnection.get(navRedisKey);
+    if (oldNavMsgId) {
+      // Fire-and-forget: non-critical, message may already be gone
+      void (async () => {
+        try {
+          const token = process.env.TELEGRAM_BOT_TOKEN;
+          if (token) {
+            await fetch(`${TELEGRAM_API_BASE}/bot${token}/deleteMessage`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ chat_id: chatId, message_id: parseInt(oldNavMsgId, 10) }),
+            });
+          }
+        } catch { /* silent */ }
+      })();
+      void redisConnection.del(navRedisKey);
+    }
+  } catch {
+    // Non-fatal: cleanup is best-effort
   }
 
   // ── Step 5: Store status msgId → ai-parse will delete it ──
