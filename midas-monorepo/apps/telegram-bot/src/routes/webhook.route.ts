@@ -2203,6 +2203,18 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
               const { formatRestoredSuccessCard } = await import('../utils/screen-builder.js');
               const account = card.account_id ? await getAccountWithBalance(txResolved.workspaceId, txResolved.userId, card.account_id) : null;
               void editMessageText(chatId, txMsgId, formatRestoredSuccessCard(card, account), { inline_keyboard: [[{ text: '\u270F\uFE0F \u0418\u0437\u043C\u0435\u043D\u0438\u0442\u044C \u0437\u0430\u043F\u0438\u0441\u044C', callback_data: `ed:v:${txCmd.txId}` }]] });
+
+              // ── Fix 1+5: Restore Redis pointers for voice quick-edit ──
+              try {
+                await redisConnection.set(
+                  `midas:last_confirmed:${telegramUserId}:${chatId}`,
+                  txMsgId,
+                  'EX', 604800, // 7 days — matches notifications.worker.ts:261
+                );
+                await redisConnection.del(`midas:nav:${telegramUserId}:${chatId}`);
+                await redisConnection.del(editStateKey(telegramUserId, chatId));
+                await redisConnection.del(`midas:tx:edit:amt:${telegramUserId}:${chatId}`);
+              } catch { /* non-fatal */ }
             }
           } else if (txCmd.cmd === 'list') {
             const [items, total, stats] = await Promise.all([
