@@ -874,6 +874,20 @@ async function buildVoiceNavResponse(
         keyboard: { inline_keyboard: kbRows },
       };
     }
+
+    // ── Phase 5.0: Context-Aware Quick Edits ──────────────────────────────
+    // edit_amount / edit_category / edit_account / edit_type are handled
+    // exclusively in webhook.route.ts (text-message context). The voice
+    // worker re-queues transcripts as AiParseJobPayload BEFORE this switch
+    // is reached, so these commands would never arrive here from voice.
+    // However, TypeScript requires exhaustive coverage of the NavCommand
+    // union — return null so the caller treats it as "no nav response"
+    // and falls through to normal AI-parse queue submission.
+    case 'edit_amount':
+    case 'edit_category':
+    case 'edit_account':
+    case 'edit_type':
+      return null;
   }
 }
 

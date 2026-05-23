@@ -264,5 +264,32 @@ export async function buildCommandResponse(
 
       return { text, keyboard: { inline_keyboard: rows } };
     }
+
+    // ── Phase 5.0: Context-Aware Quick Edits ────────────────────────────────
+    // Each command fetches the last transaction and returns a sentinel string
+    // that webhook.route.ts will intercept to trigger the correct UI picker
+    // via sendMessageWithKeyboard() (NEW message, not editMessageText).
+    //
+    // Sentinel format: __QUICK_EDIT__:{field}:{txId}
+    //   field: 'amt' | 'cat' | 'acc' | 'int'
+    //   txId:  26-char ULID from DB — guaranteed valid (comes from getLastTransaction SQL)
+    //
+    // Null guard mirrors edit_last / cancel_last patterns above.
+    case 'edit_amount':
+    case 'edit_category':
+    case 'edit_account':
+    case 'edit_type': {
+      const qeLastTx = await getLastTransaction(ctx.workspaceId, ctx.userId);
+      if (!qeLastTx) {
+        return { text: '📭 Нет транзакций для редактирования.' };
+      }
+      const fieldMap: Record<string, string> = {
+        edit_amount:   'amt',
+        edit_category: 'cat',
+        edit_account:  'acc',
+        edit_type:     'int',
+      };
+      return { text: `__QUICK_EDIT__:${fieldMap[cmd]}:${qeLastTx.id}` };
+    }
   }
 }
