@@ -242,12 +242,14 @@ async function processNotification(job: Job<NotificationJobPayload>): Promise<vo
         await redisConnection.set(`midas:success_card:${sentMessageId}`, '1', 'EX', 2_592_000); // 30 days
         // DEL the active-message pointer so step-7 finds nothing
         await redisConnection.del(`midas:am:${job.data.telegramUserId}:${chatId}`);
-        // Store confirmed card msgId for cancel_last deletion (24h TTL — same as old am: key)
+        // Store confirmed card msgId for cancel_last / quick-edit deletion (7d TTL — Phase 5.2)
+        // TTL increased from 24h → 7 days so that quick-edit commands (voice: "смени сумму")
+        // can reliably delete the success card even if sent days after confirmation.
         await redisConnection.set(
           `midas:last_confirmed:${job.data.telegramUserId}:${chatId}`,
           sentMessageId,
           'EX',
-          86400,
+          604800, // 7 days
         );
       } else {
         await redisConnection.set(
