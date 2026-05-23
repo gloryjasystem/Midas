@@ -184,6 +184,15 @@ async function processNotification(job: Job<NotificationJobPayload>): Promise<vo
     await deleteTelegramMessage(chatId, job.data.deleteMessageId);
   }
 
+  // Guard: delete-only jobs have empty message — nothing to send/edit.
+  // Without this, sendTelegramMessage('') → Telegram 400 "message text is empty".
+  if (!job.data.message) {
+    console.log('[midas:notifications-worker] Delete-only job — skipping send', {
+      jobId: job.id, alertId, chatId,
+    });
+    return;
+  }
+
   // Phase 1.33: Try edit-first if activeMessageId is available.
   // activeMessageId is only set for the approve notification (to edit preview → confirmed).
   // For new preview cards, activeMessageId is NOT set → always sends new message.
