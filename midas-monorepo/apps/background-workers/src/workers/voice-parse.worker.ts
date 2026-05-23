@@ -1706,20 +1706,27 @@ async function _processVoiceParse(job: Job<VoiceParseJobPayload>): Promise<void>
     const navRedisKey = `midas:nav:${telegramUserId}:${chatId}`;
     const oldNavMsgId = await redisConnection.get(navRedisKey);
     if (oldNavMsgId) {
-      // Fire-and-forget: non-critical, message may already be gone
-      void (async () => {
-        try {
-          const token = process.env.TELEGRAM_BOT_TOKEN;
-          if (token) {
-            await fetch(`${TELEGRAM_API_BASE}/bot${token}/deleteMessage`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ chat_id: chatId, message_id: parseInt(oldNavMsgId, 10) }),
-            });
-          }
-        } catch { /* silent */ }
-      })();
-      void redisConnection.del(navRedisKey);
+      const lcKey = `midas:last_confirmed:${telegramUserId}:${chatId}`;
+      const lastConfirmedMsgId = await redisConnection.get(lcKey);
+      if (oldNavMsgId === lastConfirmedMsgId) {
+        // Success card — just clear stale nav pointer, DON'T delete message
+        void redisConnection.del(navRedisKey);
+      } else {
+        // Actual nav screen — safe to delete
+        void (async () => {
+          try {
+            const token = process.env.TELEGRAM_BOT_TOKEN;
+            if (token) {
+              await fetch(`${TELEGRAM_API_BASE}/bot${token}/deleteMessage`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ chat_id: chatId, message_id: parseInt(oldNavMsgId, 10) }),
+              });
+            }
+          } catch { /* silent */ }
+        })();
+        void redisConnection.del(navRedisKey);
+      }
     }
   } catch {
     // Non-fatal: cleanup is best-effort
