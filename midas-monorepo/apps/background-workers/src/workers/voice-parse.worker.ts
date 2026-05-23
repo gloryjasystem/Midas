@@ -1599,12 +1599,22 @@ async function _processVoiceParse(job: Job<VoiceParseJobPayload>): Promise<void>
       if (results) {
         hasActiveState = results.some(([err, val]) => !err && val === 1);
       }
-    } catch {
+      // DEBUG: log which keys are active
+      console.log('[midas:voice-parse-worker] DEBUG state-gate', {
+        jobId: job.id, voiceCmd, hasActiveState,
+        keys: results?.map(([_e, val], i) => ({ key: stateKeys[i]?.split(':')[1], exists: val === 1 })),
+      });
+    } catch (sgErr: unknown) {
+      console.warn('[midas:voice-parse-worker] DEBUG state-gate Redis error', { error: sgErr instanceof Error ? (sgErr as Error).message : 'unknown' });
       // Non-fatal: if Redis fails, proceed with nav (better UX)
     }
 
     const isQuickEditCmd = voiceCmd === 'edit_amount' || voiceCmd === 'edit_category' ||
       voiceCmd === 'edit_account' || voiceCmd === 'edit_type';
+    console.log('[midas:voice-parse-worker] DEBUG gate decision', {
+      jobId: job.id, voiceCmd, hasActiveState, isQuickEditCmd,
+      willExecute: !(hasActiveState && !isQuickEditCmd),
+    });
     if (hasActiveState && !isQuickEditCmd) {
       console.log('[midas:voice-parse-worker] Phase 2S2: active state detected, skipping nav', {
         jobId: job.id, workspaceId, voiceCmd,
@@ -1633,26 +1643,18 @@ async function _processVoiceParse(job: Job<VoiceParseJobPayload>): Promise<void>
       // ── Direct execution: build nav screen inline ──
       // Blindspot 4: Can't import from telegram-bot — minimal SQL queries inlined.
       try {
+        console.log('[midas:voice-parse-worker] DEBUG calling buildVoiceNavResponse', { jobId: job.id, voiceCmd, workspaceId });
         const navResult = await buildVoiceNavResponse(voiceCmd, workspaceId, userId, telegramUserId, chatId);
+        console.log('[midas:voice-parse-worker] DEBUG navResult', { jobId: job.id, hasResult: !!navResult, hasText: !!navResult?.text });
         if (navResult) {
-          // ── Phase 5.1-B: __SENT__ sentinel for edit_amount ────────────────
-          // Amount picker is sent as a NEW message (needs sentMsgId for Redis
-          // bridge). Worker already sent it inside buildVoiceNavResponse.
-          // Here we only need to DELETE the "⏳ Распознаю..." status message.
-
-
           // Replace "⏳ Распознаю..." with the actual nav screen
           await editStatusMessage(chatId, statusMessageId, navResult.text, navResult.keyboard);
 
-          // ── Phase 2S2+: Register nav pointer in midas:nav: ──
-          // upsertBotMessage (in active-message.service.ts) already auto-deletes
-          // the nav message when a new transaction appears — BUT only if the
-          // midas:nav:{uid}:{cid} key is set. Voice nav uses editStatusMessage
-          // (not sendNavMessage), so we must write the key manually here.
+          // Register nav pointer in midas:nav:
           const navRedisKey = `midas:nav:${telegramUserId}:${chatId}`;
           void redisConnection.set(navRedisKey, statusMessageId, 'EX', 86400);
 
-          // Fix 3: edit_amount Redis bridge (using statusMessageId instead of sentMsgId)
+          // Fix 3: edit_amount Redis bridge
           if (navResult.editAmountBridge) {
             try {
               await redisConnection.set(
@@ -1663,10 +1665,11 @@ async function _processVoiceParse(job: Job<VoiceParseJobPayload>): Promise<void>
             } catch { /* non-fatal */ }
           }
 
+          console.log('[midas:voice-parse-worker] DEBUG quick-edit SUCCESS — returning', { jobId: job.id, voiceCmd });
           return;
         }
         // navResult === null means we can't handle this command (e.g. 'transactions')
-        // Fall through to AI parse
+        console.log('[midas:voice-parse-worker] DEBUG navResult null — falling through to AI parse', { jobId: job.id, voiceCmd });
       } catch (err) {
         const isQuickEdit = voiceCmd === 'edit_amount' || voiceCmd === 'edit_category' ||
           voiceCmd === 'edit_account' || voiceCmd === 'edit_type';
