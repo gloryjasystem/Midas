@@ -204,9 +204,6 @@ async function deleteSuccessCardW(
   }
 }
 
-function editStateKeyW(uid: string, cid: string): string {
-  return `midas:edit:${uid}:${cid}`;
-}
 
 // ─────────────────────────────────────────────────────────────
 // Phase 2S2: Voice nav response builder (Blindspot 4: inline queries)
@@ -1662,11 +1659,6 @@ async function _processVoiceParse(job: Job<VoiceParseJobPayload>): Promise<void>
                 `midas:tx:edit:amt:${telegramUserId}:${chatId}`,
                 `${navResult.editAmountBridge.txId}:${statusMessageId}:s`,
                 'EX', 120,
-              );
-              await redisConnection.set(
-                editStateKeyW(telegramUserId, chatId),
-                `amt:${navResult.editAmountBridge.txId}`,
-                'EX', 300,
               );
             } catch { /* non-fatal */ }
           }
