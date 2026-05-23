@@ -5698,13 +5698,44 @@ Midas создан, чтобы сделать учет денег максима
             request.log.info({ msg: '[midas:bot:webhook] nav:cancel_last (text)', telegramUserId, workspaceId: resolved.workspaceId });
             await reply.status(200).send({ ok: true });
             return;
-          } else if (navCmd === 'edit_last') {
-            // ── edit_last: open full edit card for last transaction ──
+          } else if (
+            navCmd === 'edit_last' ||
+            navCmd === 'edit_amount' ||
+            navCmd === 'edit_category' ||
+            navCmd === 'edit_account' ||
+            navCmd === 'edit_type'
+          ) {
+            // ── Phase 5.0-B: Quick Edit + edit_last combined handler ──────────
+            // buildCommandResponse returns either a full card (edit_last)
+            // or a sentinel string __QUICK_EDIT__:{field}:{txId} (Phase 5.0).
             const elResponse = await buildCommandResponse(navCmd, cmdCtx);
-            const elKeyboard = elResponse.keyboard ?? { inline_keyboard: [] };
-            await sendMessageWithKeyboard(chatId, elResponse.text, elKeyboard);
 
-            request.log.info({ msg: '[midas:bot:webhook] nav:edit_last (text)', telegramUserId, workspaceId: resolved.workspaceId });
+            if (elResponse.text.startsWith('__QUICK_EDIT__:')) {
+              // ── Send-First Bridge: open the right picker as a NEW message ──
+              const qeParts = elResponse.text.split(':');
+              const qeField = qeParts[1] ?? '';   // 'amt' | 'cat' | 'acc' | 'int'
+              const qeTxId  = qeParts[2] ?? '';   // 26-char ULID
+
+              await handleQuickEditField(
+                chatId, telegramUserId, qeTxId, qeField,
+                resolved.workspaceId, resolved.userId,
+              );
+
+              request.log.info({
+                msg: '[midas:bot:webhook] nav:quick_edit',
+                telegramUserId,
+                field: qeField,
+                txId: qeTxId,
+                workspaceId: resolved.workspaceId,
+              });
+            } else {
+              // ── edit_last: full card with edit buttons ──
+              const elKeyboard = elResponse.keyboard ?? { inline_keyboard: [] };
+              await sendMessageWithKeyboard(chatId, elResponse.text, elKeyboard);
+
+              request.log.info({ msg: '[midas:bot:webhook] nav:edit_last (text)', telegramUserId, workspaceId: resolved.workspaceId });
+            }
+
             await reply.status(200).send({ ok: true });
             return;
           } else {
@@ -8356,3 +8387,196 @@ Midas создан, чтобы сделать учет денег максима
 };
 
 export default webhookRoute;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase 5.0-B: Quick Edit Field Handler (Send-First Bridge)
+//
+// Called when user sends a text command like "измени сумму" (edit_amount NavCommand).
+// Unlike callback-based handlers that use editMessageText() on an existing message,
+// this function SENDS a new message via sendMessageWithKeyboard() — because there
+// is no bot message to edit when the trigger is a user text message.
+//
+// All keyboard callback_data uses the ':s' standalone suffix so that:
+//   ◀️ Назад  →  tx:v:{txId}:s  →  shows full card  →  ✖️ Закрыть  →  tx:done:{txId}
+//
+// SEC-12: No user-content is logged. Only chatId, telegramUserId, field, txId.
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function handleQuickEditField(
+  chatId: string,
+  telegramUserId: string,
+  txId: string,
+  field: string,  // 'amt' | 'cat' | 'acc' | 'int'
+  workspaceId: string,
+  userId: string,
+): Promise<void> {
+  // All symbols used below are statically imported at the top of webhook.route.ts:
+  //   sendMessageWithKeyboard, getTransactionCard, EDITABLE_INTENTS,
+  //   getWorkspaceCategories, getWorkspaceAccounts, buildAccountPickerKeyboard,
+  //   getCategoryEmoji, escapeHtml, redisConnection.
+  // No lazy-imports needed — this function lives inside the same module.
+  const smk = sendMessageWithKeyboard;
+
+  // Standalone context: ◀️ Назад always goes to tx:v:{txId}:s (full card).
+  // tx:v with :s suffix → ✖️ Закрыть → tx:done:{txId} (closes cleanly).
+  const SF = ':s';
+
+
+  // ── 'amt' — Amount picker ──────────────────────────────────────────────────
+  if (field === 'amt') {
+    // Guard: cross-currency transactions cannot have their amount changed.
+    // Mirrors the visibility guard in tx:v handler (is_cross_currency check).
+    const card = await getTransactionCard(txId, workspaceId, userId);
+    if (card?.is_cross_currency) {
+      await smk(chatId,
+        '⚠️ Изменение суммы недоступно для мультивалютных транзакций.',
+        { inline_keyboard: [[{ text: '◀️ Назад', callback_data: `tx:v:${txId}${SF}` }]] },
+      );
+      return;
+    }
+
+    // Send picker. Capture sentMsgId — critical for the Redis bridge below.
+    // sendMessageWithKeyboard returns string (message_id) | null.
+    const sentMsgId = await smk(
+      chatId,
+      '✏️ Введите новую сумму:',
+      { inline_keyboard: [[{ text: '◀️ Отмена', callback_data: `tx:v:${txId}${SF}` }]] },
+    );
+
+    // ── Redis bridge ────────────────────────────────────────────────────────
+    // The existing text intercept (webhook.route.ts ~L7649) reads:
+    //   midas:tx:edit:amt:{userId}:{chatId}  →  "{txId}:{msgId}:{from}"
+    // When msgId is present it uses editMessageText on that message after
+    // the user enters the number. This is exactly what we set here.
+    // If sentMsgId is null (Telegram failure) we still set the key with an
+    // empty msgId so the intercept falls back to upsertBotMessage gracefully.
+    try {
+      await redisConnection.set(
+        `midas:tx:edit:amt:${telegramUserId}:${chatId}`,
+        `${txId}:${sentMsgId ?? ''}:s`,
+        'EX', 120,
+      );
+    } catch { /* non-fatal: text intercept falls back to upsertBotMessage */ }
+
+    return;
+  }
+
+  // ── 'cat' — Category picker (full Phase 4.0 UI) ───────────────────────────
+  if (field === 'cat') {
+    const [allCats, card] = await Promise.all([
+      getWorkspaceCategories(workspaceId, userId),
+      getTransactionCard(txId, workspaceId, userId),
+    ]);
+
+    if (allCats.length === 0) {
+      await smk(chatId,
+        '⚠️ В рабочем пространстве нет категорий.',
+        { inline_keyboard: [[{ text: '◀️ Назад', callback_data: `tx:v:${txId}${SF}` }]] },
+      );
+      return;
+    }
+
+    const currentCat   = card ? allCats.find(c => c.name === card.category_name) ?? null : null;
+    const standardCats = allCats.filter(c => !c.is_custom);
+    const lifeCats     = standardCats.filter(c => c.group === 'Жизнь');
+    const bizCats      = standardCats.filter(c => c.group === 'Бизнес');
+    const customCats   = allCats.filter(c => c.is_custom === true);
+    const useFlat      = standardCats.length <= 6 || lifeCats.length === 0 || bizCats.length === 0;
+
+    const rows: { text: string; callback_data: string }[][] = [];
+
+    // ✨ Current category as AI-hint (top row)
+    if (currentCat) {
+      rows.push([{
+        text: `✨ ${getCategoryEmoji(currentCat.name, currentCat.icon)} ${currentCat.name}`,
+        callback_data: `tx:c:cat:${txId}:${currentCat.id}${SF}`,
+      }]);
+    }
+
+    // Flat list or group tabs for standard categories
+    if (useFlat) {
+      const catsToShow = currentCat
+        ? standardCats.filter(c => c.id !== currentCat.id)
+        : standardCats;
+      for (let i = 0; i < catsToShow.length; i += 2) {
+        const a = catsToShow[i]!;
+        const b = catsToShow[i + 1];
+        const btnA = {
+          text: `${getCategoryEmoji(a.name, a.icon)} ${a.name}`,
+          callback_data: `tx:c:cat:${txId}:${a.id}${SF}`,
+        };
+        rows.push(b
+          ? [btnA, { text: `${getCategoryEmoji(b.name, b.icon)} ${b.name}`, callback_data: `tx:c:cat:${txId}:${b.id}${SF}` }]
+          : [btnA],
+        );
+      }
+    } else {
+      rows.push([
+        { text: '🛒 Жизнь',  callback_data: `tx:catg:life:${txId}${SF}` },
+        { text: '💼 Бизнес', callback_data: `tx:catg:biz:${txId}${SF}` },
+      ]);
+    }
+
+    // ⭐ Мои (N)
+    if (customCats.length > 0) {
+      rows.push([{
+        text: `⭐ Мои (${String(customCats.length)})`,
+        callback_data: `tx:catg:mine:${txId}${SF}`,
+      }]);
+    }
+
+    // ✏️ Создать + ◀️ Назад
+    rows.push([{ text: '✏️ Создать', callback_data: `cc:new:tx:${txId}${SF}` }]);
+    rows.push([{ text: '◀️ Назад',   callback_data: `tx:v:${txId}${SF}` }]);
+
+    await smk(chatId, '📁 <b>Категория:</b>', { inline_keyboard: rows });
+    return;
+  }
+
+  // ── 'acc' — Account picker ─────────────────────────────────────────────────
+  if (field === 'acc') {
+    const [accs, card] = await Promise.all([
+      getWorkspaceAccounts(workspaceId, userId),
+      getTransactionCard(txId, workspaceId, userId),
+    ]);
+
+    if (accs.length === 0) {
+      await smk(chatId,
+        '⚠️ Нет доступных счетов.',
+        { inline_keyboard: [[{ text: '◀️ Назад', callback_data: `tx:v:${txId}${SF}` }]] },
+      );
+      return;
+    }
+
+    const txCurrency  = card?.base_currency ?? '';
+    const crossCount  = txCurrency
+      ? accs.filter(a => a.currency.toUpperCase() !== txCurrency.toUpperCase()).length
+      : 0;
+    const header = crossCount > 0
+      ? `🏦 <b>Выберите счёт:</b>\n\n<i>🏦 — совпадает по валюте (${escapeHtml(txCurrency)}) · ⚠️ — другая валюта</i>`
+      : '🏦 <b>Выберите счёт:</b>';
+
+    const pickerKb = buildAccountPickerKeyboard(txId, accs, txCurrency, { namespace: 'tx', suffix: SF });
+    await smk(chatId, header, pickerKb);
+    return;
+  }
+
+  // ── 'int' — Intent (type) picker ───────────────────────────────────────────
+  if (field === 'int') {
+    const intentLabels: Record<string, string> = {
+      income:        '💰 Доход',
+      expense:       '💸 Расход',
+      debt_given:    '🤝 Долг (дал)',
+      debt_received: '🤲 Долг (взял)',
+      transfer:      '🔄 Перевод',
+    };
+    const rows: { text: string; callback_data: string }[][] =
+      (EDITABLE_INTENTS as readonly string[]).map(intent => [
+        { text: intentLabels[intent] ?? intent, callback_data: `tx:c:int:${txId}:${intent}${SF}` },
+      ]);
+    rows.push([{ text: '◀️ Назад', callback_data: `tx:v:${txId}${SF}` }]);
+
+    await smk(chatId, '🔄 Выберите тип:', { inline_keyboard: rows });
+    return;
+  }
+}
