@@ -144,6 +144,7 @@ async function editStatusMessage(
 // (cannot editStatusMessage — sentMsgId needed for Redis bridge).
 // ─────────────────────────────────────────────────────────────
 
+// @ts-ignore TS6133 — kept for future use; sole caller (edit_amount) removed in Fix 3
 async function sendNewMessage(
   chatId: string,
   text: string,
@@ -203,6 +204,10 @@ async function deleteSuccessCardW(
   }
 }
 
+function editStateKeyW(uid: string, cid: string): string {
+  return `midas:edit:${uid}:${cid}`;
+}
+
 // ─────────────────────────────────────────────────────────────
 // Phase 2S2: Voice nav response builder (Blindspot 4: inline queries)
 //
@@ -215,6 +220,7 @@ async function deleteSuccessCardW(
 interface VoiceNavResponse {
   text: string;
   keyboard?: object;
+  editAmountBridge?: { txId: string };
 }
 
 async function buildVoiceNavResponse(
@@ -1066,23 +1072,9 @@ async function buildVoiceNavResponse(
           };
         }
 
-        // Send НОВОЕ сообщение (нужен sentMsgId для Redis bridge)
-        const { text: amtText, keyboard: amtKb } = buildQuickEditAmountKb(qeTx.id, SF);
+        const { text, keyboard } = buildQuickEditAmountKb(qeTx.id, SF);
         await deleteSuccessCardW(telegramUserId, chatId);
-        const sentMsgId = await sendNewMessage(chatId, amtText, amtKb);
-
-        // Redis bridge: text intercept in webhook.route.ts (~L7649) reads this key
-        // Format: "{txId}:{msgId}:{from}"  — same as text-path (Phase 5.0)
-        try {
-          await redisConnection.set(
-            `midas:tx:edit:amt:${telegramUserId}:${chatId}`,
-            `${qeTx.id}:${sentMsgId ?? ''}:s`,
-            'EX', 120,
-          );
-        } catch { /* non-fatal */ }
-
-        // Sentinel: tells caller to DELETE statusMessage (picker already sent as new msg)
-        return { text: '__SENT__' };
+        return { text, keyboard, editAmountBridge: { txId: qeTx.id } };
       }
 
       if (cmd === 'edit_category') {
@@ -1614,7 +1606,9 @@ async function _processVoiceParse(job: Job<VoiceParseJobPayload>): Promise<void>
       // Non-fatal: if Redis fails, proceed with nav (better UX)
     }
 
-    if (hasActiveState) {
+    const isQuickEditCmd = voiceCmd === 'edit_amount' || voiceCmd === 'edit_category' ||
+      voiceCmd === 'edit_account' || voiceCmd === 'edit_type';
+    if (hasActiveState && !isQuickEditCmd) {
       console.log('[midas:voice-parse-worker] Phase 2S2: active state detected, skipping nav', {
         jobId: job.id, workspaceId, voiceCmd,
       });
@@ -1648,19 +1642,7 @@ async function _processVoiceParse(job: Job<VoiceParseJobPayload>): Promise<void>
           // Amount picker is sent as a NEW message (needs sentMsgId for Redis
           // bridge). Worker already sent it inside buildVoiceNavResponse.
           // Here we only need to DELETE the "⏳ Распознаю..." status message.
-          if (navResult.text === '__SENT__') {
-            const token = process.env.TELEGRAM_BOT_TOKEN;
-            if (token) {
-              try {
-                await fetch(`${TELEGRAM_API_BASE}/bot${token}/deleteMessage`, {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ chat_id: chatId, message_id: parseInt(statusMessageId, 10) }),
-                });
-              } catch { /* non-fatal */ }
-            }
-            return;
-          }
+
 
           // Replace "⏳ Распознаю..." with the actual nav screen
           await editStatusMessage(chatId, statusMessageId, navResult.text, navResult.keyboard);
@@ -1672,6 +1654,22 @@ async function _processVoiceParse(job: Job<VoiceParseJobPayload>): Promise<void>
           // (not sendNavMessage), so we must write the key manually here.
           const navRedisKey = `midas:nav:${telegramUserId}:${chatId}`;
           void redisConnection.set(navRedisKey, statusMessageId, 'EX', 86400);
+
+          // Fix 3: edit_amount Redis bridge (using statusMessageId instead of sentMsgId)
+          if (navResult.editAmountBridge) {
+            try {
+              await redisConnection.set(
+                `midas:tx:edit:amt:${telegramUserId}:${chatId}`,
+                `${navResult.editAmountBridge.txId}:${statusMessageId}:s`,
+                'EX', 120,
+              );
+              await redisConnection.set(
+                editStateKeyW(telegramUserId, chatId),
+                `amt:${navResult.editAmountBridge.txId}`,
+                'EX', 300,
+              );
+            } catch { /* non-fatal */ }
+          }
 
           return;
         }
@@ -1708,20 +1706,27 @@ async function _processVoiceParse(job: Job<VoiceParseJobPayload>): Promise<void>
     const navRedisKey = `midas:nav:${telegramUserId}:${chatId}`;
     const oldNavMsgId = await redisConnection.get(navRedisKey);
     if (oldNavMsgId) {
-      // Fire-and-forget: non-critical, message may already be gone
-      void (async () => {
-        try {
-          const token = process.env.TELEGRAM_BOT_TOKEN;
-          if (token) {
-            await fetch(`${TELEGRAM_API_BASE}/bot${token}/deleteMessage`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ chat_id: chatId, message_id: parseInt(oldNavMsgId, 10) }),
-            });
-          }
-        } catch { /* silent */ }
-      })();
-      void redisConnection.del(navRedisKey);
+      const lcKey = `midas:last_confirmed:${telegramUserId}:${chatId}`;
+      const lastConfirmedMsgId = await redisConnection.get(lcKey);
+      if (oldNavMsgId === lastConfirmedMsgId) {
+        // Success card — just clear stale nav pointer, DON'T delete message
+        void redisConnection.del(navRedisKey);
+      } else {
+        // Actual nav screen — safe to delete
+        void (async () => {
+          try {
+            const token = process.env.TELEGRAM_BOT_TOKEN;
+            if (token) {
+              await fetch(`${TELEGRAM_API_BASE}/bot${token}/deleteMessage`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ chat_id: chatId, message_id: parseInt(oldNavMsgId, 10) }),
+              });
+            }
+          } catch { /* silent */ }
+        })();
+        void redisConnection.del(navRedisKey);
+      }
     }
   } catch {
     // Non-fatal: cleanup is best-effort
