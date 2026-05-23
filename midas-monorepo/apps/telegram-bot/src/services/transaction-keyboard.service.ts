@@ -563,15 +563,15 @@ export function parseTxCallback(data: string): TxCallbackCmd | null {
 
     if (type === 'cat') {
       if (!ULID_RE.test(value)) return null;
-      return { cmd: 'confirm_cat', txId, catId: value };
+      return { cmd: 'confirm_cat', txId, catId: value, from: parts[5] };
     }
     if (type === 'acc') {
       if (!ULID_RE.test(value)) return null;
-      return { cmd: 'confirm_acc', txId, accId: value };
+      return { cmd: 'confirm_acc', txId, accId: value, from: parts[5] };
     }
     if (type === 'int') {
       if (!(EDITABLE_INTENTS as readonly string[]).includes(value)) return null;
-      return { cmd: 'confirm_int', txId, intent: value };
+      return { cmd: 'confirm_int', txId, intent: value, from: parts[5] };
     }
     return null;
   }
