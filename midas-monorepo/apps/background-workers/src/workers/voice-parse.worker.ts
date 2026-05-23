@@ -1614,7 +1614,9 @@ async function _processVoiceParse(job: Job<VoiceParseJobPayload>): Promise<void>
       // Non-fatal: if Redis fails, proceed with nav (better UX)
     }
 
-    if (hasActiveState) {
+    const isQuickEditCmd = voiceCmd === 'edit_amount' || voiceCmd === 'edit_category' ||
+      voiceCmd === 'edit_account' || voiceCmd === 'edit_type';
+    if (hasActiveState && !isQuickEditCmd) {
       console.log('[midas:voice-parse-worker] Phase 2S2: active state detected, skipping nav', {
         jobId: job.id, workspaceId, voiceCmd,
       });
