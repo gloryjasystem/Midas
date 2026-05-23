@@ -1650,6 +1650,23 @@ async function _processVoiceParse(job: Job<VoiceParseJobPayload>): Promise<void>
           // Replace "⏳ Распознаю..." with the actual nav screen
           await editStatusMessage(chatId, statusMessageId, navResult.text, navResult.keyboard);
 
+          // Phase 5.3 Point 1.2: Cleanup previous floating "🤔" card if exists
+          try {
+            const prevClarKey = `midas:clar:msg:${telegramUserId}:${chatId}`;
+            const prevClarMsgId = await redisConnection.get(prevClarKey);
+            if (prevClarMsgId && prevClarMsgId !== statusMessageId) {
+              const tok = process.env.TELEGRAM_BOT_TOKEN;
+              if (tok) {
+                void fetch(`${TELEGRAM_API_BASE}/bot${tok}/deleteMessage`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ chat_id: chatId, message_id: parseInt(prevClarMsgId, 10) }),
+                });
+              }
+              void redisConnection.del(prevClarKey);
+            }
+          } catch { /* non-fatal */ }
+
           // Register nav pointer in midas:nav:
           const navRedisKey = `midas:nav:${telegramUserId}:${chatId}`;
           void redisConnection.set(navRedisKey, statusMessageId, 'EX', 86400);
@@ -1732,6 +1749,20 @@ async function _processVoiceParse(job: Job<VoiceParseJobPayload>): Promise<void>
   // as `deleteMessageId` when the draft card is sent. This makes the
   // "⏳ Распознаю..." message disappear exactly when the card appears.
   const clarMsgKey = `midas:clar:msg:${telegramUserId}:${chatId}`;
+  // Phase 5.3 Point 1.1: Read OLD value before overwriting — delete orphaned "🤔" card
+  try {
+    const prevFailedMsgId = await redisConnection.get(clarMsgKey);
+    if (prevFailedMsgId && prevFailedMsgId !== statusMessageId) {
+      const tok = process.env.TELEGRAM_BOT_TOKEN;
+      if (tok) {
+        void fetch(`${TELEGRAM_API_BASE}/bot${tok}/deleteMessage`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ chat_id: chatId, message_id: parseInt(prevFailedMsgId, 10) }),
+        });
+      }
+    }
+  } catch { /* non-fatal */ }
   try {
     await redisConnection.set(clarMsgKey, statusMessageId, 'EX', 600);
   } catch {
