@@ -2151,8 +2151,8 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
               for (let i = 0; i < groupCats.length; i += 2) {
                 const a = groupCats[i]!;
                 const b = groupCats[i + 1];
-                const btnA = { text: `${getCategoryEmoji(a.name, a.icon)} ${a.name}`, callback_data: `tx:c:cat:${catgTxId}:${a.id}` };
-                s2Rows.push(b ? [btnA, { text: `${getCategoryEmoji(b.name, b.icon)} ${b.name}`, callback_data: `tx:c:cat:${catgTxId}:${b.id}` }] : [btnA]);
+                const btnA = { text: `${getCategoryEmoji(a.name, a.icon)} ${a.name}`, callback_data: `tx:c:cat:${catgTxId}:${a.id}${catgSf}` };
+                s2Rows.push(b ? [btnA, { text: `${getCategoryEmoji(b.name, b.icon)} ${b.name}`, callback_data: `tx:c:cat:${catgTxId}:${b.id}${catgSf}` }] : [btnA]);
               }
             }
             s2Rows.push([{ text: '◀️ К группам', callback_data: `tx:catg:back:${catgTxId}${catgSf}` }]);
