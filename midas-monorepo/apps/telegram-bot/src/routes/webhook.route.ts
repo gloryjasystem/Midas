@@ -8424,27 +8424,29 @@ async function handleQuickEditField(
   // Passed as backSuffix to all shared builder functions from @midas/shared.
   const SF = ':s';
 
-  // ── Delete the '✅ Записано' success card before opening any picker ────────
-  // Mirrors cancel_last pattern: try midas:last_confirmed first (set by
-  // notifications worker), fallback to midas:am: (active message pointer).
-  // Non-fatal: picker opens even if Telegram deletion fails.
-  try {
-    const lcKey = `midas:last_confirmed:${telegramUserId}:${chatId}`;
-    const oldMsgId = await redisConnection.get(lcKey)
-      ?? await getActiveMessageId(telegramUserId, chatId);
-    if (oldMsgId && oldMsgId !== '0') {
-      await deleteMessage(chatId, oldMsgId);
-      await redisConnection.del(lcKey);
-      await clearActiveMessageId(telegramUserId, chatId);
-    }
-  } catch { /* non-fatal — picker opens regardless */ }
+  // Helper: delete success card (non-fatal, best-effort)
+  // Called AFTER picker is built — card stays if DB throws.
+  const deleteSuccessCard = async (): Promise<void> => {
+    try {
+      const lcKey = `midas:last_confirmed:${telegramUserId}:${chatId}`;
+      const oldMsgId = await redisConnection.get(lcKey)
+        ?? await getActiveMessageId(telegramUserId, chatId);
+      if (oldMsgId && oldMsgId !== '0') {
+        await deleteMessage(chatId, oldMsgId);
+        await redisConnection.del(lcKey);
+        await clearActiveMessageId(telegramUserId, chatId);
+      }
+    } catch { /* non-fatal — picker opens regardless */ }
+  };
 
+  try {
   // ── 'amt' — Amount picker ──────────────────────────────────────────────────
   if (field === 'amt') {
     // Guard: cross-currency transactions cannot have their amount changed.
     // Mirrors the visibility guard in tx:v handler (is_cross_currency check).
     const card = await getTransactionCard(txId, workspaceId, userId);
     if (card?.is_cross_currency) {
+      await deleteSuccessCard();
       await smk(chatId,
         '⚠️ Изменение суммы недоступно для мультивалютных транзакций.',
         { inline_keyboard: [[{ text: '◀️ Назад', callback_data: `tx:v:${txId}${SF}` }]] },
@@ -8455,6 +8457,7 @@ async function handleQuickEditField(
     // Build picker via shared builder and send as NEW message (not edit).
     // sentMsgId is critical — written to Redis bridge below.
     const { text: amtText, keyboard: amtKb } = buildQuickEditAmountKb(txId, SF);
+    await deleteSuccessCard();
     const sentMsgId = await smk(chatId, amtText, amtKb);
 
     // ── Redis bridge ────────────────────────────────────────────────────────
@@ -8480,6 +8483,7 @@ async function handleQuickEditField(
     ]);
 
     if (allCats.length === 0) {
+      await deleteSuccessCard();
       await smk(chatId,
         '⚠️ В рабочем пространстве нет категорий.',
         { inline_keyboard: [[{ text: '◀️ Назад', callback_data: `tx:v:${txId}${SF}` }]] },
@@ -8490,6 +8494,7 @@ async function handleQuickEditField(
     const { text: catText, keyboard: catKb } = buildQuickEditCategoryKb(
       txId, allCats, card?.category_name ?? null, SF,
     );
+    await deleteSuccessCard();
     await smk(chatId, catText, catKb);
     return;
   }
@@ -8502,6 +8507,7 @@ async function handleQuickEditField(
     ]);
 
     if (accs.length === 0) {
+      await deleteSuccessCard();
       await smk(chatId,
         '⚠️ Нет доступных счетов.',
         { inline_keyboard: [[{ text: '◀️ Назад', callback_data: `tx:v:${txId}${SF}` }]] },
@@ -8511,6 +8517,7 @@ async function handleQuickEditField(
 
     const txCurrency = card?.base_currency ?? '';
     const { text: accText, keyboard: accKb } = buildQuickEditAccountKb(txId, accs, txCurrency, SF);
+    await deleteSuccessCard();
     await smk(chatId, accText, accKb);
     return;
   }
@@ -8518,7 +8525,20 @@ async function handleQuickEditField(
   // ── 'int' — Intent (type) picker (via shared builder) ─────────────────────
   if (field === 'int') {
     const { text: intText, keyboard: intKb } = buildQuickEditIntentKb(txId, SF);
+    await deleteSuccessCard();
     await smk(chatId, intText, intKb);
     return;
+  }
+  } catch (err: unknown) {
+    const errorClass = err instanceof Error ? err.constructor.name : 'UnknownError';
+    console.error('[midas:bot:webhook] handleQuickEditField failed', {
+      chatId, field, txId, workspaceId, errorClass,
+    });
+    try {
+      await smk(chatId,
+        '⚠️ Не удалось открыть редактирование. Попробуй нажать ✏️ <b>Изменить запись</b>.',
+        { inline_keyboard: [] },
+      );
+    } catch { /* non-fatal */ }
   }
 }

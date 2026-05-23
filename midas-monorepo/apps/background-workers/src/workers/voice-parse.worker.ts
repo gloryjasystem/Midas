@@ -970,9 +970,15 @@ async function buildVoiceNavResponse(
     case 'edit_category':
     case 'edit_account':
     case 'edit_type': {
-      // ── Step 1: Fetch the last transaction (shared SQL across all 4 cases) ──
-      const qeTx = await withTenantTransaction(workspaceId, userId, async (client) => {
-        const r = await client.query<{
+      // ── SINGLE withTenantTransaction for ALL data ─────────────────────────
+      // FIX: Previously edit_category/edit_account used TWO sequential
+      // withTenantTransaction calls (= 2x pool.connect()). On Railway's
+      // connection-limited Postgres the 2nd timed out → picker never opened.
+      // Now all queries share ONE connection. Categories/accounts fetched
+      // conditionally inside the same callback.
+      const { qeTx, allCats, accounts } = await withTenantTransaction(workspaceId, userId, async (client) => {
+        // 1. Last transaction (needed by all 4 commands)
+        const txR = await client.query<{
           id: string;
           category_name: string | null;
           base_currency: string;
@@ -991,74 +997,26 @@ async function buildVoiceNavResponse(
            LIMIT 1`,
           [workspaceId],
         );
-        return r.rows[0] ?? null;
-      });
+        const lastTx = txR.rows[0] ?? null;
 
-      if (!qeTx) {
-        return { text: '\u{1F4AD} \u041d\u0435\u0442 \u0442\u0440\u0430\u043d\u0437\u0430\u043a\u0446\u0438\u0439 \u0434\u043b\u044f \u0440\u0435\u0434\u0430\u043a\u0442\u0438\u0440\u043e\u0432\u0430\u043d\u0438\u044f.' };
-      }
-
-      // ── Step 2: Delete success card before showing any picker ──────────────
-      await deleteSuccessCardW(telegramUserId, chatId);
-
-      // ── Step 3: Field-specific data + builder ──────────────────────────────
-      const SF = ':s'; // standalone suffix — ◀️ Назад → tx:v:{txId}:s
-
-      if (cmd === 'edit_amount') {
-        // Guard: cross-currency transactions cannot have their amount changed.
-        if (qeTx.is_cross_currency) {
-          return {
-            text: '\u26a0\ufe0f \u0418\u0437\u043c\u0435\u043d\u0435\u043d\u0438\u0435 \u0441\u0443\u043c\u043c\u044b \u043d\u0435\u0434\u043e\u0441\u0442\u0443\u043f\u043d\u043e \u0434\u043b\u044f \u043c\u0443\u043b\u044c\u0442\u0438\u0432\u0430\u043b\u044e\u0442\u043d\u044b\u0445 \u0442\u0440\u0430\u043d\u0437\u0430\u043a\u0446\u0438\u0439.',
-            keyboard: { inline_keyboard: [[{ text: '\u25c0\ufe0f \u041d\u0430\u0437\u0430\u0434', callback_data: `tx:v:${qeTx.id}${SF}` }]] },
-          };
-        }
-
-        // Send НОВОЕ сообщение (нужен sentMsgId для Redis bridge)
-        const { text: amtText, keyboard: amtKb } = buildQuickEditAmountKb(qeTx.id, SF);
-        const sentMsgId = await sendNewMessage(chatId, amtText, amtKb);
-
-        // Redis bridge: text intercept in webhook.route.ts (~L7649) reads this key
-        // Format: "{txId}:{msgId}:{from}"  — same as text-path (Phase 5.0)
-        try {
-          await redisConnection.set(
-            `midas:tx:edit:amt:${telegramUserId}:${chatId}`,
-            `${qeTx.id}:${sentMsgId ?? ''}:s`,
-            'EX', 120,
-          );
-        } catch { /* non-fatal */ }
-
-        // Sentinel: tells caller to DELETE statusMessage (picker already sent as new msg)
-        return { text: '__SENT__' };
-      }
-
-      if (cmd === 'edit_category') {
-        const allCats = await withTenantTransaction(workspaceId, userId, async (client) => {
-          const r = await client.query<QECategoryInfo>(
+        // 2. Categories — only for edit_category (same client, zero extra connections)
+        // NOTE: categories table has NO deleted_at column!
+        let cats: QECategoryInfo[] = [];
+        if (cmd === 'edit_category' && lastTx) {
+          const catR = await client.query<QECategoryInfo>(
             `SELECT id, name, "group", icon, is_custom
              FROM categories
-             WHERE workspace_id = $1 AND deleted_at IS NULL
-             ORDER BY is_custom, name`,
+             WHERE workspace_id = $1
+             ORDER BY is_custom, "group", name`,
             [workspaceId],
           );
-          return r.rows;
-        });
-
-        if (allCats.length === 0) {
-          return {
-            text: '\u26a0\ufe0f \u0412 \u0440\u0430\u0431\u043e\u0447\u0435\u043c \u043f\u0440\u043e\u0441\u0442\u0440\u0430\u043d\u0441\u0442\u0432\u0435 \u043d\u0435\u0442 \u043a\u0430\u0442\u0435\u0433\u043e\u0440\u0438\u0439.',
-            keyboard: { inline_keyboard: [[{ text: '\u25c0\ufe0f \u041d\u0430\u0437\u0430\u0434', callback_data: `tx:v:${qeTx.id}${SF}` }]] },
-          };
+          cats = catR.rows;
         }
 
-        const { text, keyboard } = buildQuickEditCategoryKb(
-          qeTx.id, allCats, qeTx.category_name, SF,
-        );
-        return { text, keyboard };
-      }
-
-      if (cmd === 'edit_account') {
-        const accounts = await withTenantTransaction(workspaceId, userId, async (client) => {
-          const r = await client.query<QEAccountInfo>(
+        // 3. Accounts — only for edit_account (same client, zero extra connections)
+        let accs: QEAccountInfo[] = [];
+        if (cmd === 'edit_account' && lastTx) {
+          const accR = await client.query<QEAccountInfo>(
             `SELECT
                a.id,
                a.name,
@@ -1086,9 +1044,63 @@ async function buildVoiceNavResponse(
              ORDER BY a.name`,
             [workspaceId],
           );
-          return r.rows;
-        });
+          accs = accR.rows;
+        }
 
+        return { qeTx: lastTx, allCats: cats, accounts: accs };
+      });
+
+      if (!qeTx) {
+        return { text: '\u{1F4AD} \u041d\u0435\u0442 \u0442\u0440\u0430\u043d\u0437\u0430\u043a\u0446\u0438\u0439 \u0434\u043b\u044f \u0440\u0435\u0434\u0430\u043a\u0442\u0438\u0440\u043e\u0432\u0430\u043d\u0438\u044f.' };
+      }
+
+      // ── Step 3: Field-specific data + builder ──────────────────────────────
+      const SF = ':s'; // standalone suffix — ◀️ Назад → tx:v:{txId}:s
+
+      if (cmd === 'edit_amount') {
+        // Guard: cross-currency transactions cannot have their amount changed.
+        if (qeTx.is_cross_currency) {
+          return {
+            text: '\u26a0\ufe0f \u0418\u0437\u043c\u0435\u043d\u0435\u043d\u0438\u0435 \u0441\u0443\u043c\u043c\u044b \u043d\u0435\u0434\u043e\u0441\u0442\u0443\u043f\u043d\u043e \u0434\u043b\u044f \u043c\u0443\u043b\u044c\u0442\u0438\u0432\u0430\u043b\u044e\u0442\u043d\u044b\u0445 \u0442\u0440\u0430\u043d\u0437\u0430\u043a\u0446\u0438\u0439.',
+            keyboard: { inline_keyboard: [[{ text: '\u25c0\ufe0f \u041d\u0430\u0437\u0430\u0434', callback_data: `tx:v:${qeTx.id}${SF}` }]] },
+          };
+        }
+
+        // Send НОВОЕ сообщение (нужен sentMsgId для Redis bridge)
+        const { text: amtText, keyboard: amtKb } = buildQuickEditAmountKb(qeTx.id, SF);
+        await deleteSuccessCardW(telegramUserId, chatId);
+        const sentMsgId = await sendNewMessage(chatId, amtText, amtKb);
+
+        // Redis bridge: text intercept in webhook.route.ts (~L7649) reads this key
+        // Format: "{txId}:{msgId}:{from}"  — same as text-path (Phase 5.0)
+        try {
+          await redisConnection.set(
+            `midas:tx:edit:amt:${telegramUserId}:${chatId}`,
+            `${qeTx.id}:${sentMsgId ?? ''}:s`,
+            'EX', 120,
+          );
+        } catch { /* non-fatal */ }
+
+        // Sentinel: tells caller to DELETE statusMessage (picker already sent as new msg)
+        return { text: '__SENT__' };
+      }
+
+      if (cmd === 'edit_category') {
+        if (allCats.length === 0) {
+          return {
+            text: '\u26a0\ufe0f \u0412 \u0440\u0430\u0431\u043e\u0447\u0435\u043c \u043f\u0440\u043e\u0441\u0442\u0440\u0430\u043d\u0441\u0442\u0432\u0435 \u043d\u0435\u0442 \u043a\u0430\u0442\u0435\u0433\u043e\u0440\u0438\u0439.',
+            keyboard: { inline_keyboard: [[{ text: '\u25c0\ufe0f \u041d\u0430\u0437\u0430\u0434', callback_data: `tx:v:${qeTx.id}${SF}` }]] },
+          };
+        }
+
+        const { text, keyboard } = buildQuickEditCategoryKb(
+          qeTx.id, allCats, qeTx.category_name, SF,
+        );
+        await deleteSuccessCardW(telegramUserId, chatId);
+        return { text, keyboard };
+      }
+
+      if (cmd === 'edit_account') {
         if (accounts.length === 0) {
           return {
             text: '\u26a0\ufe0f \u041d\u0435\u0442 \u0434\u043e\u0441\u0442\u0443\u043f\u043d\u044b\u0445 \u0441\u0447\u0435\u0442\u043e\u0432.',
@@ -1099,11 +1111,13 @@ async function buildVoiceNavResponse(
         const { text, keyboard } = buildQuickEditAccountKb(
           qeTx.id, accounts, qeTx.base_currency, SF,
         );
+        await deleteSuccessCardW(telegramUserId, chatId);
         return { text, keyboard };
       }
 
       // edit_type
       const { text, keyboard } = buildQuickEditIntentKb(qeTx.id, SF);
+      await deleteSuccessCardW(telegramUserId, chatId);
       return { text, keyboard };
     }
   }
@@ -1664,11 +1678,22 @@ async function _processVoiceParse(job: Job<VoiceParseJobPayload>): Promise<void>
         // navResult === null means we can't handle this command (e.g. 'transactions')
         // Fall through to AI parse
       } catch (err) {
+        const isQuickEdit = voiceCmd === 'edit_amount' || voiceCmd === 'edit_category' ||
+          voiceCmd === 'edit_account' || voiceCmd === 'edit_type';
         console.error('[midas:voice-parse-worker] Phase 2S2: nav execution failed', {
-          jobId: job.id, workspaceId, voiceCmd,
+          jobId: job.id, workspaceId, voiceCmd, isQuickEdit,
           error: err instanceof Error ? err.message : 'unknown',
         });
-        // Fall through to AI parse — graceful degradation
+        if (isQuickEdit) {
+          // Quick-edit failed but card was NOT deleted (delete-after-build pattern).
+          // Show friendly error instead of falling to AI parse.
+          try {
+            await editStatusMessage(chatId, statusMessageId,
+              '\u26a0\ufe0f \u041d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c \u043e\u0442\u043a\u0440\u044b\u0442\u044c \u0440\u0435\u0434\u0430\u043a\u0442\u0438\u0440\u043e\u0432\u0430\u043d\u0438\u0435. \u041f\u043e\u043f\u0440\u043e\u0431\u0443\u0439 \u043d\u0430\u0436\u0430\u0442\u044c \u270f\ufe0f \u0418\u0437\u043c\u0435\u043d\u0438\u0442\u044c \u0437\u0430\u043f\u0438\u0441\u044c.');
+          } catch { /* non-fatal */ }
+          return;
+        }
+        // Non-edit commands: fall through to AI parse — graceful degradation
       }
     }
   }
