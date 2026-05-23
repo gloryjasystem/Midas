@@ -8421,6 +8421,21 @@ async function handleQuickEditField(
   // tx:v with :s suffix → ✖️ Закрыть → tx:done:{txId} (closes cleanly).
   const SF = ':s';
 
+  // ── Delete the '✅ Записано' success card before opening any picker ────────
+  // Mirrors cancel_last pattern: try midas:last_confirmed first (set by
+  // notifications worker), fallback to midas:am: (active message pointer).
+  // Non-fatal: picker opens even if Telegram deletion fails (e.g. msg already
+  // deleted, 400 Bad Request, etc.).
+  try {
+    const lcKey = `midas:last_confirmed:${telegramUserId}:${chatId}`;
+    const oldMsgId = await redisConnection.get(lcKey)
+      ?? await getActiveMessageId(telegramUserId, chatId);
+    if (oldMsgId && oldMsgId !== '0') {
+      await deleteMessage(chatId, oldMsgId);
+      await redisConnection.del(lcKey);
+      await clearActiveMessageId(telegramUserId, chatId);
+    }
+  } catch { /* non-fatal — picker opens regardless */ }
 
   // ── 'amt' — Amount picker ──────────────────────────────────────────────────
   if (field === 'amt') {
