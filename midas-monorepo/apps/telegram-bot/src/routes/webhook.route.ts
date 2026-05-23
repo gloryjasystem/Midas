@@ -2197,7 +2197,9 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
             }
           } else if (txCmd.cmd === 'done') {
             // Returns to "✅ Записано" success card (Screenshot 1) with recalculated balance
+            request.log.info({ msg: '[midas:bot:webhook] tx:done handler entered', txId: txCmd.txId, txMsgId, chatId });
             const card = await getTransactionCard(txCmd.txId, txResolved.workspaceId, txResolved.userId);
+            request.log.info({ msg: '[midas:bot:webhook] tx:done card result', txId: txCmd.txId, cardFound: !!card, txMsgId });
             if (card && txMsgId) {
               const { getAccountWithBalance } = await import('../services/account.service.js');
               const { formatRestoredSuccessCard } = await import('../utils/screen-builder.js');
@@ -2215,7 +2217,11 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
                 await redisConnection.del(editStateKey(telegramUserId, chatId));
                 await redisConnection.del(`midas:tx:edit:amt:${telegramUserId}:${chatId}`);
               } catch { /* non-fatal */ }
+            } else {
+              request.log.error({ msg: '[midas:bot:webhook] tx:done FAILED — card not found or no msgId', txId: txCmd.txId, cardFound: !!card, txMsgId });
+              if (txMsgId) void editMessageText(chatId, txMsgId, '⚠️ Не удалось восстановить карточку. Попробуйте ещё раз.', { inline_keyboard: [] });
             }
+
           } else if (txCmd.cmd === 'list') {
             const [items, total, stats] = await Promise.all([
               getTransactionList(txResolved.workspaceId, txResolved.userId, txCmd.page, txCmd.filter),
