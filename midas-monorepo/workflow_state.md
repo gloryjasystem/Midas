@@ -1,7 +1,7 @@
 # WORKFLOW_STATE.MD — Диспетчер задач ИИ-агента Midas
 
 > **Тип:** MUTABLE — кратковременная память агента. Обновляется на каждом шаге работы.
-> **Обновлён:** 2026-05-22 21:28 (UTC+3)
+> **Обновлён:** 2026-05-23 19:35 (UTC+3)
 
 ---
 
@@ -9,15 +9,15 @@
 
 | Параметр | Значение |
 |---|---|
-| **PHASE** | Phase 2S2 — Voice Command Pipeline (cancel_last fix + edit_last) ✅ |
-| **STEP** | Сессия 2026-05-22 13:00–21:28 (UTC+3). cancel_last полностью починен (midas:last_confirmed ключ). edit_last — новая голосовая/текстовая команда для редактирования последней транзакции. |
-| **AGENT STATUS** | tsc 0 errors. Commits: b16410e → dfa168f → 7c21f33. Pushed to main. Railway auto-deploy triggered. |
-| **DEPLOYMENT** | Railway (spirited-happiness) — Midas Online, background-workers Online. Health: https://midas-production-f4f1.up.railway.app/health > ok |
-| **DB STATE** | `transfer_group_id`: TEXT ✅ \| `current_screen`: TEXT ✅ \| Все 5 миграций (1780000000000–1780400000000) применены ✅ \| Нет новых миграций в этой сессии. |
+| **PHASE** | Phase 5.3 — Context-Aware Quick Edits (Voice Edit Lifecycle Fix) ✅ DEPLOYED |
+| **STEP** | Сессия 2026-05-23 19:28–19:35 (UTC+3). Реализация завершена: 4 коммита, 5 фиксов, PR #18 merged to main. |
+| **AGENT STATUS** | tsc 0 errors (turbo 5/5). Git clean. Последний коммит на main: 1686899 (merge). Ветка fix-voice-edit-lifecycle merged. |
+| **DEPLOYMENT** | Railway (spirited-happiness) — auto-deploy from main. Midas Online, background-workers Online. Health: https://midas-production-f4f1.up.railway.app/health > ok |
+| **DB STATE** | Без изменений. Все 5 миграций применены. Новых миграций не требуется. |
 | **DATABASE_URL (public)** | `postgresql://postgres:PLLSqArtPUoQsAYmvrpsmavfQMewgTRh@hopper.proxy.rlwy.net:46284/railway` |
-| **LAST COMPLETED** | Phase 2S2: cancel_last fix (midas:last_confirmed) + edit_last (voice+text). Commits: dfa168f, 7c21f33. |
+| **LAST COMPLETED** | Phase 5.3 DEPLOYED: 4 коммита (16f1134, 8cb4c31, bdb716d, 5a80c4a) → PR #18 → merged to main (1686899). |
 | **BLOCKER** | None. |
-| **NEXT ACTION** | 1. Phase 3.1 — расширение словаря item-category-detector.service.ts (500+ записей). 2. Phase 3.2 — Report 3.0 (категорийная аналитика). 3. Тестирование edit_last + cancel_last в production. |
+| **NEXT ACTION** | Phase 3.1 (словарь item-category-detector 500+), Phase 3.2 (Report 3.0). |
 
 
 
@@ -105,6 +105,8 @@
 | **Phase 2S2 — cancel_last Fix (midas:last_confirmed)** | ✅ DEPLOYED | **Сессия 2026-05-22 13:00–18:15 (UTC+3). Commit: dfa168f.** Корневая причина: `notifications.worker.ts` намеренно DEL'ил `midas:am:` для `isSuccessCard=true` карточек (чтобы step-7 не удалял «✅ Записано»). Это ломало cancel_last — `oldCardMsgId` всегда = null. **Фикс:** (1) `notifications.worker.ts` — при `isSuccessCard` записывает `midas:last_confirmed:{uid}:{cid}` (TTL 24h) с msgId подтверждённой карточки. (2) `voice-parse.worker.ts` cancel_last — читает `midas:last_confirmed:` первым, fallback на `midas:am:`. (3) `webhook.route.ts` text cancel_last — та же логика. **Доп. фиксы из этой сессии:** `lastTx.original_amount.replace is not a function` — regex `.replace` на NUMERIC поле; SQL `updated_at` → несуществующая колонка; `withTenantTransaction` вместо `pool.query` для RLS; trailing zeros regex `/\.?0+$/` bug ("100"→"1") — заменён на `includes('.') ? replace : identity`. |
 
 | **Phase 2S2 — edit_last (Voice + Text Command)** | ✅ DEPLOYED | **Сессия 2026-05-22 18:17–18:25 (UTC+3). Commit: 7c21f33.** Новая голосовая и текстовая команда для редактирования последней транзакции. **(1) `command-router.ts`:** `NavCommand` расширен: `'edit_last'`. 9 regex паттернов (измени/изменить/редактир + последн/запись/транзакци). Размещены ДО `cancel_last` (приоритет: «изменить» ≠ «удалить»). **(2) `command-executor.service.ts`:** case `'edit_last'` — `getLastTransaction()` → `getTransactionCard(txId)` → `formatTxDetailCard(card)` + 6 кнопок (tx:f:amt/cat/acc/int + tx:d:ask + tx:done). `is_cross_currency` check для кнопки суммы. **(3) `webhook.route.ts`:** `else if (navCmd === 'edit_last')` — `buildCommandResponse` + `sendMessageWithKeyboard`. **(4) `voice-parse.worker.ts`:** `case 'edit_last'` — inline SQL (base_amount, base_currency, is_cross_currency, transaction_time) + inline card format (mirrors formatTxDetailCard) + keyboard (tx: callbacks). Все 4 callback_data формата уже обработаны existing ed:/tx: handlers. **Shared rebuild:** `npx turbo run build --filter=@midas/shared`. tsc 0 ошибок для обоих проектов. |
+
+| **Phase 5.3 — Voice Quick Edit Lifecycle Fix** | ✅ DEPLOYED | **Сессия 2026-05-23 19:28–19:35 (UTC+3). PR #18, merge commit 1686899.** Проблема: после навигации (пикер → подтверждение → полная карточка → Закрыть) голосовые edit-команды перестают работать — Redis теряет `midas:last_confirmed`. **4 коммита, 5 фиксов в 2 файлах:** (1) `16f1134` — `tx:done` восстанавливает `midas:last_confirmed` (TTL 7d) + чистит nav/edit/amt ключи (webhook.route.ts:2205). (2) `8cb4c31` — State gate bypass для edit_* команд (voice-parse.worker.ts:1617). (3) `bdb716d` — edit_amount IN-PLACE через editStatusMessage + editAmountBridge (voice-parse.worker.ts: VoiceNavResponse interface, edit_amount builder, nav caller). (4) `5a80c4a` — Nav cleanup guard — не удалять success card если oldNavMsgId === lastConfirmedMsgId (voice-parse.worker.ts:1707-1728). |
 
 ---
 
