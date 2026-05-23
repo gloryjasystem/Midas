@@ -383,3 +383,22 @@ export interface TelegramCallbackQuery {
 // ─────────────────────────────────────────────────────────────
 
 export { detectCommand, type NavCommand } from './command-router.js';
+
+// ─────────────────────────────────────────────────────────────
+// Phase 5.1-Pre: Shared UI Utilities
+// Pure functions — zero I/O, usable in any app or worker context.
+// ─────────────────────────────────────────────────────────────
+
+export { getCategoryEmoji } from './category-emoji.js';
+export { escapeHtml } from './html-escape.js';
+export {
+  buildQuickEditAmountKb,
+  buildQuickEditCategoryKb,
+  buildQuickEditAccountKb,
+  buildQuickEditIntentKb,
+  QE_EDITABLE_INTENTS,
+  type QECategoryInfo,
+  type QEAccountInfo,
+  type QEKeyboardResult,
+  type QETransactionIntent,
+} from './quick-edit-ui.js';

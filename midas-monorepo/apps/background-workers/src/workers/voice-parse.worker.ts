@@ -23,7 +23,19 @@
  */
 
 import { Worker, type Job } from 'bullmq';
-import { QUEUE_NAMES, type VoiceParseJobPayload, type AiParseJobPayload, detectCommand, type NavCommand } from '@midas/shared';
+import {
+  QUEUE_NAMES,
+  type VoiceParseJobPayload,
+  type AiParseJobPayload,
+  detectCommand,
+  type NavCommand,
+  buildQuickEditAmountKb,
+  buildQuickEditCategoryKb,
+  buildQuickEditAccountKb,
+  buildQuickEditIntentKb,
+  type QECategoryInfo,
+  type QEAccountInfo,
+} from '@midas/shared';
 import { withTenantTransaction } from '@midas/database';
 import { transcribeVoice } from '@midas/ai-core';
 import { redisConnection } from '../queues/redis.js';
@@ -123,6 +135,71 @@ async function editStatusMessage(
     });
   } catch {
     // Non-fatal: status message may already be deleted or expired
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// Phase 5.1-B: Send a new Telegram message, returns message_id string or null
+// Used by edit_amount quick-edit to create the amount picker as a NEW message
+// (cannot editStatusMessage — sentMsgId needed for Redis bridge).
+// ─────────────────────────────────────────────────────────────
+
+async function sendNewMessage(
+  chatId: string,
+  text: string,
+  keyboard: object,
+): Promise<string | null> {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  if (!token) return null;
+
+  try {
+    const resp = await fetch(`${TELEGRAM_API_BASE}/bot${token}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: chatId,
+        text,
+        parse_mode: 'HTML',
+        reply_markup: keyboard,
+      }),
+    });
+    if (!resp.ok) return null;
+    const data = await resp.json() as { ok: boolean; result?: { message_id?: number } };
+    if (!data.ok || !data.result?.message_id) return null;
+    return String(data.result.message_id);
+  } catch {
+    return null;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// Phase 5.1-B: Delete the '✅ Записано' success card if it exists
+// Mirrors the cancel_last delete logic (Blindspot 4 — inline, not imported).
+// Non-fatal: quick-edit picker opens regardless of deletion success.
+// ─────────────────────────────────────────────────────────────
+
+async function deleteSuccessCardW(
+  telegramUserId: string,
+  chatId: string,
+): Promise<void> {
+  try {
+    const lcKey = `midas:last_confirmed:${telegramUserId}:${chatId}`;
+    const amKey = `midas:am:${telegramUserId}:${chatId}`;
+    const oldCardMsgId = await redisConnection.get(lcKey) ?? await redisConnection.get(amKey);
+    if (oldCardMsgId && oldCardMsgId !== '0') {
+      const token = process.env.TELEGRAM_BOT_TOKEN;
+      if (token) {
+        await fetch(`${TELEGRAM_API_BASE}/bot${token}/deleteMessage`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ chat_id: chatId, message_id: parseInt(oldCardMsgId, 10) }),
+        });
+      }
+      await redisConnection.del(lcKey);
+      await redisConnection.del(amKey);
+    }
+  } catch {
+    // Non-fatal — picker opens regardless
   }
 }
 
@@ -875,19 +952,160 @@ async function buildVoiceNavResponse(
       };
     }
 
-    // ── Phase 5.0: Context-Aware Quick Edits ──────────────────────────────
-    // edit_amount / edit_category / edit_account / edit_type are handled
-    // exclusively in webhook.route.ts (text-message context). The voice
-    // worker re-queues transcripts as AiParseJobPayload BEFORE this switch
-    // is reached, so these commands would never arrive here from voice.
-    // However, TypeScript requires exhaustive coverage of the NavCommand
-    // union — return null so the caller treats it as "no nav response"
-    // and falls through to normal AI-parse queue submission.
+    // ── Phase 5.1-B: Context-Aware Quick Edits — Voice Path ──────────────────
+    // When the user sends a VOICE message saying "измени категорию", the STT
+    // transcribes it, detectCommand returns the edit_* NavCommand, and we arrive
+    // here. We build the SAME UI as the text path (handleQuickEditField in
+    // webhook.route.ts) using the shared builder functions from @midas/shared.
+    //
+    // Layer 1 (data): raw SQL — cannot import telegram-bot services (Blindspot 4)
+    // Layer 2 (UI):   buildQuickEdit*Kb from @midas/shared — zero duplication
+    // Layer 3 (transport): depends on field:
+    //   cat/acc/int → return { text, keyboard } → caller does editStatusMessage
+    //   amt         → sendNewMessage (needs sentMsgId) + Redis bridge → return __SENT__
+    //
+    // backSuffix ':s' → ◀️ Назад → tx:v:{txId}:s → standalone card → ✖️ Закрыть
+
     case 'edit_amount':
     case 'edit_category':
     case 'edit_account':
-    case 'edit_type':
-      return null;
+    case 'edit_type': {
+      // ── Step 1: Fetch the last transaction (shared SQL across all 4 cases) ──
+      const qeTx = await withTenantTransaction(workspaceId, userId, async (client) => {
+        const r = await client.query<{
+          id: string;
+          category_name: string | null;
+          base_currency: string;
+          is_cross_currency: boolean;
+        }>(
+          `SELECT t.id,
+                  c.name AS category_name,
+                  t.base_currency,
+                  (t.exchange_rate != 1.000000000000) AS is_cross_currency
+           FROM transactions t
+           LEFT JOIN categories c ON c.id = t.category_id
+           WHERE t.workspace_id = $1
+             AND t.deleted_at IS NULL
+             AND (t.transfer_direction IS DISTINCT FROM 'inbound')
+           ORDER BY t.created_at DESC
+           LIMIT 1`,
+          [workspaceId],
+        );
+        return r.rows[0] ?? null;
+      });
+
+      if (!qeTx) {
+        return { text: '\u{1F4AD} \u041d\u0435\u0442 \u0442\u0440\u0430\u043d\u0437\u0430\u043a\u0446\u0438\u0439 \u0434\u043b\u044f \u0440\u0435\u0434\u0430\u043a\u0442\u0438\u0440\u043e\u0432\u0430\u043d\u0438\u044f.' };
+      }
+
+      // ── Step 2: Delete success card before showing any picker ──────────────
+      await deleteSuccessCardW(telegramUserId, chatId);
+
+      // ── Step 3: Field-specific data + builder ──────────────────────────────
+      const SF = ':s'; // standalone suffix — ◀️ Назад → tx:v:{txId}:s
+
+      if (cmd === 'edit_amount') {
+        // Guard: cross-currency transactions cannot have their amount changed.
+        if (qeTx.is_cross_currency) {
+          return {
+            text: '\u26a0\ufe0f \u0418\u0437\u043c\u0435\u043d\u0435\u043d\u0438\u0435 \u0441\u0443\u043c\u043c\u044b \u043d\u0435\u0434\u043e\u0441\u0442\u0443\u043f\u043d\u043e \u0434\u043b\u044f \u043c\u0443\u043b\u044c\u0442\u0438\u0432\u0430\u043b\u044e\u0442\u043d\u044b\u0445 \u0442\u0440\u0430\u043d\u0437\u0430\u043a\u0446\u0438\u0439.',
+            keyboard: { inline_keyboard: [[{ text: '\u25c0\ufe0f \u041d\u0430\u0437\u0430\u0434', callback_data: `tx:v:${qeTx.id}${SF}` }]] },
+          };
+        }
+
+        // Send НОВОЕ сообщение (нужен sentMsgId для Redis bridge)
+        const { text: amtText, keyboard: amtKb } = buildQuickEditAmountKb(qeTx.id, SF);
+        const sentMsgId = await sendNewMessage(chatId, amtText, amtKb);
+
+        // Redis bridge: text intercept in webhook.route.ts (~L7649) reads this key
+        // Format: "{txId}:{msgId}:{from}"  — same as text-path (Phase 5.0)
+        try {
+          await redisConnection.set(
+            `midas:tx:edit:amt:${telegramUserId}:${chatId}`,
+            `${qeTx.id}:${sentMsgId ?? ''}:s`,
+            'EX', 120,
+          );
+        } catch { /* non-fatal */ }
+
+        // Sentinel: tells caller to DELETE statusMessage (picker already sent as new msg)
+        return { text: '__SENT__' };
+      }
+
+      if (cmd === 'edit_category') {
+        const allCats = await withTenantTransaction(workspaceId, userId, async (client) => {
+          const r = await client.query<QECategoryInfo>(
+            `SELECT id, name, "group", icon, is_custom
+             FROM categories
+             WHERE workspace_id = $1 AND deleted_at IS NULL
+             ORDER BY is_custom, name`,
+            [workspaceId],
+          );
+          return r.rows;
+        });
+
+        if (allCats.length === 0) {
+          return {
+            text: '\u26a0\ufe0f \u0412 \u0440\u0430\u0431\u043e\u0447\u0435\u043c \u043f\u0440\u043e\u0441\u0442\u0440\u0430\u043d\u0441\u0442\u0432\u0435 \u043d\u0435\u0442 \u043a\u0430\u0442\u0435\u0433\u043e\u0440\u0438\u0439.',
+            keyboard: { inline_keyboard: [[{ text: '\u25c0\ufe0f \u041d\u0430\u0437\u0430\u0434', callback_data: `tx:v:${qeTx.id}${SF}` }]] },
+          };
+        }
+
+        const { text, keyboard } = buildQuickEditCategoryKb(
+          qeTx.id, allCats, qeTx.category_name, SF,
+        );
+        return { text, keyboard };
+      }
+
+      if (cmd === 'edit_account') {
+        const accounts = await withTenantTransaction(workspaceId, userId, async (client) => {
+          const r = await client.query<QEAccountInfo>(
+            `SELECT
+               a.id,
+               a.name,
+               a.currency,
+               (
+                 a.initial_balance
+                 + COALESCE(SUM(CASE WHEN t.transaction_intent IN ('income','debt_received')
+                                         AND t.base_currency = a.currency THEN t.base_amount END), 0)
+                 - COALESCE(SUM(CASE WHEN t.transaction_intent IN ('expense','debt_given')
+                                         AND t.base_currency = a.currency THEN t.base_amount END), 0)
+                 + COALESCE(SUM(CASE WHEN t.transaction_intent = 'transfer'
+                                         AND t.transfer_direction = 'inbound'
+                                         AND t.base_currency = a.currency THEN t.base_amount END), 0)
+                 - COALESCE(SUM(CASE WHEN t.transaction_intent = 'transfer'
+                                         AND (t.transfer_direction = 'outbound' OR t.transfer_direction IS NULL)
+                                         AND t.base_currency = a.currency THEN t.base_amount END), 0)
+               )::text AS balance
+             FROM account_sources a
+             LEFT JOIN transactions t
+               ON t.account_id = a.id AND t.workspace_id = $1 AND t.deleted_at IS NULL
+             WHERE a.workspace_id = $1
+               AND a.deleted_at IS NULL
+               AND a.parent_account_id IS NULL
+             GROUP BY a.id, a.name, a.currency, a.initial_balance
+             ORDER BY a.name`,
+            [workspaceId],
+          );
+          return r.rows;
+        });
+
+        if (accounts.length === 0) {
+          return {
+            text: '\u26a0\ufe0f \u041d\u0435\u0442 \u0434\u043e\u0441\u0442\u0443\u043f\u043d\u044b\u0445 \u0441\u0447\u0435\u0442\u043e\u0432.',
+            keyboard: { inline_keyboard: [[{ text: '\u25c0\ufe0f \u041d\u0430\u0437\u0430\u0434', callback_data: `tx:v:${qeTx.id}${SF}` }]] },
+          };
+        }
+
+        const { text, keyboard } = buildQuickEditAccountKb(
+          qeTx.id, accounts, qeTx.base_currency, SF,
+        );
+        return { text, keyboard };
+      }
+
+      // edit_type
+      const { text, keyboard } = buildQuickEditIntentKb(qeTx.id, SF);
+      return { text, keyboard };
+    }
   }
 }
 
@@ -1412,6 +1630,24 @@ async function _processVoiceParse(job: Job<VoiceParseJobPayload>): Promise<void>
       try {
         const navResult = await buildVoiceNavResponse(voiceCmd, workspaceId, userId, telegramUserId, chatId);
         if (navResult) {
+          // ── Phase 5.1-B: __SENT__ sentinel for edit_amount ────────────────
+          // Amount picker is sent as a NEW message (needs sentMsgId for Redis
+          // bridge). Worker already sent it inside buildVoiceNavResponse.
+          // Here we only need to DELETE the "⏳ Распознаю..." status message.
+          if (navResult.text === '__SENT__') {
+            const token = process.env.TELEGRAM_BOT_TOKEN;
+            if (token) {
+              try {
+                await fetch(`${TELEGRAM_API_BASE}/bot${token}/deleteMessage`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ chat_id: chatId, message_id: parseInt(statusMessageId, 10) }),
+                });
+              } catch { /* non-fatal */ }
+            }
+            return;
+          }
+
           // Replace "⏳ Распознаю..." with the actual nav screen
           await editStatusMessage(chatId, statusMessageId, navResult.text, navResult.keyboard);
 
