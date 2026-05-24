@@ -49,6 +49,7 @@ export interface CcFsmState {
   draftId?: string;             // Set when started from draft picker
   txId?: string;                // Set when started from tx edit
   from?: string;                // tx edit 'from' context (e.g. '0', '0:s')
+  fromBud?: boolean;            // Phase 7.0-B: Set when started from budget limit picker
 }
 
 /** Result of processing a text message in the FSM. */
@@ -153,6 +154,23 @@ export async function startCcFromTx(
   from: string,
 ): Promise<{ text: string; keyboard: InlineKeyboardMarkup }> {
   await setCcState(telegramUserId, chatId, { step: 'name', txId, from });
+  return {
+    text: '✏️ <b>Создание категории</b>\n\nНапиши название (до 60 символов):',
+    keyboard: { inline_keyboard: [
+      [{ text: '❌ Отмена', callback_data: 'cc:cancel' }],
+    ] },
+  };
+}
+
+/**
+ * Start FSM from budget limit picker (Phase 7.0-B).
+ * After creation redirects to bud:add.
+ */
+export async function startCcFromBud(
+  telegramUserId: string,
+  chatId: string,
+): Promise<{ text: string; keyboard: InlineKeyboardMarkup }> {
+  await setCcState(telegramUserId, chatId, { step: 'name', fromBud: true });
   return {
     text: '✏️ <b>Создание категории</b>\n\nНапиши название (до 60 символов):',
     keyboard: { inline_keyboard: [
@@ -483,8 +501,14 @@ async function finalize(
   const resultObj: CcFsmTextResult = { handled: true, messageText: successText };
 
   // Attach redirect info via the keyboard — caller (webhook.route.ts) will
-  // use state.draftId / state.txId to trigger the appropriate update.
-  if (state.draftId) {
+  // use state.draftId / state.txId / state.fromBud to trigger the appropriate update.
+  if (state.fromBud) {
+    // Redirect back to budget category picker
+    resultObj.keyboard = { inline_keyboard: [
+      [{ text: `✅ Выбрать ${icon} ${escapeHtml(name)} для лимита`, callback_data: `bud:cat:${categoryId}` }],
+      [{ text: '📁 К категориям лимитов', callback_data: 'bud:add' }],
+    ] };
+  } else if (state.draftId) {
     // Re-render category picker with the new category auto-selected
     resultObj.keyboard = { inline_keyboard: [
       [{ text: `✅ Применить ${icon} ${escapeHtml(name)}`, callback_data: `clar:cat:${categoryId}:${state.draftId}` }],

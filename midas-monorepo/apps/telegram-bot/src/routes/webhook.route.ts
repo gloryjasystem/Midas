@@ -269,6 +269,7 @@ import {                                         // Phase 4.0: Custom Category F
   processCcText,
   startCcFromDraft,
   startCcFromTx,
+  startCcFromBud,
   handleCcOk,
   handleCcReicon,
   handleCcReiconBack,
@@ -3667,6 +3668,7 @@ Midas создан, чтобы сделать учет денег максима
               if (customCats.length > 0) {
                 rows.push([{ text: `⭐ Мои (${String(customCats.length)})`, callback_data: 'bud:catg:mine' }]);
               }
+              rows.push([{ text: '✏️ Создать категорию', callback_data: 'cc:new:bud' }]);
               rows.push([{ text: '🔙 Назад', callback_data: 'bud:list' }]);
               void editMessageText(cqChatId, cqMsgId, '➕ <b>Новый лимит</b>\n\nВыберите категорию:', { inline_keyboard: rows });
             }
@@ -3674,7 +3676,7 @@ Midas создан, чтобы сделать учет денег максима
           // bud:catg:life / bud:catg:biz / bud:catg:mine — category group drill-down
           else if (sub.startsWith('catg:')) {
             const catgSub = sub.slice(5); // 'life' | 'biz' | 'mine'
-            if (!['life', 'biz', 'mine'].includes(catgSub)) {
+            if (!['life', 'biz', 'mine', 'back'].includes(catgSub)) {
               void answerCallbackQuery(cq.id);
               await reply.status(200).send({ ok: true });
               return;
@@ -3723,6 +3725,7 @@ Midas создан, чтобы сделать учет денег максима
               if (customCats2.length > 0) {
                 rows2.push([{ text: `⭐ Мои (${String(customCats2.length)})`, callback_data: 'bud:catg:mine' }]);
               }
+              rows2.push([{ text: '✏️ Создать категорию', callback_data: 'cc:new:bud' }]);
               rows2.push([{ text: '🔙 Назад', callback_data: 'bud:list' }]);
               void editMessageText(cqChatId, cqMsgId, '➕ <b>Новый лимит</b>\n\nВыберите категорию:', { inline_keyboard: rows2 });
             } else {
@@ -4545,6 +4548,10 @@ Midas создан, чтобы сделать учет денег максима
               );
               void upsertBotMessage(telegramUserId, chatId, text, keyboard);
             }
+          } else if (callbackData === 'cc:new:bud') {
+            // cc:new:bud — start from budget limit picker (Phase 7.0-B)
+            const { text, keyboard } = await startCcFromBud(telegramUserId, chatId);
+            void upsertBotMessage(telegramUserId, chatId, text, keyboard);
           } else if (callbackData.startsWith('cc:new:')) {
             // cc:new:{draftId} — start from draft category picker
             const ccDraftId = callbackData.slice('cc:new:'.length);
