@@ -90,7 +90,7 @@
 | Фаза | Коммит | Суть |
 |---|---|---|
 | 1.32 Clarification | e00f37e | needs_clarification status, partial ParseResult, clar: callbacks. 57/57 |
-| 1.33 Clean Chat | 36cacd7 | active-message.service.ts, midas:am: pointer, edit-first UX |
+| 1.33 Clean Chat | 36cacd7 | active-message.service.ts, midas:am: pointer, upsertBotMessage() edit-first UX |
 | 1.34 Rich Cards | 6e899f0 | screen-builder.ts (both apps), preview/confirmed card formatting |
 | 1.35 Smart Categories | — | 28-category taxonomy, CategoryResolver, item_hint. 55/55. Deployed |
 | 1.36-UX Nav Keyboard | 062d40d | ReplyKeyboardMarkup 2×2, is_persistent:false, tx history as separate msgs |
@@ -252,7 +252,7 @@
 
 ### Этап 0 — /start
 
-1. `system_find_or_create_user()` (SECDEF, atomic, pg_advisory_xact_lock)
+1. `system_find_or_create_user()` (SECURITY DEFINER / SECDEF, atomic, pg_advisory_xact_lock)
 2. Создаётся: workspace (USDT, UTC), membership, default account («По умолчанию», USDT), default category (Другое)
 3. ReplyKeyboard 2×2: [💰 Баланс][📊 Отчёт] / [📋 Транзакции][⚙️ Настройки]
 4. Если 0 счетов → guided onboarding keyboard
