@@ -3122,25 +3122,142 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
             if (messageId) void editMessageText(chatId, messageId, catText, kb);
           }
           else if (cmd.cmd === 'notifications') {
+            // Phase 7.0: Expanded notifications hub with 3 sections
             const { getUserPreferences } = await import('../services/settings-advanced.service.js');
             const prefs = await getUserPreferences(stResolved.workspaceId, stResolved.userId);
-            const ds = prefs.dailySummaryEnabled ? '✅' : '❌';
-            const la = prefs.limitAlertsEnabled ? '✅' : '❌';
-            const rr = prefs.recordReminderEnabled ? '✅' : '❌';
+
+            // Build summary status label
+            let summaryLabel = '· Выкл';
+            if (prefs.dailySummaryEnabled) {
+              const hh = String(prefs.dailySummaryHour).padStart(2, '0');
+              const mm = String(prefs.dailySummaryMinute ?? 0).padStart(2, '0');
+              const presetEmoji = prefs.summaryPreset === 'morning' ? '🌅' : prefs.summaryPreset === 'evening' ? '🌆' : prefs.summaryPreset === 'night' ? '🌙' : '⏰';
+              summaryLabel = `· ${presetEmoji} ${hh}:${mm} ✅`;
+            }
+
+            // Build budget count label
+            let budgetLabel = '· Выкл';
+            try {
+              const { getBudgetCount } = await import('../services/budget.service.js');
+              const cnt = await getBudgetCount(stResolved.workspaceId, stResolved.userId);
+              if (cnt > 0) budgetLabel = `· ${String(cnt)} лимит${cnt === 1 ? '' : cnt < 5 ? 'а' : 'ов'}`;
+            } catch { /* table may not exist yet */ }
+
+            // Build subscription count label
+            let subLabel = '· Выкл';
+            try {
+              const { getRecurringCount } = await import('../services/recurring.service.js');
+              const cnt = await getRecurringCount(stResolved.workspaceId, stResolved.userId);
+              if (cnt > 0) subLabel = `· ${String(cnt)} подпис${cnt === 1 ? 'ка' : cnt < 5 ? 'ки' : 'ок'}`;
+            } catch { /* table may not exist yet */ }
+
             let text = '🔔 <b>Уведомления</b>\n\n';
-            text += `📊 Ежедневная сводка:  ${ds} (${String(prefs.dailySummaryHour)}:00)\n`;
-            text += `⚠️ Лимит по категории: ${la}\n`;
-            text += `📝 Напоминание записи: ${rr}\n`;
+            text += 'Настройте, когда бот будет\nприсылать итоги и напоминания.';
             const kb = {
               inline_keyboard: [
-                [{ text: `📊 Сводка: ${prefs.dailySummaryEnabled ? 'выкл' : 'вкл'}`, callback_data: 'st:ntf:ds' }],
-                [{ text: `⚠️ Лимиты: ${prefs.limitAlertsEnabled ? 'выкл' : 'вкл'}`, callback_data: 'st:ntf:la' }],
-                [{ text: `📝 Напоминания: ${prefs.recordReminderEnabled ? 'выкл' : 'вкл'}`, callback_data: 'st:ntf:rr' }],
-                [{ text: '← Назад', callback_data: 'st:back' }],
+                [{ text: `📊 Ежедневная сводка  ${summaryLabel}`, callback_data: 'st:ntf:sum' }],
+                [{ text: `💰 Лимиты расходов  ${budgetLabel}`, callback_data: 'st:ntf:bud' }],
+                [{ text: `🔄 Регулярные платежи  ${subLabel}`, callback_data: 'st:ntf:sub' }],
+                [{ text: '🔙 Назад', callback_data: 'st:m' }],
               ]
             };
             if (messageId) void editMessageText(chatId, messageId, text, kb);
           }
+          // Phase 7.0-A: Summary time selection screen
+          else if (cmd.cmd === 'ntf_summary') {
+            const { getUserPreferences } = await import('../services/settings-advanced.service.js');
+            const { getSettings: getStForTz1 } = await import('../services/settings.service.js');
+            const [prefs, stForTz1] = await Promise.all([getUserPreferences(stResolved.workspaceId, stResolved.userId), getStForTz1(stResolved.workspaceId, stResolved.userId)]);
+            const tz = stForTz1?.timezone ?? 'UTC';
+
+            let text = '📊 <b>Ежедневная сводка</b>\n\n';
+            if (prefs.dailySummaryEnabled) {
+              const hh = String(prefs.dailySummaryHour).padStart(2, '0');
+              const mm = String(prefs.dailySummaryMinute ?? 0).padStart(2, '0');
+              text += `✅ Включена · каждый день в ${hh}:${mm}\n`;
+              text += `🕐 ${tz}`;
+            } else {
+              text += 'Бот будет присылать итоги дня\nв выбранное время.\n\n';
+              text += `🕐 Часовой пояс: ${tz}\n\n`;
+              text += 'Выберите время:';
+            }
+
+            const p = prefs.summaryPreset;
+            const buttons = [
+              [{ text: `🌅 Утро · 09:00${p === 'morning' ? '  ✅' : ''}`, callback_data: 'st:ntf:sum:m' }],
+              [{ text: `🌆 Вечер · 21:00${p === 'evening' ? '  ✅' : ''}`, callback_data: 'st:ntf:sum:e' }],
+              [{ text: `🌙 Ночь · 00:00${p === 'night' ? '  ✅' : ''}`, callback_data: 'st:ntf:sum:n' }],
+              [{ text: `⏰ Своё время${p === 'custom' ? '  ✅' : ''}`, callback_data: 'st:ntf:sum:c' }],
+            ];
+            if (prefs.dailySummaryEnabled) {
+              buttons.push([{ text: '🚫 Выключить', callback_data: 'st:ntf:sum:off' }]);
+            }
+            buttons.push([{ text: '🔙 Назад', callback_data: 'st:ntf' }]);
+            if (messageId) void editMessageText(chatId, messageId, text, { inline_keyboard: buttons });
+          }
+          // Phase 7.0-A: Apply summary preset
+          else if (cmd.cmd === 'ntf_summary_preset') {
+            const { updateSummaryPreset, getUserPreferences } = await import('../services/settings-advanced.service.js');
+            const { getSettings: getStForTz2 } = await import('../services/settings.service.js');
+            await updateSummaryPreset(stResolved.workspaceId, stResolved.userId, cmd.preset);
+            // Re-render summary screen
+            const [prefs, stForTz2] = await Promise.all([getUserPreferences(stResolved.workspaceId, stResolved.userId), getStForTz2(stResolved.workspaceId, stResolved.userId)]);
+            const tz = stForTz2?.timezone ?? 'UTC';
+            const hh = String(prefs.dailySummaryHour).padStart(2, '0');
+            const mm = String(prefs.dailySummaryMinute ?? 0).padStart(2, '0');
+            let text = `📊 <b>Ежедневная сводка</b>\n\n✅ Включена · каждый день в ${hh}:${mm}\n🕐 ${tz}`;
+            const p = prefs.summaryPreset;
+            const buttons = [
+              [{ text: `🌅 Утро · 09:00${p === 'morning' ? '  ✅' : ''}`, callback_data: 'st:ntf:sum:m' }],
+              [{ text: `🌆 Вечер · 21:00${p === 'evening' ? '  ✅' : ''}`, callback_data: 'st:ntf:sum:e' }],
+              [{ text: `🌙 Ночь · 00:00${p === 'night' ? '  ✅' : ''}`, callback_data: 'st:ntf:sum:n' }],
+              [{ text: `⏰ Своё время${p === 'custom' ? '  ✅' : ''}`, callback_data: 'st:ntf:sum:c' }],
+              [{ text: '🚫 Выключить', callback_data: 'st:ntf:sum:off' }],
+              [{ text: '🔙 Назад', callback_data: 'st:ntf' }],
+            ];
+            if (messageId) void editMessageText(chatId, messageId, text, { inline_keyboard: buttons });
+          }
+          // Phase 7.0-A: Custom time input (text intercept)
+          else if (cmd.cmd === 'ntf_summary_custom') {
+            const { getSettings: getStForTz3 } = await import('../services/settings.service.js');
+            const stForTz3 = await getStForTz3(stResolved.workspaceId, stResolved.userId);
+            const tz = stForTz3?.timezone ?? 'UTC';
+            let text = '⏰ <b>Своё время</b>\n\n';
+            text += 'Введите время в формате ЧЧ:ММ\n\n';
+            text += '❯ Например: 08:30, 14:00, 22:15\n\n';
+            text += `🕐 Часовой пояс: ${tz}`;
+            const kb = { inline_keyboard: [[{ text: '🔙 Отмена', callback_data: 'st:ntf:sum' }]] };
+            if (messageId) {
+              void editMessageText(chatId, messageId, text, kb);
+              // Set text intercept
+              await redisConnection.set(
+                `midas:ntf:time:${telegramUserId}:${chatId}`,
+                String(messageId),
+                'EX', 120,
+              );
+            }
+          }
+          // Phase 7.0-A: Disable summary
+          else if (cmd.cmd === 'ntf_summary_off') {
+            const { disableSummary } = await import('../services/settings-advanced.service.js');
+            const { getSettings: getStForTz4 } = await import('../services/settings.service.js');
+            await disableSummary(stResolved.workspaceId, stResolved.userId);
+            // Re-render summary screen (disabled state)
+            const stForTz4 = await getStForTz4(stResolved.workspaceId, stResolved.userId);
+            const tz = stForTz4?.timezone ?? 'UTC';
+            let text = '📊 <b>Ежедневная сводка</b>\n\n';
+            text += 'Бот будет присылать итоги дня\nв выбранное время.\n\n';
+            text += `🕐 Часовой пояс: ${tz}\n\nВыберите время:`;
+            const buttons = [
+              [{ text: '🌅 Утро · 09:00', callback_data: 'st:ntf:sum:m' }],
+              [{ text: '🌆 Вечер · 21:00', callback_data: 'st:ntf:sum:e' }],
+              [{ text: '🌙 Ночь · 00:00', callback_data: 'st:ntf:sum:n' }],
+              [{ text: '⏰ Своё время', callback_data: 'st:ntf:sum:c' }],
+              [{ text: '🔙 Назад', callback_data: 'st:ntf' }],
+            ];
+            if (messageId) void editMessageText(chatId, messageId, text, { inline_keyboard: buttons });
+          }
+          // Phase 7.0: Legacy ntf_toggle — backward compat, re-render main menu
           else if (cmd.cmd === 'ntf_toggle') {
             const { getUserPreferences, updateNotificationSetting } = await import('../services/settings-advanced.service.js');
             const prefs = await getUserPreferences(stResolved.workspaceId, stResolved.userId);
@@ -3148,24 +3265,49 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
             const dbKey = keyMap[cmd.key];
             const currentVal = cmd.key === 'ds' ? prefs.dailySummaryEnabled : cmd.key === 'la' ? prefs.limitAlertsEnabled : prefs.recordReminderEnabled;
             await updateNotificationSetting(stResolved.workspaceId, stResolved.userId, dbKey, !currentVal);
-            // Re-render notifications screen (re-trigger cmd)
+            // Re-render main notifications hub
             const prefs2 = await getUserPreferences(stResolved.workspaceId, stResolved.userId);
-            const ds2 = prefs2.dailySummaryEnabled ? '✅' : '❌';
-            const la2 = prefs2.limitAlertsEnabled ? '✅' : '❌';
-            const rr2 = prefs2.recordReminderEnabled ? '✅' : '❌';
-            let text2 = '🔔 <b>Уведомления</b>\n\n';
-            text2 += `📊 Ежедневная сводка:  ${ds2} (${String(prefs2.dailySummaryHour)}:00)\n`;
-            text2 += `⚠️ Лимит по категории: ${la2}\n`;
-            text2 += `📝 Напоминание записи: ${rr2}\n`;
+            let summaryLabel2 = '· Выкл';
+            if (prefs2.dailySummaryEnabled) {
+              const hh2 = String(prefs2.dailySummaryHour).padStart(2, '0');
+              const mm2 = String(prefs2.dailySummaryMinute ?? 0).padStart(2, '0');
+              const pe = prefs2.summaryPreset === 'morning' ? '🌅' : prefs2.summaryPreset === 'evening' ? '🌆' : prefs2.summaryPreset === 'night' ? '🌙' : '⏰';
+              summaryLabel2 = `· ${pe} ${hh2}:${mm2} ✅`;
+            }
+            let text2 = '🔔 <b>Уведомления</b>\n\nНастройте, когда бот будет\nприсылать итоги и напоминания.';
             const kb2 = {
               inline_keyboard: [
-                [{ text: `📊 Сводка: ${prefs2.dailySummaryEnabled ? 'выкл' : 'вкл'}`, callback_data: 'st:ntf:ds' }],
-                [{ text: `⚠️ Лимиты: ${prefs2.limitAlertsEnabled ? 'выкл' : 'вкл'}`, callback_data: 'st:ntf:la' }],
-                [{ text: `📝 Напоминания: ${prefs2.recordReminderEnabled ? 'выкл' : 'вкл'}`, callback_data: 'st:ntf:rr' }],
-                [{ text: '← Назад', callback_data: 'st:back' }],
+                [{ text: `📊 Ежедневная сводка  ${summaryLabel2}`, callback_data: 'st:ntf:sum' }],
+                [{ text: '💰 Лимиты расходов  · Выкл', callback_data: 'st:ntf:bud' }],
+                [{ text: '🔄 Регулярные платежи  · Выкл', callback_data: 'st:ntf:sub' }],
+                [{ text: '🔙 Назад', callback_data: 'st:m' }],
               ]
             };
             if (messageId) void editMessageText(chatId, messageId, text2, kb2);
+          }
+          // Phase 7.0-B: Budgets sub-menu (entry from notifications hub)
+          else if (cmd.cmd === 'ntf_budgets') {
+            try {
+              const { getBudgetListScreen } = await import('../services/budget.service.js');
+              const screen = await getBudgetListScreen(stResolved.workspaceId, stResolved.userId);
+              if (messageId) void editMessageText(chatId, messageId, screen.text, screen.keyboard);
+            } catch {
+              const text = '💰 <b>Лимиты расходов</b>\n\nФункция скоро будет доступна.';
+              const kb = { inline_keyboard: [[{ text: '🔙 Назад', callback_data: 'st:ntf' }]] };
+              if (messageId) void editMessageText(chatId, messageId, text, kb);
+            }
+          }
+          // Phase 7.0-C: Subscriptions sub-menu (entry from notifications hub)
+          else if (cmd.cmd === 'ntf_subscriptions') {
+            try {
+              const { getRecurringListScreen } = await import('../services/recurring.service.js');
+              const screen = await getRecurringListScreen(stResolved.workspaceId, stResolved.userId);
+              if (messageId) void editMessageText(chatId, messageId, screen.text, screen.keyboard);
+            } catch {
+              const text = '🔄 <b>Регулярные платежи</b>\n\nФункция скоро будет доступна.';
+              const kb = { inline_keyboard: [[{ text: '🔙 Назад', callback_data: 'st:ntf' }]] };
+              if (messageId) void editMessageText(chatId, messageId, text, kb);
+            }
           }
           else if (cmd.cmd === 'number_format') {
             const { getUserPreferences } = await import('../services/settings-advanced.service.js');
@@ -3468,6 +3610,316 @@ Midas создан, чтобы сделать учет денег максима
           });
         }
 
+        await answerCallbackQuery(cq.id);
+        await reply.status(200).send({ ok: true });
+        return;
+      }
+
+      // ── Phase 7.0-B: Budget callbacks (prefix "bud:") ──────────────────
+      if (callbackData.startsWith('bud:')) {
+        const cqChatId = String(cq.message?.chat.id ?? '');
+        const cqMsgId = String(cq.message?.message_id ?? '');
+        const cqUserId = String(cq.from.id);
+        try {
+          const resolved = await resolveWorkspace(cqUserId, cqChatId);
+          const sub = callbackData.slice(4); // after "bud:"
+
+          if (sub === 'list') {
+            const { getBudgetListScreen } = await import('../services/budget.service.js');
+            const screen = await getBudgetListScreen(resolved.workspaceId, resolved.userId);
+            void editMessageText(cqChatId, cqMsgId, screen.text, screen.keyboard);
+          }
+          else if (sub === 'add') {
+            const { getAvailableCategories } = await import('../services/budget.service.js');
+            const cats = await getAvailableCategories(resolved.workspaceId, resolved.userId);
+            if (cats.length === 0) {
+              void editMessageText(cqChatId, cqMsgId, '💰 Все категории уже имеют лимиты.', {
+                inline_keyboard: [[{ text: '🔙 Назад', callback_data: 'bud:list' }]],
+              });
+            } else {
+              let text = '➕ <b>Новый лимит</b>\n\nВыберите категорию:';
+              const buttons = cats.map((c) => [{ text: `${c.icon} ${c.name}`, callback_data: `bud:cat:${c.id}` }]);
+              buttons.push([{ text: '🔙 Отмена', callback_data: 'bud:list' }]);
+              void editMessageText(cqChatId, cqMsgId, text, { inline_keyboard: buttons });
+            }
+          }
+          else if (sub.startsWith('cat:')) {
+            const categoryId = sub.slice(4);
+            // Get category name for display
+            const { getAvailableCategories } = await import('../services/budget.service.js');
+            const cats = await getAvailableCategories(resolved.workspaceId, resolved.userId);
+            const cat = cats.find((c) => c.id === categoryId);
+            const catName = cat ? `${cat.icon} ${cat.name}` : 'категорию';
+            let text = `➕ Лимит на ${catName}\n\nВведите сумму лимита в месяц:\n\n❯ Например: 10000, 5000, 25000`;
+            const kb = { inline_keyboard: [[{ text: '🔙 Отмена', callback_data: 'bud:list' }]] };
+            void editMessageText(cqChatId, cqMsgId, text, kb);
+            // Set text intercept
+            await redisConnection.set(
+              `midas:bud:amt:${cqUserId}:${cqChatId}`,
+              `${categoryId}:${cqMsgId}`,
+              'EX', 120,
+            );
+          }
+          else if (sub.startsWith('v:')) {
+            const limitId = sub.slice(2);
+            const { getBudgetDetail, buildBudgetDetailScreen } = await import('../services/budget.service.js');
+            const detail = await getBudgetDetail(resolved.workspaceId, resolved.userId, limitId);
+            if (detail) {
+              const screen = buildBudgetDetailScreen(detail);
+              void editMessageText(cqChatId, cqMsgId, screen.text, screen.keyboard);
+            } else {
+              void editMessageText(cqChatId, cqMsgId, '⚠️ Лимит не найден.', {
+                inline_keyboard: [[{ text: '🔙 Назад', callback_data: 'bud:list' }]],
+              });
+            }
+          }
+          else if (sub.startsWith('edit:')) {
+            const limitId = sub.slice(5);
+            const { getBudgetDetail } = await import('../services/budget.service.js');
+            const detail = await getBudgetDetail(resolved.workspaceId, resolved.userId, limitId);
+            if (detail) {
+              let text = `✏️ <b>Изменить лимит</b>\n\n${detail.categoryIcon} ${detail.categoryName}\n`;
+              text += `Текущий лимит: ${detail.limitAmount} ${detail.limitCurrency} в месяц\n\nВведите новую сумму:`;
+              void editMessageText(cqChatId, cqMsgId, text, {
+                inline_keyboard: [[{ text: '🔙 Отмена', callback_data: `bud:v:${limitId}` }]],
+              });
+              await redisConnection.set(
+                `midas:bud:edit:${cqUserId}:${cqChatId}`,
+                `${limitId}:${cqMsgId}`,
+                'EX', 120,
+              );
+            }
+          }
+          else if (sub.startsWith('del:')) {
+            const limitId = sub.slice(4);
+            const { getBudgetDetail } = await import('../services/budget.service.js');
+            const detail = await getBudgetDetail(resolved.workspaceId, resolved.userId, limitId);
+            if (detail) {
+              let text = `🗑️ <b>Удалить лимит?</b>\n\n${detail.categoryIcon} ${detail.categoryName} · ${detail.limitAmount} ${detail.limitCurrency}\n\nЭто действие нельзя отменить.`;
+              void editMessageText(cqChatId, cqMsgId, text, {
+                inline_keyboard: [
+                  [{ text: '🗑️ Да, удалить', callback_data: `bud:rm:${limitId}` }],
+                  [{ text: '🔙 Нет, назад', callback_data: `bud:v:${limitId}` }],
+                ],
+              });
+            }
+          }
+          else if (sub.startsWith('rm:')) {
+            const limitId = sub.slice(3);
+            const { deleteBudgetLimit } = await import('../services/budget.service.js');
+            await deleteBudgetLimit(resolved.workspaceId, resolved.userId, limitId);
+            void editMessageText(cqChatId, cqMsgId, '✅ Лимит удалён.', {
+              inline_keyboard: [[{ text: '🔙 К лимитам', callback_data: 'bud:list' }]],
+            });
+          }
+          else if (sub === 'close') {
+            void deleteMessage(cqChatId, cqMsgId);
+          }
+        } catch (err: unknown) {
+          const errorClass = err instanceof Error ? err.constructor.name : 'UnknownError';
+          request.log.error({ msg: '[midas:bot:webhook] bud: callback failed', errorClass });
+        }
+        await answerCallbackQuery(cq.id);
+        await reply.status(200).send({ ok: true });
+        return;
+      }
+
+      // ── Phase 7.0-C: Subscription callbacks (prefix "sub:") ────────────
+      if (callbackData.startsWith('sub:')) {
+        const cqChatId = String(cq.message?.chat.id ?? '');
+        const cqMsgId = String(cq.message?.message_id ?? '');
+        const cqUserId = String(cq.from.id);
+        try {
+          const resolved = await resolveWorkspace(cqUserId, cqChatId);
+          const sub = callbackData.slice(4); // after "sub:"
+
+          if (sub === 'list') {
+            const { getRecurringListScreen } = await import('../services/recurring.service.js');
+            const screen = await getRecurringListScreen(resolved.workspaceId, resolved.userId);
+            void editMessageText(cqChatId, cqMsgId, screen.text, screen.keyboard);
+          }
+          else if (sub === 'add') {
+            let text = '➕ <b>Новая подписка</b>\n\nВведите название платежа:\n\n❯ Например: Netflix, Spotify, Gym, Аренда';
+            void editMessageText(cqChatId, cqMsgId, text, {
+              inline_keyboard: [[{ text: '🔙 Отмена', callback_data: 'sub:list' }]],
+            });
+            await redisConnection.set(
+              `midas:sub:name:${cqUserId}:${cqChatId}`,
+              cqMsgId,
+              'EX', 120,
+            );
+          }
+          else if (sub.startsWith('v:')) {
+            const recId = sub.slice(2);
+            const { getRecurringDetail, buildRecurringDetailScreen } = await import('../services/recurring.service.js');
+            const detail = await getRecurringDetail(resolved.workspaceId, resolved.userId, recId);
+            if (detail) {
+              const screen = buildRecurringDetailScreen(detail);
+              void editMessageText(cqChatId, cqMsgId, screen.text, screen.keyboard);
+            } else {
+              void editMessageText(cqChatId, cqMsgId, '⚠️ Подписка не найдена.', {
+                inline_keyboard: [[{ text: '🔙 Назад', callback_data: 'sub:list' }]],
+              });
+            }
+          }
+          else if (sub.startsWith('pause:')) {
+            const recId = sub.slice(6);
+            const { pauseRecurring } = await import('../services/recurring.service.js');
+            await pauseRecurring(resolved.workspaceId, resolved.userId, recId);
+            void editMessageText(cqChatId, cqMsgId, '⏸ Подписка приостановлена.', {
+              inline_keyboard: [
+                [{ text: '▶️ Возобновить', callback_data: `sub:resume:${recId}` }],
+                [{ text: '🔙 К подпискам', callback_data: 'sub:list' }],
+              ],
+            });
+          }
+          else if (sub.startsWith('resume:')) {
+            const recId = sub.slice(7);
+            const { resumeRecurring } = await import('../services/recurring.service.js');
+            await resumeRecurring(resolved.workspaceId, resolved.userId, recId);
+            void editMessageText(cqChatId, cqMsgId, '▶️ Подписка возобновлена.', {
+              inline_keyboard: [[{ text: '🔙 К подпискам', callback_data: 'sub:list' }]],
+            });
+          }
+          else if (sub.startsWith('del:')) {
+            const recId = sub.slice(4);
+            const { getRecurringDetail } = await import('../services/recurring.service.js');
+            const detail = await getRecurringDetail(resolved.workspaceId, resolved.userId, recId);
+            const name = detail?.itemName ?? '—';
+            void editMessageText(cqChatId, cqMsgId, `🗑️ Удалить подписку «${name}»?\n\nЭто действие нельзя отменить.`, {
+              inline_keyboard: [
+                [{ text: '🗑️ Да, удалить', callback_data: `sub:rm:${recId}` }],
+                [{ text: '🔙 Нет, назад', callback_data: `sub:v:${recId}` }],
+              ],
+            });
+          }
+          else if (sub.startsWith('rm:')) {
+            const recId = sub.slice(3);
+            const { deleteRecurring } = await import('../services/recurring.service.js');
+            await deleteRecurring(resolved.workspaceId, resolved.userId, recId);
+            void editMessageText(cqChatId, cqMsgId, '✅ Подписка удалена.', {
+              inline_keyboard: [[{ text: '🔙 К подпискам', callback_data: 'sub:list' }]],
+            });
+          }
+          else if (sub.startsWith('eamt:')) {
+            const recId = sub.slice(5);
+            const { getRecurringDetail } = await import('../services/recurring.service.js');
+            const detail = await getRecurringDetail(resolved.workspaceId, resolved.userId, recId);
+            if (detail) {
+              let text = `✏️ <b>Изменить сумму</b>\n\n${detail.itemName ?? '—'}\nТекущая: ${detail.amount} ${detail.currency}\n\nВведите новую сумму:`;
+              void editMessageText(cqChatId, cqMsgId, text, {
+                inline_keyboard: [[{ text: '🔙 Отмена', callback_data: `sub:v:${recId}` }]],
+              });
+              await redisConnection.set(
+                `midas:sub:eamt:${cqUserId}:${cqChatId}`,
+                `${recId}:${cqMsgId}`,
+                'EX', 120,
+              );
+            }
+          }
+          else if (sub.startsWith('f:')) {
+            // Frequency selection during add flow
+            const freq = sub.slice(2); // d/w/m/y
+            const freqMap: Record<string, string> = { d: 'daily', w: 'weekly', m: 'monthly', y: 'yearly' };
+            const freqLabels: Record<string, string> = { d: 'Каждый день', w: 'Каждую неделю', m: 'Каждый месяц', y: 'Каждый год' };
+            const frequency = freqMap[freq] ?? 'monthly';
+            const freqLabel = freqLabels[freq] ?? 'Каждый месяц';
+
+            // Read pending data from Redis
+            const pendingKey = `midas:sub:freq:${cqUserId}:${cqChatId}`;
+            const pendingData = await redisConnection.get(pendingKey);
+            if (pendingData) {
+              const [name, amount, currency] = pendingData.split(':');
+              // Calculate next fire date
+              const now = new Date();
+              let nextDate = new Date(now);
+              if (frequency === 'daily') nextDate.setDate(now.getDate() + 1);
+              else if (frequency === 'weekly') nextDate.setDate(now.getDate() + 7);
+              else if (frequency === 'monthly') nextDate.setMonth(now.getMonth() + 1);
+              else nextDate.setFullYear(now.getFullYear() + 1);
+              const dateStr = `${String(nextDate.getDate()).padStart(2, '0')}.${String(nextDate.getMonth() + 1).padStart(2, '0')}.${String(nextDate.getFullYear())}`;
+
+              let text = `🔄 <b>Новая подписка</b>\n\n🎬 ${name} · ${amount} ${currency}\n📅 ${freqLabel}\n📆 Следующий платёж: ${dateStr}`;
+              // Store complete data for confirmation
+              await redisConnection.set(
+                `midas:sub:confirm:${cqUserId}:${cqChatId}`,
+                `${name}:${amount}:${currency}:${frequency}`,
+                'EX', 120,
+              );
+              void editMessageText(cqChatId, cqMsgId, text, {
+                inline_keyboard: [
+                  [{ text: '✅ Создать', callback_data: 'sub:ok' }],
+                  [{ text: '✖️ Отмена', callback_data: 'sub:list' }],
+                ],
+              });
+            }
+          }
+          else if (sub === 'ok') {
+            // Confirm subscription creation
+            const confirmKey = `midas:sub:confirm:${cqUserId}:${cqChatId}`;
+            const confirmData = await redisConnection.get(confirmKey);
+            if (confirmData) {
+              const parts = confirmData.split(':');
+              const name = parts[0] ?? '';
+              const amount = parts[1] ?? '0';
+              const currency = parts[2] ?? 'UAH';
+              const frequency = parts[3] ?? 'monthly';
+              const { createRecurring } = await import('../services/recurring.service.js');
+              await createRecurring(resolved.workspaceId, resolved.userId, {
+                amount: parseFloat(amount),
+                currency,
+                itemName: name,
+                frequency: frequency as 'daily' | 'weekly' | 'monthly' | 'yearly',
+              });
+              await redisConnection.del(confirmKey);
+              await redisConnection.del(`midas:sub:freq:${cqUserId}:${cqChatId}`);
+              void editMessageText(cqChatId, cqMsgId, `✅ Подписка создана!\n\n🎬 ${name} · ${amount} ${currency}`, {
+                inline_keyboard: [[{ text: '🔙 К подпискам', callback_data: 'sub:list' }]],
+              });
+            }
+          }
+          else if (sub.startsWith('fire:')) {
+            const recId = sub.slice(5);
+            const { fireRecurringTx, getRecurringDetail } = await import('../services/recurring.service.js');
+            const detail = await getRecurringDetail(resolved.workspaceId, resolved.userId, recId);
+            await fireRecurringTx(resolved.workspaceId, resolved.userId, recId);
+            void editMessageText(cqChatId, cqMsgId, `✅ Записано! ${detail?.itemName ?? '—'} · ${detail?.amount ?? ''} ${detail?.currency ?? ''}`, {
+              inline_keyboard: [[{ text: '✖️ Закрыть', callback_data: 'sub:close' }]],
+            });
+          }
+          else if (sub.startsWith('skip:')) {
+            const recId = sub.slice(5);
+            const { skipRecurringTx } = await import('../services/recurring.service.js');
+            await skipRecurringTx(resolved.workspaceId, resolved.userId, recId);
+            void editMessageText(cqChatId, cqMsgId, '⏭ Пропущено.', {
+              inline_keyboard: [[{ text: '✖️ Закрыть', callback_data: 'sub:close' }]],
+            });
+          }
+          else if (sub.startsWith('cancel:')) {
+            const recId = sub.slice(7);
+            const { pauseRecurring } = await import('../services/recurring.service.js');
+            await pauseRecurring(resolved.workspaceId, resolved.userId, recId);
+            void editMessageText(cqChatId, cqMsgId, '✖️ Подписка отменена.', {
+              inline_keyboard: [[{ text: '✖️ Закрыть', callback_data: 'sub:close' }]],
+            });
+          }
+          else if (sub === 'close') {
+            void deleteMessage(cqChatId, cqMsgId);
+          }
+        } catch (err: unknown) {
+          const errorClass = err instanceof Error ? err.constructor.name : 'UnknownError';
+          request.log.error({ msg: '[midas:bot:webhook] sub: callback failed', errorClass });
+        }
+        await answerCallbackQuery(cq.id);
+        await reply.status(200).send({ ok: true });
+        return;
+      }
+
+      // ── Phase 7.0: Summary close callback ──────────────────────────────
+      if (callbackData === 'summary:close') {
+        const cqChatId = String(cq.message?.chat.id ?? '');
+        const cqMsgId = String(cq.message?.message_id ?? '');
+        void deleteMessage(cqChatId, cqMsgId);
         await answerCallbackQuery(cq.id);
         await reply.status(200).send({ ok: true });
         return;
@@ -6690,6 +7142,227 @@ Midas создан, чтобы сделать учет денег максима
           );
         }
 
+        await reply.status(200).send({ ok: true });
+        return;
+      }
+    }
+
+    // ── Phase 7.0-A: Summary custom time text intercept ─────────────────
+    // If midas:ntf:time: key exists, user is entering custom HH:MM for daily summary.
+    if (!commandToken) {
+      const ntfTimeKey = `midas:ntf:time:${telegramUserId}:${chatId}`;
+      const ntfTimeMsgId = await redisConnection.get(ntfTimeKey);
+      if (ntfTimeMsgId !== null) {
+        const rawTime = message.text?.trim() ?? '';
+        const timeMatch = rawTime.match(/^([01]?\d|2[0-3]):([0-5]\d)$/);
+        if (!timeMatch) {
+          void sendMessage(chatId, '❌ Неверный формат. Введите ЧЧ:ММ (00:00 – 23:59)');
+          await reply.status(200).send({ ok: true });
+          return;
+        }
+        const hour = parseInt(timeMatch[1] ?? '0', 10);
+        const minute = parseInt(timeMatch[2] ?? '0', 10);
+        try {
+          const resolved = await resolveWorkspace(telegramUserId, chatId);
+          const { updateSummaryCustomTime } = await import('../services/settings-advanced.service.js');
+          await updateSummaryCustomTime(resolved.workspaceId, resolved.userId, hour, minute);
+          await redisConnection.del(ntfTimeKey);
+          // Delete user's text message
+          void deleteMessage(chatId, String(message.message_id));
+          // Edit the prompt message to show confirmation
+          const { getSettings: getStTz } = await import('../services/settings.service.js');
+          const stTz = await getStTz(resolved.workspaceId, resolved.userId);
+          const tz = stTz?.timezone ?? 'UTC';
+          const hh = String(hour).padStart(2, '0');
+          const mm = String(minute).padStart(2, '0');
+          let text = `✅ <b>Ежедневная сводка установлена!</b>\n\n`;
+          text += `📊 Каждый день в ${hh}:${mm}\n`;
+          text += `🕐 ${tz}\n\n`;
+          text += `Бот пришлёт первую сводку завтра.`;
+          const kb = { inline_keyboard: [[{ text: '🔙 К уведомлениям', callback_data: 'st:ntf' }]] };
+          void editMessageText(chatId, ntfTimeMsgId, text, kb);
+        } catch (err: unknown) {
+          const errorClass = err instanceof Error ? err.constructor.name : 'UnknownError';
+          request.log.error({ msg: '[midas:bot:webhook] ntf:time intercept failed', telegramUserId, errorClass });
+          void sendMessage(chatId, '⚠️ Не удалось сохранить время. Попробуйте ещё раз.');
+        }
+        await reply.status(200).send({ ok: true });
+        return;
+      }
+    }
+
+    // ── Phase 7.0-B: Budget amount text intercepts ─────────────────────
+    if (!commandToken) {
+      // New budget amount
+      const budAmtKey = `midas:bud:amt:${telegramUserId}:${chatId}`;
+      const budAmtData = await redisConnection.get(budAmtKey);
+      if (budAmtData !== null) {
+        const rawAmt = message.text?.trim().replace(/\s/g, '') ?? '';
+        const amount = parseFloat(rawAmt);
+        if (isNaN(amount) || amount <= 0) {
+          void sendMessage(chatId, '❌ Введите положительное число. Например: 10000');
+          await reply.status(200).send({ ok: true });
+          return;
+        }
+        const categoryId = budAmtData.split(':')[0] ?? '';
+        const promptMsgId = budAmtData.split(':')[1] ?? '';
+        try {
+          const resolved = await resolveWorkspace(telegramUserId, chatId);
+          // Get default currency from workspace
+          const { getSettings } = await import('../services/settings.service.js');
+          const settings = await getSettings(resolved.workspaceId, resolved.userId);
+          const currency = settings?.default_currency ?? 'UAH';
+          const { createBudgetLimit } = await import('../services/budget.service.js');
+          await createBudgetLimit(resolved.workspaceId, resolved.userId, categoryId, amount, currency);
+          await redisConnection.del(budAmtKey);
+          void deleteMessage(chatId, String(message.message_id));
+          void editMessageText(chatId, promptMsgId, `✅ Лимит установлен!\n\n💰 ${String(amount)} ${currency} в месяц`, {
+            inline_keyboard: [[{ text: '🔙 К лимитам', callback_data: 'bud:list' }]],
+          });
+        } catch (err: unknown) {
+          request.log.error({ msg: '[midas:bot:webhook] bud:amt intercept failed', errorClass: err instanceof Error ? err.constructor.name : 'UnknownError' });
+          void sendMessage(chatId, '⚠️ Не удалось создать лимит. Попробуйте ещё раз.');
+        }
+        await reply.status(200).send({ ok: true });
+        return;
+      }
+
+      // Edit budget amount
+      const budEditKey = `midas:bud:edit:${telegramUserId}:${chatId}`;
+      const budEditData = await redisConnection.get(budEditKey);
+      if (budEditData !== null) {
+        const rawAmt = message.text?.trim().replace(/\s/g, '') ?? '';
+        const amount = parseFloat(rawAmt);
+        if (isNaN(amount) || amount <= 0) {
+          void sendMessage(chatId, '❌ Введите положительное число.');
+          await reply.status(200).send({ ok: true });
+          return;
+        }
+        const limitId = budEditData.split(':')[0] ?? '';
+        const promptMsgId = budEditData.split(':')[1] ?? '';
+        try {
+          const resolved = await resolveWorkspace(telegramUserId, chatId);
+          const { updateBudgetAmount } = await import('../services/budget.service.js');
+          await updateBudgetAmount(resolved.workspaceId, resolved.userId, limitId, amount);
+          await redisConnection.del(budEditKey);
+          void deleteMessage(chatId, String(message.message_id));
+          void editMessageText(chatId, promptMsgId, `✅ Лимит обновлён!\n\n💰 Новая сумма: ${String(amount)}`, {
+            inline_keyboard: [[{ text: '🔙 К лимитам', callback_data: 'bud:list' }]],
+          });
+        } catch (err: unknown) {
+          request.log.error({ msg: '[midas:bot:webhook] bud:edit intercept failed', errorClass: err instanceof Error ? err.constructor.name : 'UnknownError' });
+        }
+        await reply.status(200).send({ ok: true });
+        return;
+      }
+    }
+
+    // ── Phase 7.0-C: Subscription text intercepts ──────────────────────
+    if (!commandToken) {
+      // Subscription name input
+      const subNameKey = `midas:sub:name:${telegramUserId}:${chatId}`;
+      const subNameMsgId = await redisConnection.get(subNameKey);
+      if (subNameMsgId !== null) {
+        const name = message.text?.trim() ?? '';
+        if (!name || name.length > 50) {
+          void sendMessage(chatId, '❌ Название должно быть от 1 до 50 символов.');
+          await reply.status(200).send({ ok: true });
+          return;
+        }
+        await redisConnection.del(subNameKey);
+        void deleteMessage(chatId, String(message.message_id));
+        // Move to amount input
+        let text = `➕ <b>${name}</b> · Подписка\n\nВведите сумму и валюту:\n\n❯ Например: 15.99 USD, 3000, 499`;
+        void editMessageText(chatId, subNameMsgId, text, {
+          inline_keyboard: [[{ text: '🔙 Отмена', callback_data: 'sub:list' }]],
+        });
+        await redisConnection.set(
+          `midas:sub:amt:${telegramUserId}:${chatId}`,
+          `${name}:${subNameMsgId}`,
+          'EX', 120,
+        );
+        await reply.status(200).send({ ok: true });
+        return;
+      }
+
+      // Subscription amount input
+      const subAmtKey = `midas:sub:amt:${telegramUserId}:${chatId}`;
+      const subAmtData = await redisConnection.get(subAmtKey);
+      if (subAmtData !== null) {
+        const rawText = message.text?.trim() ?? '';
+        // Parse amount and optional currency: "15.99 USD", "3000", "499 EUR"
+        const amtMatch = rawText.match(/^([\d\s.,]+)\s*([A-Za-zА-Яа-я₽$€£]{0,5})?$/);
+        if (!amtMatch) {
+          void sendMessage(chatId, '❌ Введите сумму. Например: 15.99 USD или 3000');
+          await reply.status(200).send({ ok: true });
+          return;
+        }
+        const amount = parseFloat((amtMatch[1] ?? '').replace(/\s/g, '').replace(',', '.'));
+        if (isNaN(amount) || amount <= 0) {
+          void sendMessage(chatId, '❌ Введите положительное число.');
+          await reply.status(200).send({ ok: true });
+          return;
+        }
+        let currency = (amtMatch[2] ?? '').toUpperCase() || 'UAH';
+        if (currency === '₽' || currency === 'РУБ') currency = 'RUB';
+        if (currency === '$') currency = 'USD';
+        if (currency === '€') currency = 'EUR';
+        if (currency === '£') currency = 'GBP';
+        if (currency === 'ГРН') currency = 'UAH';
+
+        const colonIdx = subAmtData.indexOf(':');
+        const name = subAmtData.substring(0, colonIdx);
+        const promptMsgId = subAmtData.substring(colonIdx + 1);
+
+        await redisConnection.del(subAmtKey);
+        void deleteMessage(chatId, String(message.message_id));
+
+        // Move to frequency selection
+        let text = `➕ <b>${name}</b> · ${String(amount)} ${currency}\n\nКак часто повторяется?`;
+        void editMessageText(chatId, promptMsgId, text, {
+          inline_keyboard: [
+            [{ text: '📆 Каждый день', callback_data: 'sub:f:d' }],
+            [{ text: '📅 Каждую неделю', callback_data: 'sub:f:w' }],
+            [{ text: '🗓 Каждый месяц', callback_data: 'sub:f:m' }],
+            [{ text: '📋 Каждый год', callback_data: 'sub:f:y' }],
+            [{ text: '🔙 Отмена', callback_data: 'sub:list' }],
+          ],
+        });
+        // Store data for frequency step
+        await redisConnection.set(
+          `midas:sub:freq:${telegramUserId}:${chatId}`,
+          `${name}:${String(amount)}:${currency}`,
+          'EX', 120,
+        );
+        await reply.status(200).send({ ok: true });
+        return;
+      }
+
+      // Subscription amount edit
+      const subEamtKey = `midas:sub:eamt:${telegramUserId}:${chatId}`;
+      const subEamtData = await redisConnection.get(subEamtKey);
+      if (subEamtData !== null) {
+        const rawAmt = message.text?.trim().replace(/\s/g, '') ?? '';
+        const amount = parseFloat(rawAmt.replace(',', '.'));
+        if (isNaN(amount) || amount <= 0) {
+          void sendMessage(chatId, '❌ Введите положительное число.');
+          await reply.status(200).send({ ok: true });
+          return;
+        }
+        const recId = subEamtData.split(':')[0] ?? '';
+        const promptMsgId = subEamtData.split(':')[1] ?? '';
+        try {
+          const resolved = await resolveWorkspace(telegramUserId, chatId);
+          const { updateRecurringAmount } = await import('../services/recurring.service.js');
+          await updateRecurringAmount(resolved.workspaceId, resolved.userId, recId, amount);
+          await redisConnection.del(subEamtKey);
+          void deleteMessage(chatId, String(message.message_id));
+          void editMessageText(chatId, promptMsgId, `✅ Сумма обновлена!\n\n💰 ${String(amount)}`, {
+            inline_keyboard: [[{ text: '🔙 К подпискам', callback_data: 'sub:list' }]],
+          });
+        } catch (err: unknown) {
+          request.log.error({ msg: '[midas:bot:webhook] sub:eamt intercept failed', errorClass: err instanceof Error ? err.constructor.name : 'UnknownError' });
+        }
         await reply.status(200).send({ ok: true });
         return;
       }

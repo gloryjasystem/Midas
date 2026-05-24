@@ -194,6 +194,42 @@ export const voiceParseQueue = new Queue<VoiceParseJobPayload>(
 );
 
 // ─────────────────────────────────────────────────────────────
+// summary-dispatch Queue — Phase 7.0-A
+// CRON worker: every 5 minutes, sends daily summaries to users.
+// ─────────────────────────────────────────────────────────────
+
+export const summaryDispatchQueue = new Queue(
+  QUEUE_NAMES.SUMMARY_DISPATCH,
+  {
+    connection: redisConnection,
+    prefix: BULL_PREFIX,
+    defaultJobOptions: {
+      attempts: 1,
+      removeOnComplete: { count: 50 },
+      removeOnFail: false,
+    },
+  },
+);
+
+// ─────────────────────────────────────────────────────────────
+// recurring-reminder Queue — Phase 7.0-C
+// CRON worker: every hour, sends recurring payment reminders.
+// ─────────────────────────────────────────────────────────────
+
+export const recurringReminderQueue = new Queue(
+  QUEUE_NAMES.RECURRING_REMINDER,
+  {
+    connection: redisConnection,
+    prefix: BULL_PREFIX,
+    defaultJobOptions: {
+      attempts: 1,
+      removeOnComplete: { count: 50 },
+      removeOnFail: false,
+    },
+  },
+);
+
+// ─────────────────────────────────────────────────────────────
 // Graceful shutdown — close all queue connections
 // ─────────────────────────────────────────────────────────────
 
@@ -205,6 +241,8 @@ export async function closeQueues(): Promise<void> {
     notificationsQueue.close(),
     draftExpirationQueue.close(),
     voiceParseQueue.close(),
+    summaryDispatchQueue.close(),
+    recurringReminderQueue.close(),
   ]);
 }
 

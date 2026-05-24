@@ -373,6 +373,37 @@ async function processConfirmation(job: Job<CallbackConfirmJobPayload>): Promise
     },
   );
 
+  // ── Phase 7.0-B: Budget limit check (non-fatal) ───────────────────────
+  // Check if any category budget limit crossed 80%/100% after this approval.
+  // MUST be wrapped in try-catch — budget check failure must NEVER break confirm.
+  if (result.outcome === 'approved') {
+    try {
+      const { checkBudgetAfterConfirm } = await import('../services/budget-check.service.js');
+      const approveOutcome = result as { outcome: string; intent?: string; categoryId?: string };
+      const warnings = await checkBudgetAfterConfirm(
+        workspaceId,
+        userId,
+        { outcome: result.outcome, intent: approveOutcome.intent, categoryId: approveOutcome.categoryId },
+        redisConnection,
+      );
+      for (const w of warnings) {
+        const budgetAlertId = ulid();
+        await notificationsQueue.add(
+          QUEUE_NAMES.NOTIFICATIONS,
+          {
+            alertId: budgetAlertId,
+            workspaceId,
+            chatId,
+            message: w.text,
+            inlineKeyboardJson: JSON.stringify(w.keyboard),
+            telegramUserId,
+          },
+          { jobId: IdempotencyKeyBuilder.notification(workspaceId, budgetAlertId) },
+        );
+      }
+    } catch { /* non-fatal — budget check failure must not break confirm */ }
+  }
+
   // Phase 1.39: Cleanup gate state after approve/reject.
   // 1. Delete gate_sent flag so next message isn't blocked
   // 2. Delete gate card from chat (I-1)

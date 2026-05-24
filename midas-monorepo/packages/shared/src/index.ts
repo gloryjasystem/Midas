@@ -25,6 +25,10 @@ export const QUEUE_NAMES = {
   CALLBACK_CONFIRM: 'callback-confirm',
   NOTIFICATIONS: 'notifications',
   DRAFT_EXPIRATION: 'draft-expiration',
+  /** Phase 7.0-A: Daily summary dispatch — CRON every 5 minutes */
+  SUMMARY_DISPATCH: 'summary-dispatch',
+  /** Phase 7.0-C: Recurring payment reminders — CRON every hour */
+  RECURRING_REMINDER: 'recurring-reminder',
 } as const;
 
 export type QueueName = (typeof QUEUE_NAMES)[keyof typeof QUEUE_NAMES];

@@ -24,6 +24,8 @@ import { ulid } from 'ulid';
 export interface UserPrefs {
   dailySummaryEnabled: boolean;
   dailySummaryHour: number;
+  dailySummaryMinute: number;
+  summaryPreset: string | null;
   limitAlertsEnabled: boolean;
   recordReminderEnabled: boolean;
   numberFormat: 'ru' | 'en' | 'de';
@@ -45,6 +47,8 @@ export interface WorkspaceStats {
 interface PrefsRow {
   daily_summary_enabled: boolean;
   daily_summary_hour: number;
+  daily_summary_minute: number;
+  summary_preset: string | null;
   limit_alerts_enabled: boolean;
   record_reminder_enabled: boolean;
   number_format: string;
@@ -62,8 +66,8 @@ export async function getUserPreferences(
   return await withTenantTransaction(workspaceId, userId, async (client) => {
     // Try to find existing
     const r = await client.query<PrefsRow>(
-      `SELECT daily_summary_enabled, daily_summary_hour,
-              limit_alerts_enabled, record_reminder_enabled,
+      `SELECT daily_summary_enabled, daily_summary_hour, daily_summary_minute,
+              summary_preset, limit_alerts_enabled, record_reminder_enabled,
               number_format, language
        FROM user_preferences WHERE workspace_id = $1`,
       [workspaceId],
@@ -74,6 +78,8 @@ export async function getUserPreferences(
       return {
         dailySummaryEnabled: row.daily_summary_enabled,
         dailySummaryHour: row.daily_summary_hour,
+        dailySummaryMinute: row.daily_summary_minute ?? 0,
+        summaryPreset: row.summary_preset ?? null,
         limitAlertsEnabled: row.limit_alerts_enabled,
         recordReminderEnabled: row.record_reminder_enabled,
         numberFormat: row.number_format as UserPrefs['numberFormat'],
@@ -91,6 +97,8 @@ export async function getUserPreferences(
     return {
       dailySummaryEnabled: false,
       dailySummaryHour: 21,
+      dailySummaryMinute: 0,
+      summaryPreset: null,
       limitAlertsEnabled: false,
       recordReminderEnabled: false,
       numberFormat: 'ru',
@@ -162,6 +170,100 @@ export async function updateDailySummaryHour(
     await client.query(
       `UPDATE user_preferences SET daily_summary_hour = $1, updated_at = NOW() WHERE workspace_id = $2`,
       [hour, workspaceId],
+    );
+  });
+}
+
+// ─────────────────────────────────────────────────────────────
+// Phase 7.0-A: Summary Preset Management
+// ─────────────────────────────────────────────────────────────
+
+const PRESET_CONFIG = {
+  morning: { hour: 9, minute: 0 },
+  evening: { hour: 21, minute: 0 },
+  night:   { hour: 0, minute: 0 },
+} as const;
+
+/**
+ * Set a summary preset (morning/evening/night).
+ * Enables the summary and sets hour + minute atomically.
+ */
+export async function updateSummaryPreset(
+  workspaceId: string,
+  userId: string,
+  preset: 'morning' | 'evening' | 'night',
+): Promise<void> {
+  const cfg = PRESET_CONFIG[preset];
+
+  await withTenantTransaction(workspaceId, userId, async (client) => {
+    await client.query(
+      `INSERT INTO user_preferences (id, workspace_id)
+       VALUES ($1, $2) ON CONFLICT (workspace_id) DO NOTHING`,
+      [ulid(), workspaceId],
+    );
+    await client.query(
+      `UPDATE user_preferences
+       SET daily_summary_enabled = true,
+           daily_summary_hour = $1,
+           daily_summary_minute = $2,
+           summary_preset = $3,
+           updated_at = NOW()
+       WHERE workspace_id = $4`,
+      [cfg.hour, cfg.minute, preset, workspaceId],
+    );
+  });
+}
+
+/**
+ * Set a custom summary time (HH:MM).
+ * Enables the summary with preset = 'custom'.
+ */
+export async function updateSummaryCustomTime(
+  workspaceId: string,
+  userId: string,
+  hour: number,
+  minute: number,
+): Promise<void> {
+  if (hour < 0 || hour > 23) throw new Error(`Invalid hour: ${String(hour)}`);
+  if (minute < 0 || minute > 59) throw new Error(`Invalid minute: ${String(minute)}`);
+
+  await withTenantTransaction(workspaceId, userId, async (client) => {
+    await client.query(
+      `INSERT INTO user_preferences (id, workspace_id)
+       VALUES ($1, $2) ON CONFLICT (workspace_id) DO NOTHING`,
+      [ulid(), workspaceId],
+    );
+    await client.query(
+      `UPDATE user_preferences
+       SET daily_summary_enabled = true,
+           daily_summary_hour = $1,
+           daily_summary_minute = $2,
+           summary_preset = 'custom',
+           updated_at = NOW()
+       WHERE workspace_id = $3`,
+      [hour, minute, workspaceId],
+    );
+  });
+}
+
+/**
+ * Disable the daily summary.
+ */
+export async function disableSummary(
+  workspaceId: string,
+  userId: string,
+): Promise<void> {
+  await withTenantTransaction(workspaceId, userId, async (client) => {
+    await client.query(
+      `INSERT INTO user_preferences (id, workspace_id)
+       VALUES ($1, $2) ON CONFLICT (workspace_id) DO NOTHING`,
+      [ulid(), workspaceId],
+    );
+    await client.query(
+      `UPDATE user_preferences
+       SET daily_summary_enabled = false, updated_at = NOW()
+       WHERE workspace_id = $1`,
+      [workspaceId],
     );
   });
 }

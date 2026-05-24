@@ -21,7 +21,7 @@
  */
 
 import { closeRedis } from './queues/redis.js';
-import { closeQueues, draftExpirationQueue } from './queues/queue-definitions.js';
+import { closeQueues, draftExpirationQueue, summaryDispatchQueue, recurringReminderQueue } from './queues/queue-definitions.js';
 import { attachDlqHandler } from './queues/dlq-handler.js';
 import { createWebhookIngestionWorker } from './workers/webhook-ingestion.worker.js';
 import { createAiParseWorker } from './workers/ai-parse.worker.js';
@@ -33,6 +33,16 @@ import {
   EXPIRATION_CRON_JOB_ID,
 } from './workers/draft-expiration.worker.js';
 import { createVoiceParseWorker } from './workers/voice-parse.worker.js';
+import {
+  createSummaryDispatchWorker,
+  SUMMARY_CRON_PATTERN,
+  SUMMARY_CRON_JOB_ID,
+} from './workers/summary-dispatch.worker.js';
+import {
+  createRecurringReminderWorker,
+  RECURRING_CRON_PATTERN,
+  RECURRING_CRON_JOB_ID,
+} from './workers/recurring-reminder.worker.js';
 import { runMigrations } from './migrate.js';
 import { QUEUE_NAMES } from '@midas/shared';
 import type { QueueEvents } from 'bullmq';
@@ -64,6 +74,28 @@ await draftExpirationQueue.add(
 
 console.log(`[midas] Draft expiration CRON registered: ${EXPIRATION_CRON_PATTERN}`);
 
+// Phase 7.0-A: Register summary dispatch CRON
+await summaryDispatchQueue.add(
+  'dispatch-daily-summaries',
+  {},
+  {
+    jobId: SUMMARY_CRON_JOB_ID,
+    repeat: { pattern: SUMMARY_CRON_PATTERN },
+  },
+);
+console.log(`[midas] Summary dispatch CRON registered: ${SUMMARY_CRON_PATTERN}`);
+
+// Phase 7.0-C: Register recurring reminder CRON
+await recurringReminderQueue.add(
+  'send-recurring-reminders',
+  {},
+  {
+    jobId: RECURRING_CRON_JOB_ID,
+    repeat: { pattern: RECURRING_CRON_PATTERN },
+  },
+);
+console.log(`[midas] Recurring reminder CRON registered: ${RECURRING_CRON_PATTERN}`);
+
 // ─────────────────────────────────────────────────────────────
 // Start workers
 // ─────────────────────────────────────────────────────────────
@@ -74,6 +106,8 @@ const notificationsWorker = createNotificationsWorker();
 const confirmationWorker = createConfirmationWorker();
 const expirationWorker = createDraftExpirationWorker();
 const voiceParseWorker = createVoiceParseWorker();
+const summaryDispatchWorker = createSummaryDispatchWorker();
+const recurringReminderWorker = createRecurringReminderWorker();
 
 console.log('[midas] Workers started:');
 console.log(`  ✓ ${QUEUE_NAMES.WEBHOOK_INGESTION} (concurrency: 10)`);
@@ -82,6 +116,8 @@ console.log(`  ✓ ${QUEUE_NAMES.VOICE_PARSE} (concurrency: 3, rate-limit: 30/60
 console.log(`  ✓ ${QUEUE_NAMES.NOTIFICATIONS} (concurrency: 10, rate-limit: 30/1s)`);
 console.log(`  ✓ ${QUEUE_NAMES.CALLBACK_CONFIRM} (concurrency: 5)`);
 console.log(`  ✓ ${QUEUE_NAMES.DRAFT_EXPIRATION} (concurrency: 1, CRON: ${EXPIRATION_CRON_PATTERN})`);
+console.log(`  ✓ ${QUEUE_NAMES.SUMMARY_DISPATCH} (concurrency: 1, CRON: ${SUMMARY_CRON_PATTERN})`);
+console.log(`  ✓ ${QUEUE_NAMES.RECURRING_REMINDER} (concurrency: 1, CRON: ${RECURRING_CRON_PATTERN})`);
 
 // ─────────────────────────────────────────────────────────────
 // Attach DLQ handlers (QueueEvents — fires on permanent failures)
@@ -94,6 +130,8 @@ const dlqHandlers: QueueEvents[] = [
   attachDlqHandler(QUEUE_NAMES.CALLBACK_CONFIRM),
   attachDlqHandler(QUEUE_NAMES.NOTIFICATIONS),
   attachDlqHandler(QUEUE_NAMES.DRAFT_EXPIRATION),
+  attachDlqHandler(QUEUE_NAMES.SUMMARY_DISPATCH),
+  attachDlqHandler(QUEUE_NAMES.RECURRING_REMINDER),
 ];
 
 console.log('[midas] DLQ handlers (QueueEvents) attached to all queues');
@@ -114,6 +152,8 @@ async function gracefulShutdown(signal: string): Promise<void> {
     confirmationWorker.close(),
     expirationWorker.close(),
     voiceParseWorker.close(),
+    summaryDispatchWorker.close(),
+    recurringReminderWorker.close(),
   ]);
 
   console.log('[midas] All workers stopped');

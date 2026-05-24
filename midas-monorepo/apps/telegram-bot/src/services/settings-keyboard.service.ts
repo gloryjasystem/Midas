@@ -271,6 +271,15 @@ export type SettingsCallbackCmd =
   | { cmd: 'notifications' }
   | { cmd: 'ntf_toggle'; key: 'ds' | 'la' | 'rr' }
   | { cmd: 'ntf_hour'; hour: number }
+  // Phase 7.0: Summary presets & sub-menus
+  | { cmd: 'ntf_summary' }
+  | { cmd: 'ntf_summary_preset'; preset: 'morning' | 'evening' | 'night' }
+  | { cmd: 'ntf_summary_custom' }
+  | { cmd: 'ntf_summary_off' }
+  | { cmd: 'ntf_budgets' }
+  | { cmd: 'ntf_budget_list' }
+  | { cmd: 'ntf_subscriptions' }
+  | { cmd: 'ntf_sub_list' }
   | { cmd: 'number_format' }
   | { cmd: 'nf_set'; format: string }
   | { cmd: 'language_menu' }
@@ -309,6 +318,21 @@ export function parseSettingsCallback(data: string): SettingsCallbackCmd | null 
   if (sub === 'ntf') {
     const action = parts[2] ?? '';
     if (!action) return { cmd: 'notifications' };
+    // Phase 7.0: Summary presets
+    if (action === 'sum') {
+      const sub2 = parts[3] ?? '';
+      if (!sub2) return { cmd: 'ntf_summary' };
+      if (sub2 === 'm') return { cmd: 'ntf_summary_preset', preset: 'morning' };
+      if (sub2 === 'e') return { cmd: 'ntf_summary_preset', preset: 'evening' };
+      if (sub2 === 'n') return { cmd: 'ntf_summary_preset', preset: 'night' };
+      if (sub2 === 'c') return { cmd: 'ntf_summary_custom' };
+      if (sub2 === 'off') return { cmd: 'ntf_summary_off' };
+      return null;
+    }
+    // Phase 7.0: Budget & Subscription sub-menus
+    if (action === 'bud') return { cmd: 'ntf_budgets' };
+    if (action === 'sub') return { cmd: 'ntf_subscriptions' };
+    // Legacy toggle support (backward compat for cached Telegram keyboards)
     if (action === 'ds') return { cmd: 'ntf_toggle', key: 'ds' };
     if (action === 'la') return { cmd: 'ntf_toggle', key: 'la' };
     if (action === 'rr') return { cmd: 'ntf_toggle', key: 'rr' };
