@@ -29,6 +29,8 @@ export const QUEUE_NAMES = {
   SUMMARY_DISPATCH: 'summary-dispatch',
   /** Phase 7.0-C: Recurring payment reminders — CRON every hour */
   RECURRING_REMINDER: 'recurring-reminder',
+  /** Phase 7.1: Cashflow reminder dispatch — CRON twice daily (08:00 + 20:00 UTC) */
+  CASHFLOW_REMINDER: 'cashflow-reminder',
 } as const;
 
 export type QueueName = (typeof QUEUE_NAMES)[keyof typeof QUEUE_NAMES];

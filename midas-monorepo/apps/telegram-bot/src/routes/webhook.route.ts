@@ -3152,6 +3152,14 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
               if (cnt > 0) subLabel = `· ${String(cnt)} подпис${cnt === 1 ? 'ка' : cnt < 5 ? 'ки' : 'ок'}`;
             } catch { /* table may not exist yet */ }
 
+            // Build reminder count label (Phase 7.1)
+            let remLabel = '· Выкл';
+            try {
+              const { getReminderCount } = await import('../services/reminder.service.js');
+              const cnt = await getReminderCount(stResolved.workspaceId, stResolved.userId);
+              if (cnt > 0) remLabel = `· ${String(cnt)} актив.`;
+            } catch { /* table may not exist yet */ }
+
             let text = '🔔 <b>Уведомления</b>\n\n';
             text += 'Настройте, когда бот будет\nприсылать итоги и напоминания.';
             const kb = {
@@ -3159,6 +3167,7 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
                 [{ text: `📊 Ежедневная сводка  ${summaryLabel}`, callback_data: 'st:ntf:sum' }],
                 [{ text: `💰 Лимиты расходов  ${budgetLabel}`, callback_data: 'st:ntf:bud' }],
                 [{ text: `🔄 Регулярные платежи  ${subLabel}`, callback_data: 'st:ntf:sub' }],
+                [{ text: `📅 Напоминания  ${remLabel}`, callback_data: 'st:ntf:rem' }],
                 [{ text: '🔙 Назад', callback_data: 'st:m' }],
               ]
             };
@@ -3306,6 +3315,18 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
               if (messageId) void editMessageText(chatId, messageId, screen.text, screen.keyboard);
             } catch {
               const text = '🔄 <b>Регулярные платежи</b>\n\nФункция скоро будет доступна.';
+              const kb = { inline_keyboard: [[{ text: '🔙 Назад', callback_data: 'st:ntf' }]] };
+              if (messageId) void editMessageText(chatId, messageId, text, kb);
+            }
+          }
+          // Phase 7.1: Reminders sub-menu (entry from notifications hub)
+          else if (cmd.cmd === 'ntf_reminders') {
+            try {
+              const { getReminderListScreen } = await import('../services/reminder.service.js');
+              const screen = await getReminderListScreen(stResolved.workspaceId, stResolved.userId);
+              if (messageId) void editMessageText(chatId, messageId, screen.text, screen.keyboard);
+            } catch {
+              const text = '📅 <b>Напоминания</b>\n\nФункция скоро будет доступна.';
               const kb = { inline_keyboard: [[{ text: '🔙 Назад', callback_data: 'st:ntf' }]] };
               if (messageId) void editMessageText(chatId, messageId, text, kb);
             }
@@ -3618,17 +3639,17 @@ Midas создан, чтобы сделать учет денег максима
 
       // ── Phase 7.0-B: Budget callbacks (prefix "bud:") ──────────────────
       if (callbackData.startsWith('bud:')) {
-        const cqChatId = String(cq.message?.chat.id ?? '');
-        const cqMsgId = String(cq.message?.message_id ?? '');
-        const cqUserId = String(cq.from.id);
+        const chatId = String(cq.message?.chat.id ?? '');
+        const remMsgId = String(cq.message?.message_id ?? '');
+        const telegramUserId = String(cq.from.id);
         try {
-          const resolved = await resolveWorkspace(cqUserId, cqChatId);
+          const resolved = await resolveWorkspace(telegramUserId, chatId);
           const sub = callbackData.slice(4); // after "bud:"
 
           if (sub === 'list') {
             const { getBudgetListScreen } = await import('../services/budget.service.js');
             const screen = await getBudgetListScreen(resolved.workspaceId, resolved.userId);
-            void editMessageText(cqChatId, cqMsgId, screen.text, screen.keyboard);
+            if (remMsgId) void editMessageText(chatId, remMsgId, screen.text, screen.keyboard);
           }
           else if (sub === 'add') {
             const allBudCats = await getWorkspaceCategories(resolved.workspaceId, resolved.userId);
@@ -3638,7 +3659,7 @@ Midas создан, чтобы сделать учет денег максима
             const availableCats = allBudCats.filter(c => !existingCatIds.has(c.id));
 
             if (availableCats.length === 0) {
-              void editMessageText(cqChatId, cqMsgId, '💰 Все категории уже имеют лимиты.', {
+              if (remMsgId) void editMessageText(chatId, remMsgId, '💰 Все категории уже имеют лимиты.', {
                 inline_keyboard: [[{ text: '🔙 Назад', callback_data: 'bud:list' }]],
               });
             } else {
@@ -3670,7 +3691,7 @@ Midas создан, чтобы сделать учет денег максима
               }
               rows.push([{ text: '✏️ Создать категорию', callback_data: 'cc:new:bud' }]);
               rows.push([{ text: '🔙 Назад', callback_data: 'bud:list' }]);
-              void editMessageText(cqChatId, cqMsgId, '➕ <b>Новый лимит</b>\n\nВыберите категорию:', { inline_keyboard: rows });
+              if (remMsgId) void editMessageText(chatId, remMsgId, '➕ <b>Новый лимит</b>\n\nВыберите категорию:', { inline_keyboard: rows });
             }
           }
           // bud:catg:life / bud:catg:biz / bud:catg:mine — category group drill-down
@@ -3701,7 +3722,7 @@ Midas создан, чтобы сделать учет денег максима
                 }
               }
               rows2.push([{ text: '◀️ К группам', callback_data: 'bud:catg:back' }]);
-              void editMessageText(cqChatId, cqMsgId, '<b>⭐ Мои категории:</b>', { inline_keyboard: rows2 });
+              if (remMsgId) void editMessageText(chatId, remMsgId, '<b>⭐ Мои категории:</b>', { inline_keyboard: rows2 });
             } else if (catgSub === 'back') {
               // Rebuild Screen 1
               const standardCats2 = available2.filter(c => !c.is_custom);
@@ -3727,7 +3748,7 @@ Midas создан, чтобы сделать учет денег максима
               }
               rows2.push([{ text: '✏️ Создать категорию', callback_data: 'cc:new:bud' }]);
               rows2.push([{ text: '🔙 Назад', callback_data: 'bud:list' }]);
-              void editMessageText(cqChatId, cqMsgId, '➕ <b>Новый лимит</b>\n\nВыберите категорию:', { inline_keyboard: rows2 });
+              if (remMsgId) void editMessageText(chatId, remMsgId, '➕ <b>Новый лимит</b>\n\nВыберите категорию:', { inline_keyboard: rows2 });
             } else {
               // life or biz — show categories in group
               const groupName  = catgSub === 'life' ? 'Жизнь' : 'Бизнес';
@@ -3744,7 +3765,7 @@ Midas создан, чтобы сделать учет денег максима
                 }
               }
               rows2.push([{ text: '◀️ К группам', callback_data: 'bud:catg:back' }]);
-              void editMessageText(cqChatId, cqMsgId, `<b>${groupEmoji} ${groupName}:</b>`, { inline_keyboard: rows2 });
+              if (remMsgId) void editMessageText(chatId, remMsgId, `<b>${groupEmoji} ${groupName}:</b>`, { inline_keyboard: rows2 });
             }
           }
 
@@ -3756,11 +3777,11 @@ Midas создан, чтобы сделать учет денег максима
             const catName = cat ? `${getCategoryEmoji(cat.name, cat.icon)} ${cat.name}` : 'категорию';
             let text = `➕ Лимит на ${catName}\n\nВведите сумму лимита в месяц:\n\n❯ Например: 10000, 5000, 25000`;
             const kb = { inline_keyboard: [[{ text: '🔙 Отмена', callback_data: 'bud:list' }]] };
-            void editMessageText(cqChatId, cqMsgId, text, kb);
+            if (remMsgId) void editMessageText(chatId, remMsgId, text, kb);
             // Set text intercept
             await redisConnection.set(
-              `midas:bud:amt:${cqUserId}:${cqChatId}`,
-              `${categoryId}:${cqMsgId}`,
+              `midas:bud:amt:${telegramUserId}:${chatId}`,
+              `${categoryId}:${remMsgId}`,
               'EX', 120,
             );
           }
@@ -3770,9 +3791,9 @@ Midas создан, чтобы сделать учет денег максима
             const detail = await getBudgetDetail(resolved.workspaceId, resolved.userId, limitId);
             if (detail) {
               const screen = buildBudgetDetailScreen(detail);
-              void editMessageText(cqChatId, cqMsgId, screen.text, screen.keyboard);
+              if (remMsgId) void editMessageText(chatId, remMsgId, screen.text, screen.keyboard);
             } else {
-              void editMessageText(cqChatId, cqMsgId, '⚠️ Лимит не найден.', {
+              if (remMsgId) void editMessageText(chatId, remMsgId, '⚠️ Лимит не найден.', {
                 inline_keyboard: [[{ text: '🔙 Назад', callback_data: 'bud:list' }]],
               });
             }
@@ -3784,12 +3805,12 @@ Midas создан, чтобы сделать учет денег максима
             if (detail) {
               let text = `✏️ <b>Изменить лимит</b>\n\n${detail.categoryIcon} ${detail.categoryName}\n`;
               text += `Текущий лимит: ${detail.limitAmount} ${detail.limitCurrency} в месяц\n\nВведите новую сумму:`;
-              void editMessageText(cqChatId, cqMsgId, text, {
+              if (remMsgId) void editMessageText(chatId, remMsgId, text, {
                 inline_keyboard: [[{ text: '🔙 Отмена', callback_data: `bud:v:${limitId}` }]],
               });
               await redisConnection.set(
-                `midas:bud:edit:${cqUserId}:${cqChatId}`,
-                `${limitId}:${cqMsgId}`,
+                `midas:bud:edit:${telegramUserId}:${chatId}`,
+                `${limitId}:${remMsgId}`,
                 'EX', 120,
               );
             }
@@ -3800,7 +3821,7 @@ Midas создан, чтобы сделать учет денег максима
             const detail = await getBudgetDetail(resolved.workspaceId, resolved.userId, limitId);
             if (detail) {
               let text = `🗑️ <b>Удалить лимит?</b>\n\n${detail.categoryIcon} ${detail.categoryName} · ${detail.limitAmount} ${detail.limitCurrency}\n\nЭто действие нельзя отменить.`;
-              void editMessageText(cqChatId, cqMsgId, text, {
+              if (remMsgId) void editMessageText(chatId, remMsgId, text, {
                 inline_keyboard: [
                   [{ text: '🗑️ Да, удалить', callback_data: `bud:rm:${limitId}` }],
                   [{ text: '🔙 Нет, назад', callback_data: `bud:v:${limitId}` }],
@@ -3812,12 +3833,12 @@ Midas создан, чтобы сделать учет денег максима
             const limitId = sub.slice(3);
             const { deleteBudgetLimit } = await import('../services/budget.service.js');
             await deleteBudgetLimit(resolved.workspaceId, resolved.userId, limitId);
-            void editMessageText(cqChatId, cqMsgId, '✅ Лимит удалён.', {
+            if (remMsgId) void editMessageText(chatId, remMsgId, '✅ Лимит удалён.', {
               inline_keyboard: [[{ text: '🔙 К лимитам', callback_data: 'bud:list' }]],
             });
           }
           else if (sub === 'close') {
-            void deleteMessage(cqChatId, cqMsgId);
+            void deleteMessage(chatId, remMsgId);
           }
         } catch (err: unknown) {
           const errorClass = err instanceof Error ? err.constructor.name : 'UnknownError';
@@ -3830,26 +3851,26 @@ Midas создан, чтобы сделать учет денег максима
 
       // ── Phase 7.0-C: Subscription callbacks (prefix "sub:") ────────────
       if (callbackData.startsWith('sub:')) {
-        const cqChatId = String(cq.message?.chat.id ?? '');
-        const cqMsgId = String(cq.message?.message_id ?? '');
-        const cqUserId = String(cq.from.id);
+        const chatId = String(cq.message?.chat.id ?? '');
+        const remMsgId = String(cq.message?.message_id ?? '');
+        const telegramUserId = String(cq.from.id);
         try {
-          const resolved = await resolveWorkspace(cqUserId, cqChatId);
+          const resolved = await resolveWorkspace(telegramUserId, chatId);
           const sub = callbackData.slice(4); // after "sub:"
 
           if (sub === 'list') {
             const { getRecurringListScreen } = await import('../services/recurring.service.js');
             const screen = await getRecurringListScreen(resolved.workspaceId, resolved.userId);
-            void editMessageText(cqChatId, cqMsgId, screen.text, screen.keyboard);
+            if (remMsgId) void editMessageText(chatId, remMsgId, screen.text, screen.keyboard);
           }
           else if (sub === 'add') {
             let text = '➕ <b>Новая подписка</b>\n\nВведите название платежа:\n\n❯ Например: Netflix, Spotify, Gym, Аренда';
-            void editMessageText(cqChatId, cqMsgId, text, {
+            if (remMsgId) void editMessageText(chatId, remMsgId, text, {
               inline_keyboard: [[{ text: '🔙 Отмена', callback_data: 'sub:list' }]],
             });
             await redisConnection.set(
-              `midas:sub:name:${cqUserId}:${cqChatId}`,
-              cqMsgId,
+              `midas:sub:name:${telegramUserId}:${chatId}`,
+              remMsgId,
               'EX', 120,
             );
           }
@@ -3859,9 +3880,9 @@ Midas создан, чтобы сделать учет денег максима
             const detail = await getRecurringDetail(resolved.workspaceId, resolved.userId, recId);
             if (detail) {
               const screen = buildRecurringDetailScreen(detail);
-              void editMessageText(cqChatId, cqMsgId, screen.text, screen.keyboard);
+              if (remMsgId) void editMessageText(chatId, remMsgId, screen.text, screen.keyboard);
             } else {
-              void editMessageText(cqChatId, cqMsgId, '⚠️ Подписка не найдена.', {
+              if (remMsgId) void editMessageText(chatId, remMsgId, '⚠️ Подписка не найдена.', {
                 inline_keyboard: [[{ text: '🔙 Назад', callback_data: 'sub:list' }]],
               });
             }
@@ -3870,7 +3891,7 @@ Midas создан, чтобы сделать учет денег максима
             const recId = sub.slice(6);
             const { pauseRecurring } = await import('../services/recurring.service.js');
             await pauseRecurring(resolved.workspaceId, resolved.userId, recId);
-            void editMessageText(cqChatId, cqMsgId, '⏸ Подписка приостановлена.', {
+            if (remMsgId) void editMessageText(chatId, remMsgId, '⏸ Подписка приостановлена.', {
               inline_keyboard: [
                 [{ text: '▶️ Возобновить', callback_data: `sub:resume:${recId}` }],
                 [{ text: '🔙 К подпискам', callback_data: 'sub:list' }],
@@ -3881,7 +3902,7 @@ Midas создан, чтобы сделать учет денег максима
             const recId = sub.slice(7);
             const { resumeRecurring } = await import('../services/recurring.service.js');
             await resumeRecurring(resolved.workspaceId, resolved.userId, recId);
-            void editMessageText(cqChatId, cqMsgId, '▶️ Подписка возобновлена.', {
+            if (remMsgId) void editMessageText(chatId, remMsgId, '▶️ Подписка возобновлена.', {
               inline_keyboard: [[{ text: '🔙 К подпискам', callback_data: 'sub:list' }]],
             });
           }
@@ -3890,7 +3911,7 @@ Midas создан, чтобы сделать учет денег максима
             const { getRecurringDetail } = await import('../services/recurring.service.js');
             const detail = await getRecurringDetail(resolved.workspaceId, resolved.userId, recId);
             const name = detail?.itemName ?? '—';
-            void editMessageText(cqChatId, cqMsgId, `🗑️ Удалить подписку «${name}»?\n\nЭто действие нельзя отменить.`, {
+            if (remMsgId) void editMessageText(chatId, remMsgId, `🗑️ Удалить подписку «${name}»?\n\nЭто действие нельзя отменить.`, {
               inline_keyboard: [
                 [{ text: '🗑️ Да, удалить', callback_data: `sub:rm:${recId}` }],
                 [{ text: '🔙 Нет, назад', callback_data: `sub:v:${recId}` }],
@@ -3901,7 +3922,7 @@ Midas создан, чтобы сделать учет денег максима
             const recId = sub.slice(3);
             const { deleteRecurring } = await import('../services/recurring.service.js');
             await deleteRecurring(resolved.workspaceId, resolved.userId, recId);
-            void editMessageText(cqChatId, cqMsgId, '✅ Подписка удалена.', {
+            if (remMsgId) void editMessageText(chatId, remMsgId, '✅ Подписка удалена.', {
               inline_keyboard: [[{ text: '🔙 К подпискам', callback_data: 'sub:list' }]],
             });
           }
@@ -3911,12 +3932,12 @@ Midas создан, чтобы сделать учет денег максима
             const detail = await getRecurringDetail(resolved.workspaceId, resolved.userId, recId);
             if (detail) {
               let text = `✏️ <b>Изменить сумму</b>\n\n${detail.itemName ?? '—'}\nТекущая: ${detail.amount} ${detail.currency}\n\nВведите новую сумму:`;
-              void editMessageText(cqChatId, cqMsgId, text, {
+              if (remMsgId) void editMessageText(chatId, remMsgId, text, {
                 inline_keyboard: [[{ text: '🔙 Отмена', callback_data: `sub:v:${recId}` }]],
               });
               await redisConnection.set(
-                `midas:sub:eamt:${cqUserId}:${cqChatId}`,
-                `${recId}:${cqMsgId}`,
+                `midas:sub:eamt:${telegramUserId}:${chatId}`,
+                `${recId}:${remMsgId}`,
                 'EX', 120,
               );
             }
@@ -3930,7 +3951,7 @@ Midas создан, чтобы сделать учет денег максима
             const freqLabel = freqLabels[freq] ?? 'Каждый месяц';
 
             // Read pending data from Redis
-            const pendingKey = `midas:sub:freq:${cqUserId}:${cqChatId}`;
+            const pendingKey = `midas:sub:freq:${telegramUserId}:${chatId}`;
             const pendingData = await redisConnection.get(pendingKey);
             if (pendingData) {
               const [name, amount, currency] = pendingData.split(':');
@@ -3946,11 +3967,11 @@ Midas создан, чтобы сделать учет денег максима
               let text = `🔄 <b>Новая подписка</b>\n\n🎬 ${name} · ${amount} ${currency}\n📅 ${freqLabel}\n📆 Следующий платёж: ${dateStr}`;
               // Store complete data for confirmation
               await redisConnection.set(
-                `midas:sub:confirm:${cqUserId}:${cqChatId}`,
+                `midas:sub:confirm:${telegramUserId}:${chatId}`,
                 `${name}:${amount}:${currency}:${frequency}`,
                 'EX', 120,
               );
-              void editMessageText(cqChatId, cqMsgId, text, {
+              if (remMsgId) void editMessageText(chatId, remMsgId, text, {
                 inline_keyboard: [
                   [{ text: '✅ Создать', callback_data: 'sub:ok' }],
                   [{ text: '✖️ Отмена', callback_data: 'sub:list' }],
@@ -3960,7 +3981,7 @@ Midas создан, чтобы сделать учет денег максима
           }
           else if (sub === 'ok') {
             // Confirm subscription creation
-            const confirmKey = `midas:sub:confirm:${cqUserId}:${cqChatId}`;
+            const confirmKey = `midas:sub:confirm:${telegramUserId}:${chatId}`;
             const confirmData = await redisConnection.get(confirmKey);
             if (confirmData) {
               const parts = confirmData.split(':');
@@ -3976,8 +3997,8 @@ Midas создан, чтобы сделать учет денег максима
                 frequency: frequency as 'daily' | 'weekly' | 'monthly' | 'yearly',
               });
               await redisConnection.del(confirmKey);
-              await redisConnection.del(`midas:sub:freq:${cqUserId}:${cqChatId}`);
-              void editMessageText(cqChatId, cqMsgId, `✅ Подписка создана!\n\n🎬 ${name} · ${amount} ${currency}`, {
+              await redisConnection.del(`midas:sub:freq:${telegramUserId}:${chatId}`);
+              if (remMsgId) void editMessageText(chatId, remMsgId, `✅ Подписка создана!\n\n🎬 ${name} · ${amount} ${currency}`, {
                 inline_keyboard: [[{ text: '🔙 К подпискам', callback_data: 'sub:list' }]],
               });
             }
@@ -3987,7 +4008,7 @@ Midas создан, чтобы сделать учет денег максима
             const { fireRecurringTx, getRecurringDetail } = await import('../services/recurring.service.js');
             const detail = await getRecurringDetail(resolved.workspaceId, resolved.userId, recId);
             await fireRecurringTx(resolved.workspaceId, resolved.userId, recId);
-            void editMessageText(cqChatId, cqMsgId, `✅ Записано! ${detail?.itemName ?? '—'} · ${detail?.amount ?? ''} ${detail?.currency ?? ''}`, {
+            if (remMsgId) void editMessageText(chatId, remMsgId, `✅ Записано! ${detail?.itemName ?? '—'} · ${detail?.amount ?? ''} ${detail?.currency ?? ''}`, {
               inline_keyboard: [[{ text: '✖️ Закрыть', callback_data: 'sub:close' }]],
             });
           }
@@ -3995,7 +4016,7 @@ Midas создан, чтобы сделать учет денег максима
             const recId = sub.slice(5);
             const { skipRecurringTx } = await import('../services/recurring.service.js');
             await skipRecurringTx(resolved.workspaceId, resolved.userId, recId);
-            void editMessageText(cqChatId, cqMsgId, '⏭ Пропущено.', {
+            if (remMsgId) void editMessageText(chatId, remMsgId, '⏭ Пропущено.', {
               inline_keyboard: [[{ text: '✖️ Закрыть', callback_data: 'sub:close' }]],
             });
           }
@@ -4003,12 +4024,12 @@ Midas создан, чтобы сделать учет денег максима
             const recId = sub.slice(7);
             const { pauseRecurring } = await import('../services/recurring.service.js');
             await pauseRecurring(resolved.workspaceId, resolved.userId, recId);
-            void editMessageText(cqChatId, cqMsgId, '✖️ Подписка отменена.', {
+            if (remMsgId) void editMessageText(chatId, remMsgId, '✖️ Подписка отменена.', {
               inline_keyboard: [[{ text: '✖️ Закрыть', callback_data: 'sub:close' }]],
             });
           }
           else if (sub === 'close') {
-            void deleteMessage(cqChatId, cqMsgId);
+            void deleteMessage(chatId, remMsgId);
           }
         } catch (err: unknown) {
           const errorClass = err instanceof Error ? err.constructor.name : 'UnknownError';
@@ -4021,9 +4042,9 @@ Midas создан, чтобы сделать учет денег максима
 
       // ── Phase 7.0: Summary close callback ──────────────────────────────
       if (callbackData === 'summary:close') {
-        const cqChatId = String(cq.message?.chat.id ?? '');
-        const cqMsgId = String(cq.message?.message_id ?? '');
-        void deleteMessage(cqChatId, cqMsgId);
+        const chatId = String(cq.message?.chat.id ?? '');
+        const remMsgId = String(cq.message?.message_id ?? '');
+        void deleteMessage(chatId, remMsgId);
         await answerCallbackQuery(cq.id);
         await reply.status(200).send({ ok: true });
         return;
@@ -4523,6 +4544,184 @@ Midas создан, чтобы сделать учет денег максима
         } catch (err: unknown) {
           const errorClass = err instanceof Error ? err.constructor.name : 'UnknownError';
           request.log.error({ msg: '[midas:bot:webhook] draft:catg: failed', callbackId: cq.id, errorClass });
+        }
+
+        await answerCallbackQuery(cq.id);
+        await reply.status(200).send({ ok: true });
+        return;
+      }
+      // ── Phase 7.1: Financial Reminders callbacks (prefix "rem:") ─────
+      // Handles: rem:list, rem:add, rem:type:{type}, rem:v:{id},
+      //          rem:done:{id}, rem:snooze:{id}, rem:cancel:{id},
+      //          rem:del:{id}, rem:delok:{id}
+      if (callbackData.startsWith('rem:')) {
+        try {
+          const resolved = await resolveWorkspace(telegramUserId, chatId);
+          const remSub = callbackData.slice(4); // everything after "rem:"
+          const remMsgId = cq.message ? String(cq.message.message_id) : null;
+
+          const {
+            getReminderListScreen,
+            getReminderDetail,
+            buildReminderDetailScreen,
+            completeReminder,
+            snoozeReminder,
+            cancelReminder,
+            deleteReminder,
+          } = await import('../services/reminder.service.js');
+
+          // rem:list → show list screen
+          if (remSub === 'list') {
+            const screen = await getReminderListScreen(resolved.workspaceId, resolved.userId);
+            if (remMsgId) void editMessageText(chatId, remMsgId, screen.text, screen.keyboard);
+          }
+
+          // rem:add → Step 1: ask for title (text intercept)
+          else if (remSub === 'add') {
+            const text = '📅 <b>Новое напоминание</b>\n\nВведите название:\n\n❯ Например: Аренда, Netflix, Долг Влада';
+            const kb = { inline_keyboard: [[{ text: '🔙 Отмена', callback_data: 'rem:list' }]] };
+            if (remMsgId) void editMessageText(chatId, remMsgId, text, kb);
+            await redisConnection.set(
+              `midas:rem:title:${telegramUserId}:${chatId}`,
+              String(remMsgId),
+              'EX', 120,
+            );
+          }
+
+          // rem:type:{type} → Step 2 complete, go to Step 3: ask for amount
+          else if (remSub.startsWith('type:')) {
+            const remType = remSub.slice(5);
+            if (!['expense', 'income', 'debt_pay', 'debt_receive'].includes(remType)) {
+              void answerCallbackQuery(cq.id);
+              await reply.status(200).send({ ok: true });
+              return;
+            }
+            // Restore title from Redis key (set in text intercept step 1→2)
+            const titleKey = `midas:rem:type:${telegramUserId}:${chatId}`;
+            const titleRaw = await redisConnection.get(titleKey);
+            if (!titleRaw) {
+              if (remMsgId) void editMessageText(chatId, remMsgId, '⚠️ Сессия истекла. Начните заново.', { inline_keyboard: [[{ text: '📅 Напоминания', callback_data: 'rem:list' }]] });
+            } else {
+              await redisConnection.del(titleKey);
+              const title = titleRaw;
+              const text = `📅 <b>${title}</b>\n\nВведите сумму и валюту:\n\n❯ Например: 15000 UAH, 500 USD, 150`;
+              const kb = { inline_keyboard: [[{ text: '🔙 Отмена', callback_data: 'rem:list' }]] };
+              if (remMsgId) void editMessageText(chatId, remMsgId, text, kb);
+              // Store: title:type
+              await redisConnection.set(
+                `midas:rem:amt:${telegramUserId}:${chatId}`,
+                `${title}:::${remType}:::${String(remMsgId)}`,
+                'EX', 120,
+              );
+            }
+          }
+
+          // rem:v:{id} → show detail screen
+          else if (remSub.startsWith('v:')) {
+            const remId = remSub.slice(2);
+            if (!/^[0-9A-Z]{26}$/.test(remId)) {
+              void answerCallbackQuery(cq.id);
+              await reply.status(200).send({ ok: true });
+              return;
+            }
+            const detail = await getReminderDetail(resolved.workspaceId, resolved.userId, remId);
+            if (detail) {
+              const screen = buildReminderDetailScreen(detail);
+              if (remMsgId) void editMessageText(chatId, remMsgId, screen.text, screen.keyboard);
+            }
+          }
+
+          // rem:done:{id} → mark completed
+          else if (remSub.startsWith('done:')) {
+            const remId = remSub.slice(5);
+            if (!/^[0-9A-Z]{26}$/.test(remId)) {
+              void answerCallbackQuery(cq.id);
+              await reply.status(200).send({ ok: true });
+              return;
+            }
+            const detail = await getReminderDetail(resolved.workspaceId, resolved.userId, remId);
+            if (detail) {
+              await completeReminder(resolved.workspaceId, resolved.userId, remId);
+              // If recurring, advance to next period
+              if (detail.isRecurring) {
+                const { advanceRecurring } = await import('../services/reminder.service.js');
+                const nextDate = await advanceRecurring(resolved.workspaceId, resolved.userId, remId);
+                const nextText = nextDate ? `\n🔁 Следующее: ${nextDate}` : '';
+                if (remMsgId) void editMessageText(chatId, remMsgId,
+                  `✅ <b>Выполнено!</b>\n\n${detail.title} · ${detail.amount} ${detail.currency}${nextText}`,
+                  { inline_keyboard: [[{ text: '📅 Напоминания', callback_data: 'rem:list' }]] },
+                );
+              } else {
+                if (remMsgId) void editMessageText(chatId, remMsgId,
+                  `✅ <b>Выполнено!</b>\n\n${detail.title} · ${detail.amount} ${detail.currency}`,
+                  { inline_keyboard: [[{ text: '📅 Напоминания', callback_data: 'rem:list' }]] },
+                );
+              }
+            }
+          }
+
+          // rem:snooze:{id} → snooze by 1 day
+          else if (remSub.startsWith('snooze:')) {
+            const remId = remSub.slice(7);
+            if (!/^[0-9A-Z]{26}$/.test(remId)) {
+              void answerCallbackQuery(cq.id);
+              await reply.status(200).send({ ok: true });
+              return;
+            }
+            await snoozeReminder(resolved.workspaceId, resolved.userId, remId, 1);
+            const updated = await getReminderDetail(resolved.workspaceId, resolved.userId, remId);
+            if (updated) {
+              const screen = buildReminderDetailScreen(updated);
+              if (remMsgId) void editMessageText(chatId, remMsgId, screen.text, screen.keyboard);
+            }
+          }
+
+          // rem:cancel:{id} → cancel reminder
+          else if (remSub.startsWith('cancel:')) {
+            const remId = remSub.slice(7);
+            if (!/^[0-9A-Z]{26}$/.test(remId)) {
+              void answerCallbackQuery(cq.id);
+              await reply.status(200).send({ ok: true });
+              return;
+            }
+            await cancelReminder(resolved.workspaceId, resolved.userId, remId);
+            const screen = await getReminderListScreen(resolved.workspaceId, resolved.userId);
+            if (remMsgId) void editMessageText(chatId, remMsgId, screen.text, screen.keyboard);
+          }
+
+          // rem:del:{id} → confirm delete
+          else if (remSub.startsWith('del:') && !remSub.startsWith('delok:')) {
+            const remId = remSub.slice(4);
+            if (!/^[0-9A-Z]{26}$/.test(remId)) {
+              void answerCallbackQuery(cq.id);
+              await reply.status(200).send({ ok: true });
+              return;
+            }
+            if (remMsgId) void editMessageText(chatId, remMsgId,
+              '🗑️ Удалить напоминание?',
+              { inline_keyboard: [
+                [{ text: '✅ Да, удалить', callback_data: `rem:delok:${remId}` }],
+                [{ text: '🔙 Отмена', callback_data: `rem:v:${remId}` }],
+              ] },
+            );
+          }
+
+          // rem:delok:{id} → confirmed delete
+          else if (remSub.startsWith('delok:')) {
+            const remId = remSub.slice(6);
+            if (!/^[0-9A-Z]{26}$/.test(remId)) {
+              void answerCallbackQuery(cq.id);
+              await reply.status(200).send({ ok: true });
+              return;
+            }
+            await deleteReminder(resolved.workspaceId, resolved.userId, remId);
+            const screen = await getReminderListScreen(resolved.workspaceId, resolved.userId);
+            if (remMsgId) void editMessageText(chatId, remMsgId, screen.text, screen.keyboard);
+          }
+
+        } catch (err: unknown) {
+          const errorClass = err instanceof Error ? err.constructor.name : 'UnknownError';
+          request.log.error({ msg: '[midas:bot:webhook] rem: callback failed', callbackId: cq.id, errorClass });
         }
 
         await answerCallbackQuery(cq.id);
@@ -8474,6 +8673,135 @@ Midas создан, чтобы сделать учет денег максима
           // Malformed state — discard silently, let message fall through
           await redisConnection.del(edKey);
           request.log.warn({ msg: '[midas:bot:webhook] edit: malformed Redis state — discarded', field });
+        }
+      }
+    }
+
+    // ── Phase 7.1: Reminder FSM text intercepts ────────────────────────────────
+    // Step 1: Title → show type picker
+    if (!commandToken) {
+      const remTitleKey = `midas:rem:title:${telegramUserId}:${chatId}`;
+      const remTitleMsgId = await redisConnection.get(remTitleKey);
+      if (remTitleMsgId) {
+        await redisConnection.del(remTitleKey);
+        const title = message.text.trim().slice(0, 100);
+        if (!title) {
+          void upsertBotMessage(telegramUserId, chatId, '⚠️ Название не может быть пустым. Попробуйте ещё раз.');
+          await redisConnection.set(remTitleKey, remTitleMsgId, 'EX', 120);
+        } else {
+          // Store title in next step key, then show type picker
+          await redisConnection.set(
+            `midas:rem:type:${telegramUserId}:${chatId}`,
+            title,
+            'EX', 120,
+          );
+          const text = `📅 <b>${title}</b>\n\nВыберите тип:`;
+          const kb = {
+            inline_keyboard: [
+              [
+                { text: '💸 Расход', callback_data: 'rem:type:expense' },
+                { text: '💰 Доход',  callback_data: 'rem:type:income' },
+              ],
+              [
+                { text: '🤝 Отдать долг', callback_data: 'rem:type:debt_pay' },
+                { text: '🤲 Получить долг', callback_data: 'rem:type:debt_receive' },
+              ],
+              [{ text: '🔙 Отмена', callback_data: 'rem:list' }],
+            ],
+          };
+          void upsertBotMessage(telegramUserId, chatId, text, kb);
+        }
+        await reply.status(200).send({ ok: true });
+        return;
+      }
+    }
+
+    // Step 2 (amount): title:::type:::msgId stored in midas:rem:amt
+    if (!commandToken) {
+      const remAmtKey = `midas:rem:amt:${telegramUserId}:${chatId}`;
+      const remAmtState = await redisConnection.get(remAmtKey);
+      if (remAmtState) {
+        const [title, remType] = remAmtState.split(':::') as [string, string, string];
+        if (!title || !remType) {
+          await redisConnection.del(remAmtKey);
+        } else {
+          const { parseAmountCurrency } = await import('../services/reminder.service.js');
+          const parsed = parseAmountCurrency(message.text.trim());
+          if (!parsed) {
+            void upsertBotMessage(telegramUserId, chatId,
+              '⚠️ Не удалось распознать сумму. Попробуйте: <b>15000 UAH</b> или <b>500 USD</b>',
+              { inline_keyboard: [[{ text: '🔙 Отмена', callback_data: 'rem:list' }]] },
+            );
+            // Keep key alive
+            await redisConnection.expire(remAmtKey, 120);
+          } else {
+            await redisConnection.del(remAmtKey);
+            // Store: title:::type:::amount:::currency for Step 3
+            await redisConnection.set(
+              `midas:rem:date:${telegramUserId}:${chatId}`,
+              `${title}:::${remType}:::${String(parsed.amount)}:::${parsed.currency}`,
+              'EX', 120,
+            );
+            void upsertBotMessage(telegramUserId, chatId,
+              `📅 <b>${title}</b> · ${String(parsed.amount)} ${parsed.currency}\n\nВведите дату:\n\n❯ <code>15.06</code>  <code>через 3 дня</code>  <code>завтра</code>  <code>5 числа</code>`,
+              { inline_keyboard: [[{ text: '🔙 Отмена', callback_data: 'rem:list' }]] },
+            );
+          }
+          await reply.status(200).send({ ok: true });
+          return;
+        }
+      }
+    }
+
+    // Step 3 (date): title:::type:::amount:::currency stored in midas:rem:date
+    if (!commandToken) {
+      const remDateKey = `midas:rem:date:${telegramUserId}:${chatId}`;
+      const remDateState = await redisConnection.get(remDateKey);
+      if (remDateState) {
+        const parts = remDateState.split(':::') as [string, string, string, string];
+        const [title, remType, amountStr, currency] = parts;
+        if (!title || !remType || !amountStr || !currency) {
+          await redisConnection.del(remDateKey);
+        } else {
+          const { parseRussianDate, createReminder } = await import('../services/reminder.service.js');
+          const parsedDate = parseRussianDate(message.text.trim());
+          if (!parsedDate) {
+            void upsertBotMessage(telegramUserId, chatId,
+              '⚠️ Не удалось распознать дату. Попробуйте: <b>15.06</b>, <b>через 3 дня</b>, <b>завтра</b>, <b>5 числа</b>',
+              { inline_keyboard: [[{ text: '🔙 Отмена', callback_data: 'rem:list' }]] },
+            );
+            await redisConnection.expire(remDateKey, 120);
+          } else {
+            await redisConnection.del(remDateKey);
+            try {
+              const resolved = await resolveWorkspace(telegramUserId, chatId);
+              const remId = await createReminder(resolved.workspaceId, resolved.userId, {
+                title,
+                amount: parseFloat(amountStr),
+                currency,
+                reminderType: remType as 'expense' | 'income' | 'debt_pay' | 'debt_receive',
+                dueDate: parsedDate,
+              });
+              const { getReminderDetail, buildReminderDetailScreen } = await import('../services/reminder.service.js');
+              const detail = await getReminderDetail(resolved.workspaceId, resolved.userId, remId);
+              if (detail) {
+                const screen = buildReminderDetailScreen(detail);
+                const successText = `✅ <b>Напоминание создано!</b>\n\n${screen.text}`;
+                void upsertBotMessage(telegramUserId, chatId, successText, screen.keyboard);
+              } else {
+                void upsertBotMessage(telegramUserId, chatId,
+                  '✅ Напоминание создано!',
+                  { inline_keyboard: [[{ text: '📅 Мои напоминания', callback_data: 'rem:list' }]] },
+                );
+              }
+            } catch (err: unknown) {
+              const errorClass = err instanceof Error ? err.constructor.name : 'UnknownError';
+              request.log.error({ msg: '[midas:bot:webhook] rem:date createReminder failed', errorClass });
+              void upsertBotMessage(telegramUserId, chatId, '⚠️ Не удалось создать напоминание. Попробуйте позже.');
+            }
+          }
+          await reply.status(200).send({ ok: true });
+          return;
         }
       }
     }

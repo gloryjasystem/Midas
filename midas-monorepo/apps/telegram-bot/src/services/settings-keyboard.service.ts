@@ -280,6 +280,8 @@ export type SettingsCallbackCmd =
   | { cmd: 'ntf_budget_list' }
   | { cmd: 'ntf_subscriptions' }
   | { cmd: 'ntf_sub_list' }
+  // Phase 7.1: Reminders sub-menu
+  | { cmd: 'ntf_reminders' }
   | { cmd: 'number_format' }
   | { cmd: 'nf_set'; format: string }
   | { cmd: 'language_menu' }
@@ -332,6 +334,8 @@ export function parseSettingsCallback(data: string): SettingsCallbackCmd | null 
     // Phase 7.0: Budget & Subscription sub-menus
     if (action === 'bud') return { cmd: 'ntf_budgets' };
     if (action === 'sub') return { cmd: 'ntf_subscriptions' };
+    // Phase 7.1: Reminders
+    if (action === 'rem') return { cmd: 'ntf_reminders' };
     // Legacy toggle support (backward compat for cached Telegram keyboards)
     if (action === 'ds') return { cmd: 'ntf_toggle', key: 'ds' };
     if (action === 'la') return { cmd: 'ntf_toggle', key: 'la' };
