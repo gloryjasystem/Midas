@@ -268,6 +268,156 @@ async function processAiParse(job: Job<AiParseJobPayload>): Promise<void> {
 
   const { chatId } = job.data;
 
+  // ── Phase 7.1-B: Reminder intent detection ────────────────────────────────
+  // If raw_text signals a future financial event ("напомни", "через N дней",
+  // "буду платить", "предстоит"), extract amount+currency+date and create a
+  // financial_reminder directly — bypassing the transaction draft flow entirely.
+  try {
+    const rawLower = job.data.raw_text.toLowerCase();
+    const REMINDER_TRIGGERS = [
+      'напомни', 'напоминание', 'напомнить',
+      'буду платить', 'предстоит', 'планирую заплатить', 'планирую оплатить',
+      'нужно заплатить', 'нужно оплатить', 'не забыть', 'напомни мне',
+      'remind', 'reminder',
+    ];
+    const isReminderIntent = REMINDER_TRIGGERS.some(t => rawLower.includes(t));
+
+    if (isReminderIntent) {
+      // All parsing is done inline below — no cross-app imports needed.
+
+      // Inline amount parser (mirrors parseAmountCurrency but standalone)
+      const amtMatch = job.data.raw_text.match(/([\d\s.,]+)\s*([A-Za-zА-Яа-я$€£₴₽]{0,6})/);
+      const rawAmt = amtMatch ? amtMatch[1]!.replace(/\s/g, '').replace(',', '.') : null;
+      const parsedAmount = rawAmt ? parseFloat(rawAmt) : null;
+
+      // Currency extraction
+      const ccyMap: Record<string, string> = {
+        '₴': 'UAH', 'грн': 'UAH', 'гривн': 'UAH',
+        '$': 'USD', 'долл': 'USD', 'usd': 'USD',
+        '€': 'EUR', 'евр': 'EUR', 'eur': 'EUR',
+        '₽': 'RUB', 'руб': 'RUB', 'rub': 'RUB',
+      };
+      let detectedCurrency = 'UAH';
+      for (const [key, val] of Object.entries(ccyMap)) {
+        if (rawLower.includes(key)) { detectedCurrency = val; break; }
+      }
+      const ccyUpper = (amtMatch?.[2] ?? '').trim().toUpperCase();
+      if (/^[A-Z]{3,5}$/.test(ccyUpper)) detectedCurrency = ccyUpper;
+
+      // Date extraction — inline version of parseRussianDate
+      function parseRemDate(text: string): string | null {
+        const t = text.toLowerCase();
+        const today = new Date(); today.setHours(0,0,0,0);
+        const addD = (n: number) => { const d = new Date(today); d.setDate(d.getDate() + n); return d.toISOString().slice(0,10); };
+        if (t.includes('послезавтра')) return addD(2);
+        if (t.includes('завтра')) return addD(1);
+        const rel = t.match(/через\s+(\d+)\s*(дн|день|дня|дней|недел|неделю|месяц|месяца|месяцев)/i);
+        if (rel) {
+          const n = parseInt(rel[1]!, 10);
+          const u = rel[2]!.toLowerCase();
+          if (u.startsWith('дн') || u.startsWith('день') || u.startsWith('дня') || u.startsWith('дней')) return addD(n);
+          if (u.startsWith('недел')) return addD(n * 7);
+          if (u.startsWith('месяц')) { const d2 = new Date(today); d2.setMonth(d2.getMonth() + n); return d2.toISOString().slice(0,10); }
+        }
+        const exact = t.match(/(\d{1,2})\.(\d{1,2})(?:\.(\d{4}))?/);
+        if (exact) {
+          const d = parseInt(exact[1]!, 10), m = parseInt(exact[2]!, 10) - 1;
+          const y = exact[3] ? parseInt(exact[3], 10) : today.getFullYear();
+          const cand = new Date(y, m, d);
+          if (!isNaN(cand.getTime())) return cand.toISOString().slice(0, 10);
+        }
+        const nth = t.match(/(\d{1,2})\s*числа?/i);
+        if (nth) {
+          const day = parseInt(nth[1]!, 10);
+          if (day >= 1 && day <= 31) {
+            const cand = new Date(today.getFullYear(), today.getMonth(), day);
+            if (cand <= today) cand.setMonth(cand.getMonth() + 1);
+            return cand.toISOString().slice(0, 10);
+          }
+        }
+        return null;
+      }
+
+      const dueDate = parseRemDate(job.data.raw_text);
+
+      // Extract title: remove trigger words + amount + date phrases
+      let title = job.data.raw_text
+        .replace(/напомни\s*(мне)?\s*/gi, '')
+        .replace(/через\s+\d+\s*\w+/gi, '')
+        .replace(/[\d\s.,]+\s*[A-Za-zА-Яа-яёЁ$€£₴₽]{0,6}/g, '')
+        .replace(/\d{1,2}\.\d{1,2}(?:\.\d{4})?/g, '')
+        .replace(/\d{1,2}\s*числа?/gi, '')
+        .replace(/буду платить|предстоит|планирую заплатить|нужно заплатить|не забыть/gi, '')
+        .trim()
+        .slice(0, 80);
+      if (!title || title.length < 2) title = 'Напоминание';
+
+      if (parsedAmount && parsedAmount > 0 && dueDate) {
+        // Resolve workspace userId
+        const { withTenantTransaction, pool: dbPool } = await import('@midas/database');
+        const wsRes = await dbPool.query<{ workspace_id: string }>(
+          `SELECT workspace_id FROM users WHERE telegram_id = $1 LIMIT 1`,
+          [telegramUserId],
+        );
+        const remWorkspaceId = wsRes.rows[0]?.workspace_id ?? workspaceId;
+
+        // Import ulid
+        const { ulid: makeUlid } = await import('ulid');
+        const remId = makeUlid();
+        await withTenantTransaction(remWorkspaceId, userId, async (client) => {
+          await client.query(
+            `INSERT INTO financial_reminders
+               (id, workspace_id, title, amount, currency, reminder_type,
+                due_date, remind_offsets, is_recurring)
+             VALUES ($1,$2,$3,$4,$5,'expense',$6,'{3,1,0}',false)`,
+            [remId, remWorkspaceId, title, parsedAmount, detectedCurrency, dueDate],
+          );
+        });
+
+        const dueFormatted = new Date(dueDate + 'T00:00:00')
+          .toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' });
+        const successText =
+          `✅ <b>Напоминание создано!</b>\n\n` +
+          `📅 ${title}\n` +
+          `💰 ${parsedAmount.toLocaleString('ru-RU')} ${detectedCurrency}\n` +
+          `📆 Срок: ${dueFormatted}\n\n` +
+          `Бот пришлёт уведомление за 3, 1 день и в срок.`;
+        const successKb = {
+          inline_keyboard: [
+            [{ text: '📅 Мои напоминания', callback_data: 'rem:list' }],
+            [{ text: '✏️ Изменить', callback_data: `rem:v:${remId}` }],
+          ],
+        };
+
+        const remAlertId = makeUlid();
+        await notificationsQueue.add(
+          QUEUE_NAMES.NOTIFICATIONS,
+          {
+            alertId: remAlertId,
+            workspaceId: remWorkspaceId,
+            chatId,
+            message: successText,
+            inlineKeyboardJson: JSON.stringify(successKb),
+            telegramUserId,
+            isSuccessCard: true,
+          },
+          { jobId: IdempotencyKeyBuilder.notification(remWorkspaceId, remAlertId) },
+        );
+
+        console.log('[midas:ai-parse-worker] Phase 7.1-B: reminder created from text', {
+          jobId: job.id, workspaceId, remId, dueDate,
+        });
+        return; // ← skip transaction draft flow
+      }
+    }
+  } catch (remErr: unknown) {
+    const remErrClass = remErr instanceof Error ? remErr.constructor.name : 'UnknownError';
+    console.warn('[midas:ai-parse-worker] Phase 7.1-B: reminder detection failed, falling through', {
+      jobId: job.id, errorClass: remErrClass,
+    });
+    // Non-fatal: fall through to normal transaction parse
+  }
+
   // ── Step 2.4: Phase 1.39 — Auto-delete expired draft cards ────
   // When user sends a new message, clean up any previously expired
   // draft cards from the chat (kept in Redis for 24h).

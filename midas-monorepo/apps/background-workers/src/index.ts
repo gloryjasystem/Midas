@@ -21,7 +21,7 @@
  */
 
 import { closeRedis } from './queues/redis.js';
-import { closeQueues, draftExpirationQueue, summaryDispatchQueue, recurringReminderQueue } from './queues/queue-definitions.js';
+import { closeQueues, draftExpirationQueue, summaryDispatchQueue, recurringReminderQueue, cashflowReminderQueue } from './queues/queue-definitions.js';
 import { attachDlqHandler } from './queues/dlq-handler.js';
 import { createWebhookIngestionWorker } from './workers/webhook-ingestion.worker.js';
 import { createAiParseWorker } from './workers/ai-parse.worker.js';
@@ -43,6 +43,11 @@ import {
   RECURRING_CRON_PATTERN,
   RECURRING_CRON_JOB_ID,
 } from './workers/recurring-reminder.worker.js';
+import {
+  createCashflowReminderWorker,
+  CASHFLOW_CRON_PATTERN,
+  CASHFLOW_CRON_JOB_ID,
+} from './workers/cashflow-reminder.worker.js';
 import { runMigrations } from './migrate.js';
 import { QUEUE_NAMES } from '@midas/shared';
 import type { QueueEvents } from 'bullmq';
@@ -96,6 +101,17 @@ await recurringReminderQueue.add(
 );
 console.log(`[midas] Recurring reminder CRON registered: ${RECURRING_CRON_PATTERN}`);
 
+// Phase 7.1: Register cashflow reminder CRON
+await cashflowReminderQueue.add(
+  'send-cashflow-reminders',
+  {},
+  {
+    jobId: CASHFLOW_CRON_JOB_ID,
+    repeat: { pattern: CASHFLOW_CRON_PATTERN },
+  },
+);
+console.log(`[midas] Cashflow reminder CRON registered: ${CASHFLOW_CRON_PATTERN}`);
+
 // ─────────────────────────────────────────────────────────────
 // Start workers
 // ─────────────────────────────────────────────────────────────
@@ -108,6 +124,7 @@ const expirationWorker = createDraftExpirationWorker();
 const voiceParseWorker = createVoiceParseWorker();
 const summaryDispatchWorker = createSummaryDispatchWorker();
 const recurringReminderWorker = createRecurringReminderWorker();
+const cashflowReminderWorker = createCashflowReminderWorker();
 
 console.log('[midas] Workers started:');
 console.log(`  ✓ ${QUEUE_NAMES.WEBHOOK_INGESTION} (concurrency: 10)`);
@@ -118,6 +135,7 @@ console.log(`  ✓ ${QUEUE_NAMES.CALLBACK_CONFIRM} (concurrency: 5)`);
 console.log(`  ✓ ${QUEUE_NAMES.DRAFT_EXPIRATION} (concurrency: 1, CRON: ${EXPIRATION_CRON_PATTERN})`);
 console.log(`  ✓ ${QUEUE_NAMES.SUMMARY_DISPATCH} (concurrency: 1, CRON: ${SUMMARY_CRON_PATTERN})`);
 console.log(`  ✓ ${QUEUE_NAMES.RECURRING_REMINDER} (concurrency: 1, CRON: ${RECURRING_CRON_PATTERN})`);
+console.log(`  ✓ ${QUEUE_NAMES.CASHFLOW_REMINDER} (concurrency: 1, CRON: ${CASHFLOW_CRON_PATTERN})`);
 
 // ─────────────────────────────────────────────────────────────
 // Attach DLQ handlers (QueueEvents — fires on permanent failures)
@@ -132,6 +150,7 @@ const dlqHandlers: QueueEvents[] = [
   attachDlqHandler(QUEUE_NAMES.DRAFT_EXPIRATION),
   attachDlqHandler(QUEUE_NAMES.SUMMARY_DISPATCH),
   attachDlqHandler(QUEUE_NAMES.RECURRING_REMINDER),
+  attachDlqHandler(QUEUE_NAMES.CASHFLOW_REMINDER),
 ];
 
 console.log('[midas] DLQ handlers (QueueEvents) attached to all queues');
@@ -154,6 +173,7 @@ async function gracefulShutdown(signal: string): Promise<void> {
     voiceParseWorker.close(),
     summaryDispatchWorker.close(),
     recurringReminderWorker.close(),
+    cashflowReminderWorker.close(),
   ]);
 
   console.log('[midas] All workers stopped');

@@ -230,6 +230,25 @@ export const recurringReminderQueue = new Queue(
 );
 
 // ─────────────────────────────────────────────────────────────
+// cashflow-reminder Queue — Phase 7.1
+// CRON worker: twice daily (08:00 + 20:00 UTC), pushes financial reminder cards.
+// ─────────────────────────────────────────────────────────────
+
+export const cashflowReminderQueue = new Queue(
+  QUEUE_NAMES.CASHFLOW_REMINDER,
+  {
+    connection: redisConnection,
+    prefix: BULL_PREFIX,
+    defaultJobOptions: {
+      attempts: 2,
+      backoff: { type: 'exponential', delay: 5_000 },
+      removeOnComplete: { count: 50 },
+      removeOnFail: false,
+    },
+  },
+);
+
+// ─────────────────────────────────────────────────────────────
 // Graceful shutdown — close all queue connections
 // ─────────────────────────────────────────────────────────────
 
@@ -243,6 +262,7 @@ export async function closeQueues(): Promise<void> {
     voiceParseQueue.close(),
     summaryDispatchQueue.close(),
     recurringReminderQueue.close(),
+    cashflowReminderQueue.close(),
   ]);
 }
 
