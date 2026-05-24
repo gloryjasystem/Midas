@@ -4631,7 +4631,7 @@ Midas создан, чтобы сделать учет денег максима
             }
           }
 
-          // rem:done:{id} → mark completed
+          // rem:done:{id} → mark completed + auto-create transaction
           else if (remSub.startsWith('done:')) {
             const remId = remSub.slice(5);
             if (!/^[0-9A-Z]{26}$/.test(remId)) {
@@ -4641,22 +4641,49 @@ Midas создан, чтобы сделать учет денег максима
             }
             const detail = await getReminderDetail(resolved.workspaceId, resolved.userId, remId);
             if (detail) {
-              await completeReminder(resolved.workspaceId, resolved.userId, remId);
-              // If recurring, advance to next period
+              // 1. Create transaction from reminder data (no draft needed)
+              let txId: string | null = null;
+              let txError = false;
+              try {
+                const { createTransactionFromReminder } = await import('../services/reminder.service.js');
+                txId = await createTransactionFromReminder(resolved.workspaceId, resolved.userId, detail);
+              } catch (txErr: unknown) {
+                txError = true;
+                const errClass = txErr instanceof Error ? txErr.constructor.name : 'UnknownError';
+                request.log.error({ msg: '[midas:bot:webhook] rem:done auto-tx failed', remId, errClass });
+              }
+
+              // 2. Mark reminder completed (with linked tx id if created)
+              await completeReminder(resolved.workspaceId, resolved.userId, remId, txId ?? undefined);
+
+              // 3. If recurring, advance to next period
+              let nextDate: string | null = null;
               if (detail.isRecurring) {
                 const { advanceRecurring } = await import('../services/reminder.service.js');
-                const nextDate = await advanceRecurring(resolved.workspaceId, resolved.userId, remId);
-                const nextText = nextDate ? `\n🔁 Следующее: ${nextDate}` : '';
-                if (remMsgId) void editMessageText(chatId, remMsgId,
-                  `✅ <b>Выполнено!</b>\n\n${detail.title} · ${detail.amount} ${detail.currency}${nextText}`,
-                  { inline_keyboard: [[{ text: '📅 Напоминания', callback_data: 'rem:list' }]] },
-                );
-              } else {
-                if (remMsgId) void editMessageText(chatId, remMsgId,
-                  `✅ <b>Выполнено!</b>\n\n${detail.title} · ${detail.amount} ${detail.currency}`,
-                  { inline_keyboard: [[{ text: '📅 Напоминания', callback_data: 'rem:list' }]] },
-                );
+                nextDate = await advanceRecurring(resolved.workspaceId, resolved.userId, remId);
               }
+
+              // 4. Build success card
+              const typeEmoji: Record<string, string> = {
+                expense: '💸', income: '💰', debt_pay: '🤝', debt_receive: '🤲',
+              };
+              const emoji = typeEmoji[detail.reminderType] ?? '✅';
+              const amtFmt = parseFloat(detail.amount).toLocaleString('ru-RU', { maximumFractionDigits: 2 });
+
+              let successText = `✅ <b>Выполнено!</b>\n\n${emoji} ${detail.title}\n💰 ${amtFmt} ${detail.currency}`;
+              if (txId && !txError) {
+                successText += '\n\n📌 <b>Транзакция записана автоматически</b>';
+              } else if (txError) {
+                successText += '\n\n⚠️ <i>Транзакцию не удалось записать — добавьте вручную</i>';
+              }
+              if (nextDate) successText += `\n🔁 Следующее: ${nextDate}`;
+
+              if (remMsgId) void editMessageText(chatId, remMsgId, successText, {
+                inline_keyboard: [
+                  [{ text: '📅 Напоминания', callback_data: 'rem:list' }],
+                  ...(txId ? [[{ text: '🧾 Транзакции', callback_data: 'st:m' }]] : []),
+                ],
+              });
             }
           }
 

@@ -630,3 +630,138 @@ export function parseAmountCurrency(
 
   return { amount, currency };
 }
+
+// ─────────────────────────────────────────────────────────────
+// createTransactionFromReminder — Phase 7.1-B (rem:done auto-tx)
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Map reminder_type → transaction_intent
+ */
+const REMINDER_TYPE_TO_INTENT: Record<ReminderType, string> = {
+  expense:      'expense',
+  income:       'income',
+  debt_pay:     'debt_given',     // paying off a debt = we gave money
+  debt_receive: 'debt_received',  // receiving debt = we received money
+};
+
+/**
+ * Create a real transaction directly from a FinancialReminder (no draft flow).
+ *
+ * Used by the `rem:done` callback to auto-record the transaction when the user
+ * marks a reminder as completed.
+ *
+ * Flow:
+ *  1. Resolve default account (income → default_income_account_id,
+ *     else default_expense_account_id, else first account, else create Default).
+ *  2. INSERT into transactions with reminder data (no draft_id, same-currency, rate=1).
+ *  3. UPDATE financial_reminders SET linked_tx_id.
+ *
+ * SEC-02: Amount passed as NUMERIC string from DB row — no JS float arithmetic.
+ * SEC-03: withTenantTransaction for RLS isolation.
+ * ADR-004: Transaction ID = ULID.
+ *
+ * @returns transactionId string
+ */
+export async function createTransactionFromReminder(
+  workspaceId: string,
+  userId: string,
+  reminder: FinancialReminder,
+): Promise<string> {
+  return await withTenantTransaction(workspaceId, userId, async (client) => {
+    const txId = ulid();
+    const intent = REMINDER_TYPE_TO_INTENT[reminder.reminderType];
+    const isIncome = intent === 'income' || intent === 'debt_received';
+    const defaultCol = isIncome ? 'default_income_account_id' : 'default_expense_account_id';
+
+    // ── Resolve account ──────────────────────────────────────
+    let accountId: string | null = null;
+
+    // 1. Workspace default by intent
+    const wsRow = await client.query<{ default_id: string | null }>(
+      `SELECT ${defaultCol} AS default_id FROM workspaces WHERE id = $1`,
+      [workspaceId],
+    );
+    const wsDefaultId = wsRow.rows[0]?.default_id ?? null;
+    if (wsDefaultId) {
+      const chk = await client.query<{ id: string }>(
+        `SELECT id FROM account_sources WHERE id = $1 AND workspace_id = $2 AND deleted_at IS NULL`,
+        [wsDefaultId, workspaceId],
+      );
+      if (chk.rows.length > 0) accountId = wsDefaultId;
+    }
+
+    // 2. First non-deleted account as fallback
+    if (!accountId) {
+      const fallback = await client.query<{ id: string }>(
+        `SELECT id FROM account_sources
+         WHERE workspace_id = $1 AND deleted_at IS NULL
+         ORDER BY created_at ASC LIMIT 1`,
+        [workspaceId],
+      );
+      accountId = fallback.rows[0]?.id ?? null;
+    }
+
+    // 3. Create bare Default account if workspace has none
+    if (!accountId) {
+      const newAcctId = ulid();
+      await client.query(
+        `INSERT INTO account_sources (id, workspace_id, name, type, currency)
+         VALUES ($1, $2, 'Default', 'manual'::account_source_type, $3)
+         ON CONFLICT DO NOTHING`,
+        [newAcctId, workspaceId, reminder.currency],
+      );
+      accountId = newAcctId;
+    }
+
+    // ── Insert transaction ───────────────────────────────────
+    // SEC-02: reminder.amount is NUMERIC string from DB — no float conversion needed.
+    const amountStr = String(reminder.amount);
+
+    await client.query(
+      `INSERT INTO transactions (
+         id, workspace_id,
+         original_amount, currency,
+         exchange_rate, base_currency, base_amount,
+         category_id, account_id,
+         draft_id,
+         item_name,
+         transaction_time, transaction_intent,
+         rate_source,
+         account_debit_amount, account_debit_currency,
+         created_at
+       ) VALUES (
+         $1, $2,
+         $3::NUMERIC, $4,
+         1::NUMERIC, $4, $3::NUMERIC,
+         $5, $6,
+         NULL,
+         $7,
+         NOW(), $8,
+         'none',
+         NULL, NULL,
+         NOW()
+       )`,
+      [
+        txId,                        // $1 ULID
+        workspaceId,                 // $2
+        amountStr,                   // $3 amount + base_amount
+        reminder.currency,           // $4 currency + base_currency
+        reminder.categoryId ?? null, // $5
+        accountId,                   // $6
+        reminder.title,              // $7 item_name
+        intent,                      // $8 transaction_intent
+      ],
+    );
+
+    // ── Link back to reminder ────────────────────────────────
+    await client.query(
+      `UPDATE financial_reminders
+       SET linked_tx_id = $1, updated_at = NOW()
+       WHERE id = $2 AND workspace_id = $3`,
+      [txId, reminder.id, workspaceId],
+    );
+
+    return txId;
+  });
+}
