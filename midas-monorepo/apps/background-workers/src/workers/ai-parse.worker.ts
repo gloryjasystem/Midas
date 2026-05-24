@@ -683,6 +683,84 @@ async function processAiParse(job: Job<AiParseJobPayload>): Promise<void> {
     throw new Error(`Invalid messageId: ${messageId}`);
   }
 
+  // ── Phase 7.1-D: Claude-based is_reminder detection ─────────────────────────
+  // If Claude recognised a future financial event and set is_reminder=true,
+  // create a financial_reminder instead of a transaction draft.
+  // This path triggers for nuanced cases the keyword pre-check didn't catch.
+  const aiRemData = parseResult.status === 'ok' || parseResult.status === 'partial'
+    ? parseResult.data
+    : null;
+
+  if (aiRemData?.is_reminder && aiRemData.reminder_date) {
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const dueDate = new Date(aiRemData.reminder_date + 'T00:00:00');
+    const isFuture = dueDate >= today;
+
+    if (isFuture) {
+      try {
+        const remId = ulid();
+        const remTitle = aiRemData.reminder_title ?? aiRemData.item_hint ?? aiRemData.category_hint ?? 'Напоминание';
+        const remType  = aiRemData.reminder_type ?? 'expense';
+        const remAmt   = aiRemData.amount ?? '0';
+        const remCcy   = aiRemData.currency ?? 'UAH';
+        const remRecurring    = aiRemData.reminder_recurring ?? false;
+        const remRecurrence   = aiRemData.reminder_recurrence ?? null;
+
+        await withTenantTransaction(workspaceId, userId, async (client) => {
+          await client.query(
+            `INSERT INTO financial_reminders
+               (id, workspace_id, title, amount, currency, reminder_type,
+                due_date, remind_offsets, is_recurring, recurrence_pattern)
+             VALUES ($1,$2,$3,$4::NUMERIC,$5,$6,$7,'{3,1,0}',$8,$9)`,
+            [remId, workspaceId, remTitle, remAmt, remCcy, remType,
+             aiRemData.reminder_date, remRecurring, remRecurrence],
+          );
+        });
+
+        const dueFmt = dueDate.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' });
+        const remAmtFmt = parseFloat(remAmt).toLocaleString('ru-RU', { maximumFractionDigits: 2 });
+        const successText =
+          `✅ <b>Напоминание создано!</b>\n\n` +
+          `📅 ${remTitle}\n` +
+          `💰 ${remAmtFmt} ${remCcy}\n` +
+          `📆 Срок: ${dueFmt}` +
+          (remRecurring && remRecurrence ? `\n🔁 ${remRecurrence === 'monthly' ? 'Ежемесячно' : remRecurrence === 'weekly' ? 'Еженедельно' : 'Ежегодно'}` : '') +
+          `\n\nБот пришлёт уведомление за 3, 1 день и в срок.`;
+
+        const remAlertId = ulid();
+        await notificationsQueue.add(
+          QUEUE_NAMES.NOTIFICATIONS,
+          {
+            alertId: remAlertId,
+            workspaceId,
+            chatId,
+            message: successText,
+            inlineKeyboardJson: JSON.stringify({
+              inline_keyboard: [
+                [{ text: '📅 Мои напоминания', callback_data: 'rem:list' }],
+                [{ text: '✏️ Изменить', callback_data: `rem:v:${remId}` }],
+              ],
+            }),
+            telegramUserId,
+            isSuccessCard: true,
+          },
+          { jobId: IdempotencyKeyBuilder.notification(workspaceId, remAlertId) },
+        );
+
+        console.log('[midas:ai-parse-worker] Phase 7.1-D: Claude-detected reminder created', {
+          jobId: job.id, workspaceId, remId, dueDate: aiRemData.reminder_date,
+        });
+        return; // ← skip draft flow
+      } catch (remErr: unknown) {
+        const remErrClass = remErr instanceof Error ? remErr.constructor.name : 'UnknownError';
+        console.warn('[midas:ai-parse-worker] Phase 7.1-D: Claude reminder insert failed, falling through to draft', {
+          jobId: job.id, errorClass: remErrClass,
+        });
+        // Non-fatal: fall through to normal draft creation
+      }
+    }
+  }
+
   const { draftId, status, clarificationField, partialData } = await createDraft({
     workspaceId,
     userId,

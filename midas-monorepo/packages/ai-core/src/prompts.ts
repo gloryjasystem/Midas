@@ -145,6 +145,71 @@ TRANSFER PRIORITY RULE (CRITICAL — overrides default "expense"):
     "отправил жене 3000" → intent="transfer", amount="3000", person_hint="жена"
 
 
+REMINDER / FUTURE PAYMENT DETECTION (Phase 7.1):
+If the user is describing a FUTURE financial event (not a past transaction), set is_reminder=true
+and compute reminder_date from today = {TODAY}.
+
+REMINDER SIGNALS (FUTURE TENSE — not past):
+  - напомни, напоминание, напомнить, напомни мне
+  - нужно заплатить, нужно оплатить, нужно внести
+  - буду платить, планирую заплатить, планирую оплатить
+  - предстоит, должен заплатить (FUTURE: he/I will pay)
+  - должен вернуть, должен отдать (debt WILL be repaid in future)
+  - скоро, через N дней/недель/месяцев + financial action
+  - N числа + financial action (next occurrence)
+  - ожидаю, жду (ожидаю зарплату, жду оплату)
+  - remind, reminder (English)
+
+When is_reminder=true, ALWAYS include:
+  - reminder_date: "YYYY-MM-DD" computed from today ({TODAY}) + any relative expression
+  - reminder_type: "expense" | "income" | "debt_pay" | "debt_receive"
+  - reminder_title: short description (e.g. "Аренда", "Netflix", "Долг Влада")
+  - amount and currency (same as normal fields) — if mentioned
+  - reminder_counterparty: person name if debt reminder
+  - reminder_recurring: true if repeating pattern detected ("каждый месяц", "ежемесячно", "раз в неделю")
+  - reminder_recurrence: "weekly" | "monthly" | "yearly" — only when reminder_recurring=true
+
+REMINDER DATE COMPUTATION (from today = {TODAY}):
+  - "завтра"        → today + 1 day
+  - "послезавтра"   → today + 2 days
+  - "через 3 дня"   → today + 3 days
+  - "через неделю"  → today + 7 days
+  - "через 2 недели"→ today + 14 days
+  - "через месяц"   → today + 30 days
+  - "15 числа"      → next 15th of current month (if passed — next month)
+  - "1 июня"        → June 1 of current year (if passed — next year)
+
+CRITICAL — DO NOT set is_reminder for past transactions:
+  - "купил кофе вчера" → NOT a reminder (past tense + yesterday = expense transaction)
+  - "потратил 5000"    → NOT a reminder (past tense = expense transaction)
+  - "заплатил аренду"  → NOT a reminder (past tense)
+
+EXAMPLES:
+  "напомни заплатить аренду 15000 в пятницу"
+    → is_reminder=true, reminder_date="{NEXT_FRIDAY}", reminder_type="expense",
+      reminder_title="Аренда", amount="15000", confidence=0.9
+
+  "Влад должен вернуть 500$ 10 числа"
+    → is_reminder=true, reminder_date="{NEXT_10TH}", reminder_type="debt_receive",
+      reminder_title="Долг Влада", reminder_counterparty="Влад",
+      amount="500", currency="USD", confidence=0.9
+
+  "зарплата 50к через 3 дня"
+    → is_reminder=true, reminder_date="{TODAY_PLUS_3}", reminder_type="income",
+      reminder_title="Зарплата", amount="50000", confidence=0.85
+
+  "нужно заплатить за Netflix через месяц 299 грн"
+    → is_reminder=true, reminder_date="{TODAY_PLUS_30}", reminder_type="expense",
+      reminder_title="Netflix", amount="299", currency="UAH",
+      reminder_recurring=true, reminder_recurrence="monthly", confidence=0.9
+
+  "напомни оплатить долг Саше 2000 UAH каждый месяц 1 числа"
+    → is_reminder=true, reminder_date="{NEXT_1ST}", reminder_type="debt_pay",
+      reminder_title="Долг Саше", reminder_counterparty="Саша",
+      amount="2000", currency="UAH",
+      reminder_recurring=true, reminder_recurrence="monthly", confidence=0.9
+
+
 
 --- PERSONAL ---
 

@@ -268,11 +268,16 @@ export async function parseTransaction(
 
   let response: Awaited<ReturnType<typeof client.messages.create>>;
   try {
+    // Phase 7.1: inject today's date so Claude can compute reminder_date values.
+    // The {TODAY} placeholder appears in the REMINDER section of SYSTEM_PROMPT.
+    const todayIso = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+    const systemWithDate = SYSTEM_PROMPT.replaceAll('{TODAY}', todayIso);
+
     response = await client.messages.create({
       model: 'claude-haiku-4-5',
       max_tokens: 256,
       temperature: 0, // Deterministic extraction — no randomness for classification
-      system: SYSTEM_PROMPT,
+      system: systemWithDate,
       messages: [
         {
           role: 'user',

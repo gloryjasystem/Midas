@@ -150,6 +150,54 @@ export const AiOutputSchema = z
      * 0.0 = unsure, 1.0 = certain.
      */
     confidence: z.number().min(0).max(1),
+
+    // ── Phase 7.1: Financial Reminder fields ─────────────────────────────────
+    // Set ONLY when the user is describing a FUTURE financial event, not a past transaction.
+    // Backend checks is_reminder=true and routes to reminder creation (not draft flow).
+
+    /**
+     * Phase 7.1: True when user is scheduling a future payment/income, not recording a past one.
+     * Examples: "напомни", "нужно заплатить", "скоро зарплата".
+     * When true, reminder_date MUST also be set.
+     */
+    is_reminder: z.boolean().optional(),
+
+    /**
+     * Phase 7.1: Due date for the reminder in ISO 8601 YYYY-MM-DD format.
+     * Computed from today + relative expression ("через 3 дня" → today+3).
+     * Only set when is_reminder=true.
+     */
+    reminder_date: z
+      .string()
+      .regex(/^\d{4}-\d{2}-\d{2}$/, 'Must be YYYY-MM-DD')
+      .optional(),
+
+    /**
+     * Phase 7.1: Type of the reminder event.
+     * expense = outgoing payment, income = incoming, debt_pay = repay debt, debt_receive = collect debt.
+     */
+    reminder_type: z.enum(['expense', 'income', 'debt_pay', 'debt_receive']).optional(),
+
+    /**
+     * Phase 7.1: Short human-readable title for the reminder (≤80 chars).
+     * Examples: "Аренда", "Netflix", "Долг Влада".
+     */
+    reminder_title: z.string().trim().min(1).max(80).optional(),
+
+    /**
+     * Phase 7.1: Counterparty name for debt reminders (person who owes / who is owed to).
+     */
+    reminder_counterparty: z.string().trim().min(1).max(100).optional(),
+
+    /**
+     * Phase 7.1: True when the event repeats on a schedule.
+     */
+    reminder_recurring: z.boolean().optional(),
+
+    /**
+     * Phase 7.1: Recurrence pattern. Only set when reminder_recurring=true.
+     */
+    reminder_recurrence: z.enum(['weekly', 'monthly', 'yearly']).optional(),
   })
   .strict(); // SEC-01: unknown fields = ZodError, not silent strip
 
