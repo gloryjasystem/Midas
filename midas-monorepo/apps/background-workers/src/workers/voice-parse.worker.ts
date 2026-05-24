@@ -1667,6 +1667,12 @@ async function _processVoiceParse(job: Job<VoiceParseJobPayload>): Promise<void>
             }
           } catch { /* non-fatal */ }
 
+          // FIX: Clear stale clarification state gate to prevent text intercept collision.
+          // Without this, midas:clar: from a previous failed voice attempt intercepts
+          // the user's next text BEFORE midas:tx:edit:amt gets a chance (Step 5f-clar
+          // runs before Step 5g-tx-edit in webhook.route.ts).
+          void redisConnection.del(`midas:clar:${telegramUserId}:${chatId}`);
+
           // Register nav pointer in midas:nav:
           const navRedisKey = `midas:nav:${telegramUserId}:${chatId}`;
           void redisConnection.set(navRedisKey, statusMessageId, 'EX', 86400);
@@ -1677,7 +1683,7 @@ async function _processVoiceParse(job: Job<VoiceParseJobPayload>): Promise<void>
               await redisConnection.set(
                 `midas:tx:edit:amt:${telegramUserId}:${chatId}`,
                 `${navResult.editAmountBridge.txId}:${statusMessageId}:s`,
-                'EX', 120,
+                'EX', 300,
               );
             } catch { /* non-fatal */ }
           }
