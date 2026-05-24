@@ -299,3 +299,20 @@ export async function getAvailableCategories(
     return r.rows.map((row) => ({ id: row.id, name: row.name, icon: row.icon ?? '📁' }));
   });
 }
+
+/**
+ * Get a Set of category IDs that already have an active budget limit.
+ * Used by the grouped category picker to filter out already-limited categories.
+ */
+export async function getBudgetLimitIds(
+  workspaceId: string,
+  userId: string,
+): Promise<Set<string>> {
+  return await withTenantTransaction(workspaceId, userId, async (client) => {
+    const r = await client.query<{ category_id: string }>(
+      `SELECT category_id FROM budget_limits WHERE workspace_id = $1 AND is_active = true`,
+      [workspaceId],
+    );
+    return new Set(r.rows.map((row) => row.category_id));
+  });
+}

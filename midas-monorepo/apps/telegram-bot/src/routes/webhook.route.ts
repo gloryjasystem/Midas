@@ -3630,26 +3630,127 @@ Midas создан, чтобы сделать учет денег максима
             void editMessageText(cqChatId, cqMsgId, screen.text, screen.keyboard);
           }
           else if (sub === 'add') {
-            const { getAvailableCategories } = await import('../services/budget.service.js');
-            const cats = await getAvailableCategories(resolved.workspaceId, resolved.userId);
-            if (cats.length === 0) {
+            const allBudCats = await getWorkspaceCategories(resolved.workspaceId, resolved.userId);
+            const { getBudgetLimitIds } = await import('../services/budget.service.js');
+            const existingCatIds = await getBudgetLimitIds(resolved.workspaceId, resolved.userId);
+            // Filter out categories that already have a limit
+            const availableCats = allBudCats.filter(c => !existingCatIds.has(c.id));
+
+            if (availableCats.length === 0) {
               void editMessageText(cqChatId, cqMsgId, '💰 Все категории уже имеют лимиты.', {
                 inline_keyboard: [[{ text: '🔙 Назад', callback_data: 'bud:list' }]],
               });
             } else {
-              let text = '➕ <b>Новый лимит</b>\n\nВыберите категорию:';
-              const buttons = cats.map((c) => [{ text: `${c.icon} ${c.name}`, callback_data: `bud:cat:${c.id}` }]);
-              buttons.push([{ text: '🔙 Отмена', callback_data: 'bud:list' }]);
-              void editMessageText(cqChatId, cqMsgId, text, { inline_keyboard: buttons });
+              // Build Screen 1: group tabs (same pattern as tx:catg:back)
+              const standardCats = availableCats.filter(c => !c.is_custom);
+              const customCats   = availableCats.filter(c => c.is_custom === true);
+              const lifeCats  = standardCats.filter(c => c.group === 'Жизнь');
+              const bizCats   = standardCats.filter(c => c.group === 'Бизнес');
+              const useFlat   = standardCats.length <= 6 || lifeCats.length === 0 || bizCats.length === 0;
+              const rows: { text: string; callback_data: string }[][] = [];
+
+              if (useFlat) {
+                // Small set — show all as 2-per-row buttons
+                for (let i = 0; i < standardCats.length; i += 2) {
+                  const a = standardCats[i]!;
+                  const b = standardCats[i + 1];
+                  const btnA = { text: `${getCategoryEmoji(a.name, a.icon)} ${a.name}`, callback_data: `bud:cat:${a.id}` };
+                  rows.push(b ? [btnA, { text: `${getCategoryEmoji(b.name, b.icon)} ${b.name}`, callback_data: `bud:cat:${b.id}` }] : [btnA]);
+                }
+              } else {
+                // Large set — show group tabs
+                rows.push([
+                  { text: '🛒 Жизнь',  callback_data: 'bud:catg:life' },
+                  { text: '💼 Бизнес', callback_data: 'bud:catg:biz' },
+                ]);
+              }
+              if (customCats.length > 0) {
+                rows.push([{ text: `⭐ Мои (${String(customCats.length)})`, callback_data: 'bud:catg:mine' }]);
+              }
+              rows.push([{ text: '🔙 Назад', callback_data: 'bud:list' }]);
+              void editMessageText(cqChatId, cqMsgId, '➕ <b>Новый лимит</b>\n\nВыберите категорию:', { inline_keyboard: rows });
             }
           }
+          // bud:catg:life / bud:catg:biz / bud:catg:mine — category group drill-down
+          else if (sub.startsWith('catg:')) {
+            const catgSub = sub.slice(5); // 'life' | 'biz' | 'mine'
+            if (!['life', 'biz', 'mine'].includes(catgSub)) {
+              void answerCallbackQuery(cq.id);
+              await reply.status(200).send({ ok: true });
+              return;
+            }
+            const allBudCats2 = await getWorkspaceCategories(resolved.workspaceId, resolved.userId);
+            const { getBudgetLimitIds: getBudgetLimitIds2 } = await import('../services/budget.service.js');
+            const existingIds2 = await getBudgetLimitIds2(resolved.workspaceId, resolved.userId);
+            const available2 = allBudCats2.filter(c => !existingIds2.has(c.id));
+
+            const rows2: { text: string; callback_data: string }[][] = [];
+
+            if (catgSub === 'mine') {
+              const customOnly = available2.filter(c => c.is_custom === true);
+              if (customOnly.length === 0) {
+                rows2.push([{ text: '⚠️ Нет кастомных категорий', callback_data: 'bud:catg:back' }]);
+              } else {
+                for (let i = 0; i < customOnly.length; i += 2) {
+                  const a = customOnly[i]!;
+                  const b = customOnly[i + 1];
+                  const btnA = { text: `${getCategoryEmoji(a.name, a.icon)} ${a.name}`, callback_data: `bud:cat:${a.id}` };
+                  rows2.push(b ? [btnA, { text: `${getCategoryEmoji(b.name, b.icon)} ${b.name}`, callback_data: `bud:cat:${b.id}` }] : [btnA]);
+                }
+              }
+              rows2.push([{ text: '◀️ К группам', callback_data: 'bud:catg:back' }]);
+              void editMessageText(cqChatId, cqMsgId, '<b>⭐ Мои категории:</b>', { inline_keyboard: rows2 });
+            } else if (catgSub === 'back') {
+              // Rebuild Screen 1
+              const standardCats2 = available2.filter(c => !c.is_custom);
+              const customCats2   = available2.filter(c => c.is_custom === true);
+              const lifeCats2 = standardCats2.filter(c => c.group === 'Жизнь');
+              const bizCats2  = standardCats2.filter(c => c.group === 'Бизнес');
+              const useFlat2  = standardCats2.length <= 6 || lifeCats2.length === 0 || bizCats2.length === 0;
+              if (useFlat2) {
+                for (let i = 0; i < standardCats2.length; i += 2) {
+                  const a = standardCats2[i]!;
+                  const b = standardCats2[i + 1];
+                  const btnA = { text: `${getCategoryEmoji(a.name, a.icon)} ${a.name}`, callback_data: `bud:cat:${a.id}` };
+                  rows2.push(b ? [btnA, { text: `${getCategoryEmoji(b.name, b.icon)} ${b.name}`, callback_data: `bud:cat:${b.id}` }] : [btnA]);
+                }
+              } else {
+                rows2.push([
+                  { text: '🛒 Жизнь',  callback_data: 'bud:catg:life' },
+                  { text: '💼 Бизнес', callback_data: 'bud:catg:biz' },
+                ]);
+              }
+              if (customCats2.length > 0) {
+                rows2.push([{ text: `⭐ Мои (${String(customCats2.length)})`, callback_data: 'bud:catg:mine' }]);
+              }
+              rows2.push([{ text: '🔙 Назад', callback_data: 'bud:list' }]);
+              void editMessageText(cqChatId, cqMsgId, '➕ <b>Новый лимит</b>\n\nВыберите категорию:', { inline_keyboard: rows2 });
+            } else {
+              // life or biz — show categories in group
+              const groupName  = catgSub === 'life' ? 'Жизнь' : 'Бизнес';
+              const groupEmoji = catgSub === 'life' ? '🛒' : '💼';
+              const groupCats  = available2.filter(c => c.group === groupName);
+              if (groupCats.length === 0) {
+                rows2.push([{ text: '⚠️ В этой группе нет категорий', callback_data: 'bud:catg:back' }]);
+              } else {
+                for (let i = 0; i < groupCats.length; i += 2) {
+                  const a = groupCats[i]!;
+                  const b = groupCats[i + 1];
+                  const btnA = { text: `${getCategoryEmoji(a.name, a.icon)} ${a.name}`, callback_data: `bud:cat:${a.id}` };
+                  rows2.push(b ? [btnA, { text: `${getCategoryEmoji(b.name, b.icon)} ${b.name}`, callback_data: `bud:cat:${b.id}` }] : [btnA]);
+                }
+              }
+              rows2.push([{ text: '◀️ К группам', callback_data: 'bud:catg:back' }]);
+              void editMessageText(cqChatId, cqMsgId, `<b>${groupEmoji} ${groupName}:</b>`, { inline_keyboard: rows2 });
+            }
+          }
+
           else if (sub.startsWith('cat:')) {
             const categoryId = sub.slice(4);
-            // Get category name for display
-            const { getAvailableCategories } = await import('../services/budget.service.js');
-            const cats = await getAvailableCategories(resolved.workspaceId, resolved.userId);
-            const cat = cats.find((c) => c.id === categoryId);
-            const catName = cat ? `${cat.icon} ${cat.name}` : 'категорию';
+            // Get category name/icon for display using full workspace list
+            const allCatsForBud = await getWorkspaceCategories(resolved.workspaceId, resolved.userId);
+            const cat = allCatsForBud.find((c) => c.id === categoryId);
+            const catName = cat ? `${getCategoryEmoji(cat.name, cat.icon)} ${cat.name}` : 'категорию';
             let text = `➕ Лимит на ${catName}\n\nВведите сумму лимита в месяц:\n\n❯ Например: 10000, 5000, 25000`;
             const kb = { inline_keyboard: [[{ text: '🔙 Отмена', callback_data: 'bud:list' }]] };
             void editMessageText(cqChatId, cqMsgId, text, kb);
