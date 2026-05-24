@@ -1,7 +1,7 @@
 # WORKFLOW_STATE.MD — Диспетчер задач ИИ-агента Midas
 
 > **Тип:** MUTABLE — кратковременная память агента. Обновляется на каждом шаге работы.
-> **Обновлён:** 2026-05-23 19:35 (UTC+3)
+> **Обновлён:** 2026-05-24 12:10 (UTC+3)
 
 ---
 
@@ -9,14 +9,14 @@
 
 | Параметр | Значение |
 |---|---|
-| **PHASE** | Phase 5.3 — Context-Aware Quick Edits (Voice Edit Lifecycle Fix) ✅ DEPLOYED |
-| **STEP** | Сессия 2026-05-23 19:28–19:35 (UTC+3). Реализация завершена: 4 коммита, 5 фиксов, PR #18 merged to main. |
-| **AGENT STATUS** | tsc 0 errors (turbo 5/5). Git clean. Последний коммит на main: 1686899 (merge). Ветка fix-voice-edit-lifecycle merged. |
+| **PHASE** | Phase 5.3-B — Voice Edit Lifecycle Bugfixes (Этап 1 + Этап 2) ✅ DEPLOYED |
+| **STEP** | Сессия 2026-05-24 08:00–12:10 (UTC+3). 3 коммита в main: 8cf74f8, b271c8a, 5de29a5. Изменён 1 файл: voice-parse.worker.ts. |
+| **AGENT STATUS** | tsc 0 errors. Git clean. Последний коммит: 5de29a5. Ветка main. |
 | **DEPLOYMENT** | Railway (spirited-happiness) — auto-deploy from main. Midas Online, background-workers Online. Health: https://midas-production-f4f1.up.railway.app/health > ok |
-| **DB STATE** | Без изменений. Все 5 миграций применены. Новых миграций не требуется. |
+| **DB STATE** | Без изменений. Миграций не требуется. |
 | **DATABASE_URL (public)** | `postgresql://postgres:PLLSqArtPUoQsAYmvrpsmavfQMewgTRh@hopper.proxy.rlwy.net:46284/railway` |
-| **LAST COMPLETED** | Phase 5.3 DEPLOYED: 4 коммита (16f1134, 8cb4c31, bdb716d, 5a80c4a) → PR #18 → merged to main (1686899). |
-| **BLOCKER** | None. |
+| **LAST COMPLETED** | Phase 5.3-B: 3 коммита (8cf74f8 — orphaned card cleanup, b271c8a — clar state fix + TTL 300s, 5de29a5 — nav screen cleanup). |
+| **BLOCKER** | Anthropic API баланс исчерпан — ai-parse падает с BadRequestError 400 "credit balance too low". Нужно пополнить на console.anthropic.com. Голосовые команды, распознаваемые detectCommand (баланс, сменить категорию и т.д.) работают без Claude. |
 | **NEXT ACTION** | Phase 3.1 (словарь item-category-detector 500+), Phase 3.2 (Report 3.0). |
 
 
@@ -108,6 +108,8 @@
 
 | **Phase 5.3 — Voice Quick Edit Lifecycle Fix** | ✅ DEPLOYED | **Сессия 2026-05-23 19:28–19:35 (UTC+3). PR #18, merge commit 1686899.** Проблема: после навигации (пикер → подтверждение → полная карточка → Закрыть) голосовые edit-команды перестают работать — Redis теряет `midas:last_confirmed`. **4 коммита, 5 фиксов в 2 файлах:** (1) `16f1134` — `tx:done` восстанавливает `midas:last_confirmed` (TTL 7d) + чистит nav/edit/amt ключи (webhook.route.ts:2205). (2) `8cb4c31` — State gate bypass для edit_* команд (voice-parse.worker.ts:1617). (3) `bdb716d` — edit_amount IN-PLACE через editStatusMessage + editAmountBridge (voice-parse.worker.ts: VoiceNavResponse interface, edit_amount builder, nav caller). (4) `5a80c4a` — Nav cleanup guard — не удалять success card если oldNavMsgId === lastConfirmedMsgId (voice-parse.worker.ts:1707-1728). |
 
+| **Phase 5.3-B — Voice Edit Lifecycle Bugfixes (Этап 1 + Этап 2)** | ✅ DEPLOYED | **Сессия 2026-05-24 08:00–12:10 (UTC+3). 3 коммита в main. Изменён 1 файл: `voice-parse.worker.ts`.** **Этап 1 — Cleanup orphaned "🤔" карточек (коммит 8cf74f8):** Точка 1.1: перед записью `midas:clar:msg:` читается старый ID → `deleteMessage(старая 🤔)`. Точка 1.2: в success path после `editStatusMessage` читается `midas:clar:msg:` → если есть старая 🤔 → `deleteMessage`. **Этап 1-Б — Фикс бага «Изменить сумму → В какой валюте?» (коммит b271c8a):** Корневая причина: `midas:clar:{uid}:{cid}` (state gate clarification) от предыдущего неудачного голосового не удалялся в success path. `webhook.route.ts` Step 5f-clar проверяется ДО Step 5g-tx-edit → при живом `midas:clar:` следующий текст пользователя перехватывался как ответ на старый clarification-запрос вместо edit_amount intercept. Фикс: `void redisConnection.del(midas:clar:)` добавлен в success path (после Point 1.2). Также увеличен TTL `midas:tx:edit:amt:` с 120s до 300s. Проведён полный аудит 7 сценариев конфликтов — все чисто. **Этап 2 — Cleanup предыдущего nav-экрана (коммит 5de29a5):** Проблема: последовательные голосовые команды (баланс → сменить категорию) накапливают nav-экраны в чате. Фикс: Point 2.1 в success path — ПЕРЕД `editStatusMessage` читаем `midas:nav:` + `midas:last_confirmed:` через Redis pipeline. Если старый nav существует и НЕ является success card и НЕ является текущим statusMessageId → `deleteMessage(oldNavMsgId)` + `del(midas:nav:)`. Полностью зеркалит аналогичный cleanup в ai-parse path (строки 1717-1751). tsc 0 ошибок. |
+
 ---
 
 ## 3. ПРИНЯТЫЕ АРХИТЕКТУРНЫЕ РЕШЕНИЯ
@@ -157,7 +159,8 @@
     - `midas:dead_card:{chatId}` — message_id карточки "? Отменено" или "? Черновик истёк", TTL 24h. Записывается confirmation.worker (reject/expired) и draft-expiration.worker (CRON expire). Читается и удаляется ai-parse.worker при отправке следующей preview — карточка автоматически удаляется из чата. (Phase 1.40)
      - `midas:am:{userId}:{chatId}` — Phase 2.10: pointer на текущее активное сообщение (черновики, пикеры счётов, clarification). TTL 24h. При approve транзакции — DEL (не SET, чтобы success card не удалялась). Step-7 в webhook.route.ts проверяет `midas:success_card:{amId}` перед удалением.
      - `midas:success_card:{msgId}` — Phase 2.10: sentinel key, TTL 30 дней. Записывается `notifications.worker` при `isSuccessCard=true` (после approve). Читается step-7 в `webhook.route.ts` — если EXISTS, сообщение НЕ удаляется при вводе следующей транзакции. Двойная блокировка вместе с DEL `midas:am:`.
-     - `midas:last_confirmed:{userId}:{chatId}` — Phase 2S2: msgId подтверждённой «✅ Записано» карточки, TTL 24h. Записывается `notifications.worker` при `isSuccessCard=true`. Читается cancel_last и edit_last (voice-parse.worker + webhook.route.ts) для удаления старой карточки. Решает проблему что `midas:am:` = null для success cards.
+     - `midas:last_confirmed:{userId}:{chatId}` — Phase 2S2: msgId подтверждённой «✅ Записано» карточки, TTL 7d (обновлено в Phase 5.3: `tx:done` записывает с TTL 604800). Записывается `notifications.worker` при `isSuccessCard=true` и `webhook.route.ts` при `tx:done`. Читается cancel_last, edit_last, deleteSuccessCardW (voice-parse), и **Phase 5.3-B Point 2.1** (nav cleanup guard — не удалять success card если oldNavMsgId === lastConfirmedMsgId).
+     - `midas:tx:edit:amt:{userId}:{chatId}` — Phase 5.3: bridge для edit_amount через голос. Значение: `{txId}:{statusMessageId}:s`. **Phase 5.3-B:** TTL увеличен с 120s до 300s. Записывается voice-parse success path (editAmountBridge). Читается Step 5g-tx-edit в webhook.route.ts для перехвата числового ввода и обновления суммы транзакции.
     - `bl:state:{telegramUserId}:{chatId}` — Phase 2.1: state для текстовых intercepts баланс-менеджмента. Хранит `{action, accountId}`. Actions: `rename`, `set_balance`, `currency_input`. TTL 300s.
     - `bl:source:{telegramUserId}:{chatId}` — Phase 2.1: флаг что добавление счёта инициировано из баланса. При `ac:done` возвращает в balance dashboard вместо setup complete.
      - `midas:tx:sr:ctx:{telegramUserId}:{chatId}` — Phase 2.3: поисковый контекст для пагинации. Хранит JSON `{t: 'name'|'amount'|'category'|'date', q?: string, f?: string, to?: string, lb?: string}` TTL 600s. Создаётся при первом поиске, читается при навигации по страницам (tx:sr:p:{page}). При устаревании — дружелюбное сообщение «поиск заново».
