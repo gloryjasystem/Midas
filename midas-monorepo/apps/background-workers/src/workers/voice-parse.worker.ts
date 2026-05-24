@@ -1647,6 +1647,35 @@ async function _processVoiceParse(job: Job<VoiceParseJobPayload>): Promise<void>
         const navResult = await buildVoiceNavResponse(voiceCmd, workspaceId, userId, telegramUserId, chatId);
         console.log('[midas:voice-parse-worker] DEBUG navResult', { jobId: job.id, hasResult: !!navResult, hasText: !!navResult?.text });
         if (navResult) {
+          // Phase 2 Point 2.1: Delete previous nav screen before showing the new one.
+          // Without this, consecutive voice commands accumulate nav screens in the chat.
+          // Mirrors the identical cleanup at lines ~1717-1751 (ai-parse path).
+          try {
+            const oldNavKey = `midas:nav:${telegramUserId}:${chatId}`;
+            const lcKeyP2 = `midas:last_confirmed:${telegramUserId}:${chatId}`;
+            // Read both keys in one pipeline to minimise round-trips
+            const [[, oldNavMsgId], [, lastConfirmedId]] = await redisConnection.pipeline()
+              .get(oldNavKey)
+              .get(lcKeyP2)
+              .exec() as [[null, string | null], [null, string | null]];
+
+            if (
+              oldNavMsgId &&                           // there IS a previous nav screen
+              oldNavMsgId !== statusMessageId &&        // it is NOT the current "⏳" (same-msg edit)
+              oldNavMsgId !== lastConfirmedId           // it is NOT the success card (✅ Записано)
+            ) {
+              const tok = process.env.TELEGRAM_BOT_TOKEN;
+              if (tok) {
+                void fetch(`${TELEGRAM_API_BASE}/bot${tok}/deleteMessage`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ chat_id: chatId, message_id: parseInt(oldNavMsgId, 10) }),
+                });
+              }
+              void redisConnection.del(oldNavKey);
+            }
+          } catch { /* non-fatal — nav cleanup is best-effort */ }
+
           // Replace "⏳ Распознаю..." with the actual nav screen
           await editStatusMessage(chatId, statusMessageId, navResult.text, navResult.keyboard);
 
