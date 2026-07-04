@@ -75,7 +75,8 @@ async function processSummaryDispatch(job: Job): Promise<void> {
       COALESCE(w.timezone, 'UTC') AS timezone
     FROM user_preferences up
     JOIN workspaces w ON w.id = up.workspace_id
-    JOIN users u ON u.workspace_id = up.workspace_id
+    JOIN workspace_memberships wm ON wm.workspace_id = up.workspace_id AND wm.role = 'owner'
+    JOIN users u ON u.id = wm.user_id
     WHERE up.daily_summary_enabled = true
   `);
 

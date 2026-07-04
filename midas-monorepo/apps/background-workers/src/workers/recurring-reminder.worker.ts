@@ -67,7 +67,8 @@ async function processRecurringReminder(job: Job): Promise<void> {
       COALESCE(c.icon, '📁') AS category_icon
     FROM recurring_transactions rt
     JOIN workspaces w ON w.id = rt.workspace_id
-    JOIN users u ON u.workspace_id = rt.workspace_id
+    JOIN workspace_memberships wm ON wm.workspace_id = rt.workspace_id AND wm.role = 'owner'
+    JOIN users u ON u.id = wm.user_id
     LEFT JOIN categories c ON c.id = rt.category_id
     WHERE rt.is_active = true
       AND rt.next_fire_date <= CURRENT_DATE

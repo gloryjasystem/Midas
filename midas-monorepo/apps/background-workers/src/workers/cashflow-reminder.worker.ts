@@ -85,7 +85,8 @@ async function processCashflowReminder(job: Job): Promise<void> {
       fr.counterparty
     FROM financial_reminders fr
     JOIN workspaces w ON w.id = fr.workspace_id
-    JOIN users u ON u.workspace_id = fr.workspace_id
+    JOIN workspace_memberships wm ON wm.workspace_id = fr.workspace_id AND wm.role = 'owner'
+    JOIN users u ON u.id = wm.user_id
     WHERE fr.status IN ('active', 'snoozed')
       AND (fr.due_date - CURRENT_DATE) = ANY(fr.remind_offsets)
   `);
