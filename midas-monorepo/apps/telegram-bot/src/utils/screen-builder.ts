@@ -276,7 +276,10 @@ export function buildPreviewScreen(data: PreviewScreenData): string {
     lines.push('');
   }
 
-  lines.push(`${emoji} <b>${label}</b>`, '');
+  // Для перевода уточняем направление: с исходного счёта деньги СПИСЫВАЮТСЯ.
+  // Без пометки «Перевод» неоднозначен (доход это или расход) — показываем «(расход со счёта)».
+  const labelSuffix = data.intent === 'transfer' ? ' <i>(расход со счёта)</i>' : '';
+  lines.push(`${emoji} <b>${label}</b>${labelSuffix}`, '');
 
   // ── Blockquote: amount + item name ───────────────────────────
   if (data.amount) {

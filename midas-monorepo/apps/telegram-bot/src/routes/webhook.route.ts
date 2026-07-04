@@ -2000,14 +2000,20 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
             }
             request.log.info({ msg: '[midas:bot:webhook] ia:newaccount: onboarding started from draft picker', workspaceId: iaResolved.workspaceId });
 
-          // ── Phase 2.5: ia:showpicker — «◀️ Назад» from type-picker → show account picker ──
+          // ── Phase 2.5: ia:showpicker — «◀️ Назад» from type-picker → return to the ORIGIN picker ──
           } else if (iaCmd.cmd === 'showpicker') {
             // Restore the previously saved account_id (saved by ia:delink before unlinking).
-            // This ensures the draft is not left in an account-less state if user bails out.
+            // Its PRESENCE also identifies which picker the user came from:
+            //   • saved acct exists → user opened «Создать счёт» from the FULL picker
+            //     ("🔄 Сменить счёт" / ia:delink, Screen 3) → restore the full picker.
+            //   • no saved acct     → user opened it from the V2 account-aware draft card
+            //     (Screen 1) → restore THAT card. (BUGFIX: previously always showed the full picker.)
             const prevAcctKey = `midas:prev_acct:${iaCmd.draftId}`;
+            let cameFromFullPicker = false;
             try {
               const savedAcctId = await redisConnection.get(prevAcctKey);
               if (savedAcctId) {
+                cameFromFullPicker = true;
                 await patchDraftAccount(iaResolved.workspaceId, iaResolved.userId, iaCmd.draftId, savedAcctId);
                 // Keep the key alive — user might open the picker again and go back again.
               }
@@ -2016,34 +2022,59 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
             // Clear FSM onboarding state — user backed out, so any partial ac: state is irrelevant.
             void redisConnection.del(onboardStateKey(telegramUserId, chatId));
 
-            // Fetch intent + accounts and show the full picker (same as ia:delink flow).
+            // Fetch intent + accounts (shared by both picker variants).
             const showPickerDraft = await getDraftFields(iaResolved.workspaceId, iaResolved.userId, iaCmd.draftId);
             const showPickerIntent    = showPickerDraft?.parsed_intent    ?? null;
             const showPickerCurrency  = showPickerDraft?.parsed_currency  ?? null;
             const showPickerAccounts  = await getWorkspaceAccountsWithBalances(
               iaResolved.workspaceId, iaResolved.userId, showPickerIntent, showPickerCurrency,
             );
-            const showPickerEntries: AccountPickerFullEntry[] = showPickerAccounts.map((acc) => ({
-              id:       acc.id,
-              name:     escapeHtml(acc.name),
-              currency: acc.currency,
-              type:     acc.type,
-              balance:  acc.balance,
-            }));
+            // Only pass parsedCurrency for transfer intent — currency hint is misleading
+            // for expense/income/debt where cross-currency is valid (XFX flow).
+            const showPickerDisplayCurrency = showPickerIntent === 'transfer' ? showPickerCurrency : null;
+
             if (iaMsgId) {
-              // Only pass parsedCurrency for transfer intent — currency hint is misleading
-              // for expense/income/debt where cross-currency is valid (XFX flow).
-              const showPickerDisplayCurrency = showPickerIntent === 'transfer' ? showPickerCurrency : null;
-              const pickerText = showPickerEntries.length > 0
-                ? getPickerScreenText(showPickerIntent, showPickerDisplayCurrency)
-                : getPickerEmptyText(showPickerDisplayCurrency);
-              void editMessageText(
-                chatId, iaMsgId,
-                pickerText,
-                buildAccountPickerForDraft(iaCmd.draftId, showPickerEntries, null),
-              );
+              if (cameFromFullPicker) {
+                // Path B: restore the FULL picker (Screen 3), identical to the ia:delink view.
+                const showPickerEntries: AccountPickerFullEntry[] = showPickerAccounts.map((acc) => ({
+                  id:       acc.id,
+                  name:     escapeHtml(acc.name),
+                  currency: acc.currency,
+                  type:     acc.type,
+                  balance:  acc.balance,
+                }));
+                const pickerText = showPickerEntries.length > 0
+                  ? getPickerScreenText(showPickerIntent, showPickerDisplayCurrency)
+                  : getPickerEmptyText(showPickerDisplayCurrency);
+                void editMessageText(
+                  chatId, iaMsgId, pickerText,
+                  buildAccountPickerForDraft(iaCmd.draftId, showPickerEntries, null),
+                );
+              } else {
+                // Path A (BUGFIX): restore the V2 account-aware draft card (Screen 1) —
+                // the exact card the user tapped "➕ Создать счёт" from.
+                const richPreviewRes = await confirmPreviewFull(iaResolved.workspaceId, iaResolved.userId, iaCmd.draftId);
+                const pickerHeader = getPickerV2Text(showPickerIntent);
+                if (showPickerAccounts.length > 0) {
+                  const v2Entries = toAccountPickerEntries(showPickerAccounts).map((e) => ({
+                    ...e,
+                    name: escapeHtml(e.name),
+                  }));
+                  void editMessageText(
+                    chatId, iaMsgId,
+                    `${richPreviewRes.text}\n\n${pickerHeader}`,
+                    buildAccountPickerV2Keyboard(v2Entries, iaCmd.draftId),
+                  );
+                } else {
+                  void editMessageText(
+                    chatId, iaMsgId,
+                    getPickerEmptyText(showPickerDisplayCurrency),
+                    buildAccountPickerV2Keyboard([], iaCmd.draftId),
+                  );
+                }
+              }
             }
-            request.log.info({ msg: '[midas:bot:webhook] ia:showpicker: returned to account picker from type screen', workspaceId: iaResolved.workspaceId });
+            request.log.info({ msg: '[midas:bot:webhook] ia:showpicker: returned to origin picker from type screen', workspaceId: iaResolved.workspaceId, cameFromFullPicker });
           }
 
         } catch (err: unknown) {
