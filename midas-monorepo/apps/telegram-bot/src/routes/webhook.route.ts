@@ -66,7 +66,7 @@ import { voiceParseQueue } from '../queues/voice-queue.js';
 import { resolveWorkspace } from '../services/workspace-resolver.js';
 import { checkOnboardingRateLimit } from '../services/rate-limiter.js';
 // Phase 1.33: sendMessage no longer imported directly — all sends go via upsertBotMessage.
-import { getMonthlyReport } from '../services/report.service.js';
+// getMonthlyReport removed — «Отчёт» section is temporarily gated behind a "WIP" stub.
 import { getBalanceData, getAccountDetail, setAccountBalanceById, getAccountTxCount, getChildAccountCurrencies, getChildAccountDetails, getDefaultAccount } from '../services/balance.service.js';
 import {
   setAccountBalance,
@@ -445,6 +445,16 @@ const HELP_TEXT =
   '⚙️ <b>НАСТРОЙКИ</b>\n' +
   '/settings — Часовой пояс и уведомления\n\n' +
   '❓ Вопросы → @midas_support';
+
+// ── «В разработке»: раздел «Отчёт» временно отключён ──────────────
+/** Notice card shown when the user opens the (WIP) «Отчёт» section via a reply/text/slash command. */
+const REPORT_DEV_TEXT =
+  '🚧 <b>Раздел «Отчёт» в разработке</b>\n\n' +
+  'Мы дорабатываем аналитику — скоро всё заработает. Спасибо за терпение!';
+/** OK button that dismisses the notice card (handled by the dev:close callback). */
+const REPORT_DEV_KB = { inline_keyboard: [[{ text: '🆗 OK', callback_data: 'dev:close' }]] };
+/** Centered native alert text for inline «Отчёт» buttons (callback queries). */
+const REPORT_DEV_ALERT = '🚧 Раздел «Отчёт» в разработке. Скоро будет доступен.';
 
 /** Message returned for any unrecognised slash command. */
 const UNKNOWN_COMMAND_TEXT = 'Команда не распознана или пока находится в разработке.';
@@ -1026,6 +1036,17 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
         if (!isFloatingCard) {
           void setActiveMessageId(telegramUserId, chatId, String(cq.message.message_id));
         }
+      }
+
+      // ── «В разработке» stub: dismiss the notice card (🆗 OK) ────────
+      // Reply-keyboard buttons (e.g. «📊 Отчёт») can't show a native centered
+      // popup, so we render a small notice message with an OK button; this
+      // handler deletes that message when the user taps OK.
+      if (callbackData === 'dev:close') {
+        await answerCallbackQuery(cq.id);
+        if (cq.message) void deleteMessage(chatId, String(cq.message.message_id));
+        await reply.status(200).send({ ok: true });
+        return;
       }
 
       // ── Phase 1.30: account onboarding callbacks (prefix "ac:") ────
@@ -4879,13 +4900,10 @@ Midas создан, чтобы сделать учет денег максима
               void upsertBotMessage(telegramUserId, chatId, '⚠️ Не удалось получить баланс. Попробуйте позже.');
             }
           } else if (cmdTarget === 'report') {
-            try {
-              const cmdResolved = await resolveWorkspace(telegramUserId, chatId);
-              const reportText = await getMonthlyReport(cmdResolved.workspaceId, cmdResolved.userId);
-              void upsertBotMessage(telegramUserId, chatId, reportText);
-            } catch {
-              void upsertBotMessage(telegramUserId, chatId, '⚠️ Не удалось получить отчёт. Попробуйте позже.');
-            }
+            // Раздел «Отчёт» в разработке → native-попап по центру с OK.
+            await answerCallbackQuery(cq.id, REPORT_DEV_ALERT, true);
+            await reply.status(200).send({ ok: true });
+            return;
           }
           await answerCallbackQuery(cq.id);
           await reply.status(200).send({ ok: true });
@@ -5011,13 +5029,10 @@ Midas создан, чтобы сделать учет денег максима
             const { text: balanceMsg, accounts } = await getBalanceData(navResolved.workspaceId, navResolved.userId);
             await upsertBotMessage(telegramUserId, chatId, balanceMsg, buildBalanceListKeyboard(accounts as BalanceAccountRow[]));
           } else if (navCmd === 'report') {
-            const reportMsg = await getMonthlyReport(navResolved.workspaceId, navResolved.userId);
-            await upsertBotMessage(telegramUserId, chatId, reportMsg, {
-              inline_keyboard: [[
-                { text: '💼 Баланс', callback_data: 'nav:balance' },
-                { text: '⚙️ Настройки', callback_data: 'stg:main' },
-              ]],
-            });
+            // Раздел «Отчёт» в разработке → native-попап по центру с OK.
+            await answerCallbackQuery(cq.id, REPORT_DEV_ALERT, true);
+            await reply.status(200).send({ ok: true });
+            return;
           }
         } catch (err: unknown) {
           const errorClass = err instanceof Error ? err.constructor.name : 'UnknownError';
@@ -6639,17 +6654,12 @@ Midas создан, чтобы сделать учет денег максима
       return;
     }
 
-    if (navText === NAV_BTN_REPORT) {
-      // Phase 2.9: sendNavMessage — always sends NEW message, never edits/deletes tx records
-      try {
-        const { buildPeriodPickerKeyboard } = await import('../services/report-keyboard.service.js');
-        void sendNavMessage(telegramUserId, chatId, '📊 <b>Отчёты</b>\n\nВыбери период:', buildPeriodPickerKeyboard());
-        request.log.info({ msg: '[midas:bot:webhook] nav:report → period picker', telegramUserId });
-      } catch (err: unknown) {
-        const errorClass = err instanceof Error ? err.constructor.name : 'UnknownError';
-        request.log.error({ msg: '[midas:bot:webhook] nav:report failed', telegramUserId, errorClass });
-        void sendNavMessage(telegramUserId, chatId, '⚠️ Не удалось открыть отчёты. Попробуйте позже.');
-      }
+    if (navText === NAV_BTN_REPORT || navText === '📊 Отчеты' || navText === '📊 Отчет') {
+      // Раздел «Отчёт» временно в разработке. Reply-кнопка не может показать
+      // native-попап по центру, поэтому отправляем карточку-уведомление с кнопкой OK
+      // (закрывается обработчиком dev:close).
+      void sendNavMessage(telegramUserId, chatId, REPORT_DEV_TEXT, REPORT_DEV_KB);
+      request.log.info({ msg: '[midas:bot:webhook] nav:report → dev stub (WIP)', telegramUserId });
       await reply.status(200).send({ ok: true });
       return;
     }
@@ -6998,26 +7008,9 @@ Midas создан, чтобы сделать учет денег максима
 
       // ── 5c: /report ──────────────────────────────────────────
       if (commandToken === '/report') {
-        try {
-          const resolved = await resolveWorkspace(telegramUserId, chatId);
-          const reportText = await getMonthlyReport(resolved.workspaceId, resolved.userId);
-          void upsertBotMessage(telegramUserId, chatId, reportText);
-
-          request.log.info({
-            msg: '[midas:bot:webhook] /report sent',
-            telegramUserId,
-            workspaceId: resolved.workspaceId,
-          });
-        } catch (err: unknown) {
-          const errorClass = err instanceof Error ? err.constructor.name : 'UnknownError';
-          request.log.error({
-            msg: '[midas:bot:webhook] /report failed',
-            telegramUserId,
-            errorClass,
-          });
-          void upsertBotMessage(telegramUserId, chatId, '⚠️ Не удалось сформировать отчёт. Попробуйте позже.');
-        }
-
+        // Раздел «Отчёт» временно в разработке — карточка-уведомление с кнопкой OK.
+        void upsertBotMessage(telegramUserId, chatId, REPORT_DEV_TEXT, REPORT_DEV_KB);
+        request.log.info({ msg: '[midas:bot:webhook] /report → dev stub (WIP)', telegramUserId });
         await reply.status(200).send({ ok: true });
         return;
       }

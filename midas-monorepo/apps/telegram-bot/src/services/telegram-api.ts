@@ -350,10 +350,13 @@ export async function editMessageReplyMarkup(
 export async function answerCallbackQuery(
   callbackQueryId: string,
   text?: string,
+  showAlert = false,
 ): Promise<boolean> {
   return telegramPost('answerCallbackQuery', {
     callback_query_id: callbackQueryId,
-    ...(text ? { text, show_alert: false } : {}),
+    // show_alert: true → centered modal popup with an OK button (dismissable).
+    // false → brief toast. Only meaningful when `text` is provided.
+    ...(text ? { text, show_alert: showAlert } : {}),
   });
 }
 
