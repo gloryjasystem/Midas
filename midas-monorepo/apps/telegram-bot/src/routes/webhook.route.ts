@@ -2705,16 +2705,6 @@ const webhookRoute: FastifyPluginAsync = async (fastify) => {
           return;
         }
 
-        // Раздел «Отчёт» в разработке: блокируем любые действия пикера периодов
-        // (в т.ч. на старых, уже открытых карточках) — кроме «Закрыть».
-        // Показываем native-попап по центру; «Закрыть» пропускаем, чтобы можно было убрать карточку.
-        // Каст к string, чтобы НЕ сужать тип rpCmd.cmd (иначе TS2367 на сравнениях ниже).
-        if ((rpCmd.cmd as string) !== 'close') {
-          await answerCallbackQuery(cq.id, REPORT_DEV_ALERT, true);
-          await reply.status(200).send({ ok: true });
-          return;
-        }
-
         const rpMsgId = String(cq.message?.message_id ?? '');
 
         try {
@@ -6600,20 +6590,6 @@ Midas создан, чтобы сделать учет денег максима
               request.log.info({ msg: '[midas:bot:webhook] nav:edit_last (text)', telegramUserId, workspaceId: resolved.workspaceId });
             }
 
-            await reply.status(200).send({ ok: true });
-            return;
-          } else if (navCmd === 'report') {
-            // Раздел «Отчёт» временно в разработке — вместо пикера периодов
-            // показываем карточку-уведомление с кнопкой OK (закрывается dev:close).
-            // ВАЖНО: перехват именно здесь, т.к. reply-кнопка «📊 Отчёт» и голос/текст
-            // идут через command-router (detectCommand → 'report'), а не через NAV_BTN_REPORT.
-            const oldNavIdRep = await getNavMessageId(telegramUserId, chatId);
-            if (oldNavIdRep) {
-              void deleteMessage(chatId, oldNavIdRep);
-              void clearNavMessageId(telegramUserId, chatId);
-            }
-            void sendNavMessage(telegramUserId, chatId, REPORT_DEV_TEXT, REPORT_DEV_KB);
-            request.log.info({ msg: '[midas:bot:webhook] nav:report → dev stub (WIP, router)', telegramUserId });
             await reply.status(200).send({ ok: true });
             return;
           } else {
