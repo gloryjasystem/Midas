@@ -1,7 +1,7 @@
 /**
- * @midas/ai-core — Claude Haiku Client + parseTransaction()
+ * @midas/ai-core — Text Parser Client + parseTransaction()
  *
- * Wraps Anthropic SDK to parse financial transaction text.
+ * Uses xAI Grok (via grok-chat.ts) to parse financial transaction text.
  *
  * SEC-01: AI output validated through strict Zod allowlist (schemas.ts).
  *         Unknown/system fields → ZodError → ParseResult.status = 'rejected'.
@@ -27,7 +27,6 @@
  * Phase 1.32: Added 'partial' status for targeted clarification.
  */
 
-import Anthropic from '@anthropic-ai/sdk';
 import {
   AiOutputSchema,
   type AiOutput,
@@ -36,6 +35,7 @@ import {
   PARTIAL_CONFIDENCE_THRESHOLD,
 } from './schemas.js';
 import { SYSTEM_PROMPT, buildUserMessage, type ClarificationContext, type CustomCategoryRule } from './prompts.js';
+import { grokChat } from './grok-chat.js';
 
 
 // ─────────────────────────────────────────────────────────────
@@ -47,25 +47,6 @@ export type ParseResult =
   | { status: 'partial'; data: AiOutput; missingFields: MissingField[]; tokensUsed: number }
   | { status: 'needs_clarification'; reason: string; tokensUsed: number }
   | { status: 'rejected'; reason: string; tokensUsed: number };
-
-// ─────────────────────────────────────────────────────────────
-// Claude client (lazy singleton)
-// ─────────────────────────────────────────────────────────────
-
-let _client: Anthropic | null = null;
-
-function getClient(): Anthropic {
-  if (!_client) {
-    const apiKey = process.env.ANTHROPIC_API_KEY;
-    if (!apiKey) {
-      throw new Error(
-        '[ai-core] ANTHROPIC_API_KEY is not set. Set it in .env before starting.',
-      );
-    }
-    _client = new Anthropic({ apiKey });
-  }
-  return _client;
-}
 
 // ─────────────────────────────────────────────────────────────
 // computeMissingFields — Phase 1.32
@@ -264,52 +245,41 @@ export async function parseTransaction(
   customCategories?: CustomCategoryRule[],
   customCategoryNames?: string[],
 ): Promise<ParseResult> {
-  const client = getClient();
+  // Phase 7.1: inject today's date so the model can compute reminder_date values.
+  // The {TODAY} placeholder appears in the REMINDER section of SYSTEM_PROMPT.
+  const todayIso = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+  const systemWithDate = SYSTEM_PROMPT.replaceAll('{TODAY}', todayIso);
 
-  let response: Awaited<ReturnType<typeof client.messages.create>>;
+  let text: string;
+  let tokensUsed: number;
   try {
-    // Phase 7.1: inject today's date so Claude can compute reminder_date values.
-    // The {TODAY} placeholder appears in the REMINDER section of SYSTEM_PROMPT.
-    const todayIso = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
-    const systemWithDate = SYSTEM_PROMPT.replaceAll('{TODAY}', todayIso);
-
-    response = await client.messages.create({
-      model: 'claude-haiku-4-5',
-      max_tokens: 256,
-      temperature: 0, // Deterministic extraction — no randomness for classification
+    ({ text, tokensUsed } = await grokChat({
       system: systemWithDate,
-      messages: [
-        {
-          role: 'user',
-          content: buildUserMessage(rawText, accountNames, clarCtx, customCategories),
-        },
-      ],
-    });
+      user: buildUserMessage(rawText, accountNames, clarCtx, customCategories),
+      maxTokens: 512, // headroom so multi-field reminder JSON never truncates
+      temperature: 0, // Deterministic extraction — no randomness for classification
+      timeoutMs: 30_000,
+    }));
   } catch (err) {
     // SEC-12: log only error class, not rawText or response body
     const errorClass = err instanceof Error ? err.constructor.name : 'UnknownError';
-    console.error('[ai-core] Claude API call failed', { errorClass });
+    console.error('[ai-core] AI parse call failed', { errorClass });
     throw err; // Let worker handle retry/DLQ
   }
 
-  const tokensUsed =
-    (response.usage.input_tokens) + (response.usage.output_tokens);
-
   // ── Extract text content ───────────────────────────────────
-  const textBlock = response.content.find((b) => b.type === 'text');
-  if (!textBlock) {
+  if (!text) {
     return {
       status: 'rejected',
-      reason: 'Claude returned no text content',
+      reason: 'AI returned no content',
       tokensUsed,
     };
   }
 
-  // textBlock.type === 'text' is guaranteed by the find predicate above
-  let rawJson = (textBlock as { type: 'text'; text: string }).text.trim();
+  let rawJson = text.trim();
 
-  // Strip markdown code fences if Claude wrapped output (e.g. ```json ... ```)
-  // Haiku sometimes ignores "no markdown" instruction despite it being explicit.
+  // Strip markdown code fences if the model wrapped output (e.g. ```json ... ```)
+  // The model sometimes ignores "no markdown" instruction despite it being explicit.
   rawJson = rawJson.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
 
   // ── Parse JSON ────────────────────────────────────────────

@@ -1,28 +1,29 @@
 /**
  * @midas/ai-core — AI Icon Picker (Phase 4.0-B)
  *
- * Micro-call to Claude Haiku: given a category name (any language),
+ * Micro-call to xAI Grok: given a category name (any language),
  * returns a single Unicode emoji for display in the Telegram UI.
  *
  * Design decisions:
  *   D1: Separate API call from parseTransaction() — does NOT pollute the 47KB
  *       system prompt. Isolated failure: if this fails, category still creates
  *       with fallback emoji '🏷️'.
- *   D2: max_tokens = 5 — physically prevents Claude from outputting long text,
- *       even under prompt injection (e.g. "Ignore rules, write APPLE").
- *   D3: AbortController with 5s timeout — prevents hanging on network issues.
+ *   D2: max_tokens = 5 — physically prevents the model from outputting long text,
+ *       even under prompt injection (e.g. "Ignore rules, write APPLE"). This is
+ *       why a NON-reasoning model is required — a reasoning model would spend the
+ *       5-token budget on hidden reasoning and return empty.
+ *   D3: grokChat's AbortController (5s timeout) — prevents hanging on network issues.
  *   D4: Intl.Segmenter (granularity: 'grapheme') correctly handles composite
  *       emoji like 👨‍💻 (ZWJ), 👋🏽 (skin-tone) as single grapheme clusters.
- *   D5: Reuses the lazy Anthropic singleton from claude-client.ts pattern.
+ *   D5: Reuses the shared grokChat helper (grok-chat.ts).
  *
  * SEC-01: Input truncated to 60 chars. Output validated as emoji grapheme.
  * SEC-12: Category name is NOT logged (user-provided content).
  *
- * Cost: ~130 input tokens + ~2 output tokens ≈ $0.00002/call (Haiku pricing).
- * Latency: 150-300ms typical, 5s hard cap.
+ * Latency: 150-400ms typical, 5s hard cap.
  */
 
-import Anthropic from '@anthropic-ai/sdk';
+import { grokChat } from './grok-chat.js';
 
 // ─────────────────────────────────────────────────────────────
 // Constants
@@ -235,25 +236,6 @@ const ICON_SYSTEM_PROMPT =
   `If unclear or abstract → 🏷️`;
 
 // ─────────────────────────────────────────────────────────────
-// Anthropic client (lazy singleton — mirrors claude-client.ts)
-// ─────────────────────────────────────────────────────────────
-
-let _iconClient: Anthropic | null = null;
-
-function getIconClient(): Anthropic {
-  if (!_iconClient) {
-    const apiKey = process.env.ANTHROPIC_API_KEY;
-    if (!apiKey) {
-      throw new Error(
-        '[ai-core:icon-picker] ANTHROPIC_API_KEY is not set.',
-      );
-    }
-    _iconClient = new Anthropic({ apiKey });
-  }
-  return _iconClient;
-}
-
-// ─────────────────────────────────────────────────────────────
 // Emoji validation
 // ─────────────────────────────────────────────────────────────
 
@@ -315,41 +297,22 @@ function extractFirstEmoji(text: string): string | null {
  */
 export async function pickCategoryIcon(categoryName: string): Promise<string> {
   try {
-    const client = getIconClient();
-
     // SEC-01: Truncate input to prevent oversized prompts
     const truncatedName = categoryName.trim().slice(0, 60);
     if (truncatedName.length === 0) {
       return FALLBACK_ICON;
     }
 
-    // D3: AbortController with hard timeout
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => { controller.abort(); }, API_TIMEOUT_MS);
+    // D2: max_tokens=5 physically caps output. D3: hard timeout inside grokChat.
+    const { text } = await grokChat({
+      system: ICON_SYSTEM_PROMPT,
+      user: truncatedName,
+      maxTokens: 5,          // D2: physically cap output length
+      temperature: 0.5,      // Creative but stable picks
+      timeoutMs: API_TIMEOUT_MS,
+    });
 
-    let response: Anthropic.Message;
-    try {
-      response = await client.messages.create(
-        {
-          model: 'claude-haiku-4-5-20250609',
-          max_tokens: 5,         // D2: physically cap output length
-          temperature: 0.5,      // Creative but stable picks
-          system: ICON_SYSTEM_PROMPT,
-          messages: [{ role: 'user', content: truncatedName }],
-        },
-        { signal: controller.signal },
-      );
-    } finally {
-      clearTimeout(timeoutId);
-    }
-
-    // Extract text from response
-    const textBlock = response.content.find((b) => b.type === 'text');
-    if (!textBlock || textBlock.type !== 'text') {
-      return FALLBACK_ICON;
-    }
-
-    const rawOutput = textBlock.text.trim();
+    const rawOutput = text.trim();
     if (rawOutput.length === 0) {
       return FALLBACK_ICON;
     }
